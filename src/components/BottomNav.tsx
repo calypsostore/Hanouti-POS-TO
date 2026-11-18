@@ -6,12 +6,12 @@ import { useAuthStore } from '../stores/authStore';
 import { userService } from '../services/userService';
 
 const staffNavigation = [
-  { to: '/dashboard', permission: null, label: 'nav.dashboard', icon: 'space_dashboard' },
-  { to: '/pos', permission: 'take_orders', label: 'nav.pos', icon: 'point_of_sale' },
-  { to: '/orders', permission: 'view_order_history', label: 'nav.orders', icon: 'receipt_long' },
-  { to: '/customers', permission: 'customers', label: 'nav.customers', icon: 'group' },
-  { to: '/shift', permission: 'open_close_shift', label: 'nav.shift', icon: 'payments' },
-  { to: '/settings', label: 'nav.settings', icon: 'tune' },
+  { to: '/dashboard', permission: null, label: 'nav.dashboard', compactLabel: 'Home', icon: 'space_dashboard' },
+  { to: '/pos', permission: 'take_orders', label: 'nav.pos', compactLabel: 'POS', icon: 'point_of_sale' },
+  { to: '/orders', permission: 'view_order_history', label: 'nav.orders', compactLabel: 'Orders', icon: 'receipt_long' },
+  { to: '/customers', permission: 'customers', label: 'nav.customers', compactLabel: 'Cust.', icon: 'group' },
+  { to: '/shift', permission: 'open_close_shift', label: 'nav.shift', compactLabel: 'Shift', icon: 'payments' },
+  { to: '/settings', label: 'nav.settings', compactLabel: 'Set.', icon: 'tune' },
 ] as const;
 
 type StaffNavigationItem = (typeof staffNavigation)[number];
@@ -92,6 +92,7 @@ export function BottomNav() {
           <>
             <MaterialIcon name={item.icon} filled={isActive} className="bottom-nav__icon" />
             <span className="bottom-nav__label">{t(item.label)}</span>
+            <span aria-hidden="true" className="bottom-nav__compact-label">{item.compactLabel}</span>
           </>
         )}
       </NavLink>

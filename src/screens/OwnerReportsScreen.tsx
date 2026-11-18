@@ -30,12 +30,13 @@ function OwnerReportsContent() {
   const [liveSummary, setLiveSummary] = useState<DashboardSummary>(emptySummary);
   const [latestReport, setLatestReport] = useState<ReportRecord | null>(null);
   const [selectedReport, setSelectedReport] = useState<ReportRecord | null>(null);
+  const [ownerPin, setOwnerPin] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const date = new Date();
   const businessDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   const dayClosed = store?.dayClosedOn === businessDate;
-  const zBlocked = openShifts.length > 0 || dayClosed;
+  const zBlocked = openShifts.length > 0;
 
   useEffect(() => {
     void Promise.all([
@@ -78,7 +79,8 @@ function OwnerReportsContent() {
 
   async function createZ() {
     try {
-      const report = await reportService.closeDayWithZReport(storeId, user?.name ?? 'Owner');
+      const report = await reportService.closeDayWithZReport(storeId, user?.name ?? 'Owner', dayClosed ? ownerPin : undefined);
+      setOwnerPin('');
       setSelectedReport(report);
       await refresh(report, t('reports.closed'));
     } catch (reportError) {
@@ -102,10 +104,24 @@ function OwnerReportsContent() {
         <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
           <div className="mb-3 flex items-center gap-2"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-warning-container text-on-warning-container"><MaterialIcon name="lock" /></span><div><h2 className="font-display text-headline-sm">{t('reports.zReport')}</h2><p className="font-body text-body-sm text-outline">{t('reports.zDescription')}</p></div></div>
           <Summary sales={liveSummary.salesMillimes} orders={liveSummary.orderCount} />
-          {zBlocked && <p className="mt-3 rounded-lg bg-warning-container p-2.5 font-body text-body-sm text-on-warning-container">{dayClosed ? 'This business day is already closed.' : t('reports.openShiftsBlock')}
-            {openShifts.length > 0 && <a href="/owner/shifts" className="ml-1 font-semibold underline">Review or force-close shifts</a>}
-          </p>}
-          <Button onClick={() => { void createZ(); }} disabled={zBlocked} variant="danger" className="mt-4 w-full"><MaterialIcon name="lock" />{dayClosed ? 'Day closed' : t('reports.zReport')}</Button>
+          {zBlocked && <p className="mt-3 rounded-lg bg-warning-container p-2.5 font-body text-body-sm text-on-warning-container">{t('reports.openShiftsBlock')} <a href="/owner/shifts" className="font-semibold underline">Review or force-close shifts</a></p>}
+          {dayClosed && (
+            <label className="mt-3 block font-body text-label-md text-on-surface">
+              Owner PIN required to create another Z report today
+              <input
+                required
+                type="password"
+                inputMode="numeric"
+                pattern="[0-9]{4}"
+                maxLength={4}
+                value={ownerPin}
+                onChange={(event) => setOwnerPin(event.target.value)}
+                placeholder="••••"
+                className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 tracking-[0.5em] outline-none focus:ring-2 focus:ring-primary"
+              />
+            </label>
+          )}
+          <Button onClick={() => { void createZ(); }} disabled={zBlocked} variant="danger" className="mt-4 w-full"><MaterialIcon name="lock" />{dayClosed ? 'Create another Z report' : t('reports.zReport')}</Button>
         </article>
       </section>
 

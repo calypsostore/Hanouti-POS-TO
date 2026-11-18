@@ -1,12 +1,14 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from './Button';
 import { formatTnd } from '../lib/format';
 import type { ReportRecord } from '../types/domain';
+import { printOrSharePdf } from '../services/receiptExport';
 
 const money = (amount: number | undefined) => `${formatTnd((amount ?? 0) / 1000)} DT`;
 
 export function ReportView({ report, storeName, onClose }: { report: ReportRecord; storeName: string; onClose: () => void }) {
   const [shareError, setShareError] = useState('');
+  const printTarget = useRef<HTMLElement>(null);
   const reportStoreName = report.storeName ?? storeName;
   const lines = [
     reportStoreName,
@@ -28,7 +30,10 @@ export function ReportView({ report, storeName, onClose }: { report: ReportRecor
     `Voids (${report.voids?.count ?? 0}), total ${money(report.voids?.totalMillimes)}:`,
     ...(report.voids?.orders ?? []).map((item) => `Ticket #${item.ticketNumber}: ${item.reason} (${money(item.totalMillimes)})`),
     'Shifts:',
-    ...(report.shifts ?? []).map((shift) => `${shift.staffName}, opened ${new Date(shift.openedAt).toLocaleString()}, closed ${shift.closedAt ? new Date(shift.closedAt).toLocaleString() : 'open'}, expected ${money(shift.expectedCashMillimes)}, counted ${shift.countedCashMillimes === undefined ? '—' : money(shift.countedCashMillimes)}, difference ${shift.differenceMillimes === undefined ? '—' : money(shift.differenceMillimes)}${shift.forceClosedByOwner ? ' (force closed by owner)' : ''}`),
+    ...(report.shifts ?? []).map((shift) => {
+      if (shift.status === 'in_progress') return `${shift.staffName}, in progress, opened ${new Date(shift.openedAt).toLocaleString()}`;
+      return `${shift.staffName}, opened ${new Date(shift.openedAt).toLocaleString()}, closed ${shift.closedAt ? new Date(shift.closedAt).toLocaleString() : '—'}, expected ${money(shift.expectedCashMillimes)}, counted ${shift.countedCashMillimes === undefined ? '—' : money(shift.countedCashMillimes)}, difference ${shift.differenceMillimes === undefined ? '—' : money(shift.differenceMillimes)}${shift.forceClosedByOwner ? ' (force closed by owner)' : ''}${shift.voidAdjustmentMillimes ? `, Void adjustment ${money(shift.voidAdjustmentMillimes)}` : ''}`;
+    }),
     `Tabs issued: ${money(report.tabsIssuedMillimes)}`,
     `Tabs settled: ${money(report.tabsSettledMillimes)}`,
     `Outstanding tabs: ${money(report.tabsOutstandingMillimes)}`,
@@ -47,16 +52,26 @@ export function ReportView({ report, storeName, onClose }: { report: ReportRecor
     }
   }
 
+  async function printReport() {
+    setShareError('');
+    try {
+      await printOrSharePdf(printTarget.current, `${report.type.toLowerCase()}-report-${report.businessDate}`, `${report.type} report`);
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return;
+      setShareError(error instanceof Error ? error.message : 'Unable to create or share this report.');
+    }
+  }
+
   return (
     <div className="receipt-overlay" onMouseDown={onClose}>
       <section role="dialog" aria-modal="true" aria-label={`${report.type} report`} className="receipt-dialog" onMouseDown={(event) => event.stopPropagation()}>
         <div className="receipt-actions no-print">
-          <Button variant="secondary" onClick={() => window.print()}>Print / Save PDF</Button>
+          <Button variant="secondary" onClick={() => { void printReport(); }}>Print / Save PDF</Button>
           <Button variant="secondary" onClick={() => { void shareText(); }}>Share text</Button>
           <Button variant="ghost" onClick={onClose}>Close</Button>
         </div>
         {shareError && <p role="alert" className="no-print receipt-error">{shareError}</p>}
-        <article className="receipt-print-target thermal-receipt">
+        <article ref={printTarget} className="receipt-print-target thermal-receipt">
           <header className="receipt-center">
             <strong>{reportStoreName}</strong>
             <strong>{report.type === 'X' ? 'X REPORT — NOT A CLOSE' : 'Z REPORT — DAY CLOSED'}</strong>
@@ -95,11 +110,16 @@ export function ReportView({ report, storeName, onClose }: { report: ReportRecor
             <div className="receipt-item" key={shift.shiftId}>
               <strong>{shift.staffName}{shift.forceClosedByOwner ? ' • force closed by owner' : ''}</strong>
               <div>Opened: {new Date(shift.openedAt).toLocaleString()}</div>
-              <div>Closed: {shift.closedAt ? new Date(shift.closedAt).toLocaleString() : 'Open'}</div>
-              <ReceiptRow label="Start" amount={money(shift.startingCashMillimes)} />
-              <ReceiptRow label="Expected" amount={money(shift.expectedCashMillimes)} />
-              <ReceiptRow label="Counted" amount={shift.countedCashMillimes === undefined ? '—' : money(shift.countedCashMillimes)} />
-              <ReceiptRow label="Difference" amount={shift.differenceMillimes === undefined ? '—' : money(shift.differenceMillimes)} />
+              {shift.status === 'in_progress' ? <strong>In progress</strong> : (
+                <>
+                  <div>Closed: {shift.closedAt ? new Date(shift.closedAt).toLocaleString() : '—'}</div>
+                  <ReceiptRow label="Start" amount={money(shift.startingCashMillimes)} />
+                  <ReceiptRow label="Expected" amount={money(shift.expectedCashMillimes)} />
+                  <ReceiptRow label="Counted" amount={shift.countedCashMillimes === undefined ? '—' : money(shift.countedCashMillimes)} />
+                  <ReceiptRow label="Difference" amount={shift.differenceMillimes === undefined ? '—' : money(shift.differenceMillimes)} />
+                </>
+              )}
+              {shift.voidAdjustmentMillimes !== undefined && <ReceiptRow label="Void adjustment" amount={money(shift.voidAdjustmentMillimes)} />}
             </div>
           ))}
           <Rule />

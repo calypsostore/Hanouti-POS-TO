@@ -48,23 +48,35 @@ async function summarize(storeId: string, from: number, to: number) {
   const includedShifts = shifts.filter((shift) => {
     const opened = new Date(shift.openedAt).getTime();
     const closed = shift.closedAt ? new Date(shift.closedAt).getTime() : Number.POSITIVE_INFINITY;
-    return opened <= to && closed >= from;
+    const adjustedInPeriod = (shift.voidAdjustments ?? []).some((adjustment) => {
+      const timestamp = new Date(adjustment.createdAt).getTime();
+      return timestamp >= from && timestamp <= to;
+    });
+    return (opened <= to && closed >= from) || adjustedInPeriod;
   });
   const shiftLines: ReportShiftLine[] = await Promise.all(includedShifts.map(async (shift) => {
-    const cashSales = await orderService.getCashSalesForShift(shift.id);
-    const expected = shift.expectedCashMillimes ?? shift.startingCashMillimes + cashSales;
+    const inProgress = shift.status === 'open';
+    const periodAdjustments = (shift.voidAdjustments ?? []).filter((adjustment) => {
+      const timestamp = new Date(adjustment.createdAt).getTime();
+      return timestamp >= from && timestamp <= to;
+    });
+    const voidAdjustmentMillimes = periodAdjustments.reduce((sum, adjustment) => sum + adjustment.amountMillimes, 0);
+    const cashSales = inProgress ? 0 : await orderService.getCashSalesForShift(shift.id);
+    const expected = inProgress ? undefined : (shift.expectedCashMillimes ?? shift.startingCashMillimes + cashSales) + voidAdjustmentMillimes;
     const counted = shift.countedCashMillimes;
     const staffName = staff.find((user) => user.id === shift.staffId)?.name ?? 'Staff';
     return {
       shiftId: shift.id,
       staffName,
+      status: inProgress ? 'in_progress' : 'closed',
       openedAt: shift.openedAt,
       closedAt: shift.closedAt,
       startingCashMillimes: shift.startingCashMillimes,
       expectedCashMillimes: expected,
-      countedCashMillimes: counted,
-      differenceMillimes: shift.status === 'closed' ? shift.differenceMillimes ?? (counted ?? 0) - expected : undefined,
+      countedCashMillimes: inProgress ? undefined : counted,
+      differenceMillimes: inProgress ? undefined : (counted ?? 0) - (expected ?? 0),
       forceClosedByOwner: shift.forceClosedByOwner ?? false,
+      voidAdjustmentMillimes: voidAdjustmentMillimes || undefined,
     };
   }));
   const itemIndex = new Map(catalogItems.map((item) => [item.id, item]));
@@ -100,10 +112,11 @@ async function summarize(storeId: string, from: number, to: number) {
     const issued = allOrders.filter((order) => order.customerId === customer.id && order.paymentMethod === 'tab' && order.status === 'done')
       .reduce((sum, order) => sum + order.totalMillimes, 0);
     const settled = allSettlements.filter((tab) => tab.customerId === customer.id).reduce((sum, tab) => sum + tab.amountMillimes, 0);
-    return total + Math.max(0, issued - settled);
+    return total + issued - settled;
   }, 0);
   const salesMillimes = orders.reduce((sum, order) => sum + order.totalMillimes, 0);
-  const cashDifferenceMillimes = shiftLines.reduce((sum, shift) => sum + (shift.differenceMillimes ?? 0), 0);
+  const closedShiftLines = shiftLines.filter((shift) => shift.status !== 'in_progress');
+  const cashDifferenceMillimes = closedShiftLines.reduce((sum, shift) => sum + (shift.differenceMillimes ?? 0), 0);
   return {
     salesMillimes,
     orderCount: orders.length,
@@ -122,8 +135,8 @@ async function summarize(storeId: string, from: number, to: number) {
     },
     shiftLines,
     paymentSplit,
-    totalExpectedCashMillimes: shiftLines.reduce((sum, shift) => sum + shift.expectedCashMillimes, 0),
-    totalCountedMillimes: shiftLines.reduce((sum, shift) => sum + (shift.countedCashMillimes ?? 0), 0),
+    totalExpectedCashMillimes: closedShiftLines.reduce((sum, shift) => sum + (shift.expectedCashMillimes ?? 0), 0),
+    totalCountedMillimes: closedShiftLines.reduce((sum, shift) => sum + (shift.countedCashMillimes ?? 0), 0),
     totalDifferenceMillimes: cashDifferenceMillimes,
     tabsIssuedMillimes,
     tabsSettledMillimes,
@@ -188,11 +201,14 @@ export const reportService = {
     return createReport(storeId, 'X', generatedBy);
   },
 
-  async closeDayWithZReport(storeId: string, generatedBy = 'Owner'): Promise<ReportRecord> {
+  async closeDayWithZReport(storeId: string, generatedBy = 'Owner', ownerPin?: string): Promise<ReportRecord> {
     if ((await shiftService.listOpenShifts(storeId)).length > 0) throw new Error('Force-close or close every shift before creating a Z report.');
     const store = await userService.getStore(storeId);
     if (!store) throw new Error('The store could not be found.');
-    if (store.dayClosedOn === todayKey()) throw new Error('The business day is already closed. Open a new shift before creating another Z report.');
+    if (store.dayClosedOn === todayKey()) {
+      if (!ownerPin) throw new Error('Owner PIN is required to create another Z report today.');
+      if (!await userService.verifyStorePin(storeId, ownerPin)) throw new Error('The owner PIN is incorrect.');
+    }
     const report = await createReport(storeId, 'Z', generatedBy);
     writeData('stores', (await userService.listStores()).map((candidate) => candidate.id === storeId ? { ...candidate, dayClosedOn: todayKey() } : candidate));
     return report;

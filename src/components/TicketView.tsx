@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from './Button';
 import { formatTnd } from '../lib/format';
 import type { OrderRecord } from '../types/domain';
+import { printOrSharePdf } from '../services/receiptExport';
 
 export function TicketView({ order, storeName, staffName, onClose }: {
   order: OrderRecord;
@@ -10,6 +11,7 @@ export function TicketView({ order, storeName, staffName, onClose }: {
   onClose: () => void;
 }) {
   const [shareError, setShareError] = useState('');
+  const printTarget = useRef<HTMLElement>(null);
   const voided = order.status === 'voided';
   const ticketStoreName = order.storeName ?? storeName;
   const ticketStaffName = order.staffName ?? staffName;
@@ -36,16 +38,26 @@ export function TicketView({ order, storeName, staffName, onClose }: {
     }
   }
 
+  async function printTicket() {
+    setShareError('');
+    try {
+      await printOrSharePdf(printTarget.current, `ticket-${order.number}`, `Ticket #${order.number}`);
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return;
+      setShareError(error instanceof Error ? error.message : 'Unable to create or share this ticket.');
+    }
+  }
+
   return (
     <div className="receipt-overlay" onMouseDown={onClose}>
       <section role="dialog" aria-modal="true" aria-label={`Ticket ${order.number}`} className="receipt-dialog" onMouseDown={(event) => event.stopPropagation()}>
         <div className="receipt-actions no-print">
-          <Button variant="secondary" onClick={() => window.print()}>Print</Button>
+          <Button variant="secondary" onClick={() => { void printTicket(); }}>Print</Button>
           <Button variant="secondary" onClick={() => { void share(); }}>Share text</Button>
           <Button variant="ghost" onClick={onClose}>Close</Button>
         </div>
         {shareError && <p role="alert" className="no-print receipt-error">{shareError}</p>}
-        <article className="receipt-print-target thermal-receipt">
+        <article ref={printTarget} className="receipt-print-target thermal-receipt">
           <header className="receipt-center">
             <strong>{ticketStoreName}</strong>
             <div>Ticket #{order.number}</div>

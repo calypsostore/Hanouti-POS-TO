@@ -12,15 +12,19 @@ export const customerService = {
     return getCustomers().filter((customer) => customer.storeId === storeId).sort((a, b) => a.name.localeCompare(b.name));
   },
 
-  async createCustomer(storeId: string, name: string, phone?: string): Promise<CustomerRecord> {
+  async createCustomer(storeId: string, name: string, phone?: string, creditLimitMillimes?: number): Promise<CustomerRecord> {
     const trimmedName = name.trim();
     if (!trimmedName) throw new Error('Customer name is required.');
     if (!await userService.getStore(storeId)) throw new Error('The store could not be found.');
+    if (creditLimitMillimes !== undefined && (!Number.isInteger(creditLimitMillimes) || creditLimitMillimes < 0)) {
+      throw new Error('Credit limit must be a non-negative amount in millimes.');
+    }
     const customer: CustomerRecord = {
       id: `customer-${crypto.randomUUID()}`,
       storeId,
       name: trimmedName,
       phone: phone?.trim() || undefined,
+      creditLimitMillimes,
       createdAt: new Date().toISOString(),
     };
     writeData('customers', [...getCustomers(), customer]);
@@ -32,7 +36,7 @@ export const customerService = {
       .reduce((sum, order) => sum + order.totalMillimes, 0);
     const settled = getTabs().filter((tab) => tab.customerId === customerId && tab.kind === 'settled')
       .reduce((sum, tab) => sum + tab.amountMillimes, 0);
-    return Math.max(0, issued - settled);
+    return issued - settled;
   },
 
   async getOrderHistory(customerId: string): Promise<OrderRecord[]> {
@@ -56,8 +60,6 @@ export const customerService = {
     if (!customer) throw new Error('Customer could not be found in this store.');
     const shift = await shiftService.getOpenShiftForUser(input.storeId, input.staffId);
     if (!shift) throw new Error('Open your shift before accepting a tab payment.');
-    const balance = await this.getBalance(input.customerId);
-    if (input.amountMillimes > balance) throw new Error('Payment cannot exceed the customer open balance.');
     const record: TabRecord = {
       id: `tab-${crypto.randomUUID()}`,
       storeId: input.storeId,

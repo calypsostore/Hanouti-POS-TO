@@ -93,7 +93,6 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       const shift = await shiftService.closeShift(
         ownOpenShift.id,
         parseTnd(countedCash),
-        cashSales,
       );
       await refresh();
       setCountedCash('');
@@ -109,7 +108,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     setError('');
     setNotice('');
     try {
-      await shiftService.forceCloseShift(shift.id, user.id, parseTnd(forceCountedCash[shift.id] ?? ''), cashByShift[shift.id] ?? 0);
+      await shiftService.forceCloseShift(shift.id, user.id, parseTnd(forceCountedCash[shift.id] ?? ''));
       setForceCountedCash((current) => ({ ...current, [shift.id]: '' }));
       await refresh();
       setNotice(`${staffNames[shift.staffId] ?? 'Staff'}'s shift was force-closed by the owner.`);

@@ -10,11 +10,24 @@ import { customerService } from '../services/customerService';
 import { userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
 import type { CustomerRecord, OrderRecord, TabRecord } from '../types/domain';
+import { TabStatementView } from '../components/TabStatementView';
 
 function parseAmount(value: string): number {
   const parsed = Number(value.trim().replace(',', '.'));
   if (!Number.isFinite(parsed) || parsed <= 0) throw new Error('Enter a payment greater than zero.');
   return Math.round(parsed * 1000);
+}
+
+function parseCreditLimit(value: string): number | undefined {
+  if (!value.trim()) return undefined;
+  const parsed = Number(value.trim().replace(',', '.'));
+  if (!Number.isFinite(parsed) || parsed < 0) throw new Error('Credit limit must be a non-negative amount.');
+  return Math.round(parsed * 1000);
+}
+
+function balanceLabel(balanceMillimes: number): string {
+  const amount = formatTnd(Math.abs(balanceMillimes) / 1000);
+  return balanceMillimes < 0 ? `Credit ${amount} DT` : `${amount} DT`;
 }
 
 export function CustomersScreen() {
@@ -27,11 +40,13 @@ export function CustomersScreen() {
   const [transactions, setTransactions] = useState<TabRecord[]>([]);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [creditLimit, setCreditLimit] = useState('');
   const [amount, setAmount] = useState('');
   const [canSettle, setCanSettle] = useState(user?.role === 'owner');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [storeName, setStoreName] = useState('');
+  const [showStatement, setShowStatement] = useState(false);
 
   const refresh = useCallback(async () => {
     const records = await customerService.listCustomers(storeId);
@@ -58,9 +73,10 @@ export function CustomersScreen() {
     event.preventDefault();
     setError('');
     try {
-      const customer = await customerService.createCustomer(storeId, name, phone);
+      const customer = await customerService.createCustomer(storeId, name, phone, parseCreditLimit(creditLimit));
       setName('');
       setPhone('');
+      setCreditLimit('');
       setSelected(customer);
       await refresh();
       setNotice('Customer added.');
@@ -90,9 +106,10 @@ export function CustomersScreen() {
         <h1 className="font-display text-headline-lg text-on-surface">Customers & tabs</h1>
         <p className="mt-1 font-body text-body-md text-on-surface-variant">{storeName} • open balances and customer history</p>
       </header>
-      <form onSubmit={addCustomer} className="mb-4 grid gap-2 rounded-xl bg-surface-container-lowest p-4 shadow-card sm:grid-cols-[1fr_1fr_auto]">
+      <form onSubmit={addCustomer} className="mb-4 grid gap-2 rounded-xl bg-surface-container-lowest p-4 shadow-card sm:grid-cols-[1fr_1fr_1fr_auto]">
         <input required value={name} onChange={(event) => setName(event.target.value)} placeholder="Customer name" aria-label="Customer name" className="h-12 rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" />
         <input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="Phone (optional)" aria-label="Phone number" className="h-12 rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" />
+        <input value={creditLimit} onChange={(event) => setCreditLimit(event.target.value)} placeholder="Credit limit (TND, optional)" aria-label="Credit limit (TND, optional)" inputMode="decimal" className="h-12 rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" />
         <Button type="submit"><MaterialIcon name="person_add" />Add customer</Button>
       </form>
       {(error || notice) && <p role={error ? 'alert' : 'status'} className={`mb-3 rounded-lg p-3 font-body text-body-sm ${error ? 'bg-error-container text-on-error-container' : 'bg-success-container text-on-success-container'}`}>{error || notice}</p>}
@@ -101,7 +118,7 @@ export function CustomersScreen() {
           {customers.map((customer) => (
             <button type="button" key={customer.id} onClick={() => setSelected(customer)} className={`flex items-center justify-between gap-3 rounded-xl p-4 text-left shadow-card ${selected?.id === customer.id ? 'bg-primary text-on-primary' : 'bg-surface-container-lowest text-on-surface'}`}>
               <span><strong className="block font-body text-label-lg">{customer.name}</strong><small>{customer.phone || 'No phone'}</small></span>
-              <span className="text-right"><small className="block">Balance</small><strong>{formatTnd((balances[customer.id] ?? 0) / 1000)} DT</strong></span>
+              <span className="text-right"><small className="block">Balance</small><strong>{balanceLabel(balances[customer.id] ?? 0)}</strong></span>
             </button>
           ))}
           {customers.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">No customers yet.</p>}
@@ -110,8 +127,8 @@ export function CustomersScreen() {
           {selected ? (
             <>
               <div className="flex items-start justify-between gap-3">
-                <div><h2 className="font-display text-headline-md">{selected.name}</h2><p className="font-body text-body-sm text-outline">Open balance: {formatTnd((balances[selected.id] ?? 0) / 1000)} DT</p></div>
-                <MaterialIcon name="account_balance_wallet" className="text-2xl text-primary" />
+                <div><h2 className="font-display text-headline-md">{selected.name}</h2><p className="font-body text-body-sm text-outline">{(balances[selected.id] ?? 0) < 0 ? 'Credit balance' : 'Open balance'}: {formatTnd(Math.abs(balances[selected.id] ?? 0) / 1000)} DT{selected.creditLimitMillimes !== undefined ? ` • Credit limit: ${formatTnd(selected.creditLimitMillimes / 1000)} DT` : ''}</p></div>
+                <Button type="button" variant="secondary" onClick={() => setShowStatement(true)}><MaterialIcon name="receipt_long" />Tab statement</Button>
               </div>
               {canSettle && (balances[selected.id] ?? 0) > 0 && (
                 <form onSubmit={(event) => { void settle(event); }} className="my-4 flex flex-wrap items-end gap-2 rounded-lg bg-surface-container-low p-3">
@@ -140,6 +157,19 @@ export function CustomersScreen() {
       </div>
     </>
   );
-  if (user?.role === 'owner') return <WorkspaceLayout title="Customers" storeName={storeName} links={ownerWorkspaceLinks}>{content}</WorkspaceLayout>;
-  return <div className="min-h-screen bg-surface pb-24"><TopBar title="Customers" storeName={storeName} /><main className="mx-auto max-w-5xl px-4 py-5">{content}</main><BottomNav /></div>;
+  return (
+    <>
+      {user?.role === 'owner'
+        ? <WorkspaceLayout title="Customers" storeName={storeName} links={ownerWorkspaceLinks}>{content}</WorkspaceLayout>
+        : <div className="min-h-screen bg-surface pb-24"><TopBar title="Customers" storeName={storeName} /><main className="mx-auto max-w-5xl px-4 py-5">{content}</main><BottomNav /></div>}
+      {showStatement && selected && <TabStatementView
+        customer={selected}
+        storeName={storeName}
+        balanceMillimes={balances[selected.id] ?? 0}
+        transactions={transactions}
+        orders={history}
+        onClose={() => setShowStatement(false)}
+      />}
+    </>
+  );
 }

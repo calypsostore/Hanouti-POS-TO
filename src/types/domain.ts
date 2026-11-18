@@ -118,6 +118,14 @@ export interface ShiftRecord {
   closedAt?: string;
   forceClosedByOwner?: boolean;
   closedByUserId?: string;
+  voidAdjustments?: ShiftVoidAdjustment[];
+}
+
+export interface ShiftVoidAdjustment {
+  orderId: string;
+  orderNumber: number;
+  amountMillimes: number;
+  createdAt: string;
 }
 
 export interface ReportCategoryLine {
@@ -143,13 +151,15 @@ export interface ReportVoidLine {
 export interface ReportShiftLine {
   shiftId: string;
   staffName: string;
+  status?: 'in_progress' | 'closed';
   openedAt: string;
   closedAt?: string;
   startingCashMillimes: number;
-  expectedCashMillimes: number;
+  expectedCashMillimes?: number;
   countedCashMillimes?: number;
   differenceMillimes?: number;
   forceClosedByOwner: boolean;
+  voidAdjustmentMillimes?: number;
 }
 
 export interface ReportRecord {
@@ -184,6 +194,7 @@ export interface CustomerRecord {
   storeId: string;
   name: string;
   phone?: string;
+  creditLimitMillimes?: number;
   createdAt: string;
 }
 

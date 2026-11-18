@@ -1,4 +1,4 @@
-import type { OrderLineRecord, OrderRecord, PaymentMethod } from '../types/domain';
+import type { CustomerRecord, OrderLineRecord, OrderRecord, PaymentMethod, TabRecord } from '../types/domain';
 import { shiftService } from './shiftService';
 import { userService } from './userService';
 import { catalogService } from './catalogService';
@@ -48,11 +48,12 @@ export const orderService = {
     if (store.dayClosedOn === businessDate(new Date())) throw new Error('The business day is closed. Open a new shift to continue.');
     const shift = await shiftService.getOpenShiftForUser(input.storeId, input.staffId);
     if (!shift) throw new Error('Open a shift before taking orders.');
+    let tabCustomer: CustomerRecord | undefined;
     if (input.paymentMethod === 'tab') {
       if (!input.customerId) throw new Error('Select a customer before charging this order to a tab.');
       if (!await userService.hasPermission(input.staffId, 'use_tabs')) throw new Error('Your position does not allow customer tabs.');
-      const customer = readData<import('../types/domain').CustomerRecord[]>('customers', []).find((candidate) => candidate.id === input.customerId && candidate.storeId === input.storeId);
-      if (!customer) throw new Error('Select a customer from this store.');
+      tabCustomer = readData<CustomerRecord[]>('customers', []).find((candidate) => candidate.id === input.customerId && candidate.storeId === input.storeId);
+      if (!tabCustomer) throw new Error('Select a customer from this store.');
     }
     const [catalogItems, categories] = await Promise.all([
       catalogService.listItems(input.storeId),
@@ -91,6 +92,20 @@ export const orderService = {
       }
     }
     const totalMillimes = items.reduce((sum, item) => sum + item.lineTotalMillimes, 0);
+    if (input.paymentMethod === 'tab' && tabCustomer?.creditLimitMillimes !== undefined) {
+      if (!Number.isInteger(tabCustomer.creditLimitMillimes) || tabCustomer.creditLimitMillimes < 0) {
+        throw new Error('This customer has an invalid credit limit.');
+      }
+      const currentOrders = getOrders()
+        .filter((order) => order.customerId === tabCustomer.id && order.paymentMethod === 'tab' && order.status === 'done')
+        .reduce((sum, order) => sum + order.totalMillimes, 0);
+      const settled = readData<TabRecord[]>('tabs', [])
+        .filter((tab) => tab.customerId === tabCustomer.id && tab.kind === 'settled')
+        .reduce((sum, tab) => sum + tab.amountMillimes, 0);
+      if (currentOrders - settled + totalMillimes > tabCustomer.creditLimitMillimes) {
+        throw new Error('This order would exceed the customer credit limit.');
+      }
+    }
     const dateKey = businessDate(new Date());
     const counters = readData<Record<string, { businessDate: string; nextNumber: number }>>('order-counters', {});
     const counter = counters[input.storeId];
@@ -177,6 +192,14 @@ export const orderService = {
       voidReason: cleanedReason,
     };
     saveOrders(orders.map((candidate) => candidate.id === orderId ? updated : candidate));
+    if (order.paymentMethod === 'cash') {
+      await shiftService.recordClosedShiftVoidAdjustment({
+        shiftId: order.shiftId,
+        orderId: order.id,
+        orderNumber: order.number,
+        amountMillimes: order.totalMillimes,
+      });
+    }
     await restoreOrderStock(order);
     return updated;
   },
@@ -195,7 +218,17 @@ export const orderService = {
       : { ...order, status: 'done', voidRequestedAt: undefined, voidReason: undefined };
     if (decision === 'approve' && !updated.voidReason) throw new Error('A reason is required to void an order.');
     saveOrders(orders.map((candidate) => candidate.id === orderId ? updated : candidate));
-    if (decision === 'approve') await restoreOrderStock(order);
+    if (decision === 'approve') {
+      if (order.paymentMethod === 'cash') {
+        await shiftService.recordClosedShiftVoidAdjustment({
+          shiftId: order.shiftId,
+          orderId: order.id,
+          orderNumber: order.number,
+          amountMillimes: order.totalMillimes,
+        });
+      }
+      await restoreOrderStock(order);
+    }
     return updated;
   },
 

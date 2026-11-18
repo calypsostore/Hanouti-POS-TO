@@ -64,6 +64,7 @@ button {
 }
 
 .bottom-nav {
+  --pos-action-bar-height: 0px;
   position: fixed;
   z-index: 40;
   right: 0;
@@ -76,7 +77,7 @@ button {
 }
 
 .bottom-nav.is-pos-open {
-  padding-bottom: max(38px, calc(env(safe-area-inset-bottom, 0px) + 28px));
+  padding-bottom: calc(var(--pos-action-bar-height) + env(safe-area-inset-bottom, 0px) + 28px);
 }
 
 .bottom-nav__bar {
@@ -118,7 +119,7 @@ button {
 .bottom-nav__pos-toggle {
   position: absolute;
   z-index: 45;
-  bottom: max(0px, env(safe-area-inset-bottom, 0px));
+  bottom: calc(var(--pos-action-bar-height) + env(safe-area-inset-bottom, 0px));
   left: 50%;
   display: grid;
   width: 56px;
@@ -416,6 +417,12 @@ button {
   .bottom-nav__pos-toggle {
     width: 60px;
     height: 26px;
+  }
+}
+
+@media (max-width: 599px) {
+  .bottom-nav {
+    --pos-action-bar-height: 72px;
   }
 }
 

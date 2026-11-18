@@ -387,7 +387,7 @@ export function PosScreen() {
         </aside>
       </main>
 
-      <div className="fixed inset-x-0 bottom-16 z-30 flex items-center justify-between gap-3 bg-surface-container-lowest/95 px-3 py-2.5 shadow-sheet backdrop-blur-xl tablet:hidden">
+      <div className="fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-3 bg-surface-container-lowest/95 px-3 py-2.5 shadow-sheet backdrop-blur-xl safe-bottom tablet:hidden">
         <button type="button" onClick={() => setDrawerOpen(true)} className="min-w-0 text-left">
           <span className="block">
             <span className="flex items-center gap-1.5 font-body text-label-sm uppercase text-outline">

@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/><meta content="mobile_tab" name="shell-type"/><title>Pos Terminal - 7anouti-POS</title><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=Plus+Jakarta+Sans:wght@600;700;800&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "primary": "#004652", "inverse-surface": "#273237", "surface-container-high": "#deeaf1", "on-secondary-fixed-variant": "#653e00", "on-primary-fixed": "#001f26", "inverse-primary": "#8ed1e2", "surface-bright": "#f3faff", "on-tertiary-container": "#55e4a8", "on-error-container": "#93000a", "outline-variant": "#bfc8cb", "tertiary-container": "#006343", "tertiary": "#004930", "outline": "#6f797b", "secondary-container": "#fea619", "on-secondary": "#ffffff", "on-secondary-fixed": "#2a1700", "on-secondary-container": "#684000", "on-error": "#ffffff", "tertiary-fixed-dim": "#4edea3", "surface-container": "#e4f0f7", "primary-fixed-dim": "#8ed1e2", "background": "#f3faff", "inverse-on-surface": "#e7f3fa", "surface-tint": "#1d6776", "primary-fixed": "#aaedff", "on-tertiary-fixed-variant": "#005236", "primary-container": "#0f5f6e", "on-primary": "#ffffff", "on-primary-fixed-variant": "#004e5b", "on-surface-variant": "#3f484b", "tertiary-fixed": "#6ffbbe", "secondary-fixed-dim": "#ffb95f", "on-background": "#121d22", "on-primary-container": "#94d7e8", "secondary": "#855300", "surface-container-highest": "#d8e4eb", "secondary-fixed": "#ffddb8", "surface": "#f3faff", "error-container": "#ffdad6", "error": "#ba1a1a", "surface-container-low": "#eaf5fc", "surface-container-lowest": "#ffffff", "surface-variant": "#d8e4eb", "on-tertiary-fixed": "#002113", "on-tertiary": "#ffffff", "on-surface": "#121d22", "surface-dim": "#d0dce3" }, "borderRadius": { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" }, "spacing": { "space-xl": "1.5rem", "margin": "1rem", "gutter-tablet": "1rem", "space-2xl": "2rem", "space-xs": "0.25rem", "space-sm": "0.5rem", "margin-tablet": "1.5rem", "space-lg": "1rem", "space-md": "0.75rem", "gutter": "0.75rem" }, "fontFamily": { "label-md": ["Inter"], "label-lg": ["Inter"], "headline-lg": ["Plus Jakarta Sans"], "currency-display": ["Plus Jakarta Sans"], "headline-md": ["Plus Jakarta Sans"], "body-md": ["Inter"], "headline-xl-mobile": ["Plus Jakarta Sans"], "label-sm": ["Inter"], "headline-xl": ["Plus Jakarta Sans"], "body-lg": ["Inter"], "currency-display-mobile": ["Plus Jakarta Sans"], "body-sm": ["Inter"], "title-md": ["Inter"], "headline-sm": ["Plus Jakarta Sans"] }, "fontSize": { "label-md": ["12px", {"lineHeight": "16px", "letterSpacing": "0.02em", "fontWeight": "600"}], "label-lg": ["14px", {"lineHeight": "20px", "letterSpacing": "0.01em", "fontWeight": "600"}], "headline-lg": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "700"}], "currency-display": ["30px", {"lineHeight": "36px", "letterSpacing": "-0.02em", "fontWeight": "800"}], "headline-md": ["20px", {"lineHeight": "28px", "fontWeight": "600"}], "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}], "headline-xl-mobile": ["26px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "700"}], "label-sm": ["10px", {"lineHeight": "14px", "letterSpacing": "0.04em", "fontWeight": "700"}], "headline-xl": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700"}], "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}], "currency-display-mobile": ["24px", {"lineHeight": "30px", "letterSpacing": "-0.01em", "fontWeight": "800"}], "body-sm": ["12px", {"lineHeight": "16px", "fontWeight": "400"}], "title-md": ["18px", {"lineHeight": "24px", "fontWeight": "600"}], "headline-sm": ["16px", {"lineHeight": "24px", "fontWeight": "600"}] } } } }</script><style>@layer base{html,body{width:100vw;margin:0;padding:0;min-height:100vh;}body{overscroll-behavior-y:none;}.pb-safe{padding-bottom:env(safe-area-inset-bottom,0px);}.pt-safe{padding-top:env(safe-area-inset-top,0px);}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head><body class="bg-background font-body-md text-body-md text-on-surface flex flex-col min-h-screen antialiased selection:bg-primary-fixed selection:text-on-primary-fixed"><header class="fixed top-0 w-full z-50 bg-surface/85 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)] pt-safe"><div class="h-16 px-space-lg flex items-center justify-between gap-space-sm"><div class="flex items-center gap-space-md min-w-0"><img alt="7anouti-POS Brand Icon" class="h-8 w-auto object-contain flex-shrink-0" src="https://lh3.googleusercontent.com/aida/ALJJyrATygGBimWUMuP9iwk4tfZTn_SDofSLtK-fOC6AmgXJsrlbAeBzWY465VEaMDCtuS87Dqmm2SQdd1mfUZHKBcB2rjRe-lrIo3ZxKVTTYnS3w1ruJvtftjzLogaGlNwrBeF5yWWPQMoOYnolcUCtIQMk_SYI67P6yw0CgEkQFE5JYBy7YtLM1d_JuBPpHDorlUEGuZf197O0ucM4Gz-lQWoAQYO9eYo4j-m3AFe3yY6R"/><div class="flex flex-col truncate"><span class="font-label-sm text-label-sm uppercase text-outline leading-none">7anouti-POS</span><h1 class="font-headline-sm text-headline-sm text-primary truncate leading-tight">Pos Terminal</h1></div></div><div class="flex items-center gap-space-sm flex-shrink-0"><span class="inline-flex items-center px-space-sm py-space-xs rounded-full bg-surface-container-high text-tertiary font-label-sm text-label-sm"><span class="w-2 h-2 rounded-full bg-tertiary-fixed-dim inline-block mr-1.5 animate-pulse"></span>Online</span><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></div></header><main class="flex-1 flex flex-col relative w-full pt-16 pb-24 bg-surface"><div class="flex flex-col w-full pb-36 select-none">
+<!-- Top Operational Context Bar -->
+<div class="px-space-md py-space-sm flex items-center justify-between gap-space-sm bg-surface-container-low">
+<div class="flex flex-col min-w-0">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-[18px] text-primary" style="font-variation-settings: 'FILL' 1;">storefront</span>
+<h2 class="font-headline-sm text-headline-sm text-primary truncate leading-tight">Café Sidi Bou - Marsa</h2>
+</div>
+<div class="flex items-center gap-1.5 mt-0.5">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-tertiary-fixed text-on-tertiary-fixed font-label-sm text-label-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-tertiary-container animate-pulse"></span>
+          Shift open since 07:00
+        </span>
+</div>
+</div>
+<!-- Quick Actions (Bell + Lock) -->
+<div class="flex items-center gap-space-xs flex-shrink-0">
+<button aria-label="Notifications" class="relative w-11 h-11 flex items-center justify-center rounded-xl bg-surface-container-lowest shadow-sm active:scale-95 transition-transform text-on-surface-variant hover:text-primary" type="button">
+<span class="material-symbols-outlined text-[22px]">notifications</span>
+<span class="absolute top-2 right-2 w-4 h-4 rounded-full bg-error text-on-error font-label-sm text-[9px] flex items-center justify-center font-bold">2</span>
+</button>
+<button aria-label="Terminal Staff Lock" class="w-11 h-11 flex items-center justify-center rounded-xl bg-surface-container-lowest shadow-sm active:scale-95 transition-transform text-primary hover:bg-surface-container" type="button">
+<span class="material-symbols-outlined text-[22px]">lock</span>
+</button>
+</div>
+</div>
+<!-- Search & Catalog Filtering -->
+<div class="px-space-md pt-space-md flex flex-col gap-space-sm">
+<!-- Compact Search Field -->
+<div class="relative w-full">
+<span class="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-outline text-[20px]">search</span>
+<input class="w-full h-11 pl-10 pr-10 rounded-xl bg-surface-container-lowest shadow-sm text-on-surface placeholder:text-outline font-body-md text-body-md focus:outline-none focus:ring-0" placeholder="Search items (Express, Direct, Croissant)..." type="text"/>
+<button aria-label="Barcode / Quick Scan" class="absolute right-2.5 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-lg text-primary hover:bg-surface-container" type="button">
+<span class="material-symbols-outlined text-[18px]">barcode_scanner</span>
+</button>
+</div>
+<!-- Horizontally Scrollable Category Pills -->
+<div class="flex items-center gap-2 overflow-x-auto py-1 -mx-space-md px-space-md no-scrollbar">
+<button class="flex-shrink-0 min-h-[42px] px-4 rounded-full bg-primary-container text-on-primary font-label-md text-label-md flex items-center gap-1.5 shadow-sm" type="button">
+<span class="material-symbols-outlined text-[18px]" style="font-variation-settings: 'FILL' 1;">apps</span>
+        All Items
+      </button>
+<button class="flex-shrink-0 min-h-[42px] px-3.5 rounded-full bg-surface-container-lowest text-on-surface-variant font-label-md text-label-md flex items-center gap-1.5 shadow-sm active:bg-surface-container" type="button">
+<span class="material-symbols-outlined text-[18px] text-secondary">coffee</span>
+        Coffee
+      </button>
+<button class="flex-shrink-0 min-h-[42px] px-3.5 rounded-full bg-surface-container-lowest text-on-surface-variant font-label-md text-label-md flex items-center gap-1.5 shadow-sm active:bg-surface-container" type="button">
+<span class="material-symbols-outlined text-[18px] text-primary">local_cafe</span>
+        Cold Drinks
+      </button>
+<button class="flex-shrink-0 min-h-[42px] px-3.5 rounded-full bg-surface-container-lowest text-on-surface-variant font-label-md text-label-md flex items-center gap-1.5 shadow-sm active:bg-surface-container" type="button">
+<span class="material-symbols-outlined text-[18px] text-secondary-container">bakery_dining</span>
+        Pastry
+      </button>
+<button class="flex-shrink-0 min-h-[42px] px-3.5 rounded-full bg-surface-container-lowest text-on-surface-variant font-label-md text-label-md flex items-center gap-1.5 shadow-sm active:bg-surface-container" type="button">
+<span class="material-symbols-outlined text-[18px] text-tertiary-fixed-dim">water_drop</span>
+        Water
+      </button>
+<button class="flex-shrink-0 min-h-[42px] px-3.5 rounded-full bg-surface-container-lowest text-on-surface-variant font-label-md text-label-md flex items-center gap-1.5 shadow-sm active:bg-surface-container" type="button">
+<span class="material-symbols-outlined text-[18px] text-secondary">lunch_dining</span>
+        Food
+      </button>
+</div>
+</div>
+<!-- Quick Picks Carousel Section -->
+<div class="mt-space-md px-space-md flex flex-col gap-2">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-secondary-container text-[18px]" style="font-variation-settings: 'FILL' 1;">bolt</span>
+<span class="font-headline-sm text-headline-sm text-primary">Quick Picks</span>
+</div>
+<span class="font-label-sm text-label-sm text-outline">High Velocity</span>
+</div>
+<div class="flex items-center gap-2.5 overflow-x-auto pb-1 -mx-space-md px-space-md no-scrollbar">
+<!-- Fast Pick 1 -->
+<button class="flex-shrink-0 w-36 p-3 rounded-2xl bg-surface-container-lowest shadow-sm flex flex-col justify-between text-left active:scale-95 transition-transform" type="button">
+<div class="flex items-start justify-between">
+<div class="w-8 h-8 rounded-xl bg-surface-container flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[20px]">coffee</span>
+</div>
+<span class="font-label-sm text-label-sm text-tertiary-container bg-tertiary-fixed px-1.5 py-0.5 rounded-md">Top</span>
+</div>
+<div class="mt-3">
+<p class="font-label-md text-label-md text-on-surface truncate">Café Express</p>
+<p class="font-headline-sm text-headline-sm text-primary font-bold">1.800 <span class="font-label-sm text-label-sm font-normal text-outline">DT</span></p>
+</div>
+</button>
+<!-- Fast Pick 2 -->
+<button class="flex-shrink-0 w-36 p-3 rounded-2xl bg-surface-container-lowest shadow-sm flex flex-col justify-between text-left active:scale-95 transition-transform" type="button">
+<div class="flex items-start justify-between">
+<div class="w-8 h-8 rounded-xl bg-surface-container flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-[20px]">local_cafe</span>
+</div>
+</div>
+<div class="mt-3">
+<p class="font-label-md text-label-md text-on-surface truncate">Cappuccino</p>
+<p class="font-headline-sm text-headline-sm text-primary font-bold">2.800 <span class="font-label-sm text-label-sm font-normal text-outline">DT</span></p>
+</div>
+</button>
+<!-- Fast Pick 3 -->
+<button class="flex-shrink-0 w-36 p-3 rounded-2xl bg-surface-container-lowest shadow-sm flex flex-col justify-between text-left active:scale-95 transition-transform" type="button">
+<div class="flex items-start justify-between">
+<div class="w-8 h-8 rounded-xl bg-surface-container flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-[20px]">bakery_dining</span>
+</div>
+</div>
+<div class="mt-3">
+<p class="font-label-md text-label-md text-on-surface truncate">Croissant Amande</p>
+<p class="font-headline-sm text-headline-sm text-primary font-bold">2.200 <span class="font-label-sm text-label-sm font-normal text-outline">DT</span></p>
+</div>
+</button>
+<!-- Fast Pick 4 -->
+<button class="flex-shrink-0 w-36 p-3 rounded-2xl bg-surface-container-lowest shadow-sm flex flex-col justify-between text-left active:scale-95 transition-transform" type="button">
+<div class="flex items-start justify-between">
+<div class="w-8 h-8 rounded-xl bg-surface-container flex items-center justify-center text-secondary-container">
+<span class="material-symbols-outlined text-[20px]">nutrition</span>
+</div>
+</div>
+<div class="mt-3">
+<p class="font-label-md text-label-md text-on-surface truncate">Citronnade</p>
+<p class="font-headline-sm text-headline-sm text-primary font-bold">3.500 <span class="font-label-sm text-label-sm font-normal text-outline">DT</span></p>
+</div>
+</button>
+</div>
+</div>
+<!-- Active Item Grid (2 Columns, Thumb-optimised 48px+ targets) -->
+<div class="mt-space-md px-space-md">
+<div class="flex items-center justify-between mb-2">
+<span class="font-headline-sm text-headline-sm text-on-surface">Catalogue Items</span>
+<span class="font-label-sm text-label-sm text-outline">Touch to Add</span>
+</div>
+<div class="grid grid-cols-2 gap-space-sm">
+<!-- Item 1: Café Direct (Active Stepper state) -->
+<div class="relative bg-surface-container-lowest rounded-2xl p-3.5 shadow-sm flex flex-col justify-between min-h-[148px]">
+<div class="flex items-start justify-between">
+<div class="w-12 h-12 rounded-xl bg-surface-container-high flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[28px]" style="font-variation-settings: 'FILL' 1;">coffee_maker</span>
+</div>
+<span class="px-2 py-0.5 rounded-full bg-primary-fixed text-on-primary-fixed font-label-sm text-label-sm">In Cart (2)</span>
+</div>
+<div class="mt-2 min-w-0">
+<h3 class="font-title-md text-body-lg font-semibold text-on-surface truncate">Café Direct</h3>
+<p class="font-currency-display-mobile text-currency-display-mobile text-primary font-bold">2.000 <span class="font-label-md text-label-md text-outline">DT</span></p>
+</div>
+<!-- Touch Stepper Component -->
+<div class="mt-2 pt-2 flex items-center justify-between bg-surface-container-low rounded-xl px-1 py-1">
+<button aria-label="Decrease quantity" class="w-9 h-9 rounded-lg bg-surface-container-lowest text-primary shadow-sm flex items-center justify-center active:scale-90 transition-transform" type="button">
+<span class="material-symbols-outlined text-[18px]">remove</span>
+</button>
+<span class="font-headline-sm text-headline-sm text-primary font-bold px-2">2</span>
+<button aria-label="Increase quantity" class="w-9 h-9 rounded-lg bg-primary text-on-primary shadow-sm flex items-center justify-center active:scale-90 transition-transform" type="button">
+<span class="material-symbols-outlined text-[18px]">add</span>
+</button>
+</div>
+</div>
+<!-- Item 2: Croissant Beurre (Shows Modifier Capability) -->
+<div class="relative bg-surface-container-lowest rounded-2xl p-3.5 shadow-sm flex flex-col justify-between min-h-[148px] active:scale-[0.98] transition-all cursor-pointer">
+<div class="flex items-start justify-between">
+<div class="w-12 h-12 rounded-xl bg-surface-container-high flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-[28px]">bakery_dining</span>
+</div>
+<span class="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-outline">
+<span class="material-symbols-outlined text-[18px]">tune</span>
+</span>
+</div>
+<div class="mt-2 min-w-0">
+<h3 class="font-title-md text-body-lg font-semibold text-on-surface truncate">Croissant Beurre</h3>
+<p class="font-currency-display-mobile text-currency-display-mobile text-primary font-bold">1.400 <span class="font-label-md text-label-md text-outline">DT</span></p>
+</div>
+<div class="mt-2 flex items-center justify-between text-outline font-label-sm text-label-sm">
+<span class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">checklist</span> Modifiers
+          </span>
+<span class="text-tertiary font-bold">+ Add</span>
+</div>
+</div>
+<!-- Item 3: Café Crème (Qty 1 in ticket) -->
+<div class="relative bg-surface-container-lowest rounded-2xl p-3.5 shadow-sm flex flex-col justify-between min-h-[148px]">
+<div class="flex items-start justify-between">
+<div class="w-12 h-12 rounded-xl bg-surface-container-high flex items-center justify-center text-primary-container">
+<span class="material-symbols-outlined text-[28px]">local_cafe</span>
+</div>
+<span class="w-6 h-6 rounded-full bg-primary text-on-primary font-label-sm text-label-sm flex items-center justify-center font-bold">1</span>
+</div>
+<div class="mt-2 min-w-0">
+<h3 class="font-title-md text-body-lg font-semibold text-on-surface truncate">Café Crème</h3>
+<p class="font-currency-display-mobile text-currency-display-mobile text-primary font-bold">2.500 <span class="font-label-md text-label-md text-outline">DT</span></p>
+</div>
+<div class="mt-2 pt-2 flex items-center justify-between bg-surface-container-low rounded-xl px-1 py-1">
+<button aria-label="Remove item" class="w-9 h-9 rounded-lg bg-surface-container-lowest text-error shadow-sm flex items-center justify-center active:scale-90 transition-transform" type="button">
+<span class="material-symbols-outlined text-[18px]">delete</span>
+</button>
+<span class="font-headline-sm text-headline-sm text-primary font-bold px-2">1</span>
+<button aria-label="Add more" class="w-9 h-9 rounded-lg bg-primary text-on-primary shadow-sm flex items-center justify-center active:scale-90 transition-transform" type="button">
+<span class="material-symbols-outlined text-[18px]">add</span>
+</button>
+</div>
+</div>
+<!-- Item 4: 86'd OUT OF STOCK -->
+<div class="relative bg-surface-container-lowest rounded-2xl p-3.5 shadow-sm flex flex-col justify-between min-h-[148px] overflow-hidden opacity-85">
+<!-- Grayish Overlay with Strike -->
+<div class="absolute inset-0 bg-surface-dim/40 backdrop-blur-[1px] z-10 flex flex-col items-center justify-center p-3 text-center pointer-events-auto">
+<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-error text-on-error font-label-sm text-label-sm font-bold shadow-md">
+<span class="material-symbols-outlined text-[14px]">block</span> 86 Out of Stock
+          </span>
+<span class="mt-1.5 font-label-sm text-[11px] text-on-surface bg-surface-container-lowest/90 px-2 py-0.5 rounded-md shadow-sm">
+            Restocking at 14:00
+          </span>
+</div>
+<div class="flex items-start justify-between">
+<div class="w-12 h-12 rounded-xl bg-surface-container flex items-center justify-center text-outline">
+<span class="material-symbols-outlined text-[28px]">wine_bar</span>
+</div>
+<span class="font-label-sm text-label-sm text-error font-bold">SOLD OUT</span>
+</div>
+<div class="mt-2 min-w-0">
+<h3 class="font-title-md text-body-lg font-semibold text-outline truncate">Jus de Fraise</h3>
+<p class="font-currency-display-mobile text-currency-display-mobile text-outline font-bold">4.500 <span class="font-label-md text-label-md text-outline">DT</span></p>
+</div>
+<div class="mt-2 h-9 flex items-center justify-center text-outline font-label-sm text-label-sm">
+          Unavailable
+        </div>
+</div>
+<!-- Item 5: Baguette Farcie -->
+<button class="relative bg-surface-container-lowest rounded-2xl p-3.5 shadow-sm flex flex-col justify-between min-h-[148px] text-left active:scale-[0.98] transition-transform" type="button">
+<div class="flex items-start justify-between">
+<div class="w-12 h-12 rounded-xl bg-surface-container-high flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-[28px]">lunch_dining</span>
+</div>
+<span class="w-8 h-8 rounded-full bg-surface-container-low flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[18px]">add</span>
+</span>
+</div>
+<div class="mt-2 min-w-0">
+<h3 class="font-title-md text-body-lg font-semibold text-on-surface truncate">Baguette Farcie</h3>
+<p class="font-currency-display-mobile text-currency-display-mobile text-primary font-bold">5.500 <span class="font-label-md text-label-md text-outline">DT</span></p>
+</div>
+<div class="mt-2 flex items-center justify-between text-outline font-label-sm text-label-sm">
+<span>Sandwicherie</span>
+<span class="text-primary font-semibold">Ready in 3m</span>
+</div>
+</button>
+<!-- Item 6: Eau Minérale Safia 0.5L -->
+<button class="relative bg-surface-container-lowest rounded-2xl p-3.5 shadow-sm flex flex-col justify-between min-h-[148px] text-left active:scale-[0.98] transition-transform" type="button">
+<div class="flex items-start justify-between">
+<div class="w-12 h-12 rounded-xl bg-surface-container-high flex items-center justify-center text-tertiary-fixed-dim">
+<span class="material-symbols-outlined text-[28px]">water_drop</span>
+</div>
+<span class="w-8 h-8 rounded-full bg-surface-container-low flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[18px]">add</span>
+</span>
+</div>
+<div class="mt-2 min-w-0">
+<h3 class="font-title-md text-body-lg font-semibold text-on-surface truncate">Eau 0.5L Safia</h3>
+<p class="font-currency-display-mobile text-currency-display-mobile text-primary font-bold">1.000 <span class="font-label-md text-label-md text-outline">DT</span></p>
+</div>
+<div class="mt-2 flex items-center justify-between text-outline font-label-sm text-label-sm">
+<span>Fresh / Frais</span>
+<span class="text-tertiary font-semibold">Fridge #1</span>
+</div>
+</button>
+</div>
+</div>
+<!-- Interactive Active Modifier Peek Sheet -->
+<div class="mt-space-md mx-space-md p-space-md rounded-2xl bg-surface-container-lowest shadow-sm flex flex-col gap-2">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-primary text-[20px]">room_service</span>
+<span class="font-headline-sm text-headline-sm text-primary">Quick Modifiers</span>
+</div>
+<span class="font-label-sm text-label-sm text-tertiary bg-tertiary-fixed px-2 py-0.5 rounded-full font-bold">Applies to Café Direct</span>
+</div>
+<!-- Active Tunisan Neighborhood Coffee Modifiers -->
+<div class="flex flex-wrap gap-2 pt-1">
+<button class="h-9 px-3 rounded-xl bg-primary text-on-primary font-label-md text-label-md flex items-center gap-1.5 shadow-sm" type="button">
+<span class="material-symbols-outlined text-[16px]">check</span>
+        Sans Sucre (بلا سكر)
+      </button>
+<button class="h-9 px-3 rounded-xl bg-primary text-on-primary font-label-md text-label-md flex items-center gap-1.5 shadow-sm" type="button">
+<span class="material-symbols-outlined text-[16px]">check</span>
+        Extra Shot (+0.600 DT)
+      </button>
+<button class="h-9 px-3 rounded-xl bg-surface-container-high text-on-surface font-label-md text-label-md flex items-center gap-1.5 active:bg-surface-container" type="button">
+<span class="material-symbols-outlined text-[16px] text-outline">add</span>
+        Halib Zeyed (حليب زايد)
+      </button>
+<button class="h-9 px-3 rounded-xl bg-surface-container-high text-on-surface font-label-md text-label-md flex items-center gap-1.5 active:bg-surface-container" type="button">
+<span class="material-symbols-outlined text-[16px] text-outline">add</span>
+        Mahroussa (محروصة)
+      </button>
+</div>
+</div>
+<!-- Bottom Floating Order & Tender Action Deck (Pinned above shell navigation bar) -->
+<div class="fixed bottom-16 left-0 right-0 z-40 px-space-md py-2.5 bg-surface-container-lowest/95 backdrop-blur-xl shadow-[0_-6px_20px_rgba(15,95,110,0.1)]">
+<div class="flex items-center justify-between gap-space-sm">
+<!-- Order Summary info -->
+<div class="flex flex-col min-w-0 pr-1">
+<div class="flex items-center gap-1.5">
+<span class="w-5 h-5 rounded-full bg-secondary-container text-on-secondary-container font-label-sm text-[10px] flex items-center justify-center font-bold">3</span>
+<span class="font-label-sm text-label-sm text-outline truncate uppercase">Current Order</span>
+</div>
+<div class="flex items-baseline gap-1">
+<span class="font-currency-display text-currency-display text-primary font-extrabold leading-tight tracking-tight">6.300</span>
+<span class="font-label-md text-label-md text-on-surface font-bold">DT</span>
+</div>
+</div>
+<!-- Action Cluster -->
+<div class="flex items-center gap-2 flex-1 justify-end">
+<!-- Secondary Button: Customer Ledger Tab -->
+<button class="min-h-[52px] px-3.5 rounded-2xl bg-surface-container-high text-primary font-label-md text-label-md flex flex-col items-center justify-center active:scale-95 transition-transform flex-shrink-0" type="button">
+<span class="material-symbols-outlined text-[20px]">account_balance_wallet</span>
+<span class="leading-none mt-0.5 font-bold">Tab (كريدي)</span>
+</button>
+<!-- Primary Large Tender Button: Instant Cash / Done -->
+<button class="flex-1 min-h-[52px] max-w-[210px] px-3 rounded-2xl bg-primary-container text-on-primary shadow-lg flex flex-col items-center justify-center active:scale-98 transition-all hover:bg-primary" type="button">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[22px]">check_circle</span>
+<span class="font-title-md text-title-md font-bold leading-tight">Done</span>
+</div>
+<span class="font-label-sm text-[10px] text-on-primary-container/90 leading-none">Paid outside app</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<script>
+  // Micro-interaction: Visual feedback on tactile clicks without full reload
+  document.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('touchstart', function() {}, {passive: true});
+  });
+</script></main><nav class="fixed bottom-0 w-full z-50 pb-safe bg-surface-container-lowest/90 backdrop-blur-xl shadow-[0_-4px_16px_rgba(15,95,110,0.08)]" data-active-classes="text-primary-container font-headline-sm"><div class="flex items-stretch justify-around h-16 px-space-xs"><a aria-current="page" class="flex-1 flex flex-col items-center justify-center min-h-[56px] min-w-[56px] py-space-xs transition-colors group text-primary-container font-headline-sm" data-path="pos-terminal" href="#"><div class="flex items-center justify-center w-10 h-7 rounded-xl transition-all group-hover:bg-surface-container"><span class="material-symbols-outlined text-[24px]">point_of_sale</span></div><span class="font-label-sm text-label-sm leading-tight mt-0.5">POS</span></a><a class="flex-1 flex flex-col items-center justify-center min-h-[56px] min-w-[56px] py-space-xs text-on-surface-variant hover:text-primary transition-colors group relative" data-path="active-orders" href="#"><div class="relative flex items-center justify-center w-10 h-7 rounded-xl transition-all group-hover:bg-surface-container"><span class="material-symbols-outlined text-[24px]">receipt_long</span><span class="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-secondary-container text-on-secondary-container font-label-sm text-[10px] flex items-center justify-center font-bold">4</span></div><span class="font-label-sm text-label-sm leading-tight mt-0.5">Orders</span></a><a class="flex-1 flex flex-col items-center justify-center min-h-[56px] min-w-[56px] py-space-xs text-on-surface-variant hover:text-primary transition-colors group" data-path="customer-ledger" href="#"><div class="flex items-center justify-center w-10 h-7 rounded-xl transition-all group-hover:bg-surface-container"><span class="material-symbols-outlined text-[24px]">group</span></div><span class="font-label-sm text-label-sm leading-tight mt-0.5">Customers</span></a><a class="flex-1 flex flex-col items-center justify-center min-h-[56px] min-w-[56px] py-space-xs text-on-surface-variant hover:text-primary transition-colors group" data-path="shift-drawer" href="#"><div class="flex items-center justify-center w-10 h-7 rounded-xl transition-all group-hover:bg-surface-container"><span class="material-symbols-outlined text-[24px]">payments</span></div><span class="font-label-sm text-label-sm leading-tight mt-0.5">Shift</span></a><a class="flex-1 flex flex-col items-center justify-center min-h-[56px] min-w-[56px] py-space-xs text-on-surface-variant hover:text-primary transition-colors group" data-path="terminal-settings" href="#"><div class="flex items-center justify-center w-10 h-7 rounded-xl transition-all group-hover:bg-surface-container"><span class="material-symbols-outlined text-[24px]">tune</span></div><span class="font-label-sm text-label-sm leading-tight mt-0.5">Settings</span></a></div></nav></body></html>

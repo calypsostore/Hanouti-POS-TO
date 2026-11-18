@@ -73,7 +73,6 @@ button {
   justify-content: center;
   padding: 0 clamp(16px, 4.2vw, 32px) max(10px, env(safe-area-inset-bottom, 0px));
   pointer-events: none;
-  animation: bottom-nav-rise 680ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .bottom-nav__bar {
@@ -95,7 +94,6 @@ button {
   -webkit-backdrop-filter: blur(24px) saturate(1.45);
   backdrop-filter: blur(24px) saturate(1.45);
   pointer-events: auto;
-  animation: bottom-nav-glass-enter 840ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .bottom-nav__bar::before {
@@ -106,19 +104,6 @@ button {
   background: linear-gradient(100deg, rgb(94 190 229 / 28%), rgb(255 255 255 / 48%), rgb(44 190 205 / 28%));
   content: "";
   filter: blur(16px);
-}
-
-.bottom-nav__bar::after {
-  position: absolute;
-  z-index: 1;
-  inset: 1px;
-  border-radius: inherit;
-  background: linear-gradient(108deg, transparent 25%, rgb(255 255 255 / 46%) 43%, rgb(132 237 244 / 19%) 49%, transparent 63%);
-  content: "";
-  opacity: 0.52;
-  pointer-events: none;
-  transform: translateX(-125%);
-  animation: bottom-nav-reflection 15s ease-in-out 1s infinite;
 }
 
 .bottom-nav__group {
@@ -271,15 +256,9 @@ button {
   box-shadow:
     0 3px 11px rgb(7 143 163 / 27%),
     inset 0 1px 2px rgb(255 255 255 / 72%);
-  opacity: 0;
   pointer-events: none;
   transition:
-    transform 620ms cubic-bezier(0.22, 1.45, 0.36, 1),
-    opacity 220ms ease;
-}
-
-.bottom-nav__active-indicator.is-visible {
-  opacity: 1;
+    transform 320ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .bottom-nav__pos-link {
@@ -297,7 +276,6 @@ button {
   -webkit-tap-highlight-color: transparent;
   transform: translateX(-50%);
   transition: transform 420ms cubic-bezier(0.2, 1.35, 0.35, 1);
-  animation: bottom-nav-pos-enter 860ms cubic-bezier(0.22, 1, 0.36, 1) 90ms both;
 }
 
 .bottom-nav__pos-link::before,
@@ -421,48 +399,6 @@ button {
   }
 }
 
-@keyframes bottom-nav-rise {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 18px, 0);
-  }
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0);
-  }
-}
-
-@keyframes bottom-nav-glass-enter {
-  from {
-    opacity: 0;
-    filter: blur(5px);
-  }
-  to {
-    opacity: 1;
-    filter: blur(0);
-  }
-}
-
-@keyframes bottom-nav-pos-enter {
-  from {
-    opacity: 0;
-    transform: translate3d(-50%, 12px, 0) scale(0.78);
-  }
-  to {
-    opacity: 1;
-    transform: translate3d(-50%, 0, 0) scale(1);
-  }
-}
-
-@keyframes bottom-nav-reflection {
-  0%, 62%, 100% {
-    transform: translateX(-125%);
-  }
-  79% {
-    transform: translateX(125%);
-  }
-}
-
 @keyframes bottom-nav-touch-ripple {
   0% {
     opacity: 0.7;
@@ -512,7 +448,6 @@ button {
 @media (prefers-reduced-motion: reduce) {
   .bottom-nav,
   .bottom-nav__bar,
-  .bottom-nav__bar::after,
   .bottom-nav__pos-link,
   .bottom-nav__pos-link.is-pulsing::after,
   .bottom-nav__pos-link.is-pulsing .bottom-nav__pos-orbit,

@@ -16,14 +16,23 @@ const staffNavigation = [
 
 type StaffNavigationItem = (typeof staffNavigation)[number];
 
+let previousIndicatorPosition: { x: number; y: number } | null = null;
+let pendingNavigationPath: string | null = null;
+let pendingPosPulse = false;
+
 export function BottomNav() {
   const user = useAuthStore((state) => state.user);
   const location = useLocation();
   const barRef = useRef<HTMLDivElement>(null);
-  const posPulseTimeout = useRef<number | null>(null);
   const [allowed, setAllowed] = useState<Record<string, boolean>>({});
-  const [activeIndicator, setActiveIndicator] = useState<{ x: number; y: number } | null>(null);
-  const [posPulsing, setPosPulsing] = useState(false);
+  const [activeIndicator, setActiveIndicator] = useState<{ x: number; y: number } | null>(() =>
+    location.pathname !== '/pos' && pendingNavigationPath === location.pathname ? previousIndicatorPosition : null,
+  );
+  const [posPulsing, setPosPulsing] = useState(() => {
+    const shouldPulse = pendingPosPulse;
+    pendingPosPulse = false;
+    return shouldPulse;
+  });
 
   useEffect(() => {
     if (!user) return;
@@ -50,34 +59,54 @@ export function BottomNav() {
 
   useLayoutEffect(() => {
     const bar = barRef.current;
-    const icon = bar?.querySelector<HTMLElement>('.bottom-nav__link[aria-current="page"] .bottom-nav__icon');
-    if (!bar || !icon) {
-      setActiveIndicator(null);
+    const activeLinkIcon = bar?.querySelector<HTMLElement>('.bottom-nav__link[aria-current="page"] .bottom-nav__icon');
+    const activePosOrbit = bar?.querySelector<HTMLElement>('.bottom-nav__pos-link[aria-current="page"] .bottom-nav__pos-orbit');
+    const target = activeLinkIcon ?? activePosOrbit;
+    if (!bar || !target) {
+      if (pendingNavigationPath !== location.pathname) setActiveIndicator(null);
       return;
     }
 
+    const isPosActive = !activeLinkIcon;
     const updatePosition = () => {
       const barBounds = bar.getBoundingClientRect();
-      const iconBounds = icon.getBoundingClientRect();
-      setActiveIndicator({
-        x: iconBounds.left - barBounds.left + iconBounds.width / 2,
-        y: iconBounds.top - barBounds.top + iconBounds.height / 2,
-      });
+      const targetBounds = target.getBoundingClientRect();
+      const position = {
+        x: targetBounds.left - barBounds.left + targetBounds.width / 2,
+        y: targetBounds.top - barBounds.top + targetBounds.height / 2,
+      };
+      previousIndicatorPosition = position;
+      setActiveIndicator(isPosActive ? null : position);
     };
 
-    updatePosition();
+    let animationFrame: number | null = null;
+    if (!isPosActive && pendingNavigationPath === location.pathname && previousIndicatorPosition) {
+      setActiveIndicator(previousIndicatorPosition);
+      animationFrame = window.requestAnimationFrame(() => {
+        animationFrame = null;
+        pendingNavigationPath = null;
+        updatePosition();
+      });
+    } else {
+      updatePosition();
+      if (pendingNavigationPath === location.pathname) pendingNavigationPath = null;
+    }
+
     window.addEventListener('resize', updatePosition);
-    return () => window.removeEventListener('resize', updatePosition);
+    return () => {
+      if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
+      window.removeEventListener('resize', updatePosition);
+    };
   }, [location.pathname, navigationSignature]);
 
-  useEffect(() => () => {
-    if (posPulseTimeout.current !== null) window.clearTimeout(posPulseTimeout.current);
-  }, []);
+  useEffect(() => {
+    if (!posPulsing) return;
+    const timeout = window.setTimeout(() => setPosPulsing(false), 720);
+    return () => window.clearTimeout(timeout);
+  }, [posPulsing]);
 
   function pulsePosButton() {
     setPosPulsing(true);
-    if (posPulseTimeout.current !== null) window.clearTimeout(posPulseTimeout.current);
-    posPulseTimeout.current = window.setTimeout(() => setPosPulsing(false), 720);
   }
 
   function renderLink(item: StaffNavigationItem) {
@@ -86,6 +115,7 @@ export function BottomNav() {
         key={item.to}
         to={item.to}
         aria-label={t(item.label)}
+        onClick={() => { pendingNavigationPath = item.to === location.pathname ? null : item.to; }}
         className={({ isActive }) => `bottom-nav__link${isActive ? ' is-active' : ''}`}
       >
         {({ isActive }) => (
@@ -102,18 +132,24 @@ export function BottomNav() {
   return (
     <nav aria-label={t('nav.staffNavigation')} className="bottom-nav">
       <div ref={barRef} className={`bottom-nav__bar${posItem ? ' has-pos' : ''}`}>
-        <span
-          aria-hidden="true"
-          className={`bottom-nav__active-indicator${activeIndicator ? ' is-visible' : ''}`}
-          style={activeIndicator ? { transform: `translate3d(${activeIndicator.x}px, ${activeIndicator.y}px, 0) translate(-50%, -50%)` } : undefined}
-        />
+        {activeIndicator && (
+          <span
+            aria-hidden="true"
+            className="bottom-nav__active-indicator"
+            style={{ transform: `translate3d(${activeIndicator.x}px, ${activeIndicator.y}px, 0) translate(-50%, -50%)` }}
+          />
+        )}
         {posItem ? (
           <>
             <div className="bottom-nav__group bottom-nav__group--left">{leftItems.map(renderLink)}</div>
             <NavLink
               to={posItem.to}
               aria-label={t(posItem.label)}
-              onClick={pulsePosButton}
+              onClick={() => {
+                pendingNavigationPath = posItem.to === location.pathname ? null : posItem.to;
+                pendingPosPulse = posItem.to !== location.pathname;
+                pulsePosButton();
+              }}
               className={({ isActive }) => `bottom-nav__pos-link${isActive ? ' is-active' : ''}${posPulsing ? ' is-pulsing' : ''}`}
             >
               <span className="bottom-nav__pos-orbit">

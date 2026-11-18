@@ -388,7 +388,7 @@ export function PosScreen() {
         </aside>
       </main>
 
-      <div className={`pos-mobile-action-bar fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-3 bg-surface-container-lowest/95 px-3 py-2.5 shadow-sheet backdrop-blur-xl safe-bottom tablet:hidden${posNavigationOpen ? ' is-pos-nav-open' : ''}`}>
+      <div className={`pos-mobile-action-bar fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-3 bg-surface-container-lowest/95 px-3 py-2.5 shadow-sheet backdrop-blur-xl tablet:hidden${posNavigationOpen ? ' is-pos-nav-open' : ''}`}>
         <button type="button" onClick={() => setDrawerOpen(true)} className="min-w-0 text-left">
           <span className="block">
             <span className="flex items-center gap-1.5 font-body text-label-sm uppercase text-outline">
@@ -398,7 +398,7 @@ export function PosScreen() {
             <span className="font-display text-currency-display-mobile text-primary">{formatTnd(totalMillimes / 1000)} <small className="font-body text-label-md text-on-surface">DT</small></span>
           </span>
         </button>
-        <Button onClick={finishOrder} disabled={!cart.length} className="min-h-[52px] shrink-0 rounded-2xl px-4">
+        <Button variant="success" onClick={finishOrder} disabled={!cart.length} className="min-h-[52px] shrink-0 rounded-2xl px-4">
           <MaterialIcon name="check_circle" className="text-xl" />
           {t('common.done')}
         </Button>

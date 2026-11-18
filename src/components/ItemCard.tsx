@@ -56,20 +56,20 @@ export function ItemCard({ item, quantity = 0, onAdd, onRemove, canToggleStock =
           aria-pressed={item.outOfStock}
           aria-label={`${t(item.outOfStock ? 'pos.markAvailable' : 'pos.markOutOfStock')}: ${item.name}`}
           onClick={onToggleStock}
-          className="absolute right-3 top-3 z-10 flex min-h-9 items-center gap-1 rounded-full bg-surface-container-lowest px-2 text-label-sm text-primary shadow-card"
+          className="absolute right-3 top-3 z-10 flex min-h-9 items-center gap-1 rounded-full px-2 text-label-sm text-primary"
         >
           <MaterialIcon name={item.outOfStock ? 'check' : 'block'} className="text-base" />
-          {item.outOfStock ? t('pos.available') : t('catalog.markOutOfStock')}
+          {item.outOfStock && t('pos.available')}
         </button>
       )}
       {quantity > 0 && onRemove && !item.outOfStock && (
-        <div className="mt-2 flex items-center justify-between rounded-lg bg-surface-container-low p-1">
-          <button type="button" aria-label={t('pos.removeItem', { item: item.name })} onClick={onRemove} className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-container-lowest text-primary">
-            <MaterialIcon name={quantity === 1 ? 'delete' : 'remove'} className="text-lg" />
+        <div className="mt-1 flex items-center justify-between rounded-lg bg-surface-container-low p-0.5">
+          <button type="button" aria-label={t('pos.removeItem', { item: item.name })} onClick={onRemove} className="flex h-8 w-8 items-center justify-center rounded-lg bg-surface-container-lowest text-primary">
+            <MaterialIcon name={quantity === 1 ? 'delete' : 'remove'} className="text-sm" />
           </button>
-          <span className="font-display text-headline-sm text-primary">{quantity}</span>
-          <button type="button" aria-label={t('pos.addItem', { item: item.name })} onClick={onAdd} className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-on-primary">
-            <MaterialIcon name="add" className="text-lg" />
+          <span className="font-display text-label-lg text-primary">{quantity}</span>
+          <button type="button" aria-label={t('pos.addItem', { item: item.name })} onClick={onAdd} className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-on-primary">
+            <MaterialIcon name="add" className="text-sm" />
           </button>
         </div>
       )}

@@ -16,17 +16,23 @@ const staffNavigation = [
 
 type StaffNavigationItem = (typeof staffNavigation)[number];
 
+interface BottomNavProps {
+  posNavigationOpen?: boolean;
+  onPosNavigationOpenChange?: (open: boolean) => void;
+}
+
 let previousIndicatorPosition: { x: number; y: number } | null = null;
 let pendingNavigationPath: string | null = null;
 let pendingPosPulse = false;
 
-export function BottomNav() {
+export function BottomNav({ posNavigationOpen: controlledPosNavigationOpen, onPosNavigationOpenChange }: BottomNavProps = {}) {
   const user = useAuthStore((state) => state.user);
   const location = useLocation();
   const barRef = useRef<HTMLDivElement>(null);
   const posNavigationPointerStart = useRef<number | null>(null);
   const [allowed, setAllowed] = useState<Record<string, boolean>>({});
-  const [posNavigationOpen, setPosNavigationOpen] = useState(false);
+  const [internalPosNavigationOpen, setInternalPosNavigationOpen] = useState(false);
+  const posNavigationOpen = controlledPosNavigationOpen ?? internalPosNavigationOpen;
   const [activeIndicator, setActiveIndicator] = useState<{ x: number; y: number } | null>(() =>
     location.pathname !== '/pos' && pendingNavigationPath === location.pathname ? previousIndicatorPosition : null,
   );
@@ -59,6 +65,11 @@ export function BottomNav() {
   const rightItems = otherItems.slice(2);
   const navigationSignature = visibleNavigation.map((item) => item.to).join('|');
   const isPosScreen = location.pathname === '/pos';
+
+  function updatePosNavigationOpen(open: boolean) {
+    if (onPosNavigationOpenChange) onPosNavigationOpenChange(open);
+    else setInternalPosNavigationOpen(open);
+  }
 
   useLayoutEffect(() => {
     const bar = barRef.current;
@@ -122,9 +133,9 @@ export function BottomNav() {
     if (startY === null) return;
     posNavigationPointerStart.current = null;
     const swipeDistance = startY - event.clientY;
-    if (swipeDistance > 24) setPosNavigationOpen(true);
-    else if (swipeDistance < -24) setPosNavigationOpen(false);
-    else setPosNavigationOpen((open) => !open);
+    if (swipeDistance > 24) updatePosNavigationOpen(true);
+    else if (swipeDistance < -24) updatePosNavigationOpen(false);
+    else updatePosNavigationOpen(!posNavigationOpen);
   }
 
   function renderLink(item: StaffNavigationItem) {
@@ -146,7 +157,7 @@ export function BottomNav() {
   return (
     <nav
       aria-label={t('nav.staffNavigation')}
-      className={`bottom-nav${isPosScreen && posNavigationOpen ? ' is-pos-open' : ''}`}
+      className="bottom-nav"
     >
       <div
         ref={barRef}
@@ -167,6 +178,12 @@ export function BottomNav() {
               to={posItem.to}
               aria-label={t(posItem.label)}
               onClick={() => {
+                if (isPosScreen && posNavigationOpen) {
+                  pendingNavigationPath = null;
+                  pendingPosPulse = false;
+                  updatePosNavigationOpen(false);
+                  return;
+                }
                 pendingNavigationPath = posItem.to === location.pathname ? null : posItem.to;
                 pendingPosPulse = posItem.to !== location.pathname;
                 pulsePosButton();
@@ -185,15 +202,17 @@ export function BottomNav() {
       {isPosScreen && (
         <button
           type="button"
-          className="bottom-nav__pos-toggle"
+          className={`bottom-nav__pos-toggle${posNavigationOpen ? ' is-hidden' : ''}`}
           aria-label={t(posNavigationOpen ? 'nav.hideNavigation' : 'nav.showNavigation')}
+          aria-hidden={posNavigationOpen}
           aria-expanded={posNavigationOpen}
           aria-controls="staff-bottom-nav-bar"
+          tabIndex={posNavigationOpen ? -1 : 0}
           onPointerDown={handlePosNavigationPointerDown}
           onPointerUp={handlePosNavigationPointerUp}
           onPointerCancel={() => { posNavigationPointerStart.current = null; }}
           onClick={(event) => {
-            if (event.detail === 0) setPosNavigationOpen((open) => !open);
+            if (event.detail === 0) updatePosNavigationOpen(!posNavigationOpen);
           }}
         >
           <MaterialIcon name="menu" />

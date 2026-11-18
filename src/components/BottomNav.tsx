@@ -11,7 +11,7 @@ const staffNavigation = [
   { to: '/orders', permission: 'view_order_history', label: 'nav.orders', icon: 'receipt_long' },
   { to: '/customers', permission: 'customers', label: 'nav.customers', icon: 'group' },
   { to: '/shift', permission: 'open_close_shift', label: 'nav.shift', icon: 'payments' },
-  { to: '/settings', label: 'nav.settings', icon: 'tune' },
+  { to: '/settings', label: 'nav.settings', icon: 'settings' },
 ] as const;
 
 type StaffNavigationItem = (typeof staffNavigation)[number];

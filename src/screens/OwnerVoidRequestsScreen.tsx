@@ -20,6 +20,7 @@ function OwnerVoidRequestsContent() {
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [voidReasons, setVoidReasons] = useState<Record<string, string>>({});
 
   const refreshRequests = useCallback(async () => {
     const orders = (await orderService.listAll(storeId)).filter((order) => order.status === 'pending_void');
@@ -37,7 +38,7 @@ function OwnerVoidRequestsContent() {
     setError('');
     setNotice('');
     try {
-      await orderService.resolveVoidRequest(order.id, ownerId, decision);
+      await orderService.resolveVoidRequest(order.id, ownerId, decision, voidReasons[order.id]);
       await refreshRequests();
       setNotice(decision === 'approve' ? `Order #${order.number} voided.` : `Void request for #${order.number} rejected.`);
     } catch (resolveError) {
@@ -75,9 +76,12 @@ function OwnerVoidRequestsContent() {
                   <span>Total</span><span className="tabular-nums">{formatTnd(order.totalMillimes / 1000)} DT</span>
                 </div>
               </div>
+              <label className="font-body text-label-sm">Reason required to approve void
+                <textarea value={voidReasons[order.id] ?? order.voidReason ?? ''} onChange={(event) => setVoidReasons((current) => ({ ...current, [order.id]: event.target.value }))} className="mt-1 min-h-16 w-full rounded-lg bg-surface-container-low p-3" />
+              </label>
               <div className="flex justify-end gap-2">
                 <Button variant="danger" onClick={() => { void resolve(order, 'reject'); }}><MaterialIcon name="close" />{t('voids.reject')}</Button>
-                <Button onClick={() => { void resolve(order, 'approve'); }}><MaterialIcon name="check" />{t('voids.approve')}</Button>
+                <Button disabled={!(voidReasons[order.id] ?? order.voidReason ?? '').trim()} onClick={() => { void resolve(order, 'approve'); }}><MaterialIcon name="check" />{t('voids.approve')}</Button>
               </div>
             </article>
           );

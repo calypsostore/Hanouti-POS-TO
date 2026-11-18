@@ -8,6 +8,7 @@ import { ItemCard, type ItemCardItem } from '../components/ItemCard';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { TicketRow, type TicketLine } from '../components/TicketRow';
 import { TopBar } from '../components/TopBar';
+import { TicketView } from '../components/TicketView';
 import { formatTnd } from '../lib/format';
 import { t } from '../i18n/translations';
 import { catalogService } from '../services/catalogService';
@@ -16,7 +17,8 @@ import { shiftService } from '../services/shiftService';
 import { userService } from '../services/userService';
 import { updateService } from '../services/updateService';
 import { useAuthStore } from '../stores/authStore';
-import type { CatalogItemRecord, CatalogModifierRecord, CategoryRecord, OrderLineRecord, OrderRecord, ShiftRecord, StoreRecord } from '../types/domain';
+import type { CatalogItemRecord, CatalogModifierRecord, CategoryRecord, CustomerRecord, OrderLineRecord, OrderRecord, PaymentMethod, ShiftRecord, StoreRecord } from '../types/domain';
+import { customerService } from '../services/customerService';
 
 interface CartLine extends TicketLine {
   itemId: string;
@@ -61,18 +63,25 @@ export function PosScreen() {
   const [selectedItem, setSelectedItem] = useState<ProductView | null>(null);
   const [selectedModifiers, setSelectedModifiers] = useState<string[]>([]);
   const [can86Items, setCan86Items] = useState(false);
+  const [canUseTabs, setCanUseTabs] = useState(false);
+  const [customers, setCustomers] = useState<CustomerRecord[]>([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
+  const [ticketOrder, setTicketOrder] = useState<OrderRecord | null>(null);
   const categoryOptions = [{ id: 'all', name: t('pos.allItems'), icon: 'apps' }, ...categoryRecords];
 
   useEffect(() => {
     const refresh = async () => {
       try {
-        const [items, categories, shift, currentStore, todaysOrders, permission] = await Promise.all([
+        const [items, categories, shift, currentStore, todaysOrders, permission, tabsPermission, customerList] = await Promise.all([
           catalogService.listItems(storeId),
           catalogService.listCategories(storeId),
           user ? shiftService.getOpenShiftForUser(storeId, user.id) : Promise.resolve(undefined),
           storeId ? userService.getStore(storeId) : Promise.resolve(undefined),
           orderService.listAll(storeId),
           user ? userService.hasPermission(user.id, '86_items') : Promise.resolve(false),
+          user ? userService.hasPermission(user.id, 'use_tabs') : Promise.resolve(false),
+          storeId ? customerService.listCustomers(storeId) : Promise.resolve([]),
         ]);
         setCatalogRecords(items);
         setCategoryRecords(categories);
@@ -80,6 +89,8 @@ export function PosScreen() {
         setStore(currentStore);
         setOrders(todaysOrders);
         setCan86Items(permission);
+        setCanUseTabs(tabsPermission);
+        setCustomers(customerList);
       } catch (error) {
         setToast(error instanceof Error ? error.message : t('common.refreshFailed'));
       }
@@ -201,12 +212,21 @@ export function PosScreen() {
         lineTotalMillimes: line.quantity * line.unitPriceMillimes,
         modifiers: line.modifiers ?? [],
       }));
-      await orderService.createOrder({ storeId: user.storeId, staffId: user.id, items, paymentMethod: 'cash' });
+      const order = await orderService.createOrder({
+        storeId: user.storeId,
+        staffId: user.id,
+        items,
+        paymentMethod,
+        customerId: paymentMethod === 'tab' ? selectedCustomerId : undefined,
+      });
       setCart([]);
       setDrawerOpen(false);
       setCatalogRecords(await catalogService.listItems(storeId));
       setOrders(await orderService.listAll(storeId));
       setToast(t('pos.orderDone'));
+      setTicketOrder(order);
+      setPaymentMethod('cash');
+      setSelectedCustomerId('');
       window.setTimeout(() => setToast(''), 2500);
     } catch (error) {
       setToast(error instanceof Error ? error.message : t('pos.cannotSaveOrder'));
@@ -246,6 +266,25 @@ export function PosScreen() {
           <span className="font-body text-label-md text-on-surface-variant">{t('common.total')}</span>
           <span className="font-display text-currency-display-mobile text-on-surface">{formatTnd(totalMillimes / 1000)} <small className="font-body text-label-md">DT</small></span>
         </div>
+        {canUseTabs && (
+          <div className="mb-3 grid grid-cols-2 gap-2">
+            <label className="font-body text-label-sm text-on-surface-variant">
+              Payment
+              <select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod)} className="mt-1 h-11 w-full rounded-lg bg-surface-container-low px-2 text-on-surface">
+                <option value="cash">Cash</option><option value="card">Card</option><option value="other">Other</option><option value="tab">Customer tab</option>
+              </select>
+            </label>
+            {paymentMethod === 'tab' && (
+              <label className="font-body text-label-sm text-on-surface-variant">
+                Customer
+                <select required value={selectedCustomerId} onChange={(event) => setSelectedCustomerId(event.target.value)} className="mt-1 h-11 w-full rounded-lg bg-surface-container-low px-2 text-on-surface">
+                  <option value="">Select customer</option>
+                  {customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
+                </select>
+              </label>
+            )}
+          </div>
+        )}
         <Button onClick={finishOrder} disabled={!cart.length} className="min-h-[54px] w-full rounded-xl text-body-lg">
           <MaterialIcon name="check_circle" className="text-xl" />
           {t('common.done')} <span className="ml-auto font-display tabular-nums">{formatTnd(totalMillimes / 1000)} DT</span>
@@ -359,6 +398,7 @@ export function PosScreen() {
       </div>
 
       <BottomNav />
+      {ticketOrder && <TicketView order={ticketOrder} storeName={store?.name ?? t('pos.cafe')} staffName={user?.name ?? t('common.staff')} onClose={() => setTicketOrder(null)} />}
       <BottomSheet open={drawerOpen} onClose={() => setDrawerOpen(false)} title={t('pos.currentOrder')}>
         {renderTicketContent(true)}
       </BottomSheet>

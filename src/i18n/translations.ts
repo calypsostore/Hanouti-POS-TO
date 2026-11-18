@@ -7,6 +7,7 @@ const en = {
   'app.logOut': 'Log out',
   'nav.pos': 'POS',
   'nav.orders': 'Orders',
+  'nav.customers': 'Customers',
   'nav.shift': 'Shift',
   'nav.settings': 'Settings',
   'nav.dashboard': 'Dashboard',

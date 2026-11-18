@@ -1,6 +1,7 @@
 import type { PermissionDefinition, PositionRecord, StoreRecord, UserRecord, UserSummary } from '../types/domain';
 import { readData, writeData } from './storage';
 import { seedPositions, seedStores, seedUsers } from './seedData';
+import { hashSecret, verifySecret } from './secretService';
 
 const PERMISSIONS: PermissionDefinition[] = [
   { id: 'take_orders', label: 'Take orders' },
@@ -8,6 +9,8 @@ const PERMISSIONS: PermissionDefinition[] = [
   { id: '86_items', label: '86 items' },
   { id: 'open_close_shift', label: 'Open / close shift' },
   { id: 'view_order_history', label: 'View order history' },
+  { id: 'use_tabs', label: 'Charge orders to customer tabs' },
+  { id: 'settle_tabs', label: 'Settle customer tabs' },
 ];
 
 const getUsers = () => readData('users', seedUsers);
@@ -32,7 +35,7 @@ function createId(prefix: string): string {
 }
 
 function withoutPassword(user: UserRecord): UserSummary {
-  const { password: _password, ...safeUser } = user;
+  const { password: _password, passwordHash: _passwordHash, ...safeUser } = user;
   return safeUser;
 }
 
@@ -65,12 +68,13 @@ export const userService = {
 
     const temporaryPassword = makeTemporaryPassword();
     const ownerId = createId('owner');
+    const defaultPinHash = await hashSecret('1234');
     const store: StoreRecord = {
       id: createId('store'),
       ownerId,
       code,
       name: input.storeName.trim(),
-      adminPin: '1234',
+      adminPinHash: defaultPinHash,
       isActive: true,
       createdAt: new Date().toISOString(),
     };
@@ -79,7 +83,7 @@ export const userService = {
       role: 'owner',
       name: input.name.trim(),
       email: input.email.trim(),
-      password: temporaryPassword,
+      passwordHash: await hashSecret(temporaryPassword),
       mustChangePassword: true,
       isActive: true,
       storeId: store.id,
@@ -107,7 +111,7 @@ export const userService = {
       role: 'staff',
       name,
       username,
-      password: temporaryPassword,
+      passwordHash: await hashSecret(temporaryPassword),
       mustChangePassword: true,
       isActive: true,
       storeId: input.storeId,
@@ -174,9 +178,21 @@ export const userService = {
     const stores = getStores();
     const store = stores.find((candidate) => candidate.id === storeId);
     if (!store) throw new Error('The store could not be found.');
-    const updated = { ...store, adminPin: pin };
+    const updated = { ...store, adminPin: undefined, adminPinHash: await hashSecret(pin) };
     saveStores(stores.map((candidate) => candidate.id === storeId ? updated : candidate));
     return updated;
+  },
+
+  async verifyStorePin(storeId: string, pin: string): Promise<boolean> {
+    const stores = getStores();
+    const store = stores.find((candidate) => candidate.id === storeId);
+    if (!store) return false;
+    const result = await verifySecret(store.adminPinHash ?? store.adminPin, pin);
+    if (result.valid && result.needsRehash) {
+      const updated = { ...store, adminPin: undefined, adminPinHash: await hashSecret(pin) };
+      saveStores(stores.map((candidate) => candidate.id === storeId ? updated : candidate));
+    }
+    return result.valid;
   },
 
   async updateStoreInfo(storeId: string, changes: { name?: string }): Promise<StoreRecord> {

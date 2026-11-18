@@ -28,6 +28,17 @@ const emptySummary: DashboardSummary = {
   cashDifferenceMillimes: 0,
   topItems: {},
   shifts: [],
+  tabsOutstandingMillimes: 0,
+  salesByCategory: [],
+  itemsSold: [],
+  voids: { count: 0, totalMillimes: 0, orders: [] },
+  shiftLines: [],
+  paymentSplit: { cash: 0, card: 0, other: 0, tab: 0 },
+  totalExpectedCashMillimes: 0,
+  totalCountedMillimes: 0,
+  totalDifferenceMillimes: 0,
+  tabsIssuedMillimes: 0,
+  tabsSettledMillimes: 0,
 };
 
 function OwnerDashboardContent() {
@@ -74,11 +85,12 @@ function OwnerDashboardContent() {
         </div>
       </div>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <SummaryCard icon="payments" label={t('owner.sales')} value={`${formatTnd(summary.salesMillimes / 1000)} DT`} tone="primary" />
         <SummaryCard icon="receipt_long" label={t('owner.orderCount')} value={String(summary.orderCount)} tone="success" />
         <SummaryCard icon="schedule" label="Open shifts" value={String(openShifts.length)} tone="warning" />
         <SummaryCard icon="account_balance" label={t('owner.cashDifferences')} value={`${formatTnd(summary.cashDifferenceMillimes / 1000)} DT`} tone="error" />
+        <SummaryCard icon="account_balance_wallet" label="Outstanding tabs" value={`${formatTnd(summary.tabsOutstandingMillimes / 1000)} DT`} tone="warning" />
       </section>
 
       <section className="mt-4 grid gap-4 xl:grid-cols-2">

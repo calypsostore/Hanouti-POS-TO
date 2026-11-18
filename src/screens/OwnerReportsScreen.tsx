@@ -11,9 +11,15 @@ import { shiftService } from '../services/shiftService';
 import { useAuthStore } from '../stores/authStore';
 import { userService } from '../services/userService';
 import type { ReportRecord, ShiftRecord, StoreRecord } from '../types/domain';
+import { ReportView } from '../components/ReportView';
 
 type DashboardSummary = Awaited<ReturnType<typeof reportService.getDashboard>>;
-const emptySummary: DashboardSummary = { salesMillimes: 0, orderCount: 0, cashDifferenceMillimes: 0, topItems: {}, shifts: [] };
+const emptySummary: DashboardSummary = {
+  salesMillimes: 0, orderCount: 0, cashDifferenceMillimes: 0, topItems: {}, shifts: [],
+  tabsOutstandingMillimes: 0, salesByCategory: [], itemsSold: [], voids: { count: 0, totalMillimes: 0, orders: [] },
+  shiftLines: [], paymentSplit: { cash: 0, card: 0, other: 0, tab: 0 }, totalExpectedCashMillimes: 0,
+  totalCountedMillimes: 0, totalDifferenceMillimes: 0, tabsIssuedMillimes: 0, tabsSettledMillimes: 0,
+};
 
 function OwnerReportsContent() {
   const user = useAuthStore((state) => state.user);
@@ -23,6 +29,7 @@ function OwnerReportsContent() {
   const [openShifts, setOpenShifts] = useState<ShiftRecord[]>([]);
   const [liveSummary, setLiveSummary] = useState<DashboardSummary>(emptySummary);
   const [latestReport, setLatestReport] = useState<ReportRecord | null>(null);
+  const [selectedReport, setSelectedReport] = useState<ReportRecord | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const date = new Date();
@@ -34,7 +41,7 @@ function OwnerReportsContent() {
     void Promise.all([
       reportService.listReports(storeId),
       shiftService.listOpenShifts(storeId),
-      reportService.getDashboard(storeId, 'day'),
+      reportService.getCurrentPeriodSummary(storeId),
       userService.getStore(storeId),
     ]).then(([nextReports, nextOpenShifts, nextSummary, nextStore]) => {
       setReports(nextReports);
@@ -50,6 +57,7 @@ function OwnerReportsContent() {
       shiftService.listOpenShifts(storeId),
       userService.getStore(storeId),
     ]);
+    setLiveSummary(await reportService.getCurrentPeriodSummary(storeId));
     setReports(nextReports);
     setOpenShifts(nextOpenShifts);
     setStore(nextStore);
@@ -60,7 +68,9 @@ function OwnerReportsContent() {
 
   async function createX() {
     try {
-      await refresh(await reportService.createXReport(storeId), 'X report created. The day remains open.');
+      const report = await reportService.createXReport(storeId, user?.name ?? 'Owner');
+      setSelectedReport(report);
+      await refresh(report, 'X report created. The day remains open.');
     } catch (reportError) {
       setError(reportError instanceof Error ? reportError.message : 'Unable to create the X report.');
     }
@@ -68,7 +78,9 @@ function OwnerReportsContent() {
 
   async function createZ() {
     try {
-      await refresh(await reportService.closeDayWithZReport(storeId), t('reports.closed'));
+      const report = await reportService.closeDayWithZReport(storeId, user?.name ?? 'Owner');
+      setSelectedReport(report);
+      await refresh(report, t('reports.closed'));
     } catch (reportError) {
       setError(reportError instanceof Error ? reportError.message : 'Unable to close the business day.');
     }
@@ -78,7 +90,7 @@ function OwnerReportsContent() {
     <WorkspaceLayout title={t('reports.title')} storeName={store?.name} links={ownerWorkspaceLinks}>
       <header className="mb-4">
         <h1 className="font-display text-headline-lg text-on-surface">{t('reports.title')}</h1>
-        <p className="mt-1 font-body text-body-md text-on-surface-variant">X reports are live snapshots. Z reports close the business day.</p>
+        <p className="mt-1 font-body text-body-md text-on-surface-variant">X reports are live snapshots. Z reports close the current reporting period.</p>
       </header>
 
       <section className="grid gap-3 md:grid-cols-2">
@@ -90,7 +102,9 @@ function OwnerReportsContent() {
         <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
           <div className="mb-3 flex items-center gap-2"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-warning-container text-on-warning-container"><MaterialIcon name="lock" /></span><div><h2 className="font-display text-headline-sm">{t('reports.zReport')}</h2><p className="font-body text-body-sm text-outline">{t('reports.zDescription')}</p></div></div>
           <Summary sales={liveSummary.salesMillimes} orders={liveSummary.orderCount} />
-          {zBlocked && <p className="mt-3 rounded-lg bg-warning-container p-2.5 font-body text-body-sm text-on-warning-container">{dayClosed ? 'This business day is already closed.' : t('reports.openShiftsBlock')}</p>}
+          {zBlocked && <p className="mt-3 rounded-lg bg-warning-container p-2.5 font-body text-body-sm text-on-warning-container">{dayClosed ? 'This business day is already closed.' : t('reports.openShiftsBlock')}
+            {openShifts.length > 0 && <a href="/owner/shifts" className="ml-1 font-semibold underline">Review or force-close shifts</a>}
+          </p>}
           <Button onClick={() => { void createZ(); }} disabled={zBlocked} variant="danger" className="mt-4 w-full"><MaterialIcon name="lock" />{dayClosed ? 'Day closed' : t('reports.zReport')}</Button>
         </article>
       </section>
@@ -107,14 +121,15 @@ function OwnerReportsContent() {
         <h2 className="mb-3 font-display text-headline-md text-on-surface">Report history</h2>
         <div className="flex flex-col gap-2">
           {reports.map((report) => (
-            <article key={report.id} className="flex items-center justify-between rounded-xl bg-surface-container-lowest p-4 shadow-card">
+            <button type="button" key={report.id} onClick={() => setSelectedReport(report)} className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-lowest p-4 text-left shadow-card">
               <div><p className="font-body text-label-md text-on-surface">{report.type} report • {report.businessDate}</p><p className="mt-1 font-body text-body-sm text-outline">{new Date(report.createdAt).toLocaleString()} • {report.orderCount} orders • {formatTnd(report.salesMillimes / 1000)} DT</p></div>
-              <StatusTag status={report.type === 'Z' ? 'closed' : 'open'}>{report.type}</StatusTag>
-            </article>
+              <span className="flex items-center gap-2"><StatusTag status={report.type === 'Z' ? 'closed' : 'open'}>{report.type}</StatusTag><MaterialIcon name="open_in_new" /></span>
+            </button>
           ))}
           {reports.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">{t('common.noData')}</p>}
         </div>
       </section>
+      {selectedReport && <ReportView report={selectedReport} storeName={store?.name ?? ''} onClose={() => setSelectedReport(null)} />}
     </WorkspaceLayout>
   );
 }

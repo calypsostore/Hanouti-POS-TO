@@ -7,6 +7,7 @@ import { Keypad } from '../components/Keypad';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { StatusTag } from '../components/StatusTag';
 import { TopBar } from '../components/TopBar';
+import { TicketView } from '../components/TicketView';
 import { formatTnd } from '../lib/format';
 import { orderService } from '../services/orderService';
 import { userService } from '../services/userService';
@@ -38,6 +39,7 @@ interface OrderView {
   reason?: string;
   voidedBy?: string;
   voidRequestedAt?: string;
+  record: OrderRecord;
 }
 
 async function toOrderView(order: OrderRecord): Promise<OrderView> {
@@ -59,6 +61,7 @@ async function toOrderView(order: OrderRecord): Promise<OrderView> {
     reason: order.voidReason,
     voidedBy: order.voidedBy,
     voidRequestedAt: order.voidRequestedAt,
+    record: order,
   };
 }
 
@@ -81,6 +84,9 @@ export function OrdersScreen() {
   const [pin, setPin] = useState('');
   const [feedback, setFeedback] = useState('');
   const [toast, setToast] = useState('');
+  const [voidReason, setVoidReason] = useState('');
+  const [ticketOrder, setTicketOrder] = useState<OrderView | null>(null);
+  const [pinLockedSeconds, setPinLockedSeconds] = useState(0);
 
   const visibleOrders = useMemo(
     () => orders.filter((order) => filter === 'all' || order.status === filter),
@@ -105,25 +111,39 @@ export function OrdersScreen() {
     }
   }, [refreshOrders, storeId, user]);
 
+  useEffect(() => {
+    if (!activeOrder) {
+      setPinLockedSeconds(0);
+      return;
+    }
+    const updateRemaining = () => setPinLockedSeconds(Math.ceil(orderService.getPinLockRemainingMs(storeId) / 1000));
+    updateRemaining();
+    const timer = window.setInterval(updateRemaining, 1000);
+    return () => window.clearInterval(timer);
+  }, [activeOrder, storeId]);
+
   function openVoidSheet(order: OrderView) {
     setActiveOrder(order);
     setPin('');
     setFeedback('');
+    setVoidReason('');
   }
 
   async function pressPin(digit: string) {
+    if (pinLockedSeconds > 0) return;
     if (pin.length >= 4) return;
     const nextPin = `${pin}${digit}`;
     setPin(nextPin);
     if (nextPin.length === 4) {
       if (!activeOrder || !user) return;
       try {
-        await orderService.voidWithPin(activeOrder.id, nextPin, user.id);
+        await orderService.voidWithPin(activeOrder.id, nextPin, user.id, voidReason);
         await refreshOrders();
         setActiveOrder(null);
         showToast(t('orders.voidedToast', { number: activeOrder.number }));
       } catch (error) {
         setFeedback(error instanceof Error ? error.message : t('orders.unableToVoid'));
+        setPinLockedSeconds(Math.ceil(orderService.getPinLockRemainingMs(activeOrder.record.storeId) / 1000));
         window.setTimeout(() => setPin(''), 600);
       }
     }
@@ -132,7 +152,7 @@ export function OrdersScreen() {
   async function requestVoid() {
     if (!activeOrder || !user) return;
     try {
-      await orderService.requestVoid(activeOrder.id, user.id);
+      await orderService.requestVoid(activeOrder.id, user.id, voidReason);
       await refreshOrders();
       setActiveOrder(null);
       showToast(t('orders.voidRequestSent'));
@@ -251,10 +271,10 @@ export function OrdersScreen() {
                     {formatTnd(order.status === 'voided' ? 0 : order.total)} <small className="font-body text-label-sm">DT</small>
                   </span>
                 </div>
-                {order.status === 'done' && order.staffId === user?.id && (
+                {order.status !== 'pending' && (
                   <div className="flex items-center gap-2">
-                    <Button variant="secondary" className="min-h-10 px-3 text-label-md" onClick={() => showToast(t('orders.ticketNumber', { number: order.number }))}><MaterialIcon name="receipt" className="text-lg" />{t('orders.ticket')}</Button>
-                    <Button variant="danger" className="min-h-10 px-3 text-label-md" onClick={() => openVoidSheet(order)}><MaterialIcon name="cancel" className="text-lg" />{t('orders.void')}</Button>
+                    <Button variant="secondary" className="min-h-10 px-3 text-label-md" onClick={() => setTicketOrder(order)}><MaterialIcon name="receipt" className="text-lg" />{t('orders.ticket')}</Button>
+                    {order.status === 'done' && order.staffId === user?.id && <Button variant="danger" className="min-h-10 px-3 text-label-md" onClick={() => openVoidSheet(order)}><MaterialIcon name="cancel" className="text-lg" />{t('orders.void')}</Button>}
                   </div>
                 )}
                 {order.status === 'pending' && (
@@ -274,11 +294,14 @@ export function OrdersScreen() {
         {activeOrder && (
           <div className="flex flex-col gap-4">
             <p className="text-center font-body text-body-sm text-outline">{t('orders.totalAuthorization', { total: formatTnd(activeOrder.total) })}</p>
+            <label className="font-body text-label-md">Void reason
+              <textarea required value={voidReason} onChange={(event) => setVoidReason(event.target.value)} className="mt-1 min-h-20 w-full rounded-lg bg-surface-container-low p-3 outline-none focus:ring-2 focus:ring-primary" />
+            </label>
             <div className="flex justify-center gap-3" aria-label={t('orders.pinDigitsEntered', { count: pin.length })}>
               {[0, 1, 2, 3].map((index) => <span key={index} className={`h-4 w-4 rounded-full ${index < pin.length ? 'bg-primary' : 'bg-surface-container-highest'}`} />)}
             </div>
-            <p role="alert" className="h-4 text-center font-body text-label-sm text-error-dark">{feedback}</p>
-            <Keypad onPress={pressPin} onClear={() => { setPin(''); setFeedback(''); }} onBackspace={() => { setPin((value) => value.slice(0, -1)); setFeedback(''); }} />
+            <p role="alert" className="min-h-4 text-center font-body text-label-sm text-error-dark">{pinLockedSeconds > 0 ? `PIN pad locked for ${pinLockedSeconds} seconds.` : feedback}</p>
+            <Keypad disabled={pinLockedSeconds > 0} onPress={pressPin} onClear={() => { setPin(''); setFeedback(''); }} onBackspace={() => { setPin((value) => value.slice(0, -1)); setFeedback(''); }} />
             <div className="flex flex-col gap-2 rounded-xl bg-surface-container-low p-3">
               <div className="flex items-center gap-2">
                 <MaterialIcon name="wifi_tethering" className="text-xl text-secondary" />
@@ -287,11 +310,12 @@ export function OrdersScreen() {
                   <p className="font-body text-body-sm text-outline">{t('orders.sendApproval')}</p>
                 </div>
               </div>
-              {canRequestVoid && <Button className="w-full" onClick={requestVoid}><MaterialIcon name="send_to_mobile" className="text-lg" />{t('orders.requestVoid')}</Button>}
+              {canRequestVoid && <Button className="w-full" disabled={!voidReason.trim()} onClick={requestVoid}><MaterialIcon name="send_to_mobile" className="text-lg" />{t('orders.requestVoid')}</Button>}
             </div>
           </div>
         )}
       </BottomSheet>
+      {ticketOrder && <TicketView order={ticketOrder.record} storeName={store?.name ?? ''} staffName={ticketOrder.staff} onClose={() => setTicketOrder(null)} />}
       {toast && <div role="status" className="fixed left-1/2 top-20 z-50 -translate-x-1/2 rounded-full bg-primary-dark px-4 py-2.5 font-body text-label-md text-white shadow-overlay">{toast}</div>}
     </div>
   );

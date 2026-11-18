@@ -22,6 +22,7 @@ const OwnerStaffScreen = lazy(() => import('./screens/OwnerStaffScreen').then((m
 const OwnerVoidRequestsScreen = lazy(() => import('./screens/OwnerVoidRequestsScreen').then((module) => ({ default: module.OwnerVoidRequestsScreen })));
 const OwnerReportsScreen = lazy(() => import('./screens/OwnerReportsScreen').then((module) => ({ default: module.OwnerReportsScreen })));
 const OwnerInventoryScreen = lazy(() => import('./screens/OwnerInventoryScreen').then((module) => ({ default: module.OwnerInventoryScreen })));
+const CustomersScreen = lazy(() => import('./screens/CustomersScreen').then((module) => ({ default: module.CustomersScreen })));
 const SuperAdminStoresScreen = lazy(() => import('./screens/SuperAdminStoresScreen').then((module) => ({ default: module.SuperAdminStoresScreen })));
 
 function homeForRole(role: UserRole): string {
@@ -56,25 +57,26 @@ function SetPasswordRoute() {
 interface ProtectedRouteProps {
   roles: UserRole[];
   children: ReactNode;
-  permission?: string;
+  permission?: string | string[];
 }
 
 function ProtectedRoute({ roles, children, permission }: ProtectedRouteProps) {
   const user = useAuthStore((state) => state.user);
   const location = useLocation();
   const [permissionAllowed, setPermissionAllowed] = useState<boolean | null>(null);
+  const permissionKey = Array.isArray(permission) ? permission.join('|') : permission ?? '';
 
   useEffect(() => {
-    if (!permission || user?.role !== 'staff') return;
+    if (!permissionKey || user?.role !== 'staff') return;
     let active = true;
-    void userService.hasPermission(user.id, permission).then((allowed) => {
-      if (active) setPermissionAllowed(allowed);
+    void Promise.all(permissionKey.split('|').map((permissionId) => userService.hasPermission(user.id, permissionId))).then((results) => {
+      if (active) setPermissionAllowed(results.some(Boolean));
     }).catch((error: unknown) => {
       console.error('Could not verify staff permission.', error);
       if (active) setPermissionAllowed(false);
     });
     return () => { active = false; };
-  }, [permission, user]);
+  }, [permissionKey, user]);
 
   if (!user) return <Navigate to="/" replace state={{ from: location.pathname }} />;
   if (user.mustChangePassword) return <Navigate to="/set-password" replace />;
@@ -151,6 +153,7 @@ export default function App() {
           <Route path="/set-password" element={<SetPasswordRoute />} />
           <Route path="/pos" element={<ProtectedRoute roles={['staff']} permission="take_orders"><PosScreen /></ProtectedRoute>} />
           <Route path="/orders" element={<ProtectedRoute roles={['staff', 'owner']} permission="view_order_history"><OrdersScreen /></ProtectedRoute>} />
+          <Route path="/customers" element={<ProtectedRoute roles={['staff', 'owner']} permission={['use_tabs', 'settle_tabs']}><CustomersScreen /></ProtectedRoute>} />
           <Route path="/shift" element={<ProtectedRoute roles={['staff']} permission="open_close_shift"><ShiftScreen /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute roles={['staff', 'owner', 'super_admin']}><SettingsScreen /></ProtectedRoute>} />
           <Route path="/owner" element={<Navigate to="/owner/dashboard" replace />} />

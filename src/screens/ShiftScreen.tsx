@@ -34,6 +34,8 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const [cashSales, setCashSales] = useState(0);
   const [pendingVoidCount, setPendingVoidCount] = useState(0);
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
+  const [forceCountedCash, setForceCountedCash] = useState<Record<string, string>>({});
+  const [cashByShift, setCashByShift] = useState<Record<string, number>>({});
 
   useEffect(() => updateService.registerUnsavedState(() => startingCashEdited || countedCash.length > 0), [startingCashEdited, countedCash.length]);
 
@@ -59,6 +61,8 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     }
     const staffRecords = await Promise.all(nextShifts.map((shift) => userService.getUser(shift.staffId)));
     setStaffNames(Object.fromEntries(nextShifts.map((shift, index) => [shift.staffId, staffRecords[index]?.name ?? 'Staff'])));
+    const salesByShift = await Promise.all(nextShifts.filter((shift) => shift.status === 'open').map(async (shift) => [shift.id, await orderService.getCashSalesForShift(shift.id)] as const));
+    setCashByShift(Object.fromEntries(salesByShift));
   }, [storeId, user]);
 
   useEffect(() => {
@@ -96,6 +100,21 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       setNotice(shift.differenceMillimes === 0 ? t('shift.zeroDifference') : t('shift.cashDifferenceRecorded'));
     } catch (closeError) {
       setError(closeError instanceof Error ? closeError.message : 'Unable to close the shift.');
+    }
+  }
+
+  async function forceCloseShift(event: FormEvent<HTMLFormElement>, shift: ShiftRecord) {
+    event.preventDefault();
+    if (!user || user.role !== 'owner') return;
+    setError('');
+    setNotice('');
+    try {
+      await shiftService.forceCloseShift(shift.id, user.id, parseTnd(forceCountedCash[shift.id] ?? ''), cashByShift[shift.id] ?? 0);
+      setForceCountedCash((current) => ({ ...current, [shift.id]: '' }));
+      await refresh();
+      setNotice(`${staffNames[shift.staffId] ?? 'Staff'}'s shift was force-closed by the owner.`);
+    } catch (closeError) {
+      setError(closeError instanceof Error ? closeError.message : 'Unable to force-close this shift.');
     }
   }
 
@@ -159,17 +178,27 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
         <h2 className="mb-3 font-display text-headline-md text-on-surface">{t('shift.history')}</h2>
         <div className="flex flex-col gap-2">
           {shifts.map((shift) => (
-            <article key={shift.id} className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-lowest p-4 shadow-card">
+            <article key={shift.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-surface-container-lowest p-4 shadow-card">
               <div>
                 <p className="font-body text-label-lg text-on-surface">{staffNames[shift.staffId] ?? 'Staff'}</p>
                 <p className="mt-1 font-body text-body-sm text-outline">
                   {new Date(shift.openedAt).toLocaleString()} {shift.closedAt ? ` • Closed ${new Date(shift.closedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
                 </p>
+                {shift.forceClosedByOwner && <p className="mt-1 font-body text-label-sm text-warning">Force closed by owner</p>}
               </div>
               <div className="text-right">
                 <StatusTag status={shift.status === 'open' ? 'started' : 'closed'}>{shift.status === 'open' ? 'Started' : 'Closed'}</StatusTag>
                 {shift.differenceMillimes !== undefined && <p className={`mt-1 font-body text-label-sm tabular-nums ${shift.differenceMillimes === 0 ? 'text-success-dark' : 'text-error-dark'}`}>{t('shift.difference')}: {formatTnd(shift.differenceMillimes / 1000)} DT</p>}
               </div>
+              {ownerMode && shift.status === 'open' && user?.role === 'owner' && (
+                <form onSubmit={(event) => { void forceCloseShift(event, shift); }} className="mt-3 flex w-full flex-wrap items-end gap-2 border-t border-outline-variant pt-3">
+                  <p className="w-full font-body text-body-sm text-on-surface-variant">Expected cash: {formatTnd((shift.startingCashMillimes + (cashByShift[shift.id] ?? 0)) / 1000)} DT. Enter the drawer count you verified.</p>
+                  <label className="min-w-40 flex-1 font-body text-label-sm">Owner-counted cash (TND)
+                    <input required inputMode="decimal" value={forceCountedCash[shift.id] ?? ''} onChange={(event) => setForceCountedCash((current) => ({ ...current, [shift.id]: event.target.value }))} placeholder="0.000" className="mt-1 h-11 w-full rounded-lg bg-surface-container-low px-3" />
+                  </label>
+                  <Button type="submit" variant="danger"><MaterialIcon name="lock" />Force close</Button>
+                </form>
+              )}
             </article>
           ))}
           {shifts.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">{t('common.noData')}</p>}

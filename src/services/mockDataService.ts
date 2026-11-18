@@ -10,5 +10,4 @@ export async function initializeMockData(): Promise<void> {
   readData('orders', seedOrders);
   readData('shifts', seedShiftsForStore);
   readData('reports', seedReports);
-  readData('order-counter', 1043);
 }

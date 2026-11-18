@@ -75,6 +75,14 @@ export const catalogService = {
     return await this.updateItem(itemId, { stockCount, outOfStock: stockCount === 0 });
   },
 
+  async incrementStock(itemId: string, quantity: number): Promise<CatalogItemRecord> {
+    if (!Number.isInteger(quantity) || quantity < 1) throw new Error('Stock quantity must be a positive whole number.');
+    const item = getItems().find((candidate) => candidate.id === itemId);
+    if (!item) throw new Error('Catalog item could not be found.');
+    if (item.stockCount === null) return item;
+    return await this.updateItem(itemId, { stockCount: item.stockCount + quantity, outOfStock: false });
+  },
+
   async setModifiers(itemId: string, modifiers: CatalogModifierRecord[]): Promise<CatalogItemRecord> {
     return await this.updateItem(itemId, { modifiers });
   },

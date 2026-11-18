@@ -63,6 +63,28 @@ export const shiftService = {
     return updated;
   },
 
+  async forceCloseShift(shiftId: string, ownerId: string, countedCashMillimes: number, cashSalesMillimes: number): Promise<ShiftRecord> {
+    if (!Number.isInteger(countedCashMillimes) || countedCashMillimes < 0) throw new Error('Counted cash must be a non-negative amount in millimes.');
+    const shifts = getShifts();
+    const shift = shifts.find((candidate) => candidate.id === shiftId && candidate.status === 'open');
+    if (!shift) throw new Error('Open shift could not be found.');
+    const store = await userService.getStore(shift.storeId);
+    if (!store || store.ownerId !== ownerId) throw new Error('Only this store owner can force-close the shift.');
+    const expectedCashMillimes = shift.startingCashMillimes + cashSalesMillimes;
+    const updated: ShiftRecord = {
+      ...shift,
+      status: 'closed',
+      countedCashMillimes,
+      expectedCashMillimes,
+      differenceMillimes: countedCashMillimes - expectedCashMillimes,
+      closedAt: new Date().toISOString(),
+      forceClosedByOwner: true,
+      closedByUserId: ownerId,
+    };
+    saveShifts(shifts.map((candidate) => candidate.id === shiftId ? updated : candidate));
+    return updated;
+  },
+
   async getShift(shiftId: string): Promise<ShiftRecord | undefined> {
     return getShifts().find((shift) => shift.id === shiftId);
   },

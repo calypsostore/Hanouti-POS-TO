@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
 import { MaterialIcon } from '../components/MaterialIcon';
@@ -15,9 +15,10 @@ type StaffSheet = 'new-staff' | 'new-position' | 'edit-staff' | null;
 function OwnerStaffContent() {
   const user = useAuthStore((state) => state.user);
   const storeId = user?.storeId ?? '';
-  const [staff, setStaff] = useState(() => userService.listUsers(storeId).filter((entry) => entry.role === 'staff'));
-  const [positions, setPositions] = useState(() => userService.listPositions(storeId));
-  const permissions = userService.listPermissionDefinitions();
+  const [staff, setStaff] = useState<UserSummary[]>([]);
+  const [positions, setPositions] = useState<PositionRecord[]>([]);
+  const [permissions, setPermissions] = useState<PermissionDefinition[]>([]);
+  const [storeName, setStoreName] = useState<string>();
   const [sheet, setSheet] = useState<StaffSheet>(null);
   const [name, setName] = useState('');
   const [positionId, setPositionId] = useState('');
@@ -27,19 +28,30 @@ function OwnerStaffContent() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
-  function refresh() {
-    setStaff(userService.listUsers(storeId).filter((entry) => entry.role === 'staff'));
-    setPositions(userService.listPositions(storeId));
-  }
+  const refresh = useCallback(async () => {
+    const [users, nextPositions, nextPermissions] = await Promise.all([
+      userService.listUsers(storeId),
+      userService.listPositions(storeId),
+      userService.listPermissionDefinitions(),
+    ]);
+    setStaff(users.filter((entry) => entry.role === 'staff'));
+    setPositions(nextPositions);
+    setPermissions(nextPermissions);
+  }, [storeId]);
 
-  function createStaff(event: FormEvent<HTMLFormElement>) {
+  useEffect(() => {
+    void refresh().catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : t('common.loadFailed')));
+    if (user?.storeId) void userService.getStore(user.storeId).then((store) => setStoreName(store?.name)).catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : t('common.storeLoadFailed')));
+  }, [refresh, storeId, user?.storeId]);
+
+  async function createStaff(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
     setNotice('');
     try {
-      const result = userService.createStaff({ storeId, name, positionId: positionId || positions[0]?.id || '' });
+      const result = await userService.createStaff({ storeId, name, positionId: positionId || positions[0]?.id || '' });
       setTemporaryCredentials({ username: result.staff.username ?? '', password: result.temporaryPassword });
-      refresh();
+      await refresh();
       setName('');
       setSheet(null);
     } catch (createError) {
@@ -47,13 +59,13 @@ function OwnerStaffContent() {
     }
   }
 
-  function createPosition(event: FormEvent<HTMLFormElement>) {
+  async function createPosition(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
     setNotice('');
     try {
-      userService.createPosition(storeId, name, selectedPermissions);
-      refresh();
+      await userService.createPosition(storeId, name, selectedPermissions);
+      await refresh();
       setName('');
       setSelectedPermissions([]);
       setSheet(null);
@@ -63,13 +75,13 @@ function OwnerStaffContent() {
     }
   }
 
-  function editStaff(event: FormEvent<HTMLFormElement>) {
+  async function editStaff(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!editing) return;
     setError('');
     try {
-      userService.updateStaff(editing.id, { name, positionId: positionId || editing.positionId });
-      refresh();
+      await userService.updateStaff(editing.id, { name, positionId: positionId || editing.positionId });
+      await refresh();
       setSheet(null);
       setEditing(null);
       setNotice('Staff profile updated.');
@@ -86,11 +98,11 @@ function OwnerStaffContent() {
     setSheet('edit-staff');
   }
 
-  function toggleStaff(staffMember: UserSummary) {
+  async function toggleStaff(staffMember: UserSummary) {
     setError('');
     try {
-      userService.updateStaff(staffMember.id, { isActive: !staffMember.isActive });
-      refresh();
+      await userService.updateStaff(staffMember.id, { isActive: !staffMember.isActive });
+      await refresh();
     } catch (updateError) {
       setError(updateError instanceof Error ? updateError.message : 'Unable to update staff status.');
     }
@@ -101,7 +113,7 @@ function OwnerStaffContent() {
   }
 
   return (
-    <WorkspaceLayout title={t('staff.title')} storeName={user?.storeId ? userService.getStore(user.storeId)?.name : undefined} links={ownerWorkspaceLinks}>
+    <WorkspaceLayout title={t('staff.title')} storeName={storeName} links={ownerWorkspaceLinks}>
       <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="font-display text-headline-lg text-on-surface">{t('staff.title')}</h1>
@@ -129,7 +141,7 @@ function OwnerStaffContent() {
             <div className="flex items-center gap-2">
               <StatusTag status={staffMember.isActive ? 'open' : 'suspended'}>{staffMember.isActive ? t('common.active') : t('common.suspended')}</StatusTag>
               <Button variant="secondary" className="min-h-10 px-3 text-label-md" onClick={() => openEdit(staffMember)}><MaterialIcon name="edit" className="text-lg" />Edit</Button>
-              <Button variant={staffMember.isActive ? 'danger' : 'secondary'} className="min-h-10 px-3 text-label-md" onClick={() => toggleStaff(staffMember)}>{staffMember.isActive ? t('staff.disable') : t('staff.enable')}</Button>
+              <Button variant={staffMember.isActive ? 'danger' : 'secondary'} className="min-h-10 px-3 text-label-md" onClick={() => { void toggleStaff(staffMember); }}>{staffMember.isActive ? t('staff.disable') : t('staff.enable')}</Button>
             </div>
           </article>
         ))}

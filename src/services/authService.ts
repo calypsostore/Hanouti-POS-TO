@@ -40,7 +40,7 @@ export const authService = {
     return withoutPassword(user);
   },
 
-  getCurrentUser(): UserSummary | null {
+  async getCurrentUser(): Promise<UserSummary | null> {
     const session = readData<AuthSession | null>(SESSION_KEY, null);
     if (!session) return null;
     const user = getUsers().find((candidate) => candidate.id === session.userId);
@@ -70,7 +70,7 @@ export const authService = {
     saveUsers(users.map((candidate) => candidate.id === userId ? { ...candidate, password: newPassword } : candidate));
   },
 
-  logout(): void {
+  async logout(): Promise<void> {
     writeData<AuthSession | null>(SESSION_KEY, null);
   },
 };

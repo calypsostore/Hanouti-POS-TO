@@ -1,4 +1,5 @@
 import { formatTnd } from '../lib/format';
+import { t } from '../i18n/translations';
 import { MaterialIcon } from './MaterialIcon';
 
 export interface ItemCardItem {
@@ -14,9 +15,11 @@ interface ItemCardProps {
   quantity?: number;
   onAdd: () => void;
   onRemove?: () => void;
+  canToggleStock?: boolean;
+  onToggleStock?: () => void;
 }
 
-export function ItemCard({ item, quantity = 0, onAdd, onRemove }: ItemCardProps) {
+export function ItemCard({ item, quantity = 0, onAdd, onRemove, canToggleStock = false, onToggleStock }: ItemCardProps) {
   return (
     <article
       className={`relative flex min-h-36 flex-col justify-between overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest p-3.5 shadow-card ${
@@ -25,7 +28,7 @@ export function ItemCard({ item, quantity = 0, onAdd, onRemove }: ItemCardProps)
     >
       <button
         type="button"
-        aria-label={item.outOfStock ? `${item.name}, out of stock` : `Add ${item.name}`}
+        aria-label={item.outOfStock ? `${item.name}, ${t('pos.outOfStock')}` : t('pos.addItem', { item: item.name })}
         disabled={item.outOfStock}
         onClick={onAdd}
         className="flex flex-1 flex-col justify-between text-left disabled:cursor-not-allowed"
@@ -36,7 +39,7 @@ export function ItemCard({ item, quantity = 0, onAdd, onRemove }: ItemCardProps)
           </span>
           {quantity > 0 && (
             <span className="rounded-full bg-primary-fixed px-2 py-0.5 font-body text-label-sm text-on-surface">
-              In cart ({quantity})
+              {t('pos.itemAddedToCart', { count: quantity })}
             </span>
           )}
         </div>
@@ -47,22 +50,34 @@ export function ItemCard({ item, quantity = 0, onAdd, onRemove }: ItemCardProps)
           </p>
         </div>
       </button>
+      {canToggleStock && onToggleStock && (
+        <button
+          type="button"
+          aria-pressed={item.outOfStock}
+          aria-label={`${t(item.outOfStock ? 'pos.markAvailable' : 'pos.markOutOfStock')}: ${item.name}`}
+          onClick={onToggleStock}
+          className="absolute right-3 top-3 z-10 flex min-h-9 items-center gap-1 rounded-full bg-surface-container-lowest px-2 text-label-sm text-primary shadow-card"
+        >
+          <MaterialIcon name={item.outOfStock ? 'check' : 'block'} className="text-base" />
+          {item.outOfStock ? t('pos.available') : t('catalog.markOutOfStock')}
+        </button>
+      )}
       {quantity > 0 && onRemove && !item.outOfStock && (
         <div className="mt-2 flex items-center justify-between rounded-lg bg-surface-container-low p-1">
-          <button type="button" aria-label={`Remove one ${item.name}`} onClick={onRemove} className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-container-lowest text-primary">
+          <button type="button" aria-label={t('pos.removeItem', { item: item.name })} onClick={onRemove} className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-container-lowest text-primary">
             <MaterialIcon name={quantity === 1 ? 'delete' : 'remove'} className="text-lg" />
           </button>
           <span className="font-display text-headline-sm text-primary">{quantity}</span>
-          <button type="button" aria-label={`Add one ${item.name}`} onClick={onAdd} className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-on-primary">
+          <button type="button" aria-label={t('pos.addItem', { item: item.name })} onClick={onAdd} className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-on-primary">
             <MaterialIcon name="add" className="text-lg" />
           </button>
         </div>
       )}
       {item.outOfStock && (
-        <div className="absolute inset-0 flex items-center justify-center bg-surface-dim/70 p-3">
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-surface-dim/70 p-3">
           <span className="inline-flex items-center gap-1 rounded-full bg-error px-3 py-1 font-body text-label-sm text-white shadow-card">
             <MaterialIcon name="block" className="text-sm" />
-            86 Out of Stock
+            {t('pos.outOfStock')}
           </span>
         </div>
       )}

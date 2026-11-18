@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { MaterialIcon } from '../components/MaterialIcon';
@@ -9,7 +9,7 @@ import { formatTnd } from '../lib/format';
 import { reportService } from '../services/reportService';
 import { userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
-import type { ShiftRecord } from '../types/domain';
+import type { ShiftRecord, StoreRecord } from '../types/domain';
 
 type Period = 'day' | 'week' | 'month' | 'year';
 
@@ -20,16 +20,35 @@ const periodLabels: Record<Period, TranslationKey> = {
   year: 'owner.year',
 };
 
+type DashboardSummary = Awaited<ReturnType<typeof reportService.getDashboard>>;
+
+const emptySummary: DashboardSummary = {
+  salesMillimes: 0,
+  orderCount: 0,
+  cashDifferenceMillimes: 0,
+  topItems: {},
+  shifts: [],
+};
+
 function OwnerDashboardContent() {
   const user = useAuthStore((state) => state.user);
   const storeId = user?.storeId ?? '';
-  const store = userService.getStore(storeId);
+  const [store, setStore] = useState<StoreRecord>();
   const [period, setPeriod] = useState<Period>('day');
-  const [summary, setSummary] = useState(() => reportService.getDashboard(storeId, 'day'));
+  const [summary, setSummary] = useState<DashboardSummary>(emptySummary);
 
-  function selectPeriod(nextPeriod: Period) {
+  useEffect(() => {
+    void Promise.all([reportService.getDashboard(storeId, 'day'), userService.getStore(storeId)])
+      .then(([nextSummary, nextStore]) => {
+        setSummary(nextSummary);
+        setStore(nextStore);
+      })
+      .catch((loadError: unknown) => console.error('Unable to load owner dashboard.', loadError));
+  }, [storeId]);
+
+  async function selectPeriod(nextPeriod: Period) {
     setPeriod(nextPeriod);
-    setSummary(reportService.getDashboard(storeId, nextPeriod));
+    setSummary(await reportService.getDashboard(storeId, nextPeriod));
   }
 
   const topItems = Object.entries(summary.topItems)
@@ -115,11 +134,14 @@ function SummaryCard({ icon, label, value, tone }: { icon: string; label: string
 }
 
 function ShiftSummary({ shift }: { shift: ShiftRecord }) {
-  const staff = userService.getUser(shift.staffId);
+  const [staffName, setStaffName] = useState('Staff');
+  useEffect(() => {
+    void userService.getUser(shift.staffId).then((staff) => setStaffName(staff?.name ?? 'Staff'));
+  }, [shift.staffId]);
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-low p-3">
       <div>
-        <p className="font-body text-label-md text-on-surface">{staff?.name ?? 'Staff'}</p>
+        <p className="font-body text-label-md text-on-surface">{staffName}</p>
         <p className="mt-1 font-body text-body-sm text-outline">{new Date(shift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
       </div>
       <div className="text-right">

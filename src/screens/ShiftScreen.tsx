@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { BottomNav } from '../components/BottomNav';
 import { Button } from '../components/Button';
 import { MaterialIcon } from '../components/MaterialIcon';
@@ -12,6 +12,7 @@ import { useAuthStore } from '../stores/authStore';
 import type { ShiftRecord } from '../types/domain';
 import { t } from '../i18n/translations';
 import { ownerWorkspaceLinks } from '../app/navigation';
+import { updateService } from '../services/updateService';
 
 function parseTnd(value: string): number {
   const parsed = Number(value.trim().replace(',', '.'));
@@ -22,53 +23,80 @@ function parseTnd(value: string): number {
 function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const user = useAuthStore((state) => state.user);
   const storeId = user?.storeId ?? '';
-  const [shifts, setShifts] = useState(() => shiftService.listShifts(storeId));
-  const ownOpenShift = user ? shiftService.getOpenShiftForUser(storeId, user.id) : undefined;
+  const [shifts, setShifts] = useState<ShiftRecord[]>([]);
+  const [ownOpenShift, setOwnOpenShift] = useState<ShiftRecord>();
   const [startingCash, setStartingCash] = useState('50.000');
+  const [startingCashEdited, setStartingCashEdited] = useState(false);
   const [countedCash, setCountedCash] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const store = userService.getStore(storeId);
+  const [store, setStore] = useState<Awaited<ReturnType<typeof userService.getStore>>>();
+  const [cashSales, setCashSales] = useState(0);
+  const [pendingVoidCount, setPendingVoidCount] = useState(0);
+  const [staffNames, setStaffNames] = useState<Record<string, string>>({});
 
-  function refresh() {
-    setShifts(shiftService.listShifts(storeId));
-  }
+  useEffect(() => updateService.registerUnsavedState(() => startingCashEdited || countedCash.length > 0), [startingCashEdited, countedCash.length]);
 
-  function openShift(event: FormEvent<HTMLFormElement>) {
+  const refresh = useCallback(async () => {
+    const [nextShifts, nextOpenShift, nextStore] = await Promise.all([
+      shiftService.listShifts(storeId),
+      user ? shiftService.getOpenShiftForUser(storeId, user.id) : Promise.resolve(undefined),
+      userService.getStore(storeId),
+    ]);
+    setShifts(nextShifts);
+    setOwnOpenShift(nextOpenShift);
+    setStore(nextStore);
+    if (nextOpenShift) {
+      const [sales, pendingCount] = await Promise.all([
+        orderService.getCashSalesForShift(nextOpenShift.id),
+        orderService.getPendingVoidCountForShift(nextOpenShift.id),
+      ]);
+      setCashSales(sales);
+      setPendingVoidCount(pendingCount);
+    } else {
+      setCashSales(0);
+      setPendingVoidCount(0);
+    }
+    const staffRecords = await Promise.all(nextShifts.map((shift) => userService.getUser(shift.staffId)));
+    setStaffNames(Object.fromEntries(nextShifts.map((shift, index) => [shift.staffId, staffRecords[index]?.name ?? 'Staff'])));
+  }, [storeId, user]);
+
+  useEffect(() => {
+    void refresh().catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : t('common.loadFailed')));
+  }, [refresh]);
+
+  async function openShift(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!user || !storeId) return;
     setError('');
     setNotice('');
     try {
-      shiftService.openShift(storeId, user.id, parseTnd(startingCash));
-      refresh();
+      await shiftService.openShift(storeId, user.id, parseTnd(startingCash));
+      setStartingCashEdited(false);
+      await refresh();
       setNotice('Shift opened.');
     } catch (openError) {
       setError(openError instanceof Error ? openError.message : 'Unable to open the shift.');
     }
   }
 
-  function closeShift(event: FormEvent<HTMLFormElement>) {
+  async function closeShift(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!ownOpenShift) return;
     setError('');
     setNotice('');
     try {
-      const shift = shiftService.closeShift(
+      const shift = await shiftService.closeShift(
         ownOpenShift.id,
         parseTnd(countedCash),
-        orderService.getCashSalesForShift(ownOpenShift.id),
+        cashSales,
       );
-      refresh();
+      await refresh();
       setCountedCash('');
       setNotice(shift.differenceMillimes === 0 ? t('shift.zeroDifference') : t('shift.cashDifferenceRecorded'));
     } catch (closeError) {
       setError(closeError instanceof Error ? closeError.message : 'Unable to close the shift.');
     }
-  }
-
-  function staffName(shift: ShiftRecord) {
-    return userService.getUser(shift.staffId)?.name ?? 'Staff';
   }
 
   const openCount = shifts.filter((shift) => shift.status === 'open').length;
@@ -94,23 +122,24 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             </div>
             <div className="space-y-3">
               <Metric label={t('shift.startingCash')} amount={ownOpenShift.startingCashMillimes} />
-              <Metric label={t('shift.cashSales')} amount={orderService.getCashSalesForShift(ownOpenShift.id)} />
-              <Metric label={t('shift.expectedCash')} amount={ownOpenShift.startingCashMillimes + orderService.getCashSalesForShift(ownOpenShift.id)} prominent />
+              <Metric label={t('shift.cashSales')} amount={cashSales} />
+              <Metric label={t('shift.expectedCash')} amount={ownOpenShift.startingCashMillimes + cashSales} prominent />
             </div>
           </section>
-          <form onSubmit={closeShift} className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+          <form onSubmit={(event) => { void closeShift(event); }} className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
             <h2 className="font-display text-headline-md text-on-surface">{t('shift.closeShift')}</h2>
             <label htmlFor="counted-cash" className="font-body text-label-md">{t('shift.countedCash')} (TND)</label>
             <input id="counted-cash" inputMode="decimal" required value={countedCash} onChange={(event) => setCountedCash(event.target.value)} placeholder="50.000" className="h-14 rounded-xl bg-surface-container-low px-4 font-body text-title-md tabular-nums outline-none focus:ring-2 focus:ring-primary" />
+            {pendingVoidCount > 0 && <p role="alert" className="rounded-lg bg-warning-container p-3 font-body text-body-sm text-on-warning-container">{t('shift.pendingVoidWarning', { count: pendingVoidCount })}</p>}
             {countedCash && Number.isFinite(Number(countedCash.replace(',', '.'))) && (
-              <Metric label={t('shift.difference')} amount={Math.round(Number(countedCash.replace(',', '.')) * 1000) - (ownOpenShift.startingCashMillimes + orderService.getCashSalesForShift(ownOpenShift.id))} signed />
+              <Metric label={t('shift.difference')} amount={Math.round(Number(countedCash.replace(',', '.')) * 1000) - (ownOpenShift.startingCashMillimes + cashSales)} signed />
             )}
             <p className="font-body text-body-sm text-on-surface-variant">{t('shift.cashDifferenceRecorded')}</p>
             <Button type="submit" variant="danger" className="w-full"><MaterialIcon name="lock" />{t('shift.closeShift')}</Button>
           </form>
         </div>
       ) : (
-        <form onSubmit={openShift} className="max-w-xl rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+        <form onSubmit={(event) => { void openShift(event); }} className="max-w-xl rounded-2xl bg-surface-container-lowest p-4 shadow-card">
           <div className="mb-4 flex items-center gap-3">
             <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-fixed text-primary"><MaterialIcon name="payments" /></span>
             <div>
@@ -119,7 +148,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             </div>
           </div>
           <label htmlFor="starting-cash" className="mb-1.5 block font-body text-label-md">{t('shift.startingCash')} (TND)</label>
-          <input id="starting-cash" inputMode="decimal" required value={startingCash} onChange={(event) => setStartingCash(event.target.value)} className="mb-4 h-14 w-full rounded-xl bg-surface-container-low px-4 font-body text-title-md tabular-nums outline-none focus:ring-2 focus:ring-primary" />
+          <input id="starting-cash" inputMode="decimal" required value={startingCash} onChange={(event) => { setStartingCash(event.target.value); setStartingCashEdited(true); }} className="mb-4 h-14 w-full rounded-xl bg-surface-container-low px-4 font-body text-title-md tabular-nums outline-none focus:ring-2 focus:ring-primary" />
           <Button type="submit" className="w-full"><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
         </form>
       )}
@@ -132,7 +161,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           {shifts.map((shift) => (
             <article key={shift.id} className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-lowest p-4 shadow-card">
               <div>
-                <p className="font-body text-label-lg text-on-surface">{staffName(shift)}</p>
+                <p className="font-body text-label-lg text-on-surface">{staffNames[shift.staffId] ?? 'Staff'}</p>
                 <p className="mt-1 font-body text-body-sm text-outline">
                   {new Date(shift.openedAt).toLocaleString()} {shift.closedAt ? ` • Closed ${new Date(shift.closedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
                 </p>
@@ -163,8 +192,11 @@ function Metric({ label, amount, prominent = false, signed = false }: { label: s
 
 export function ShiftScreen({ ownerMode = false }: { ownerMode?: boolean }) {
   const storeId = useAuthStore((state) => state.user?.storeId);
-  const store = storeId ? userService.getStore(storeId) : undefined;
+  const [storeName, setStoreName] = useState<string>();
+  useEffect(() => {
+    if (storeId) void userService.getStore(storeId).then((store) => setStoreName(store?.name));
+  }, [storeId]);
   const content = <ShiftContent ownerMode={ownerMode} />;
-  if (ownerMode) return <WorkspaceLayout title={t('shift.title')} storeName={store?.name} links={ownerWorkspaceLinks}>{content}</WorkspaceLayout>;
+  if (ownerMode) return <WorkspaceLayout title={t('shift.title')} storeName={storeName} links={ownerWorkspaceLinks}>{content}</WorkspaceLayout>;
   return <div className="min-h-screen bg-surface px-4 pb-24 pt-5"><div className="mx-auto max-w-3xl">{content}</div><BottomNav /></div>;
 }

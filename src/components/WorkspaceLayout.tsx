@@ -22,7 +22,7 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
   return (
     <div className="min-h-screen bg-surface pb-6">
       <TopBar title={title} storeName={storeName} onProfileClick={() => navigate('/settings')} />
-      <nav aria-label="Workspace navigation" className="scrollbar-hidden sticky top-16 z-20 flex gap-2 overflow-x-auto border-b border-outline-variant bg-surface/95 px-3 py-2 backdrop-blur-xl">
+      <nav aria-label={t('common.workspaceNavigation')} className="scrollbar-hidden sticky top-16 z-20 flex gap-2 overflow-x-auto border-b border-outline-variant bg-surface/95 px-3 py-2 backdrop-blur-xl">
         {links.map((link) => (
           <NavLink
             key={link.to}

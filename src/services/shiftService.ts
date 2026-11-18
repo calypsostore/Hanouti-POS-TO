@@ -11,22 +11,22 @@ const todayKey = () => {
 };
 
 export const shiftService = {
-  listShifts(storeId: string): ShiftRecord[] {
+  async listShifts(storeId: string): Promise<ShiftRecord[]> {
     return getShifts().filter((shift) => shift.storeId === storeId).sort((a, b) => b.openedAt.localeCompare(a.openedAt));
   },
 
-  listOpenShifts(storeId: string): ShiftRecord[] {
-    return this.listShifts(storeId).filter((shift) => shift.status === 'open');
+  async listOpenShifts(storeId: string): Promise<ShiftRecord[]> {
+    return (await this.listShifts(storeId)).filter((shift) => shift.status === 'open');
   },
 
-  getOpenShiftForUser(storeId: string, userId: string): ShiftRecord | undefined {
+  async getOpenShiftForUser(storeId: string, userId: string): Promise<ShiftRecord | undefined> {
     return getShifts().find((shift) => shift.storeId === storeId && shift.staffId === userId && shift.status === 'open');
   },
 
-  openShift(storeId: string, staffId: string, startingCashMillimes: number): ShiftRecord {
+  async openShift(storeId: string, staffId: string, startingCashMillimes: number): Promise<ShiftRecord> {
     if (!Number.isInteger(startingCashMillimes) || startingCashMillimes < 0) throw new Error('Starting cash must be a non-negative amount in millimes.');
-    if (!userService.getStore(storeId)?.isActive) throw new Error('This store is inactive.');
-    if (this.getOpenShiftForUser(storeId, staffId)) throw new Error('This user already has an open shift.');
+    if (!(await userService.getStore(storeId))?.isActive) throw new Error('This store is inactive.');
+    if (await this.getOpenShiftForUser(storeId, staffId)) throw new Error('This user already has an open shift.');
     const shift: ShiftRecord = {
       id: `shift-${crypto.randomUUID()}`,
       storeId,
@@ -37,15 +37,15 @@ export const shiftService = {
     };
     saveShifts([...getShifts(), shift]);
 
-    const store = userService.getStore(storeId);
+    const store = await userService.getStore(storeId);
     if (store?.dayClosedOn === todayKey()) {
-      const stores = userService.listStores().map((candidate) => candidate.id === storeId ? { ...candidate, dayClosedOn: undefined } : candidate);
+      const stores = (await userService.listStores()).map((candidate) => candidate.id === storeId ? { ...candidate, dayClosedOn: undefined } : candidate);
       writeData('stores', stores);
     }
     return shift;
   },
 
-  closeShift(shiftId: string, countedCashMillimes: number, cashSalesMillimes: number): ShiftRecord {
+  async closeShift(shiftId: string, countedCashMillimes: number, cashSalesMillimes: number): Promise<ShiftRecord> {
     if (!Number.isInteger(countedCashMillimes) || countedCashMillimes < 0) throw new Error('Counted cash must be a non-negative amount in millimes.');
     const shifts = getShifts();
     const shift = shifts.find((candidate) => candidate.id === shiftId && candidate.status === 'open');
@@ -63,7 +63,7 @@ export const shiftService = {
     return updated;
   },
 
-  getShift(shiftId: string): ShiftRecord | undefined {
+  async getShift(shiftId: string): Promise<ShiftRecord | undefined> {
     return getShifts().find((shift) => shift.id === shiftId);
   },
 };

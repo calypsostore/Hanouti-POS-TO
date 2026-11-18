@@ -1,16 +1,17 @@
 import { NavLink } from 'react-router-dom';
 import { MaterialIcon } from './MaterialIcon';
+import { t } from '../i18n/translations';
 
 const staffNavigation = [
-  { to: '/pos', label: 'POS', icon: 'point_of_sale' },
-  { to: '/orders', label: 'Orders', icon: 'receipt_long' },
-  { to: '/shift', label: 'Shift', icon: 'payments' },
-  { to: '/settings', label: 'Settings', icon: 'tune' },
-];
+  { to: '/pos', label: 'nav.pos', icon: 'point_of_sale' },
+  { to: '/orders', label: 'nav.orders', icon: 'receipt_long' },
+  { to: '/shift', label: 'nav.shift', icon: 'payments' },
+  { to: '/settings', label: 'nav.settings', icon: 'tune' },
+] as const;
 
 export function BottomNav() {
   return (
-    <nav aria-label="Staff navigation" className="fixed inset-x-0 bottom-0 z-40 bg-surface-container-lowest/95 shadow-sheet backdrop-blur-xl safe-bottom">
+    <nav aria-label={t('nav.staffNavigation')} className="fixed inset-x-0 bottom-0 z-40 bg-surface-container-lowest/95 shadow-sheet backdrop-blur-xl safe-bottom">
       <div className="flex h-16 items-stretch justify-around px-1">
         {staffNavigation.map((item) => (
           <NavLink
@@ -25,7 +26,7 @@ export function BottomNav() {
             {({ isActive }) => (
               <>
                 <MaterialIcon name={item.icon} filled={isActive} className="text-2xl" />
-                <span>{item.label}</span>
+                <span>{t(item.label)}</span>
               </>
             )}
           </NavLink>

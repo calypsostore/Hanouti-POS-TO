@@ -1,4 +1,5 @@
 import { MaterialIcon } from './MaterialIcon';
+import { t } from '../i18n/translations';
 
 interface KeypadProps {
   onPress: (value: string) => void;
@@ -15,9 +16,9 @@ export function Keypad({ onPress, onClear, onBackspace }: KeypadProps) {
           {key}
         </button>
       ))}
-      <button type="button" onClick={onClear} className="h-14 rounded-xl bg-surface-container-high font-body text-label-md text-on-surface-variant">CLR</button>
+      <button type="button" onClick={onClear} className="h-14 rounded-xl bg-surface-container-high font-body text-label-md text-on-surface-variant">{t('keypad.clear')}</button>
       <button type="button" onClick={() => onPress('0')} className="h-14 rounded-xl bg-surface-container font-display text-headline-md text-on-surface">0</button>
-      <button type="button" aria-label="Delete last digit" onClick={onBackspace} className="flex h-14 items-center justify-center rounded-xl bg-surface-container-high text-on-surface-variant">
+      <button type="button" aria-label={t('keypad.deleteDigit')} onClick={onBackspace} className="flex h-14 items-center justify-center rounded-xl bg-surface-container-high text-on-surface-variant">
         <MaterialIcon name="backspace" />
       </button>
     </div>

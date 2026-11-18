@@ -37,25 +37,25 @@ function withoutPassword(user: UserRecord): UserSummary {
 }
 
 export const userService = {
-  listUsers(storeId?: string): UserSummary[] {
+  async listUsers(storeId?: string): Promise<UserSummary[]> {
     return getUsers().filter((user) => !storeId || user.storeId === storeId).map(withoutPassword);
   },
 
-  getUser(userId: string): UserSummary | undefined {
+  async getUser(userId: string): Promise<UserSummary | undefined> {
     const user = getUsers().find((candidate) => candidate.id === userId);
     if (!user) return undefined;
     return withoutPassword(user);
   },
 
-  getStore(storeId: string): StoreRecord | undefined {
+  async getStore(storeId: string): Promise<StoreRecord | undefined> {
     return getStores().find((store) => store.id === storeId);
   },
 
-  listStores(): StoreRecord[] {
+  async listStores(): Promise<StoreRecord[]> {
     return getStores();
   },
 
-  createOwnerAccount(input: { name: string; email: string; storeName: string; storeCode: string }): { owner: UserSummary; store: StoreRecord; temporaryPassword: string } {
+  async createOwnerAccount(input: { name: string; email: string; storeName: string; storeCode: string }): Promise<{ owner: UserSummary; store: StoreRecord; temporaryPassword: string }> {
     const users = getUsers();
     if (users.some((user) => user.email?.toLocaleLowerCase() === input.email.toLocaleLowerCase())) {
       throw new Error('An account already uses this email address.');
@@ -87,12 +87,14 @@ export const userService = {
     };
     saveUsers([...users, owner]);
     saveStores([...getStores(), store]);
-    return { owner: this.getUser(owner.id)!, store, temporaryPassword };
+    const ownerSummary = await this.getUser(owner.id);
+    if (!ownerSummary) throw new Error('The new owner account could not be loaded.');
+    return { owner: ownerSummary, store, temporaryPassword };
   },
 
-  createStaff(input: { storeId: string; name: string; positionId: string }): { staff: UserSummary; temporaryPassword: string } {
+  async createStaff(input: { storeId: string; name: string; positionId: string }): Promise<{ staff: UserSummary; temporaryPassword: string }> {
     const name = input.name.trim();
-    const store = this.getStore(input.storeId);
+    const store = await this.getStore(input.storeId);
     if (!store) throw new Error('The store could not be found.');
     if (!getPositions().some((position) => position.id === input.positionId && position.storeId === input.storeId)) {
       throw new Error('Select a position from this store.');
@@ -113,10 +115,12 @@ export const userService = {
       createdAt: new Date().toISOString(),
     };
     saveUsers([...getUsers(), staff]);
-    return { staff: this.getUser(staff.id)!, temporaryPassword };
+    const staffSummary = await this.getUser(staff.id);
+    if (!staffSummary) throw new Error('The new staff account could not be loaded.');
+    return { staff: staffSummary, temporaryPassword };
   },
 
-  updateStaff(userId: string, changes: { name?: string; positionId?: string; isActive?: boolean }): UserSummary {
+  async updateStaff(userId: string, changes: { name?: string; positionId?: string; isActive?: boolean }): Promise<UserSummary> {
     const users = getUsers();
     const user = users.find((candidate) => candidate.id === userId && candidate.role === 'staff');
     if (!user) throw new Error('Staff account could not be found.');
@@ -125,26 +129,38 @@ export const userService = {
     }
     const updated = { ...user, ...changes };
     saveUsers(users.map((candidate) => candidate.id === userId ? updated : candidate));
-    return this.getUser(userId)!;
+    const updatedUser = await this.getUser(userId);
+    if (!updatedUser) throw new Error('Updated staff account could not be loaded.');
+    return updatedUser;
   },
 
-  listPositions(storeId: string): PositionRecord[] {
+  async listPositions(storeId: string): Promise<PositionRecord[]> {
     return getPositions().filter((position) => position.storeId === storeId);
   },
 
-  listPermissionDefinitions(): PermissionDefinition[] {
+  async listPermissionDefinitions(): Promise<PermissionDefinition[]> {
     return PERMISSIONS;
   },
 
-  createPosition(storeId: string, name: string, permissionIds: string[]): PositionRecord {
-    if (!this.getStore(storeId)) throw new Error('The store could not be found.');
+  async hasPermission(userId: string, permissionId: string): Promise<boolean> {
+    const user = getUsers().find((candidate) => candidate.id === userId && candidate.role === 'staff');
+    if (!user?.storeId || !user.positionId) return false;
+    return getPositions().some((position) =>
+      position.id === user.positionId &&
+      position.storeId === user.storeId &&
+      position.permissionIds.includes(permissionId),
+    );
+  },
+
+  async createPosition(storeId: string, name: string, permissionIds: string[]): Promise<PositionRecord> {
+    if (!await this.getStore(storeId)) throw new Error('The store could not be found.');
     if (!name.trim()) throw new Error('Position name is required.');
     const position: PositionRecord = { id: createId('position'), storeId, name: name.trim(), permissionIds: [...new Set(permissionIds)] };
     savePositions([...getPositions(), position]);
     return position;
   },
 
-  updatePosition(positionId: string, changes: { name?: string; permissionIds?: string[] }): PositionRecord {
+  async updatePosition(positionId: string, changes: { name?: string; permissionIds?: string[] }): Promise<PositionRecord> {
     const positions = getPositions();
     const position = positions.find((candidate) => candidate.id === positionId);
     if (!position) throw new Error('Position could not be found.');
@@ -153,7 +169,7 @@ export const userService = {
     return updated;
   },
 
-  updateStorePin(storeId: string, pin: string): StoreRecord {
+  async updateStorePin(storeId: string, pin: string): Promise<StoreRecord> {
     if (!/^\d{4}$/.test(pin)) throw new Error('Admin PIN must contain exactly 4 digits.');
     const stores = getStores();
     const store = stores.find((candidate) => candidate.id === storeId);
@@ -163,7 +179,7 @@ export const userService = {
     return updated;
   },
 
-  updateStoreInfo(storeId: string, changes: { name?: string }): StoreRecord {
+  async updateStoreInfo(storeId: string, changes: { name?: string }): Promise<StoreRecord> {
     const stores = getStores();
     const store = stores.find((candidate) => candidate.id === storeId);
     if (!store) throw new Error('The store could not be found.');
@@ -173,7 +189,7 @@ export const userService = {
     return updated;
   },
 
-  suspendStore(storeId: string, isActive: boolean): StoreRecord {
+  async suspendStore(storeId: string, isActive: boolean): Promise<StoreRecord> {
     const stores = getStores();
     const store = stores.find((candidate) => candidate.id === storeId);
     if (!store) throw new Error('The store could not be found.');
@@ -182,12 +198,14 @@ export const userService = {
     return updated;
   },
 
-  suspendOwner(userId: string, isActive: boolean): UserSummary {
+  async suspendOwner(userId: string, isActive: boolean): Promise<UserSummary> {
     const users = getUsers();
     const owner = users.find((candidate) => candidate.id === userId && candidate.role === 'owner');
     if (!owner) throw new Error('Owner account could not be found.');
     const updated = { ...owner, isActive };
     saveUsers(users.map((candidate) => candidate.id === userId ? updated : candidate));
-    return this.getUser(userId)!;
+    const updatedUser = await this.getUser(userId);
+    if (!updatedUser) throw new Error('Updated owner account could not be loaded.');
+    return updatedUser;
   },
 };

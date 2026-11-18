@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { BottomNav } from '../components/BottomNav';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
@@ -8,12 +9,14 @@ import { MaterialIcon } from '../components/MaterialIcon';
 import { TicketRow, type TicketLine } from '../components/TicketRow';
 import { TopBar } from '../components/TopBar';
 import { formatTnd } from '../lib/format';
+import { t } from '../i18n/translations';
 import { catalogService } from '../services/catalogService';
 import { orderService } from '../services/orderService';
 import { shiftService } from '../services/shiftService';
 import { userService } from '../services/userService';
+import { updateService } from '../services/updateService';
 import { useAuthStore } from '../stores/authStore';
-import type { CatalogItemRecord, OrderLineRecord } from '../types/domain';
+import type { CatalogItemRecord, CatalogModifierRecord, CategoryRecord, OrderLineRecord, OrderRecord, ShiftRecord, StoreRecord } from '../types/domain';
 
 interface CartLine extends TicketLine {
   itemId: string;
@@ -23,9 +26,9 @@ interface CartLine extends TicketLine {
 interface ProductView extends ItemCardItem {
   priceMillimes: number;
   categoryId: string;
+  stockCount: number | null;
+  modifiers: CatalogModifierRecord[];
 }
-
-const quickPickIds = ['item-espresso', 'item-cappuccino', 'item-almond-croissant', 'item-lemonade'];
 
 function toProductView(item: CatalogItemRecord): ProductView {
   return {
@@ -35,52 +38,112 @@ function toProductView(item: CatalogItemRecord): ProductView {
     priceMillimes: item.priceMillimes,
     icon: item.icon,
     categoryId: item.categoryId,
-    outOfStock: item.outOfStock,
+    outOfStock: item.outOfStock || item.stockCount === 0,
+    stockCount: item.stockCount,
+    modifiers: item.modifiers ?? [],
   };
 }
 
 export function PosScreen() {
+  const location = useLocation();
   const user = useAuthStore((state) => state.user);
   const storeId = user?.storeId ?? '';
-  const store = storeId ? userService.getStore(storeId) : undefined;
+  const [store, setStore] = useState<StoreRecord>();
   const [category, setCategory] = useState('all');
   const [search, setSearch] = useState('');
   const [cart, setCart] = useState<CartLine[]>([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [toast, setToast] = useState('');
-  const [selectedModifiers, setSelectedModifiers] = useState<string[]>(['Sans Sucre', 'Extra Shot']);
-  const [catalogRecords] = useState(() => catalogService.listItems(storeId));
-  const [categoryRecords] = useState(() => catalogService.listCategories(storeId));
-  const openShift = user ? shiftService.getOpenShiftForUser(storeId, user.id) : undefined;
-  const categoryOptions = [{ id: 'all', name: 'All Items', icon: 'apps' }, ...categoryRecords];
+  const [catalogRecords, setCatalogRecords] = useState<CatalogItemRecord[]>([]);
+  const [categoryRecords, setCategoryRecords] = useState<CategoryRecord[]>([]);
+  const [openShift, setOpenShift] = useState<ShiftRecord>();
+  const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [selectedItem, setSelectedItem] = useState<ProductView | null>(null);
+  const [selectedModifiers, setSelectedModifiers] = useState<string[]>([]);
+  const [can86Items, setCan86Items] = useState(false);
+  const categoryOptions = [{ id: 'all', name: t('pos.allItems'), icon: 'apps' }, ...categoryRecords];
+
+  useEffect(() => {
+    const refresh = async () => {
+      try {
+        const [items, categories, shift, currentStore, todaysOrders, permission] = await Promise.all([
+          catalogService.listItems(storeId),
+          catalogService.listCategories(storeId),
+          user ? shiftService.getOpenShiftForUser(storeId, user.id) : Promise.resolve(undefined),
+          storeId ? userService.getStore(storeId) : Promise.resolve(undefined),
+          orderService.listAll(storeId),
+          user ? userService.hasPermission(user.id, '86_items') : Promise.resolve(false),
+        ]);
+        setCatalogRecords(items);
+        setCategoryRecords(categories);
+        setOpenShift(shift);
+        setStore(currentStore);
+        setOrders(todaysOrders);
+        setCan86Items(permission);
+      } catch (error) {
+        setToast(error instanceof Error ? error.message : t('common.refreshFailed'));
+      }
+    };
+    void refresh();
+    const onFocus = () => { void refresh(); };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [storeId, user, location.pathname]);
+
+  useEffect(() => updateService.registerUnsavedState(() => cart.length > 0), [cart.length]);
 
   const allProducts = useMemo(() => catalogRecords.map(toProductView), [catalogRecords]);
   const filteredItems = useMemo(() => allProducts.filter((item) =>
     item.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()) &&
     (category === 'all' || item.categoryId === category),
   ), [allProducts, category, search]);
-  const quickPicks = quickPickIds
-    .map((id) => allProducts.find((item) => item.id === id))
-    .filter((item): item is ProductView => item !== undefined);
+  const quickPicks = useMemo(() => {
+    const quantities = new Map<string, number>();
+    for (const order of orders) {
+      if (order.status !== 'done') continue;
+      for (const line of order.items) quantities.set(line.itemId, (quantities.get(line.itemId) ?? 0) + line.quantity);
+    }
+    const soldItems = [...allProducts]
+      .filter((item) => quantities.has(item.id))
+      .sort((left, right) => (quantities.get(right.id) ?? 0) - (quantities.get(left.id) ?? 0));
+    return (soldItems.length ? soldItems : allProducts).slice(0, 4);
+  }, [allProducts, orders]);
 
   const totalMillimes = cart.reduce((sum, line) => sum + line.quantity * line.unitPriceMillimes, 0);
   const count = cart.reduce((sum, line) => sum + line.quantity, 0);
 
   function addItem(item: ProductView) {
-    if (item.outOfStock) return;
+    if (item.outOfStock || item.stockCount === 0) return;
     if (!openShift) {
-      setToast('Open a shift before taking orders');
+      setToast(t('pos.openShiftRequired'));
+      window.setTimeout(() => setToast(''), 2500);
+      return;
+    }
+    if (item.modifiers.length > 0) {
+      setSelectedItem(item);
+      setSelectedModifiers([]);
+      return;
+    }
+    commitItem(item, []);
+  }
+
+  function commitItem(item: ProductView, modifierIds: string[]) {
+    const selected = item.modifiers.filter((modifier) => modifierIds.includes(modifier.id));
+    const modifiers = selected.map((modifier) => modifier.name);
+    const modifierTotal = selected.reduce((sum, modifier) => sum + modifier.priceMillimes, 0);
+    const lineId = `${item.id}:${selected.map((modifier) => modifier.id).sort().join(',')}`;
+    const currentQuantity = cart.filter((line) => line.itemId === item.id).reduce((sum, line) => sum + line.quantity, 0);
+    if (item.stockCount !== null && currentQuantity >= item.stockCount) {
+      setToast(t('pos.stockRemaining', { item: item.name, count: item.stockCount }));
       window.setTimeout(() => setToast(''), 2500);
       return;
     }
     setCart((lines) => {
-      const existing = lines.find((line) => line.id === item.id);
-      if (existing) return lines.map((line) => line.id === item.id ? { ...line, quantity: line.quantity + 1 } : line);
-      const modifiers = item.id === 'item-direct' ? selectedModifiers : [];
-      const extraShot = modifiers.includes('Extra Shot') ? 600 : 0;
-      const unitPriceMillimes = item.priceMillimes + extraShot;
+      const existing = lines.find((line) => line.id === lineId);
+      if (existing) return lines.map((line) => line.id === lineId ? { ...line, quantity: line.quantity + 1 } : line);
+      const unitPriceMillimes = item.priceMillimes + modifierTotal;
       return [...lines, {
-        id: item.id,
+        id: lineId,
         itemId: item.id,
         name: item.name,
         quantity: 1,
@@ -89,6 +152,7 @@ export function PosScreen() {
         modifiers,
       }];
     });
+    setSelectedItem(null);
   }
 
   function changeQuantity(id: string, delta: number) {
@@ -97,10 +161,35 @@ export function PosScreen() {
       .filter((line) => line.quantity > 0));
   }
 
-  function finishOrder() {
+  function changeProductQuantity(itemId: string, delta: number) {
+    const line = [...cart].reverse().find((candidate) => candidate.itemId === itemId);
+    if (line) changeQuantity(line.id, delta);
+  }
+
+  function incrementCartLine(line: CartLine) {
+    const item = catalogRecords.find((candidate) => candidate.id === line.itemId);
+    const quantity = cart.filter((candidate) => candidate.itemId === line.itemId).reduce((sum, candidate) => sum + candidate.quantity, 0);
+    if (item?.stockCount !== null && item && quantity >= item.stockCount) {
+      setToast(t('pos.stockRemaining', { item: item.name, count: item.stockCount }));
+      window.setTimeout(() => setToast(''), 2500);
+      return;
+    }
+    changeQuantity(line.id, 1);
+  }
+
+  async function toggleStock(item: ProductView) {
+    try {
+      await catalogService.setOutOfStock(item.id, !item.outOfStock);
+      setCatalogRecords(await catalogService.listItems(storeId));
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : t('common.updateFailed'));
+    }
+  }
+
+  async function finishOrder() {
     if (cart.length === 0) return;
     if (!user?.storeId) {
-      setToast('Your account is not linked to a store.');
+      setToast(t('pos.accountNotLinked'));
       return;
     }
     try {
@@ -112,43 +201,41 @@ export function PosScreen() {
         lineTotalMillimes: line.quantity * line.unitPriceMillimes,
         modifiers: line.modifiers ?? [],
       }));
-      orderService.createOrder({ storeId: user.storeId, staffId: user.id, items, paymentMethod: 'cash' });
+      await orderService.createOrder({ storeId: user.storeId, staffId: user.id, items, paymentMethod: 'cash' });
       setCart([]);
       setDrawerOpen(false);
-      setToast('Order marked as done');
+      setCatalogRecords(await catalogService.listItems(storeId));
+      setOrders(await orderService.listAll(storeId));
+      setToast(t('pos.orderDone'));
       window.setTimeout(() => setToast(''), 2500);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : 'Unable to save this order.');
+      setToast(error instanceof Error ? error.message : t('pos.cannotSaveOrder'));
       window.setTimeout(() => setToast(''), 3000);
     }
   }
 
-  function toggleModifier(modifier: string) {
-    setSelectedModifiers((values) => values.includes(modifier) ? values.filter((value) => value !== modifier) : [...values, modifier]);
-  }
-
-  const TicketContent = ({ compact = false }: { compact?: boolean }) => (
+  const renderTicketContent = (compact = false) => (
     <div className={`flex flex-col ${compact ? 'h-full' : ''}`}>
       <div className="mb-2 flex items-center justify-between">
         <div>
-          <p className="font-body text-label-sm uppercase tracking-wider text-outline">Current Order</p>
-          <h2 className="font-display text-headline-md text-on-surface">Order ticket</h2>
+          <p className="font-body text-label-sm uppercase tracking-wider text-outline">{t('pos.currentOrder')}</p>
+          <h2 className="font-display text-headline-md text-on-surface">{t('pos.orderTicket')}</h2>
         </div>
         <span className="rounded-full bg-secondary-container px-2.5 py-1 font-body text-label-sm text-on-surface">
-          {count} {count === 1 ? 'item' : 'items'}
+          {count} {t(count === 1 ? 'common.item' : 'common.items')}
         </span>
       </div>
       <div className={`min-h-24 flex-1 overflow-y-auto ${compact ? 'max-h-[45vh]' : ''}`}>
         {cart.length === 0 ? (
           <div className="flex min-h-28 flex-col items-center justify-center text-center text-outline">
             <MaterialIcon name="receipt_long" className="text-3xl" />
-            <p className="mt-1 font-body text-body-sm">Tap an item to add it to this ticket</p>
+            <p className="mt-1 font-body text-body-sm">{t('pos.tapToAdd')}</p>
           </div>
         ) : cart.map((line) => (
           <TicketRow
             key={line.id}
             item={{ id: line.id, name: line.name, quantity: line.quantity, unitPrice: line.unitPrice, modifiers: line.modifiers }}
-            onIncrement={() => changeQuantity(line.id, 1)}
+            onIncrement={() => incrementCartLine(line)}
             onDecrement={() => changeQuantity(line.id, -1)}
             onRemove={() => setCart((lines) => lines.filter((item) => item.id !== line.id))}
           />
@@ -156,40 +243,31 @@ export function PosScreen() {
       </div>
       <div className="mt-3 border-t border-outline-variant pt-3">
         <div className="mb-3 flex items-baseline justify-between">
-          <span className="font-body text-label-md text-on-surface-variant">Total</span>
+          <span className="font-body text-label-md text-on-surface-variant">{t('common.total')}</span>
           <span className="font-display text-currency-display-mobile text-on-surface">{formatTnd(totalMillimes / 1000)} <small className="font-body text-label-md">DT</small></span>
         </div>
         <Button onClick={finishOrder} disabled={!cart.length} className="min-h-[54px] w-full rounded-xl text-body-lg">
           <MaterialIcon name="check_circle" className="text-xl" />
-          Done <span className="ml-auto font-display tabular-nums">{formatTnd(totalMillimes / 1000)} DT</span>
+          {t('common.done')} <span className="ml-auto font-display tabular-nums">{formatTnd(totalMillimes / 1000)} DT</span>
         </Button>
-        <p className="mt-1 text-center font-body text-body-sm text-on-surface-variant">Paid outside app</p>
+        <p className="mt-1 text-center font-body text-body-sm text-on-surface-variant">{t('pos.paidOutsideApp')}</p>
       </div>
     </div>
   );
 
   return (
     <div className="min-h-screen bg-surface pb-36 tablet:pb-20">
-      <TopBar title="POS Terminal" storeName={store?.name} />
+      <TopBar title={t('pos.terminal')} storeName={store?.name} />
       <div className="flex items-center justify-between gap-2 bg-surface-container-low px-3 py-2.5">
         <div className="min-w-0">
           <h2 className="flex items-center gap-1 truncate font-display text-headline-sm text-primary">
             <MaterialIcon name="storefront" className="text-lg" filled />
-            {store?.name ?? 'Café'}
+            {store?.name ?? t('pos.cafe')}
           </h2>
           <span className={`mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-body text-label-sm ${openShift ? 'bg-success text-on-surface' : 'bg-error-container text-on-error-container'}`}>
             <span className={`h-1.5 w-1.5 rounded-full ${openShift ? 'bg-success-dark' : 'bg-error-dark'}`} />
-            {openShift ? `Shift open since ${new Date(openShift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Open shift required'}
+            {openShift ? t('pos.shiftOpenSince', { time: new Date(openShift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }) : t('pos.shiftRequired')}
           </span>
-        </div>
-        <div className="flex shrink-0 gap-2">
-          <button type="button" aria-label="Notifications" className="relative flex h-11 w-11 items-center justify-center rounded-xl bg-surface-container-lowest shadow-card text-on-surface-variant">
-            <MaterialIcon name="notifications" className="text-[22px]" />
-            <span className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-error px-1 font-body text-[9px] text-white">2</span>
-          </button>
-          <button type="button" aria-label="Staff lock" className="flex h-11 w-11 items-center justify-center rounded-xl bg-surface-container-lowest text-primary shadow-card">
-            <MaterialIcon name="lock" className="text-[22px]" />
-          </button>
         </div>
       </div>
 
@@ -201,7 +279,7 @@ export function PosScreen() {
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search items (Express, Direct, Croissant)..."
+                placeholder={t('pos.searchPlaceholder')}
                 className="h-12 w-full rounded-xl bg-surface-container-lowest pl-11 pr-4 font-body text-body-md shadow-card outline-none focus:ring-2 focus:ring-primary"
               />
             </label>
@@ -219,16 +297,15 @@ export function PosScreen() {
             <div className="mb-2 flex items-center justify-between px-3">
               <h2 className="flex items-center gap-1.5 font-display text-headline-sm text-primary">
                 <MaterialIcon name="bolt" className="text-lg text-secondary" filled />
-                Quick Picks
+                {t('pos.quickPicks')}
               </h2>
-              <span className="font-body text-label-sm text-outline">High Velocity</span>
+              <span className="font-body text-label-sm text-outline">{t('pos.highVelocity')}</span>
             </div>
             <div className="scrollbar-hidden flex gap-2.5 overflow-x-auto px-3 pb-1">
-              {quickPicks.map((item, index) => (
+              {quickPicks.map((item) => (
                 <button key={item.id} type="button" onClick={() => addItem(item)} className="flex min-h-32 w-36 shrink-0 flex-col justify-between rounded-2xl bg-surface-container-lowest p-3 text-left shadow-card active:scale-[0.98]">
                   <div className="flex items-start justify-between">
                     <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-surface-container text-primary"><MaterialIcon name={item.icon} className="text-xl" /></span>
-                    {index === 0 && <span className="rounded-md bg-success px-1.5 py-0.5 font-body text-label-sm text-on-surface">Top</span>}
                   </div>
                   <div className="mt-2">
                     <p className="truncate font-body text-label-md text-on-surface">{item.name}</p>
@@ -241,46 +318,27 @@ export function PosScreen() {
 
           <section className="mt-4 px-3">
             <div className="mb-2 flex items-center justify-between">
-              <h2 className="font-display text-headline-sm text-on-surface">Catalogue Items</h2>
-              <span className="font-body text-label-sm text-outline">Touch to Add</span>
+              <h2 className="font-display text-headline-sm text-on-surface">{t('pos.catalogueItems')}</h2>
+              <span className="font-body text-label-sm text-outline">{t('pos.touchToAdd')}</span>
             </div>
             <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
               {filteredItems.map((item) => (
                 <ItemCard
                   key={item.id}
                   item={{ id: item.id, name: item.name, price: item.priceMillimes / 1000, icon: item.icon, outOfStock: item.outOfStock }}
-                  quantity={cart.find((line) => line.id === item.id)?.quantity ?? 0}
+                  quantity={cart.filter((line) => line.itemId === item.id).reduce((sum, line) => sum + line.quantity, 0)}
                   onAdd={() => addItem(item)}
-                  onRemove={() => changeQuantity(item.id, -1)}
+                  onRemove={() => changeProductQuantity(item.id, -1)}
+                  canToggleStock={can86Items}
+                  onToggleStock={() => { void toggleStock(item); }}
                 />
               ))}
-            </div>
-          </section>
-
-          <section className="mx-3 mt-4 rounded-2xl border border-outline-variant bg-surface-container-lowest p-3 shadow-card">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <h2 className="flex items-center gap-1.5 font-display text-headline-sm text-primary">
-                <MaterialIcon name="room_service" className="text-xl" />
-                Quick Modifiers
-              </h2>
-              <span className="rounded-full bg-success-container px-2 py-1 font-body text-label-sm text-on-success-container">Applies to Café Direct</span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {['Sans Sucre', 'Extra Shot', 'Halib Zeyed', 'Mahroussa'].map((modifier) => {
-                const active = selectedModifiers.includes(modifier);
-                return (
-                  <button key={modifier} type="button" onClick={() => toggleModifier(modifier)} className={`inline-flex min-h-10 items-center gap-1.5 rounded-xl px-3 font-body text-label-md ${active ? 'bg-primary text-on-primary' : 'bg-surface-container-high text-on-surface'}`}>
-                    <MaterialIcon name={active ? 'check' : 'add'} className="text-base" />
-                    {modifier}
-                  </button>
-                );
-              })}
             </div>
           </section>
         </section>
 
         <aside className="hidden border-l border-outline-variant bg-surface-container-lowest p-4 tablet:block">
-          <TicketContent compact />
+          {renderTicketContent(true)}
         </aside>
       </main>
 
@@ -289,20 +347,36 @@ export function PosScreen() {
           <span className="block">
             <span className="flex items-center gap-1.5 font-body text-label-sm uppercase text-outline">
               <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-secondary-container px-1 text-on-surface">{count}</span>
-              Current Order
+              {t('pos.currentOrder')}
             </span>
             <span className="font-display text-currency-display-mobile text-primary">{formatTnd(totalMillimes / 1000)} <small className="font-body text-label-md text-on-surface">DT</small></span>
           </span>
         </button>
         <Button onClick={finishOrder} disabled={!cart.length} className="min-h-[52px] shrink-0 rounded-2xl px-4">
           <MaterialIcon name="check_circle" className="text-xl" />
-          Done <span className="ml-1 font-display tabular-nums">{formatTnd(totalMillimes / 1000)} DT</span>
+          {t('common.done')} <span className="ml-1 font-display tabular-nums">{formatTnd(totalMillimes / 1000)} DT</span>
         </Button>
       </div>
 
       <BottomNav />
-      <BottomSheet open={drawerOpen} onClose={() => setDrawerOpen(false)} title="Current order">
-        <TicketContent compact />
+      <BottomSheet open={drawerOpen} onClose={() => setDrawerOpen(false)} title={t('pos.currentOrder')}>
+        {renderTicketContent(true)}
+      </BottomSheet>
+      <BottomSheet open={selectedItem !== null} onClose={() => setSelectedItem(null)} title={selectedItem?.name ?? ''}>
+        {selectedItem && (
+          <div className="flex flex-col gap-3">
+            {selectedItem.modifiers.map((modifier) => {
+              const active = selectedModifiers.includes(modifier.id);
+              return (
+                <button key={modifier.id} type="button" aria-pressed={active} onClick={() => setSelectedModifiers((values) => active ? values.filter((value) => value !== modifier.id) : [...values, modifier.id])} className={`flex min-h-12 items-center justify-between rounded-xl px-4 font-body text-label-md ${active ? 'bg-primary text-on-primary' : 'bg-surface-container-high text-on-surface'}`}>
+                  <span>{modifier.name}</span>
+                  <span>{modifier.priceMillimes ? `+${formatTnd(modifier.priceMillimes / 1000)} DT` : t('common.noCharge')}</span>
+                </button>
+              );
+            })}
+            <Button onClick={() => commitItem(selectedItem, selectedModifiers)}>{t('pos.addToOrder')}</Button>
+          </div>
+        )}
       </BottomSheet>
       {toast && <div role="status" className="fixed left-1/2 top-20 z-50 -translate-x-1/2 rounded-full bg-primary-dark px-4 py-2.5 font-body text-label-md text-white shadow-overlay">{toast}</div>}
     </div>

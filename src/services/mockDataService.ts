@@ -1,7 +1,7 @@
 import { seedCatalogItems, seedCategories, seedOrders, seedPositions, seedReports, seedShiftsForStore, seedStores, seedUsers } from './seedData';
 import { readData } from './storage';
 
-export function initializeMockData(): void {
+export async function initializeMockData(): Promise<void> {
   readData('users', seedUsers);
   readData('stores', seedStores);
   readData('positions', seedPositions);

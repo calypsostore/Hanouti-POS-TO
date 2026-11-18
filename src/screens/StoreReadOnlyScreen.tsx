@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { StatusTag } from '../components/StatusTag';
@@ -8,16 +9,35 @@ import { formatTnd } from '../lib/format';
 import { catalogService } from '../services/catalogService';
 import { orderService } from '../services/orderService';
 import { userService } from '../services/userService';
+import type { CatalogItemRecord, OrderRecord, StoreRecord, UserSummary } from '../types/domain';
 
 export function StoreReadOnlyScreen() {
   const { storeId = '' } = useParams();
-  const store = userService.getStore(storeId);
+  const [store, setStore] = useState<StoreRecord>();
+  const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [items, setItems] = useState<CatalogItemRecord[]>([]);
+  const [owner, setOwner] = useState<UserSummary>();
+  useEffect(() => {
+    let active = true;
+    void userService.getStore(storeId).then(async (nextStore) => {
+      if (!active) return;
+      setStore(nextStore);
+      if (!nextStore) return;
+      const [nextOrders, nextItems, nextOwner] = await Promise.all([
+        orderService.listToday(storeId),
+        catalogService.listItems(storeId),
+        userService.getUser(nextStore.ownerId),
+      ]);
+      if (!active) return;
+      setOrders(nextOrders);
+      setItems(nextItems);
+      setOwner(nextOwner);
+    });
+    return () => { active = false; };
+  }, [storeId]);
   if (!store) {
     return <main className="p-6"><Link to="/admin/stores" className="font-body text-primary">Back to stores</Link><p className="mt-4 font-body text-body-md text-error-dark">Store could not be found.</p></main>;
   }
-  const orders = orderService.listToday(storeId);
-  const items = catalogService.listItems(storeId);
-  const owner = userService.getUser(store.ownerId);
   const sales = orders.filter((order) => order.status === 'done').reduce((sum, order) => sum + order.totalMillimes, 0);
 
   return (

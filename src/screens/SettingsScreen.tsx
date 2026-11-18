@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '../components/BottomNav';
 import { Button } from '../components/Button';
@@ -16,17 +16,30 @@ export function SettingsScreen() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
-  const store = user?.storeId ? userService.getStore(user.storeId) : undefined;
+  const [store, setStore] = useState<Awaited<ReturnType<typeof userService.getStore>>>();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [storeName, setStoreName] = useState(store?.name ?? '');
   const [adminPin, setAdminPin] = useState('');
-  const [language, setLanguage] = useState(settingsService.getLanguage());
+  const [language, setLanguage] = useState<'en' | 'ar'>('en');
   const [lastCheck, setLastCheck] = useState(updateService.getLastCheck());
   const [checking, setChecking] = useState(false);
+  const [updateResult, setUpdateResult] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+
+  useEffect(() => {
+    if (user?.storeId) {
+      void userService.getStore(user.storeId).then((nextStore) => {
+        setStore(nextStore);
+        setStoreName(nextStore?.name ?? '');
+      }).catch((storeError: unknown) => setError(storeError instanceof Error ? storeError.message : t('common.storeLoadFailed')));
+    }
+    void settingsService.getLanguage().then(setLanguage).catch((languageError: unknown) => {
+      setError(languageError instanceof Error ? languageError.message : t('settings.languageFailed'));
+    });
+  }, [user?.storeId]);
 
   async function changePassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -48,26 +61,26 @@ export function SettingsScreen() {
     }
   }
 
-  function saveStoreInfo(event: FormEvent<HTMLFormElement>) {
+  async function saveStoreInfo(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!store) return;
     setError('');
     setNotice('');
     try {
-      userService.updateStoreInfo(store.id, { name: storeName });
+      await userService.updateStoreInfo(store.id, { name: storeName });
       setNotice('Store information saved.');
     } catch (storeError) {
       setError(storeError instanceof Error ? storeError.message : 'Unable to save store information.');
     }
   }
 
-  function savePin(event: FormEvent<HTMLFormElement>) {
+  async function savePin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!store) return;
     setError('');
     setNotice('');
     try {
-      userService.updateStorePin(store.id, adminPin);
+      await userService.updateStorePin(store.id, adminPin);
       setAdminPin('');
       setNotice('Store admin PIN updated.');
     } catch (pinError) {
@@ -75,10 +88,14 @@ export function SettingsScreen() {
     }
   }
 
-  function changeLanguage(value: 'en') {
-    settingsService.setLanguage(value);
-    setLanguage(value);
-    setNotice(t('settings.englishOnly'));
+  async function changeLanguage(value: 'en') {
+    try {
+      await settingsService.setLanguage(value);
+      setLanguage(value);
+      setNotice(t('settings.englishOnly'));
+    } catch (languageError) {
+      setError(languageError instanceof Error ? languageError.message : t('settings.languageFailed'));
+    }
   }
 
   async function checkForUpdates() {
@@ -88,7 +105,7 @@ export function SettingsScreen() {
     try {
       const result = await updateService.checkForUpdates();
       setLastCheck(result.checkedAt);
-      setNotice(t('settings.updateChecked'));
+      setUpdateResult(result.updateAvailable ? t('settings.updateAvailable') : t('settings.upToDate'));
     } catch (updateError) {
       setError(updateError instanceof Error ? updateError.message : 'Unable to check for updates.');
     } finally {
@@ -96,8 +113,8 @@ export function SettingsScreen() {
     }
   }
 
-  function handleLogout() {
-    logout();
+  async function handleLogout() {
+    await logout();
     navigate('/', { replace: true });
   }
 
@@ -118,13 +135,13 @@ export function SettingsScreen() {
 
       {user?.role === 'owner' && store && (
         <>
-          <form onSubmit={saveStoreInfo} className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+          <form onSubmit={(event) => { void saveStoreInfo(event); }} className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
             <h2 className="font-display text-headline-md text-on-surface">{t('settings.storeInfo')}</h2>
             <label className="font-body text-label-md">{t('settings.storeName')}<input required value={storeName} onChange={(event) => setStoreName(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
             <p className="font-body text-body-sm text-outline">Store code: {store.code}</p>
             <Button type="submit" variant="secondary">{t('common.save')}</Button>
           </form>
-          <form onSubmit={savePin} className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+          <form onSubmit={(event) => { void savePin(event); }} className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
             <h2 className="font-display text-headline-md text-on-surface">{t('settings.adminPin')}</h2>
             <input aria-label={t('settings.adminPin')} required pattern="[0-9]{4}" maxLength={4} inputMode="numeric" value={adminPin} onChange={(event) => setAdminPin(event.target.value)} placeholder="••••" className="h-12 rounded-lg bg-surface-container-low px-3 tracking-[0.5em] outline-none focus:ring-2 focus:ring-primary" />
             <Button type="submit" variant="secondary">{t('common.save')}</Button>
@@ -134,7 +151,7 @@ export function SettingsScreen() {
 
       <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
         <h2 className="mb-3 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="language" className="text-primary" />{t('settings.language')}</h2>
-        <select value={language} onChange={(event) => changeLanguage(event.target.value as 'en')} className="h-12 w-full rounded-lg bg-surface-container-low px-3 font-body text-body-md outline-none focus:ring-2 focus:ring-primary">
+        <select value={language} onChange={(event) => { void changeLanguage(event.target.value as 'en'); }} className="h-12 w-full rounded-lg bg-surface-container-low px-3 font-body text-body-md outline-none focus:ring-2 focus:ring-primary">
           <option value="en">{t('settings.englishOnly')}</option>
         </select>
       </section>
@@ -153,10 +170,11 @@ export function SettingsScreen() {
           <MaterialIcon name={checking ? 'sync' : 'refresh'} className={`text-lg ${checking ? 'animate-spin' : ''}`} />
           {checking ? t('settings.checkingUpdates') : t('settings.checkUpdates')}
         </Button>
+        {updateResult && <p role="status" className="font-body text-body-sm text-on-surface-variant">{updateResult}</p>}
       </section>
 
       {(error || notice) && <p role={error ? 'alert' : 'status'} className={`rounded-lg p-3 font-body text-body-sm ${error ? 'bg-error-container text-on-error-container' : 'bg-success-container text-on-success-container'}`}>{error || notice}</p>}
-      <Button variant="danger" onClick={handleLogout} className="w-full"><MaterialIcon name="logout" />{t('app.logOut')}</Button>
+      <Button variant="danger" onClick={() => { void handleLogout(); }} className="w-full"><MaterialIcon name="logout" />{t('app.logOut')}</Button>
     </div>
   );
 

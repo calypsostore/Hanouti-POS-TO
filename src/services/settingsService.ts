@@ -1,16 +1,19 @@
-export type AppLanguage = 'en';
+export type AppLanguage = 'en' | 'ar';
 
 const LANGUAGE_KEY = '7anouti-pos:language';
 
 export const settingsService = {
-  getLanguage(): AppLanguage {
+  async getLanguage(): Promise<AppLanguage> {
     const savedLanguage = localStorage.getItem(LANGUAGE_KEY);
-    return savedLanguage === 'en' ? savedLanguage : 'en';
+    const language = savedLanguage === 'ar' ? 'ar' : 'en';
+    document.documentElement.lang = language;
+    document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
+    return language;
   },
 
-  setLanguage(language: AppLanguage): void {
+  async setLanguage(language: AppLanguage): Promise<void> {
     localStorage.setItem(LANGUAGE_KEY, language);
     document.documentElement.lang = language;
-    document.documentElement.dir = 'ltr';
+    document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
   },
 };

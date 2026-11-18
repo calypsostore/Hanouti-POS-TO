@@ -59,8 +59,15 @@ export interface CatalogItemRecord {
   icon: string;
   priceMillimes: number;
   stockCount: number | null;
+  modifiers?: CatalogModifierRecord[];
   outOfStock: boolean;
   isActive: boolean;
+}
+
+export interface CatalogModifierRecord {
+  id: string;
+  name: string;
+  priceMillimes: number;
 }
 
 export interface OrderLineRecord {
@@ -87,6 +94,7 @@ export interface OrderRecord {
   voidRequestedAt?: string;
   voidedAt?: string;
   voidedBy?: string;
+  voidedByUserId?: string;
   voidReason?: string;
 }
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '../components/Button';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { StatusTag } from '../components/StatusTag';
@@ -13,12 +13,18 @@ import { userService } from '../services/userService';
 function OwnerInventoryContent() {
   const user = useAuthStore((state) => state.user);
   const storeId = user?.storeId ?? '';
-  const [items, setItems] = useState(() => catalogService.listItems(storeId));
+  const [items, setItems] = useState<CatalogItemRecord[]>([]);
+  const [storeName, setStoreName] = useState<string>();
   const [counts, setCounts] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
-  function updateCount(item: CatalogItemRecord) {
+  useEffect(() => {
+    void catalogService.listItems(storeId).then(setItems).catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : t('common.loadFailed')));
+    if (user?.storeId) void userService.getStore(user.storeId).then((store) => setStoreName(store?.name)).catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : t('common.storeLoadFailed')));
+  }, [storeId, user?.storeId]);
+
+  async function updateCount(item: CatalogItemRecord) {
     const rawCount = counts[item.id] ?? String(item.stockCount ?? '');
     if (!rawCount.trim()) {
       setError('Enter a stock count before updating.');
@@ -32,8 +38,8 @@ function OwnerInventoryContent() {
       return;
     }
     try {
-      catalogService.setStockCount(item.id, count);
-      setItems(catalogService.listItems(storeId));
+      await catalogService.setStockCount(item.id, count);
+      setItems(await catalogService.listItems(storeId));
       setCounts((current) => ({ ...current, [item.id]: String(count) }));
       setError('');
       setNotice(`${item.name} stock updated.`);
@@ -43,7 +49,7 @@ function OwnerInventoryContent() {
   }
 
   return (
-    <WorkspaceLayout title={t('inventory.title')} storeName={user?.storeId ? userService.getStore(user.storeId)?.name : undefined} links={ownerWorkspaceLinks}>
+    <WorkspaceLayout title={t('inventory.title')} storeName={storeName} links={ownerWorkspaceLinks}>
       <header className="mb-4">
         <h1 className="font-display text-headline-lg text-on-surface">{t('inventory.title')}</h1>
         <p className="mt-1 font-body text-body-md text-on-surface-variant">Track basic stock counts and availability.</p>
@@ -58,7 +64,7 @@ function OwnerInventoryContent() {
             </div>
             <div className="flex items-center gap-2">
               <input aria-label={`${t('catalog.stockCount')}: ${item.name}`} type="number" min="0" step="1" value={counts[item.id] ?? (item.stockCount === null ? '' : item.stockCount)} placeholder="—" onChange={(event) => setCounts((current) => ({ ...current, [item.id]: event.target.value }))} className="h-11 w-24 rounded-lg bg-surface-container-low px-3 text-right font-body tabular-nums outline-none focus:ring-2 focus:ring-primary" />
-              <Button variant="secondary" className="min-h-11 px-3" onClick={() => updateCount(item)}><MaterialIcon name="save" className="text-lg" />{t('inventory.updateCount')}</Button>
+              <Button variant="secondary" className="min-h-11 px-3" onClick={() => { void updateCount(item); }}><MaterialIcon name="save" className="text-lg" />{t('inventory.updateCount')}</Button>
             </div>
           </article>
         ))}

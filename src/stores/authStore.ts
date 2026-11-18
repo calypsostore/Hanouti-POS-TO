@@ -7,10 +7,10 @@ interface AuthState {
   user: UserSummary | null;
   ready: boolean;
   initializationError: string | null;
-  hydrate: () => void;
+  hydrate: () => Promise<void>;
   login: (identifier: string, password: string, roles?: UserRole[]) => Promise<UserSummary>;
   setInitialPassword: (password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 function errorMessage(error: unknown): string {
@@ -21,10 +21,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   ready: false,
   initializationError: null,
-  hydrate: () => {
+  hydrate: async () => {
     try {
-      initializeMockData();
-      set({ user: authService.getCurrentUser(), ready: true, initializationError: null });
+      await initializeMockData();
+      const user = await authService.getCurrentUser();
+      set({ user, ready: true, initializationError: null });
     } catch (error) {
       set({ ready: true, initializationError: errorMessage(error) });
     }
@@ -40,8 +41,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const updatedUser = await authService.setInitialPassword(user.id, password);
     set({ user: updatedUser });
   },
-  logout: () => {
-    authService.logout();
+  logout: async () => {
+    await authService.logout();
     set({ user: null });
   },
 }));

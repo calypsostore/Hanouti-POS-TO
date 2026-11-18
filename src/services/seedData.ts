@@ -113,8 +113,30 @@ export const seedCatalogItems: CatalogItemRecord[] = [
 ];
 
 const seedShifts: ShiftRecord[] = [
-  { id: 'shift-sarah-today', storeId, staffId: sarahId, status: 'open', startingCashMillimes: 50000, openedAt: todayAt(7, 0) },
-  { id: 'shift-abdullah-today', storeId, staffId: abdullahId, status: 'open', startingCashMillimes: 50000, openedAt: todayAt(8, 0) },
+  {
+    id: 'shift-sarah-today',
+    storeId,
+    staffId: sarahId,
+    status: 'closed',
+    startingCashMillimes: 50000,
+    expectedCashMillimes: 56200,
+    countedCashMillimes: 56200,
+    differenceMillimes: 0,
+    openedAt: todayAt(7, 0),
+    closedAt: todayAt(13, 0),
+  },
+  {
+    id: 'shift-abdullah-today',
+    storeId,
+    staffId: abdullahId,
+    status: 'closed',
+    startingCashMillimes: 50000,
+    expectedCashMillimes: 59000,
+    countedCashMillimes: 59000,
+    differenceMillimes: 0,
+    openedAt: todayAt(8, 0),
+    closedAt: todayAt(13, 0),
+  },
 ];
 
 const makeLine = (itemId: string, name: string, quantity: number, unitPriceMillimes: number) => ({
@@ -168,7 +190,8 @@ export const seedOrders: OrderRecord[] = [
     createdAt: todayAt(10, 45),
     voidRequestedAt: todayAt(10, 50),
     voidedAt: todayAt(10, 52),
-    voidedBy: 'owner-lamarsa',
+    voidedBy: 'owner',
+    voidedByUserId: 'owner-lamarsa',
     voidReason: 'Customer left terrace before serving',
   },
 ];

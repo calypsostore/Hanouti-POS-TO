@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Button } from '../components/Button';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { StatusTag } from '../components/StatusTag';
@@ -15,16 +15,30 @@ function OwnerVoidRequestsContent() {
   const user = useAuthStore((state) => state.user);
   const storeId = user?.storeId ?? '';
   const ownerId = user?.id ?? '';
-  const [requests, setRequests] = useState(() => orderService.listAll(storeId).filter((order) => order.status === 'pending_void'));
+  const [requests, setRequests] = useState<OrderRecord[]>([]);
+  const [storeName, setStoreName] = useState<string>();
+  const [staffNames, setStaffNames] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
-  function resolve(order: OrderRecord, decision: 'approve' | 'reject') {
+  const refreshRequests = useCallback(async () => {
+    const orders = (await orderService.listAll(storeId)).filter((order) => order.status === 'pending_void');
+    const staff = await Promise.all(orders.map((order) => userService.getUser(order.staffId)));
+    setRequests(orders);
+    setStaffNames(Object.fromEntries(orders.map((order, index) => [order.staffId, staff[index]?.name ?? 'Staff'])));
+  }, [storeId]);
+
+  useEffect(() => {
+    void refreshRequests().catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : t('common.loadFailed')));
+    if (user?.storeId) void userService.getStore(user.storeId).then((store) => setStoreName(store?.name)).catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : t('common.storeLoadFailed')));
+  }, [refreshRequests, storeId, user?.storeId]);
+
+  async function resolve(order: OrderRecord, decision: 'approve' | 'reject') {
     setError('');
     setNotice('');
     try {
-      orderService.resolveVoidRequest(order.id, ownerId, decision);
-      setRequests(orderService.listAll(storeId).filter((item) => item.status === 'pending_void'));
+      await orderService.resolveVoidRequest(order.id, ownerId, decision);
+      await refreshRequests();
       setNotice(decision === 'approve' ? `Order #${order.number} voided.` : `Void request for #${order.number} rejected.`);
     } catch (resolveError) {
       setError(resolveError instanceof Error ? resolveError.message : 'Unable to resolve this request.');
@@ -32,7 +46,7 @@ function OwnerVoidRequestsContent() {
   }
 
   return (
-    <WorkspaceLayout title={t('voids.title')} storeName={user?.storeId ? userService.getStore(user.storeId)?.name : undefined} links={ownerWorkspaceLinks}>
+    <WorkspaceLayout title={t('voids.title')} storeName={storeName} links={ownerWorkspaceLinks}>
       <header className="mb-4">
         <h1 className="font-display text-headline-lg text-on-surface">{t('voids.title')}</h1>
         <p className="mt-1 font-body text-body-md text-on-surface-variant">Approve or reject staff requests to void completed orders.</p>
@@ -41,13 +55,12 @@ function OwnerVoidRequestsContent() {
       {notice && <p role="status" className="mb-3 rounded-lg bg-success-container p-3 font-body text-body-sm text-on-success-container">{notice}</p>}
       <section className="flex flex-col gap-3">
         {requests.map((order) => {
-          const staff = userService.getUser(order.staffId);
           return (
             <article key={order.id} className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <h2 className="font-display text-headline-sm text-on-surface">Order #{order.number}</h2>
-                  <p className="mt-1 font-body text-body-sm text-outline">{t('voids.requestedBy', { name: staff?.name ?? 'Staff' })} • {order.voidRequestedAt ? new Date(order.voidRequestedAt).toLocaleString() : ''}</p>
+                  <p className="mt-1 font-body text-body-sm text-outline">{t('voids.requestedBy', { name: staffNames[order.staffId] ?? 'Staff' })} • {order.voidRequestedAt ? new Date(order.voidRequestedAt).toLocaleString() : ''}</p>
                 </div>
                 <StatusTag status="pending">Awaiting owner</StatusTag>
               </div>
@@ -63,8 +76,8 @@ function OwnerVoidRequestsContent() {
                 </div>
               </div>
               <div className="flex justify-end gap-2">
-                <Button variant="danger" onClick={() => resolve(order, 'reject')}><MaterialIcon name="close" />{t('voids.reject')}</Button>
-                <Button onClick={() => resolve(order, 'approve')}><MaterialIcon name="check" />{t('voids.approve')}</Button>
+                <Button variant="danger" onClick={() => { void resolve(order, 'reject'); }}><MaterialIcon name="close" />{t('voids.reject')}</Button>
+                <Button onClick={() => { void resolve(order, 'approve'); }}><MaterialIcon name="check" />{t('voids.approve')}</Button>
               </div>
             </article>
           );

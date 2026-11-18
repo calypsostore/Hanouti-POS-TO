@@ -1,9 +1,10 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { useAuthStore } from '../stores/authStore';
 import { userService } from '../services/userService';
+import { t } from '../i18n/translations';
 
 export function SetNewPasswordScreen() {
   const navigate = useNavigate();
@@ -20,38 +21,37 @@ export function SetNewPasswordScreen() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!longEnough) {
-      setError('Use at least 6 characters.');
+      setError(t('password.useSixCharacters'));
       return;
     }
     if (!matching) {
-      setError('Passwords do not match.');
+      setError(t('password.mismatch'));
       return;
     }
     setError('');
     try {
       await setInitialPassword(password);
-      if (!user) throw new Error('You must sign in before setting a password.');
+      if (!user) throw new Error(t('auth.signInBeforePassword'));
       navigate(user.role === 'staff' ? '/pos' : user.role === 'owner' ? '/owner/dashboard' : '/admin/stores');
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Unable to update the password.');
+      setError(saveError instanceof Error ? saveError.message : t('password.unableToUpdate'));
     }
   }
 
   const accountName = user?.username ?? user?.email ?? '';
-  const store = user?.storeId ? userService.getStore(user.storeId) : undefined;
-  const accountRole = user?.role === 'staff' ? 'Verified Staff' : user?.role === 'owner' ? 'Verified Owner' : 'Verified Admin';
+  const [store, setStore] = useState<Awaited<ReturnType<typeof userService.getStore>>>();
+  useEffect(() => {
+    if (user?.storeId) void userService.getStore(user.storeId).then(setStore);
+  }, [user?.storeId]);
+  const accountRole = user?.role === 'staff' ? t('password.verifiedStaff') : user?.role === 'owner' ? t('password.verifiedOwner') : t('password.verifiedAdmin');
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-surface via-surface-container-low to-surface px-4 pb-8 pt-3">
       <div className="mx-auto flex w-full max-w-xl flex-col">
         <div className="flex items-center justify-between py-2">
-          <button type="button" aria-label="Go back" onClick={() => navigate('/')} className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface-container-lowest text-primary shadow-card">
+          <button type="button" aria-label={t('common.back')} onClick={() => navigate('/')} className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface-container-lowest text-primary shadow-card">
             <MaterialIcon name="arrow_back" />
           </button>
-          <span className="inline-flex items-center gap-2 rounded-full bg-surface-container px-3 py-2 font-body text-label-md text-primary">
-            <span className="h-2 w-2 rounded-full bg-success-dark" />
-            Terminal #{store?.code ?? 'ADMIN'} Online
-          </span>
           <span className="w-12" />
         </div>
 
@@ -62,19 +62,16 @@ export function SetNewPasswordScreen() {
               <MaterialIcon name="key" className="text-base" />
             </span>
           </div>
-          <h1 className="font-display text-headline-lg text-on-surface">Set your new password</h1>
+          <h1 className="font-display text-headline-lg text-on-surface">{t('password.setNew')}</h1>
           <p className="mt-1.5 max-w-sm font-body text-body-md text-on-surface-variant">
-            Required for your first login on this {user?.role === 'staff' ? 'store terminal' : 'account'}
+            {t('password.firstLoginRequirement', { account: user?.role === 'staff' ? t('password.storeTerminal') : t('password.account') })}
           </p>
         </header>
 
         <section className="mb-5 rounded-xl bg-surface-container-lowest p-4 shadow-card">
           <div className="mb-2 flex items-center justify-between gap-2">
-            <span className="font-body text-label-sm uppercase tracking-wider text-outline">Store Account</span>
-            <span className="inline-flex items-center gap-1 rounded-full bg-success px-2.5 py-1 font-body text-label-sm text-on-surface">
-              <MaterialIcon name="verified" className="text-sm" filled />
-              {accountRole}
-            </span>
+            <span className="font-body text-label-sm uppercase tracking-wider text-outline">{t('password.storeAccount')}</span>
+            <span className="font-body text-label-sm text-on-surface-variant">{accountRole}</span>
           </div>
           <div className="flex items-center gap-3">
             <span className="flex h-12 w-12 items-center justify-center rounded-lg bg-surface-container text-primary">
@@ -93,8 +90,8 @@ export function SetNewPasswordScreen() {
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div>
             <label htmlFor="new-password" className="mb-1.5 flex items-center justify-between font-body text-label-lg text-on-surface">
-              New Password
-              <span className="font-body text-label-sm text-outline">Min. 6 characters</span>
+              {t('password.newPassword')}
+              <span className="font-body text-label-sm text-outline">{t('password.minimumCharacters')}</span>
             </label>
             <div className="relative">
               <MaterialIcon name="lock_reset" className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[22px] text-primary" />
@@ -106,10 +103,10 @@ export function SetNewPasswordScreen() {
                 type={visible ? 'text' : 'password'}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder="Enter new password"
+                placeholder={t('password.enterNew')}
                 className="h-14 w-full rounded-xl bg-surface-container-lowest pl-12 pr-14 font-body text-title-md tracking-wider shadow-card outline-none focus:ring-2 focus:ring-primary"
               />
-              <button type="button" aria-label="Toggle password visibility" onClick={() => setVisible((value) => !value)} className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-lg text-outline">
+              <button type="button" aria-label={t('password.toggleVisibility')} onClick={() => setVisible((value) => !value)} className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-lg text-outline">
                 <MaterialIcon name={visible ? 'visibility_off' : 'visibility'} />
               </button>
             </div>
@@ -121,14 +118,13 @@ export function SetNewPasswordScreen() {
             <div className="mt-1 flex items-center justify-between">
               <span className={`flex items-center gap-1 font-body text-label-sm ${longEnough ? 'text-success-dark' : 'text-outline'}`}>
                 <MaterialIcon name={longEnough ? 'check_circle' : 'info'} className="text-sm" filled={longEnough} />
-                {longEnough ? 'Password meets requirements' : 'At least 6 characters'}
+                {longEnough ? t('password.passwordMeetsRequirements') : t('password.atLeastSix')}
               </span>
-              <span className="font-body text-label-sm text-outline">Terminal Safe</span>
             </div>
           </div>
 
           <div>
-            <label htmlFor="confirm-password" className="mb-1.5 block font-body text-label-lg text-on-surface">Confirm Password</label>
+            <label htmlFor="confirm-password" className="mb-1.5 block font-body text-label-lg text-on-surface">{t('password.confirm')}</label>
             <div className="relative">
               <MaterialIcon name="verified_user" className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[22px] text-primary" />
               <input
@@ -138,7 +134,7 @@ export function SetNewPasswordScreen() {
                 type={visible ? 'text' : 'password'}
                 value={confirmation}
                 onChange={(event) => setConfirmation(event.target.value)}
-                placeholder="Re-enter password"
+                placeholder={t('password.reenter')}
                 className="h-14 w-full rounded-xl bg-surface-container-lowest pl-12 pr-12 font-body text-title-md tracking-wider shadow-card outline-none focus:ring-2 focus:ring-primary"
               />
               {matching && <MaterialIcon name="check_circle" className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[22px] text-success-dark" filled />}
@@ -146,27 +142,25 @@ export function SetNewPasswordScreen() {
           </div>
 
           <section className="flex flex-col gap-2 rounded-xl bg-surface-container-low p-4">
-            <h2 className="mb-0.5 font-body text-label-sm uppercase tracking-wider text-outline">Password Rules</h2>
-            <p className="flex items-center gap-2 font-body text-body-sm"><MaterialIcon name={longEnough ? 'check_circle' : 'radio_button_unchecked'} className={longEnough ? 'text-lg text-success-dark' : 'text-lg text-outline'} />At least 6 characters (digits or letters)</p>
-            <p className="flex items-center gap-2 font-body text-body-sm"><MaterialIcon name="check_circle" className="text-lg text-success-dark" />Easy to remember for fast shift logouts</p>
-            <p className="flex items-center gap-2 font-body text-body-sm"><MaterialIcon name={matching ? 'check_circle' : 'radio_button_unchecked'} className={matching ? 'text-lg text-success-dark' : 'text-lg text-outline'} />Passwords match perfectly</p>
+            <h2 className="mb-0.5 font-body text-label-sm uppercase tracking-wider text-outline">{t('password.rules')}</h2>
+            <p className="flex items-center gap-2 font-body text-body-sm"><MaterialIcon name={longEnough ? 'check_circle' : 'radio_button_unchecked'} className={longEnough ? 'text-lg text-success-dark' : 'text-lg text-outline'} />{t('password.atLeastSix')}</p>
+            <p className="flex items-center gap-2 font-body text-body-sm"><MaterialIcon name="check_circle" className="text-lg text-success-dark" />{t('password.easyToRemember')}</p>
+            <p className="flex items-center gap-2 font-body text-body-sm"><MaterialIcon name={matching ? 'check_circle' : 'radio_button_unchecked'} className={matching ? 'text-lg text-success-dark' : 'text-lg text-outline'} />{t('password.match')}</p>
           </section>
 
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
           <Button type="submit" disabled={!matching || !longEnough} className="mt-1 min-h-14 w-full text-body-lg">
             <MaterialIcon name="check" filled />
-            Save and continue
+            {t('password.saveContinue')}
           </Button>
         </form>
 
         <footer className="mt-6 flex flex-col items-center text-center">
-          <p className="mb-2 flex items-center gap-1.5 font-body text-body-sm text-on-surface-variant">
+          <p className="flex items-center gap-1.5 font-body text-body-sm text-on-surface-variant">
             <MaterialIcon name="support_agent" className="text-lg text-secondary" />
-            Need assistance?
+            {t('password.needAssistance')}
           </p>
-          <a href="tel:+21698123456" className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-surface-container px-3 py-1.5 font-body text-label-md text-primary">
-            Call Store Manager (Foued: +216 98 123 456) <MaterialIcon name="call" className="text-base" />
-          </a>
+          <p className="mt-1 font-body text-body-sm text-on-surface-variant">{t('password.contactAdministrator')}</p>
         </footer>
       </div>
     </main>

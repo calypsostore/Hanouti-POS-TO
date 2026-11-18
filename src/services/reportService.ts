@@ -24,12 +24,12 @@ function getRangeStart(period: 'day' | 'week' | 'month' | 'year'): Date {
   return start;
 }
 
-function summarize(storeId: string, period: 'day' | 'week' | 'month' | 'year' = 'day') {
+async function summarize(storeId: string, period: 'day' | 'week' | 'month' | 'year' = 'day') {
   const rangeStart = getRangeStart(period).getTime();
-  const orders = orderService.listAll(storeId).filter((order) =>
+  const orders = (await orderService.listAll(storeId)).filter((order) =>
     order.status === 'done' && new Date(order.createdAt).getTime() >= rangeStart,
   );
-  const shifts = shiftService.listShifts(storeId).filter((shift) =>
+  const shifts = (await shiftService.listShifts(storeId)).filter((shift) =>
     new Date(shift.openedAt).getTime() >= rangeStart,
   );
   return {
@@ -45,16 +45,16 @@ function summarize(storeId: string, period: 'day' | 'week' | 'month' | 'year' = 
 }
 
 export const reportService = {
-  getDashboard(storeId: string, period: 'day' | 'week' | 'month' | 'year' = 'day') {
-    return summarize(storeId, period);
+  async getDashboard(storeId: string, period: 'day' | 'week' | 'month' | 'year' = 'day') {
+    return await summarize(storeId, period);
   },
 
-  listReports(storeId: string): ReportRecord[] {
+  async listReports(storeId: string): Promise<ReportRecord[]> {
     return getReports().filter((report) => report.storeId === storeId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },
 
-  createXReport(storeId: string): ReportRecord {
-    const summary = summarize(storeId);
+  async createXReport(storeId: string): Promise<ReportRecord> {
+    const summary = await summarize(storeId);
     const report: ReportRecord = {
       id: `report-${crypto.randomUUID()}`,
       storeId,
@@ -69,12 +69,12 @@ export const reportService = {
     return report;
   },
 
-  closeDayWithZReport(storeId: string): ReportRecord {
-    if (shiftService.listOpenShifts(storeId).length > 0) throw new Error('Close every shift before creating a Z report.');
-    const store = userService.getStore(storeId);
+  async closeDayWithZReport(storeId: string): Promise<ReportRecord> {
+    if ((await shiftService.listOpenShifts(storeId)).length > 0) throw new Error('Close every shift before creating a Z report.');
+    const store = await userService.getStore(storeId);
     if (!store) throw new Error('The store could not be found.');
     if (store.dayClosedOn === todayKey()) throw new Error('A Z report has already closed this business day.');
-    const summary = summarize(storeId);
+    const summary = await summarize(storeId);
     const report: ReportRecord = {
       id: `report-${crypto.randomUUID()}`,
       storeId,
@@ -86,7 +86,7 @@ export const reportService = {
       cashDifferenceMillimes: summary.cashDifferenceMillimes,
     };
     writeData('reports', [...getReports(), report]);
-    writeData('stores', userService.listStores().map((candidate) => candidate.id === storeId ? { ...candidate, dayClosedOn: todayKey() } : candidate));
+    writeData('stores', (await userService.listStores()).map((candidate) => candidate.id === storeId ? { ...candidate, dayClosedOn: todayKey() } : candidate));
     return report;
   },
 };

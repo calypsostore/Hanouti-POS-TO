@@ -3,6 +3,7 @@ import type { WorkspaceLink } from '../components/WorkspaceLayout';
 export const ownerWorkspaceLinks: WorkspaceLink[] = [
   { to: '/owner/dashboard', label: 'nav.dashboard', icon: 'space_dashboard' },
   { to: '/owner/catalog', label: 'nav.catalog', icon: 'inventory_2' },
+  { to: '/orders', label: 'nav.orders', icon: 'receipt_long' },
   { to: '/owner/staff', label: 'nav.staff', icon: 'groups' },
   { to: '/owner/voids', label: 'nav.voidRequests', icon: 'pending_actions' },
   { to: '/owner/shifts', label: 'nav.shift', icon: 'payments' },

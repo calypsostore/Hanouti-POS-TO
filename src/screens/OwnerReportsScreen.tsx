@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '../components/Button';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { StatusTag } from '../components/StatusTag';
@@ -10,46 +10,70 @@ import { reportService } from '../services/reportService';
 import { shiftService } from '../services/shiftService';
 import { useAuthStore } from '../stores/authStore';
 import { userService } from '../services/userService';
-import type { ReportRecord } from '../types/domain';
+import type { ReportRecord, ShiftRecord, StoreRecord } from '../types/domain';
+
+type DashboardSummary = Awaited<ReturnType<typeof reportService.getDashboard>>;
+const emptySummary: DashboardSummary = { salesMillimes: 0, orderCount: 0, cashDifferenceMillimes: 0, topItems: {}, shifts: [] };
 
 function OwnerReportsContent() {
   const user = useAuthStore((state) => state.user);
   const storeId = user?.storeId ?? '';
-  const store = userService.getStore(storeId);
-  const [reports, setReports] = useState(() => reportService.listReports(storeId));
+  const [store, setStore] = useState<StoreRecord>();
+  const [reports, setReports] = useState<ReportRecord[]>([]);
+  const [openShifts, setOpenShifts] = useState<ShiftRecord[]>([]);
+  const [liveSummary, setLiveSummary] = useState<DashboardSummary>(emptySummary);
   const [latestReport, setLatestReport] = useState<ReportRecord | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const openShifts = shiftService.listOpenShifts(storeId);
   const date = new Date();
   const businessDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   const dayClosed = store?.dayClosedOn === businessDate;
   const zBlocked = openShifts.length > 0 || dayClosed;
 
-  function refresh(report: ReportRecord, message: string) {
-    setReports(reportService.listReports(storeId));
+  useEffect(() => {
+    void Promise.all([
+      reportService.listReports(storeId),
+      shiftService.listOpenShifts(storeId),
+      reportService.getDashboard(storeId, 'day'),
+      userService.getStore(storeId),
+    ]).then(([nextReports, nextOpenShifts, nextSummary, nextStore]) => {
+      setReports(nextReports);
+      setOpenShifts(nextOpenShifts);
+      setLiveSummary(nextSummary);
+      setStore(nextStore);
+    }).catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : t('common.loadFailed')));
+  }, [storeId]);
+
+  async function refresh(report: ReportRecord, message: string) {
+    const [nextReports, nextOpenShifts, nextStore] = await Promise.all([
+      reportService.listReports(storeId),
+      shiftService.listOpenShifts(storeId),
+      userService.getStore(storeId),
+    ]);
+    setReports(nextReports);
+    setOpenShifts(nextOpenShifts);
+    setStore(nextStore);
     setLatestReport(report);
     setNotice(message);
     setError('');
   }
 
-  function createX() {
+  async function createX() {
     try {
-      refresh(reportService.createXReport(storeId), 'X report created. The day remains open.');
+      await refresh(await reportService.createXReport(storeId), 'X report created. The day remains open.');
     } catch (reportError) {
       setError(reportError instanceof Error ? reportError.message : 'Unable to create the X report.');
     }
   }
 
-  function createZ() {
+  async function createZ() {
     try {
-      refresh(reportService.closeDayWithZReport(storeId), t('reports.closed'));
+      await refresh(await reportService.closeDayWithZReport(storeId), t('reports.closed'));
     } catch (reportError) {
       setError(reportError instanceof Error ? reportError.message : 'Unable to close the business day.');
     }
   }
 
-  const liveSummary = reportService.getDashboard(storeId, 'day');
   return (
     <WorkspaceLayout title={t('reports.title')} storeName={store?.name} links={ownerWorkspaceLinks}>
       <header className="mb-4">
@@ -61,13 +85,13 @@ function OwnerReportsContent() {
         <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
           <div className="mb-3 flex items-center gap-2"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-fixed text-primary"><MaterialIcon name="visibility" /></span><div><h2 className="font-display text-headline-sm">{t('reports.xReport')}</h2><p className="font-body text-body-sm text-outline">{t('reports.xDescription')}</p></div></div>
           <Summary sales={liveSummary.salesMillimes} orders={liveSummary.orderCount} />
-          <Button onClick={createX} className="mt-4 w-full"><MaterialIcon name="summarize" />{t('reports.xReport')}</Button>
+          <Button onClick={() => { void createX(); }} className="mt-4 w-full"><MaterialIcon name="summarize" />{t('reports.xReport')}</Button>
         </article>
         <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
           <div className="mb-3 flex items-center gap-2"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-warning-container text-on-warning-container"><MaterialIcon name="lock" /></span><div><h2 className="font-display text-headline-sm">{t('reports.zReport')}</h2><p className="font-body text-body-sm text-outline">{t('reports.zDescription')}</p></div></div>
           <Summary sales={liveSummary.salesMillimes} orders={liveSummary.orderCount} />
           {zBlocked && <p className="mt-3 rounded-lg bg-warning-container p-2.5 font-body text-body-sm text-on-warning-container">{dayClosed ? 'This business day is already closed.' : t('reports.openShiftsBlock')}</p>}
-          <Button onClick={createZ} disabled={zBlocked} variant="danger" className="mt-4 w-full"><MaterialIcon name="lock" />{dayClosed ? 'Day closed' : t('reports.zReport')}</Button>
+          <Button onClick={() => { void createZ(); }} disabled={zBlocked} variant="danger" className="mt-4 w-full"><MaterialIcon name="lock" />{dayClosed ? 'Day closed' : t('reports.zReport')}</Button>
         </article>
       </section>
 

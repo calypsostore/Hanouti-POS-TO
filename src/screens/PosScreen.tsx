@@ -400,7 +400,7 @@ export function PosScreen() {
         </button>
         <Button onClick={finishOrder} disabled={!cart.length} className="min-h-[52px] shrink-0 rounded-2xl px-4">
           <MaterialIcon name="check_circle" className="text-xl" />
-          {t('common.done')} <span className="ml-1 font-display tabular-nums">{formatTnd(totalMillimes / 1000)} DT</span>
+          {t('common.done')}
         </Button>
       </div>
 

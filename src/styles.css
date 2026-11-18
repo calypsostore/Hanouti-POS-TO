@@ -221,28 +221,6 @@ button {
   transform: scale(1.08);
 }
 
-.bottom-nav__label {
-  overflow: hidden;
-  max-width: 100%;
-  color: inherit;
-  font-size: 0.73rem;
-  font-weight: 600;
-  line-height: 1;
-  opacity: 0.82;
-  text-overflow: ellipsis;
-  transition: color 280ms ease, opacity 280ms ease, transform 360ms ease;
-  white-space: nowrap;
-}
-
-.bottom-nav__compact-label {
-  display: none;
-}
-
-.bottom-nav__link.is-active .bottom-nav__label {
-  opacity: 1;
-  transform: translateY(-1px);
-}
-
 .bottom-nav__active-indicator {
   position: absolute;
   z-index: 1;
@@ -381,21 +359,8 @@ button {
     padding-left: 40px;
   }
 
-  .bottom-nav__label {
-    display: none;
-  }
-
-  .bottom-nav__compact-label {
-    display: block;
-    color: inherit;
-    font-size: 0.56rem;
-    font-weight: 600;
-    line-height: 1;
-    white-space: nowrap;
-  }
-
   .bottom-nav__icon {
-    font-size: 23px;
+    font-size: 24px;
   }
 }
 
@@ -460,7 +425,6 @@ button {
   .bottom-nav__link,
   .bottom-nav__link::after,
   .bottom-nav__icon,
-  .bottom-nav__label,
   .bottom-nav__pos-link,
   .bottom-nav__pos-orbit,
   .bottom-nav__pos-icon {

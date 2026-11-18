@@ -196,7 +196,7 @@ export function BottomNav() {
             if (event.detail === 0) setPosNavigationOpen((open) => !open);
           }}
         >
-          <MaterialIcon name={posNavigationOpen ? 'keyboard_arrow_down' : 'keyboard_arrow_up'} />
+          <MaterialIcon name="menu" />
         </button>
       )}
     </nav>

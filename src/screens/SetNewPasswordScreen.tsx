@@ -32,7 +32,7 @@ export function SetNewPasswordScreen() {
     try {
       await setInitialPassword(password);
       if (!user) throw new Error(t('auth.signInBeforePassword'));
-      navigate(user.role === 'staff' ? '/pos' : user.role === 'owner' ? '/owner/dashboard' : '/admin/stores');
+      navigate(user.role === 'staff' ? '/dashboard' : user.role === 'owner' ? '/owner/dashboard' : '/admin/stores');
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : t('password.unableToUpdate'));
     }

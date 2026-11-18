@@ -30,6 +30,9 @@ interface ProductView extends ItemCardItem {
   categoryId: string;
   stockCount: number | null;
   modifiers: CatalogModifierRecord[];
+  modifierGroupName?: string;
+  modifiersRequired?: boolean;
+  modifierSelectionMode?: 'single' | 'multiple';
 }
 
 function toProductView(item: CatalogItemRecord): ProductView {
@@ -43,6 +46,9 @@ function toProductView(item: CatalogItemRecord): ProductView {
     outOfStock: item.outOfStock || item.stockCount === 0,
     stockCount: item.stockCount,
     modifiers: item.modifiers ?? [],
+    modifierGroupName: item.modifierGroupName,
+    modifiersRequired: item.modifiersRequired,
+    modifierSelectionMode: item.modifierSelectionMode,
   };
 }
 
@@ -405,16 +411,23 @@ export function PosScreen() {
       <BottomSheet open={selectedItem !== null} onClose={() => setSelectedItem(null)} title={selectedItem?.name ?? ''}>
         {selectedItem && (
           <div className="flex flex-col gap-3">
+            <div>
+              <p className="font-body text-label-lg text-on-surface">{selectedItem.modifierGroupName || t('catalog.modifiers')}</p>
+              <p className="mt-1 font-body text-body-sm text-on-surface-variant">
+                {selectedItem.modifiersRequired ? selectedItem.modifierSelectionMode === 'single' ? 'Choose one option to continue.' : 'Select at least one option to continue.' : selectedItem.modifierSelectionMode === 'single' ? 'Choose one option, if wanted.' : 'Choose any options you want.'}
+              </p>
+            </div>
             {selectedItem.modifiers.map((modifier) => {
               const active = selectedModifiers.includes(modifier.id);
+              const singleSelection = selectedItem.modifierSelectionMode === 'single';
               return (
-                <button key={modifier.id} type="button" aria-pressed={active} onClick={() => setSelectedModifiers((values) => active ? values.filter((value) => value !== modifier.id) : [...values, modifier.id])} className={`flex min-h-12 items-center justify-between rounded-xl px-4 font-body text-label-md ${active ? 'bg-primary text-on-primary' : 'bg-surface-container-high text-on-surface'}`}>
+                <button key={modifier.id} type="button" aria-pressed={active} onClick={() => setSelectedModifiers((values) => active ? values.filter((value) => value !== modifier.id) : singleSelection ? [modifier.id] : [...values, modifier.id])} className={`flex min-h-12 items-center justify-between rounded-xl px-4 font-body text-label-md ${active ? 'bg-primary text-on-primary' : 'bg-surface-container-high text-on-surface'}`}>
                   <span>{modifier.name}</span>
                   <span>{modifier.priceMillimes ? `+${formatTnd(modifier.priceMillimes / 1000)} DT` : t('common.noCharge')}</span>
                 </button>
               );
             })}
-            <Button onClick={() => commitItem(selectedItem, selectedModifiers)}>{t('pos.addToOrder')}</Button>
+            <Button disabled={Boolean(selectedItem.modifiersRequired && selectedModifiers.length === 0)} onClick={() => commitItem(selectedItem, selectedModifiers)}>{t('pos.addToOrder')}</Button>
           </div>
         )}
       </BottomSheet>

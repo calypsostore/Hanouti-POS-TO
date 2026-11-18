@@ -44,7 +44,7 @@ export const catalogService = {
     return item;
   },
 
-  async updateItem(itemId: string, changes: Partial<Pick<CatalogItemRecord, 'name' | 'categoryId' | 'icon' | 'priceMillimes' | 'stockCount' | 'modifiers' | 'outOfStock' | 'isActive'>>): Promise<CatalogItemRecord> {
+  async updateItem(itemId: string, changes: Partial<Pick<CatalogItemRecord, 'name' | 'categoryId' | 'icon' | 'priceMillimes' | 'stockCount' | 'description' | 'sku' | 'imageDataUrl' | 'modifiers' | 'modifierGroupName' | 'modifiersRequired' | 'modifierSelectionMode' | 'outOfStock' | 'isActive'>>): Promise<CatalogItemRecord> {
     const items = getItems();
     const item = items.find((candidate) => candidate.id === itemId);
     if (!item) throw new Error('Catalog item could not be found.');

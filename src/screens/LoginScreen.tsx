@@ -32,7 +32,7 @@ export function LoginScreen() {
     try {
       const allowedRoles = role === 'staff' ? ['staff'] as const : ['owner', 'super_admin'] as const;
       const user = await login(identifier, password, [...allowedRoles]);
-      navigate(user.mustChangePassword ? '/set-password' : user.role === 'staff' ? '/pos' : user.role === 'owner' ? '/owner/dashboard' : '/admin/stores');
+      navigate(user.mustChangePassword ? '/set-password' : user.role === 'staff' ? '/dashboard' : user.role === 'owner' ? '/owner/dashboard' : '/admin/stores');
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : t('login.unableToSignIn'));
     } finally {

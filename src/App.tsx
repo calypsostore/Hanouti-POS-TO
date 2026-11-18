@@ -15,6 +15,7 @@ import type { UserRole } from './types/domain';
 import { Button } from './components/Button';
 import { MaterialIcon } from './components/MaterialIcon';
 import { t } from './i18n/translations';
+import { StaffDashboardScreen } from './screens/StaffDashboardScreen';
 
 const OwnerDashboardScreen = lazy(() => import('./screens/OwnerDashboardScreen').then((module) => ({ default: module.OwnerDashboardScreen })));
 const OwnerCatalogScreen = lazy(() => import('./screens/OwnerCatalogScreen').then((module) => ({ default: module.OwnerCatalogScreen })));
@@ -26,7 +27,7 @@ const CustomersScreen = lazy(() => import('./screens/CustomersScreen').then((mod
 const SuperAdminStoresScreen = lazy(() => import('./screens/SuperAdminStoresScreen').then((module) => ({ default: module.SuperAdminStoresScreen })));
 
 function homeForRole(role: UserRole): string {
-  if (role === 'staff') return '/pos';
+  if (role === 'staff') return '/dashboard';
   return role === 'owner' ? '/owner/dashboard' : '/admin/stores';
 }
 
@@ -151,6 +152,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<GuestRoute />} />
           <Route path="/set-password" element={<SetPasswordRoute />} />
+          <Route path="/dashboard" element={<ProtectedRoute roles={['staff']}><StaffDashboardScreen /></ProtectedRoute>} />
           <Route path="/pos" element={<ProtectedRoute roles={['staff']} permission="take_orders"><PosScreen /></ProtectedRoute>} />
           <Route path="/orders" element={<ProtectedRoute roles={['staff', 'owner']} permission="view_order_history"><OrdersScreen /></ProtectedRoute>} />
           <Route path="/customers" element={<ProtectedRoute roles={['staff', 'owner']} permission={['use_tabs', 'settle_tabs']}><CustomersScreen /></ProtectedRoute>} />

@@ -61,7 +61,13 @@ export interface CatalogItemRecord {
   icon: string;
   priceMillimes: number;
   stockCount: number | null;
+  description?: string;
+  sku?: string;
+  imageDataUrl?: string;
   modifiers?: CatalogModifierRecord[];
+  modifierGroupName?: string;
+  modifiersRequired?: boolean;
+  modifierSelectionMode?: 'single' | 'multiple';
   outOfStock: boolean;
   isActive: boolean;
 }

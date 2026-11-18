@@ -24,7 +24,9 @@ export function BottomNav() {
   const user = useAuthStore((state) => state.user);
   const location = useLocation();
   const barRef = useRef<HTMLDivElement>(null);
+  const posNavigationPointerStart = useRef<number | null>(null);
   const [allowed, setAllowed] = useState<Record<string, boolean>>({});
+  const [posNavigationOpen, setPosNavigationOpen] = useState(false);
   const [activeIndicator, setActiveIndicator] = useState<{ x: number; y: number } | null>(() =>
     location.pathname !== '/pos' && pendingNavigationPath === location.pathname ? previousIndicatorPosition : null,
   );
@@ -56,6 +58,7 @@ export function BottomNav() {
   const leftItems = otherItems.slice(0, 2);
   const rightItems = otherItems.slice(2);
   const navigationSignature = visibleNavigation.map((item) => item.to).join('|');
+  const isPosScreen = location.pathname === '/pos';
 
   useLayoutEffect(() => {
     const bar = barRef.current;
@@ -109,6 +112,21 @@ export function BottomNav() {
     setPosPulsing(true);
   }
 
+  function handlePosNavigationPointerDown(event: React.PointerEvent<HTMLButtonElement>) {
+    posNavigationPointerStart.current = event.clientY;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handlePosNavigationPointerUp(event: React.PointerEvent<HTMLButtonElement>) {
+    const startY = posNavigationPointerStart.current;
+    if (startY === null) return;
+    posNavigationPointerStart.current = null;
+    const swipeDistance = startY - event.clientY;
+    if (swipeDistance > 24) setPosNavigationOpen(true);
+    else if (swipeDistance < -24) setPosNavigationOpen(false);
+    else setPosNavigationOpen((open) => !open);
+  }
+
   function renderLink(item: StaffNavigationItem) {
     return (
       <NavLink
@@ -126,8 +144,15 @@ export function BottomNav() {
   }
 
   return (
-    <nav aria-label={t('nav.staffNavigation')} className="bottom-nav">
-      <div ref={barRef} className={`bottom-nav__bar${posItem ? ' has-pos' : ''}`}>
+    <nav
+      aria-label={t('nav.staffNavigation')}
+      className={`bottom-nav${isPosScreen && posNavigationOpen ? ' is-pos-open' : ''}`}
+    >
+      <div
+        ref={barRef}
+        id="staff-bottom-nav-bar"
+        className={`bottom-nav__bar${posItem ? ' has-pos' : ''}${isPosScreen && !posNavigationOpen ? ' is-hidden-in-pos' : ''}`}
+      >
         {activeIndicator && (
           <span
             aria-hidden="true"
@@ -157,6 +182,23 @@ export function BottomNav() {
           </>
         ) : visibleNavigation.map(renderLink)}
       </div>
+      {isPosScreen && (
+        <button
+          type="button"
+          className="bottom-nav__pos-toggle"
+          aria-label={t(posNavigationOpen ? 'nav.hideNavigation' : 'nav.showNavigation')}
+          aria-expanded={posNavigationOpen}
+          aria-controls="staff-bottom-nav-bar"
+          onPointerDown={handlePosNavigationPointerDown}
+          onPointerUp={handlePosNavigationPointerUp}
+          onPointerCancel={() => { posNavigationPointerStart.current = null; }}
+          onClick={(event) => {
+            if (event.detail === 0) setPosNavigationOpen((open) => !open);
+          }}
+        >
+          <MaterialIcon name={posNavigationOpen ? 'keyboard_arrow_down' : 'keyboard_arrow_up'} />
+        </button>
+      )}
     </nav>
   );
 }

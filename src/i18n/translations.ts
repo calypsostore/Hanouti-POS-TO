@@ -18,6 +18,8 @@ const en = {
   'nav.inventory': 'Inventory',
   'nav.stores': 'Stores',
   'nav.staffNavigation': 'Staff navigation',
+  'nav.showNavigation': 'Show navigation',
+  'nav.hideNavigation': 'Hide navigation',
   'common.save': 'Save changes',
   'common.cancel': 'Cancel',
   'common.done': 'Done',

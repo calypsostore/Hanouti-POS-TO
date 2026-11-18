@@ -75,6 +75,10 @@ button {
   pointer-events: none;
 }
 
+.bottom-nav.is-pos-open {
+  padding-bottom: max(38px, calc(env(safe-area-inset-bottom, 0px) + 28px));
+}
+
 .bottom-nav__bar {
   position: relative;
   isolation: isolate;
@@ -94,6 +98,52 @@ button {
   -webkit-backdrop-filter: blur(24px) saturate(1.45);
   backdrop-filter: blur(24px) saturate(1.45);
   pointer-events: auto;
+  transition:
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 220ms ease,
+    visibility 0s linear;
+}
+
+.bottom-nav__bar.is-hidden-in-pos {
+  opacity: 0;
+  pointer-events: none;
+  transform: translate3d(0, calc(100% + 32px), 0);
+  visibility: hidden;
+  transition:
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 220ms ease,
+    visibility 0s linear 320ms;
+}
+
+.bottom-nav__pos-toggle {
+  position: absolute;
+  z-index: 45;
+  bottom: max(0px, env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  display: grid;
+  width: 56px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 90%);
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgb(240 251 255 / 96%), rgb(193 227 247 / 94%));
+  box-shadow: 0 3px 12px rgb(35 96 148 / 20%), inset 0 1px 2px rgb(255 255 255 / 88%);
+  color: #173a64;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: none;
+  transform: translateX(-50%);
+  transition: background-color 180ms ease, box-shadow 180ms ease;
+}
+
+.bottom-nav__pos-toggle:active {
+  background: rgb(210 240 248 / 98%);
+  box-shadow: 0 1px 5px rgb(35 96 148 / 22%), inset 0 1px 2px rgb(255 255 255 / 82%);
+}
+
+.bottom-nav__pos-toggle:focus-visible {
+  outline: 3px solid #087f91;
+  outline-offset: 3px;
 }
 
 .bottom-nav__bar::before {
@@ -362,6 +412,11 @@ button {
   .bottom-nav__icon {
     font-size: 24px;
   }
+
+  .bottom-nav__pos-toggle {
+    width: 60px;
+    height: 26px;
+  }
 }
 
 @keyframes bottom-nav-touch-ripple {
@@ -428,6 +483,11 @@ button {
   .bottom-nav__pos-link,
   .bottom-nav__pos-orbit,
   .bottom-nav__pos-icon {
+    transition-duration: 0.01ms !important;
+  }
+
+  .bottom-nav__bar.is-hidden-in-pos,
+  .bottom-nav__pos-toggle {
     transition-duration: 0.01ms !important;
   }
 }

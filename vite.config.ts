@@ -53,7 +53,8 @@ export default defineConfig(({ command, mode }) => {
         includeAssets: ['icon-192.svg', 'icon-512.svg'],
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,txt,webmanifest,woff2}'],
-          globIgnores: ['version.json'],
+          globIgnores: ['**/version.json'],
+          navigateFallbackDenylist: [/^\/version\.json/, /^\/sw\.js/, /^\/workbox-/],
         },
         manifest: {
           name: '7anouti-POS',

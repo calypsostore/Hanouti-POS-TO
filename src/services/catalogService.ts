@@ -1,7 +1,7 @@
 import type { CatalogItemRecord, CatalogModifierRecord, CategoryRecord } from '../types/domain';
 import { readData, writeData } from './storage';
 import { seedCatalogItems, seedCategories } from './seedData';
-import { activityLogService } from './activityLogService';
+import { activityService } from './activityService';
 import { notificationService } from './notificationService';
 
 interface CatalogActor {
@@ -41,6 +41,8 @@ async function updateCatalogItem(
   }
   const nextOutOfStock = changes.stockCount === 0 ? true : changes.outOfStock ?? item.outOfStock;
   const availabilityChanged = item.outOfStock !== nextOutOfStock;
+  const priceChanged = changes.priceMillimes !== undefined && changes.priceMillimes !== item.priceMillimes;
+  const stockChanged = changes.stockCount !== undefined && changes.stockCount !== item.stockCount;
   if ((availabilityChanged || stockReachedZero) && !actor) {
     throw new Error('An acting staff member is required to change catalog availability.');
   }
@@ -58,15 +60,53 @@ async function updateCatalogItem(
   };
   writeData('catalog-items', items.map((candidate) => candidate.id === itemId ? updated : candidate));
 
-  if (availabilityChanged && actor) {
-    await activityLogService.recordCatalogItemAvailabilityChange({
+  const changesToLog: { action: string; summary: string }[] = [];
+  if (availabilityChanged) {
+    changesToLog.push({
+      action: nextOutOfStock ? 'item.86' : 'item.available',
+      summary: `${item.name} marked ${nextOutOfStock ? 'out of stock' : 'available'}.`,
+    });
+  }
+  if (priceChanged) {
+    changesToLog.push({
+      action: 'price.changed',
+      summary: `Changed the price of ${item.name} from ${item.priceMillimes} to ${updated.priceMillimes} millimes.`,
+    });
+  }
+  if (stockChanged) {
+    changesToLog.push({
+      action: 'stock.updated',
+      summary: `Updated ${item.name} stock from ${item.stockCount ?? 'untracked'} to ${updated.stockCount ?? 'untracked'}.`,
+    });
+  }
+  if (changesToLog.length === 0 && Object.keys(changes).length > 0) {
+    changesToLog.push({ action: 'catalog.item_updated', summary: `Updated item "${item.name}".` });
+  }
+  for (const change of changesToLog) {
+    await activityService.log({
       storeId: item.storeId,
-      actorId: actor.id,
-      action: 'catalog_item_availability_changed',
-      targetType: 'catalog_item',
-      targetId: item.id,
-      itemName: item.name,
-      outOfStock: nextOutOfStock,
+      actorId: actor?.id,
+      actorName: actor?.name,
+      action: change.action,
+      summary: change.summary,
+      entityType: 'catalog_item',
+      entityId: item.id,
+      meta: {
+        before: {
+          name: item.name,
+          priceMillimes: item.priceMillimes,
+          stockCount: item.stockCount,
+          outOfStock: item.outOfStock,
+          isActive: item.isActive,
+        },
+        after: {
+          name: updated.name,
+          priceMillimes: updated.priceMillimes,
+          stockCount: updated.stockCount,
+          outOfStock: updated.outOfStock,
+          isActive: updated.isActive,
+        },
+      },
     });
   }
   if (stockReachedZero && notifyOnStockDepletion) {
@@ -94,6 +134,14 @@ export const catalogService = {
     if (!input.name.trim()) throw new Error('Category name is required.');
     const category = { ...input, id: makeId('category'), name: input.name.trim() };
     writeData('categories', [...getCategories(), category]);
+    await activityService.log({
+      storeId: category.storeId,
+      action: 'catalog.category_created',
+      summary: `Created category "${category.name}".`,
+      entityType: 'category',
+      entityId: category.id,
+      meta: { after: category },
+    });
     return category;
   },
 
@@ -103,6 +151,14 @@ export const catalogService = {
     if (!category) throw new Error('Category could not be found.');
     const updated = { ...category, ...changes };
     writeData('categories', categories.map((candidate) => candidate.id === categoryId ? updated : candidate));
+    await activityService.log({
+      storeId: category.storeId,
+      action: 'catalog.category_updated',
+      summary: `Updated category "${updated.name}".`,
+      entityType: 'category',
+      entityId: category.id,
+      meta: { before: category, after: updated },
+    });
     return updated;
   },
 
@@ -114,6 +170,14 @@ export const catalogService = {
     }
     const item = { ...input, id: makeId('item'), name: input.name.trim() };
     writeData('catalog-items', [...getItems(), item]);
+    await activityService.log({
+      storeId: item.storeId,
+      action: 'catalog.item_created',
+      summary: `Created item "${item.name}".`,
+      entityType: 'catalog_item',
+      entityId: item.id,
+      meta: { after: item },
+    });
     return item;
   },
 

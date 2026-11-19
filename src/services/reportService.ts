@@ -13,6 +13,8 @@ import { shiftService } from './shiftService';
 import { userService } from './userService';
 import { readData, writeData } from './storage';
 import { seedReports } from './seedData';
+import { activityService } from './activityService';
+import { expenseService } from './expenseService';
 
 const getReports = () => readData('reports', seedReports);
 const todayKey = () => {
@@ -47,13 +49,14 @@ async function summarize(storeId: string, from: number, to: number) {
     const voidedAt = new Date(order.voidedAt ?? order.createdAt).getTime();
     return order.status === 'voided' && voidedAt >= from && voidedAt <= to;
   });
-  const [shifts, categories, catalogItems, staff, allComps, cashMovements] = await Promise.all([
+  const [shifts, categories, catalogItems, staff, allComps, cashMovements, expenses] = await Promise.all([
     shiftService.listShifts(storeId),
     catalogService.listCategories(storeId),
     catalogService.listItems(storeId),
     userService.listUsers(storeId),
     compService.listComps(storeId),
     shiftService.listCashMovements(storeId),
+    expenseService.listForRange(storeId, from, to),
   ]);
   const compRecords = allComps.filter((comp) => {
     const timestamp = new Date(comp.createdAt).getTime();
@@ -141,15 +144,8 @@ async function summarize(storeId: string, from: number, to: number) {
   const allCustomerTransactions = readData<TabRecord[]>('tabs', []).filter((tab) => tab.storeId === storeId);
   const customerTabs: ReportCustomerTabLine[] = customers.map((customer) => {
     const customerOrders = allOrders.filter((order) => order.customerId === customer.id && order.paymentMethod === 'tab');
-    const issued = customerOrders.filter((order) => order.status === 'done')
-      .reduce((sum, order) => sum + order.totalMillimes, 0);
     const transactions = allCustomerTransactions.filter((tab) => tab.customerId === customer.id);
     const orderIds = new Set(customerOrders.map((order) => order.id));
-    const legacyIssued = transactions
-      .filter((tab) => tab.kind === 'issued' && (!tab.orderId || !orderIds.has(tab.orderId)))
-      .reduce((sum, tab) => sum + tab.amountMillimes, 0);
-    const settled = transactions.filter((tab) => tab.kind === 'settled').reduce((sum, tab) => sum + tab.amountMillimes, 0);
-    const reversed = transactions.filter((tab) => tab.kind === 'reversal').reduce((sum, tab) => sum + tab.amountMillimes, 0);
     const periodTransactions = transactions.filter((tab) => {
       const timestamp = new Date(tab.createdAt).getTime();
       return timestamp >= from && timestamp <= to;
@@ -166,16 +162,35 @@ async function summarize(storeId: string, from: number, to: number) {
       periodTransactions
         .filter((tab) => tab.kind === 'reversal')
         .reduce((sum, tab) => sum + tab.amountMillimes, 0);
+    const ordersAtPeriodEnd = customerOrders.filter((order) =>
+      new Date(order.createdAt).getTime() <= to &&
+      !(order.status === 'voided' && new Date(order.voidedAt ?? order.createdAt).getTime() <= to),
+    );
+    const transactionsAtPeriodEnd = transactions.filter((tab) => new Date(tab.createdAt).getTime() <= to);
+    const legacyIssuedAtPeriodEnd = transactionsAtPeriodEnd
+      .filter((tab) => tab.kind === 'issued' && (!tab.orderId || !orderIds.has(tab.orderId)))
+      .reduce((sum, tab) => sum + tab.amountMillimes, 0);
+    const settledAtPeriodEnd = transactionsAtPeriodEnd
+      .filter((tab) => tab.kind === 'settled')
+      .reduce((sum, tab) => sum + tab.amountMillimes, 0);
+    const reversedAtPeriodEnd = transactionsAtPeriodEnd
+      .filter((tab) => tab.kind === 'reversal')
+      .reduce((sum, tab) => sum + tab.amountMillimes, 0);
+    const issuedAtPeriodEnd = ordersAtPeriodEnd.reduce((sum, order) => sum + order.totalMillimes, 0);
     return {
       customerId: customer.id,
       customerName: customer.name,
       issuedMillimes: issuedInPeriod + issuedTransactionMillimes,
       paymentsMillimes: periodPayments,
-      outstandingMillimes: issued + legacyIssued - settled + reversed,
+      outstandingMillimes: issuedAtPeriodEnd + legacyIssuedAtPeriodEnd - settledAtPeriodEnd + reversedAtPeriodEnd,
     };
   }).filter((customer) => customer.issuedMillimes !== 0 || customer.paymentsMillimes !== 0 || customer.outstandingMillimes !== 0);
   const tabsOutstandingMillimes = customerTabs.reduce((total, customer) => total + customer.outstandingMillimes, 0);
+  const receivableMillimes = customerTabs.reduce((total, customer) => total + Math.max(0, customer.outstandingMillimes), 0);
   const salesMillimes = orders.reduce((sum, order) => sum + order.totalMillimes, 0);
+  const salesCollectedMillimes = paymentSplit.cash + paymentSplit.card + paymentSplit.other + tabsSettledMillimes;
+  const expensesMillimes = expenses.reduce((sum, expense) => sum + expense.amountMillimes, 0);
+  const netProfitMillimes = salesCollectedMillimes - expensesMillimes;
   const closedShiftLines = shiftLines.filter((shift) => shift.status !== 'in_progress');
   const cashDifferenceMillimes = closedShiftLines.reduce((sum, shift) => sum + (shift.differenceMillimes ?? 0), 0);
   const cashOuts: ReportCashOutLine[] = cashMovements
@@ -190,6 +205,10 @@ async function summarize(storeId: string, from: number, to: number) {
     }));
   return {
     salesMillimes,
+    salesCollectedMillimes,
+    expensesMillimes,
+    netProfitMillimes,
+    receivableMillimes,
     orderCount: orders.length,
     cashDifferenceMillimes,
     topItems: [...itemTotals.values()].reduce<Record<string, number>>((totals, item) => {
@@ -259,6 +278,10 @@ async function createReport(storeId: string, type: 'X' | 'Z', generatedBy: strin
     businessDate: todayKey(),
     createdAt,
     salesMillimes: summary.salesMillimes,
+    salesCollectedMillimes: summary.salesCollectedMillimes,
+    expensesMillimes: summary.expensesMillimes,
+    netProfitMillimes: summary.netProfitMillimes,
+    receivableMillimes: summary.receivableMillimes,
     orderCount: summary.orderCount,
     cashDifferenceMillimes: summary.cashDifferenceMillimes,
     zNumber,
@@ -285,6 +308,27 @@ async function createReport(storeId: string, type: 'X' | 'Z', generatedBy: strin
     tabsOutstandingMillimes: summary.tabsOutstandingMillimes,
   };
   writeData('reports', [...getReports(), report]);
+  await activityService.log({
+    storeId,
+    action: type === 'X' ? 'report.x' : 'report.z',
+    summary: `Generated ${type} report${report.zNumber ? ` #${report.zNumber}` : ''}.`,
+    entityType: 'report',
+    entityId: report.id,
+    meta: {
+      after: {
+        type: report.type,
+        businessDate: report.businessDate,
+        salesMillimes: report.salesMillimes,
+        salesCollectedMillimes: report.salesCollectedMillimes,
+        expensesMillimes: report.expensesMillimes,
+        netProfitMillimes: report.netProfitMillimes,
+        receivableMillimes: report.receivableMillimes,
+        orderCount: report.orderCount,
+        cashDifferenceMillimes: report.cashDifferenceMillimes,
+        generatedBy: report.generatedBy,
+      },
+    },
+  });
   return report;
 }
 

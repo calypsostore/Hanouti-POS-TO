@@ -2,6 +2,7 @@ import type { PermissionDefinition, PermissionOverrides, PositionRecord, StoreRe
 import { readData, removeData, writeData } from './storage';
 import { seedPositions, seedStores, seedUsers } from './seedData';
 import { hashSecret, verifySecret } from './secretService';
+import { activityService } from './activityService';
 
 const PERMISSIONS: PermissionDefinition[] = [
   { id: 'take_orders', group: 'Orders', label: 'Take orders' },
@@ -109,6 +110,28 @@ function withoutPassword(user: UserRecord): UserSummary {
   return safeUser;
 }
 
+async function logUserMutation(input: {
+  storeId: string;
+  actorId?: string;
+  action: string;
+  summary: string;
+  entityType: string;
+  entityId: string;
+  before?: unknown;
+  after?: unknown;
+}): Promise<void> {
+  if (!input.storeId.trim()) return;
+  await activityService.log({
+    storeId: input.storeId,
+    actorId: input.actorId,
+    action: input.action,
+    summary: input.summary,
+    entityType: input.entityType,
+    entityId: input.entityId,
+    meta: { before: input.before, after: input.after },
+  });
+}
+
 export const userService = {
   async listUsers(storeId?: string): Promise<UserSummary[]> {
     return getUsers().filter((user) => !storeId || user.storeId === storeId).map(withoutPassword);
@@ -130,8 +153,20 @@ export const userService = {
 
   async clearDayClosed(storeId: string): Promise<void> {
     const stores = getStores();
-    if (!stores.some((store) => store.id === storeId)) throw new Error('The store could not be found.');
+    const store = stores.find((candidate) => candidate.id === storeId);
+    if (!store) throw new Error('The store could not be found.');
     saveStores(stores.map((store) => store.id === storeId ? { ...store, dayClosedOn: undefined } : store));
+    if (store.dayClosedOn) {
+      await logUserMutation({
+        storeId,
+        action: 'store.day_reopened',
+        summary: 'Reopened the business day.',
+        entityType: 'store',
+        entityId: store.id,
+        before: { dayClosedOn: store.dayClosedOn },
+        after: { dayClosedOn: undefined },
+      });
+    }
   },
 
   async createOwnerAccount(input: { name: string; email: string; storeName: string; storeCode: string }): Promise<{ owner: UserSummary; store: StoreRecord; temporaryPassword: string }> {
@@ -168,6 +203,15 @@ export const userService = {
     };
     saveUsers([...users, owner]);
     saveStores([...getStores(), store]);
+    await logUserMutation({
+      storeId: store.id,
+      actorId: undefined,
+      action: 'store.created',
+      summary: `Created store "${store.name}" and its owner account.`,
+      entityType: 'store',
+      entityId: store.id,
+      after: { store: { id: store.id, name: store.name, code: store.code }, owner: withoutPassword(owner) },
+    });
     const ownerSummary = await this.getUser(owner.id);
     if (!ownerSummary) throw new Error('The new owner account could not be loaded.');
     return { owner: ownerSummary, store, temporaryPassword };
@@ -234,6 +278,14 @@ export const userService = {
       createdAt: new Date().toISOString(),
     };
     saveUsers([...users, staff]);
+    await logUserMutation({
+      storeId: input.storeId,
+      action: 'staff.created',
+      summary: `Created staff account "${staff.name}".`,
+      entityType: 'staff',
+      entityId: staff.id,
+      after: withoutPassword(staff),
+    });
     const staffSummary = await this.getUser(staff.id);
     if (!staffSummary) throw new Error('The new staff account could not be loaded.');
     return { staff: staffSummary, temporaryPassword };
@@ -251,6 +303,15 @@ export const userService = {
       mustChangePassword: true,
     };
     saveUsers(users.map((candidate) => candidate.id === userId ? updated : candidate));
+    await logUserMutation({
+      storeId: staff.storeId ?? '',
+      action: 'staff.password_reset',
+      summary: `Reset the password for "${staff.name}".`,
+      entityType: 'staff',
+      entityId: staff.id,
+      before: { mustChangePassword: staff.mustChangePassword },
+      after: { mustChangePassword: true },
+    });
     return temporaryPassword;
   },
 
@@ -266,6 +327,16 @@ export const userService = {
     const pinHash = await hashSecret(pin);
     saveUsers(users.map((candidate) => candidate.id === staffId ? { ...candidate, pinHash } : candidate));
     removeData(`staff-pin-attempts:${staffId}`);
+    await logUserMutation({
+      storeId: store.id,
+      actorId: owner.id,
+      action: 'staff.pin_reset',
+      summary: `Reset the personal PIN for "${staff.name}".`,
+      entityType: 'staff',
+      entityId: staff.id,
+      before: { hasPin: Boolean(staff.pinHash) },
+      after: { hasPin: true },
+    });
   },
 
   async forceLogoutStaff(userId: string): Promise<void> {
@@ -274,6 +345,17 @@ export const userService = {
     if (!staff) throw new Error('Staff account could not be found.');
     const updated = { ...staff, sessionVersion: (staff.sessionVersion ?? 0) + 1 };
     saveUsers(users.map((candidate) => candidate.id === userId ? updated : candidate));
+    if (staff.storeId) {
+      await logUserMutation({
+        storeId: staff.storeId,
+        action: 'staff.force_logged_out',
+        summary: `Force-logged out "${staff.name}".`,
+        entityType: 'staff',
+        entityId: staff.id,
+        before: { sessionVersion: staff.sessionVersion ?? 0 },
+        after: { sessionVersion: updated.sessionVersion },
+      });
+    }
   },
 
   async updateStaff(userId: string, changes: { name?: string; phone?: string; notes?: string; positionId?: string; isActive?: boolean }): Promise<UserSummary> {
@@ -293,6 +375,15 @@ export const userService = {
     };
     saveUsers(users.map((candidate) => candidate.id === userId ? updated : candidate));
     if (changes.positionId !== undefined) notifyPermissionsChanged();
+    await logUserMutation({
+      storeId: user.storeId ?? '',
+      action: changes.positionId !== undefined ? 'staff.permission_changed' : 'staff.updated',
+      summary: `Updated staff account "${updated.name}".`,
+      entityType: 'staff',
+      entityId: user.id,
+      before: { name: user.name, phone: user.phone, notes: user.notes, positionId: user.positionId, isActive: user.isActive },
+      after: { name: updated.name, phone: updated.phone, notes: updated.notes, positionId: updated.positionId, isActive: updated.isActive },
+    });
     const updatedUser = await this.getUser(userId);
     if (!updatedUser) throw new Error('Updated staff account could not be loaded.');
     return updatedUser;
@@ -334,6 +425,15 @@ export const userService = {
     };
     saveUsers(users.map((candidate) => candidate.id === userId ? updated : candidate));
     notifyPermissionsChanged();
+    await logUserMutation({
+      storeId: user.storeId ?? '',
+      action: 'staff.permission_changed',
+      summary: `Changed permission overrides for "${user.name}".`,
+      entityType: 'staff',
+      entityId: user.id,
+      before: user.permissionOverrides,
+      after: updated.permissionOverrides,
+    });
     return withoutPassword(updated);
   },
 
@@ -357,6 +457,14 @@ export const userService = {
       maxStaffDrinkQuantityPerShift: compRules.maxStaffDrinkQuantityPerShift ?? 0,
     };
     savePositions([...getPositions(), position]);
+    await logUserMutation({
+      storeId,
+      action: 'position.created',
+      summary: `Created staff position "${position.name}".`,
+      entityType: 'position',
+      entityId: position.id,
+      after: position,
+    });
     return position;
   },
 
@@ -370,6 +478,15 @@ export const userService = {
     const updated = { ...position, ...changes, name: changes.name?.trim() ?? position.name };
     savePositions(positions.map((candidate) => candidate.id === positionId ? updated : candidate));
     notifyPermissionsChanged();
+    await logUserMutation({
+      storeId: position.storeId,
+      action: 'staff.permission_changed',
+      summary: `Changed permissions for position "${updated.name}".`,
+      entityType: 'position',
+      entityId: position.id,
+      before: position,
+      after: updated,
+    });
     return updated;
   },
 
@@ -394,6 +511,15 @@ export const userService = {
     }
     savePositions(positions.filter((candidate) => candidate.id !== positionId));
     notifyPermissionsChanged();
+    await logUserMutation({
+      storeId: position.storeId,
+      action: 'position.deleted',
+      summary: `Deleted staff position "${position.name}".`,
+      entityType: 'position',
+      entityId: position.id,
+      before: position,
+      after: { replacementPositionId, reassignedStaffIds: assignedStaff.map((staff) => staff.id) },
+    });
   },
 
   async updateStorePin(storeId: string, pin: string): Promise<StoreRecord> {
@@ -403,6 +529,15 @@ export const userService = {
     if (!store) throw new Error('The store could not be found.');
     const updated = { ...store, adminPin: undefined, adminPinHash: await hashSecret(pin), pinMustChange: false };
     saveStores(stores.map((candidate) => candidate.id === storeId ? updated : candidate));
+    await logUserMutation({
+      storeId,
+      action: 'store.pin_changed',
+      summary: 'Changed the store Admin PIN.',
+      entityType: 'store',
+      entityId: store.id,
+      before: { pinMustChange: store.pinMustChange },
+      after: { pinMustChange: false },
+    });
     return updated;
   },
 
@@ -436,6 +571,16 @@ export const userService = {
     }
     const updated = { ...store, ...changes, name: changes.name?.trim() ?? store.name };
     saveStores(stores.map((candidate) => candidate.id === storeId ? updated : candidate));
+    await logUserMutation({
+      storeId,
+      actorId: ownerId,
+      action: 'store.settings_changed',
+      summary: 'Updated store information.',
+      entityType: 'store',
+      entityId: store.id,
+      before: { name: store.name, dailySalesTargetMillimes: store.dailySalesTargetMillimes },
+      after: { name: updated.name, dailySalesTargetMillimes: updated.dailySalesTargetMillimes },
+    });
     return updated;
   },
 
@@ -447,6 +592,16 @@ export const userService = {
     }
     const updated = { ...store, allowCustomerCreditBalance: allowed };
     saveStores(getStores().map((candidate) => candidate.id === storeId ? updated : candidate));
+    await logUserMutation({
+      storeId,
+      actorId: ownerId,
+      action: 'store.settings_changed',
+      summary: 'Updated customer credit balance settings.',
+      entityType: 'store',
+      entityId: store.id,
+      before: { allowCustomerCreditBalance: store.allowCustomerCreditBalance },
+      after: { allowCustomerCreditBalance: updated.allowCustomerCreditBalance },
+    });
     return updated;
   },
 
@@ -463,6 +618,16 @@ export const userService = {
     }
     const updated = { ...store, ...changes };
     saveStores(stores.map((candidate) => candidate.id === storeId ? updated : candidate));
+    await logUserMutation({
+      storeId,
+      actorId: ownerId,
+      action: 'store.settings_changed',
+      summary: 'Updated accepted payment methods.',
+      entityType: 'store',
+      entityId: store.id,
+      before: { allowCardPayments: store.allowCardPayments, allowOtherPayments: store.allowOtherPayments },
+      after: { allowCardPayments: updated.allowCardPayments, allowOtherPayments: updated.allowOtherPayments },
+    });
     return updated;
   },
 
@@ -478,6 +643,16 @@ export const userService = {
     }
     const updated = { ...store, staffAutoLockMinutes: minutes };
     saveStores(stores.map((candidate) => candidate.id === storeId ? updated : candidate));
+    await logUserMutation({
+      storeId,
+      actorId: ownerId,
+      action: 'store.settings_changed',
+      summary: 'Updated staff auto-lock timeout.',
+      entityType: 'store',
+      entityId: store.id,
+      before: { staffAutoLockMinutes: store.staffAutoLockMinutes },
+      after: { staffAutoLockMinutes: updated.staffAutoLockMinutes },
+    });
     return updated;
   },
 
@@ -493,6 +668,16 @@ export const userService = {
     }
     const updated = { ...store, cashOutAlertThresholdMillimes: thresholdMillimes };
     saveStores(stores.map((candidate) => candidate.id === storeId ? updated : candidate));
+    await logUserMutation({
+      storeId,
+      actorId: ownerId,
+      action: 'store.settings_changed',
+      summary: 'Updated the cash-out alert threshold.',
+      entityType: 'store',
+      entityId: store.id,
+      before: { cashOutAlertThresholdMillimes: store.cashOutAlertThresholdMillimes },
+      after: { cashOutAlertThresholdMillimes: updated.cashOutAlertThresholdMillimes },
+    });
     return updated;
   },
 
@@ -502,6 +687,15 @@ export const userService = {
     if (!store) throw new Error('The store could not be found.');
     const updated = { ...store, isActive };
     saveStores(stores.map((candidate) => candidate.id === storeId ? updated : candidate));
+    await logUserMutation({
+      storeId,
+      action: 'store.status_changed',
+      summary: `${isActive ? 'Activated' : 'Suspended'} store "${store.name}".`,
+      entityType: 'store',
+      entityId: store.id,
+      before: { isActive: store.isActive },
+      after: { isActive: updated.isActive },
+    });
     return updated;
   },
 
@@ -511,6 +705,17 @@ export const userService = {
     if (!owner) throw new Error('Owner account could not be found.');
     const updated = { ...owner, isActive };
     saveUsers(users.map((candidate) => candidate.id === userId ? updated : candidate));
+    if (owner.storeId) {
+      await logUserMutation({
+        storeId: owner.storeId,
+        action: 'owner.status_changed',
+        summary: `${isActive ? 'Activated' : 'Suspended'} owner "${owner.name}".`,
+        entityType: 'owner',
+        entityId: owner.id,
+        before: { isActive: owner.isActive },
+        after: { isActive: updated.isActive },
+      });
+    }
     const updatedUser = await this.getUser(userId);
     if (!updatedUser) throw new Error('Updated owner account could not be loaded.');
     return updatedUser;

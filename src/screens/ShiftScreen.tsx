@@ -48,7 +48,7 @@ const cashMovementReasons: { reason: CashMovementReason; label: string }[] = [
   { reason: 'other', label: 'Other' },
 ];
 
-function ShiftContent({ ownerMode, ownerView }: { ownerMode: boolean; ownerView?: 'expenses' | 'suppliers' }) {
+function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const user = useAuthStore((state) => state.user);
   const storeId = user?.storeId ?? '';
   const [shifts, setShifts] = useState<ShiftRecord[]>([]);
@@ -234,10 +234,8 @@ function ShiftContent({ ownerMode, ownerView }: { ownerMode: boolean; ownerView?
   const openCount = shifts.filter((shift) => shift.status === 'open').length;
   const enteredMovementMillimes = Math.round(Number(movementAmount.replace(',', '.')) * 1000);
   const ownBreakdown = ownOpenShift ? breakdownsByShift[ownOpenShift.id] ?? emptyShiftBreakdown : emptyShiftBreakdown;
-  const pageTitle = ownerView ? t(`nav.${ownerView}`) : t('shift.title');
-  const movementsForShift = (shiftId: string) => cashMovements.filter((movement) =>
-    movement.shiftId === shiftId && (!ownerView || movement.reason === (ownerView === 'expenses' ? 'expense' : 'supplier')),
-  );
+  const pageTitle = t('shift.title');
+  const movementsForShift = (shiftId: string) => cashMovements.filter((movement) => movement.shiftId === shiftId);
   return (
     <>
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -633,13 +631,13 @@ function CashMovementList({ movements, staffNames }: {
   );
 }
 
-export function ShiftScreen({ ownerMode = false, ownerView }: { ownerMode?: boolean; ownerView?: 'expenses' | 'suppliers' }) {
+export function ShiftScreen({ ownerMode = false }: { ownerMode?: boolean }) {
   const storeId = useAuthStore((state) => state.user?.storeId);
   const [storeName, setStoreName] = useState<string>();
   useEffect(() => {
     if (storeId) void userService.getStore(storeId).then((store) => setStoreName(store?.name));
   }, [storeId]);
-  const content = <ShiftContent ownerMode={ownerMode} ownerView={ownerView} />;
-  if (ownerMode) return <WorkspaceLayout title={ownerView ? t(`nav.${ownerView}`) : t('shift.title')} storeName={storeName} links={ownerWorkspaceLinks}>{content}</WorkspaceLayout>;
+  const content = <ShiftContent ownerMode={ownerMode} />;
+  if (ownerMode) return <WorkspaceLayout title={t('shift.title')} storeName={storeName} links={ownerWorkspaceLinks}>{content}</WorkspaceLayout>;
   return <div className="min-h-screen bg-surface px-4 pb-24 pt-5"><div className="mx-auto max-w-3xl">{content}</div><BottomNav /></div>;
 }

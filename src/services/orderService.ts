@@ -4,6 +4,7 @@ import { userService } from './userService';
 import { catalogService } from './catalogService';
 import { customerService } from './customerService';
 import { notificationService } from './notificationService';
+import { activityService } from './activityService';
 import { readData, writeData } from './storage';
 import { seedOrders } from './seedData';
 
@@ -216,6 +217,25 @@ export const orderService = {
       }]);
     }
     writeData('order-counters', { ...counters, [input.storeId]: { businessDate: dateKey, nextNumber: number + 1 } });
+    await activityService.log({
+      storeId: order.storeId,
+      actorId: order.staffId,
+      actorName: staff?.name,
+      action: 'order.created',
+      summary: `Created order #${order.number} for ${order.totalMillimes} millimes.`,
+      entityType: 'order',
+      entityId: order.id,
+      meta: {
+        after: {
+          number: order.number,
+          paymentMethod: order.paymentMethod,
+          totalMillimes: order.totalMillimes,
+          customerId: order.customerId,
+          items: order.items.map(({ itemId, name, quantity, unitPriceMillimes, lineTotalMillimes }) =>
+            ({ itemId, name, quantity, unitPriceMillimes, lineTotalMillimes })),
+        },
+      },
+    });
     const ownerNotifications: Promise<void>[] = stockDepletedItems.map((item) =>
       notificationService.notifyStockDepleted(input.storeId, item.id, item.name),
     );
@@ -247,6 +267,17 @@ export const orderService = {
     if (!cleanedReason) throw new Error('A reason is required to request an order void.');
     const updated = { ...order, status: 'pending_void' as const, voidRequestedAt: new Date().toISOString(), voidReason: cleanedReason };
     saveOrders(orders.map((candidate) => candidate.id === orderId ? updated : candidate));
+    const actor = await userService.getUser(staffId);
+    await activityService.log({
+      storeId: order.storeId,
+      actorId: staffId,
+      actorName: actor?.name,
+      action: 'order.void_requested',
+      summary: `Requested a void for order #${order.number}. ${cleanedReason}`,
+      entityType: 'order',
+      entityId: order.id,
+      meta: { before: { status: order.status }, after: { status: updated.status, voidReason: cleanedReason } },
+    });
     return updated;
   },
 
@@ -283,12 +314,22 @@ export const orderService = {
       voidReason: cleanedReason,
     };
     saveOrders(orders.map((candidate) => candidate.id === orderId ? updated : candidate));
+    await activityService.log({
+      storeId: order.storeId,
+      actorId,
+      action: 'order.voided',
+      summary: `Voided order #${order.number}. ${cleanedReason}`,
+      entityType: 'order',
+      entityId: order.id,
+      meta: { before: { status: order.status }, after: { status: updated.status, voidReason: cleanedReason } },
+    });
     if (order.paymentMethod === 'cash') {
       await shiftService.recordClosedShiftVoidAdjustment({
         shiftId: order.shiftId,
         orderId: order.id,
         orderNumber: order.number,
         amountMillimes: order.totalMillimes,
+        actorId,
       });
     }
     await restoreOrderStock(order, actorId);
@@ -309,6 +350,17 @@ export const orderService = {
       : { ...order, status: 'done', voidRequestedAt: undefined, voidReason: undefined };
     if (decision === 'approve' && !updated.voidReason) throw new Error('A reason is required to void an order.');
     saveOrders(orders.map((candidate) => candidate.id === orderId ? updated : candidate));
+    await activityService.log({
+      storeId: order.storeId,
+      actorId: ownerId,
+      action: decision === 'approve' ? 'order.voided' : 'order.void_rejected',
+      summary: decision === 'approve'
+        ? `Approved void for order #${order.number}. ${cleanedReason}`
+        : `Rejected void request for order #${order.number}.`,
+      entityType: 'order',
+      entityId: order.id,
+      meta: { before: { status: order.status, voidReason: order.voidReason }, after: { status: updated.status, voidReason: updated.voidReason } },
+    });
     if (decision === 'approve') {
       if (order.paymentMethod === 'cash') {
         await shiftService.recordClosedShiftVoidAdjustment({
@@ -316,6 +368,7 @@ export const orderService = {
           orderId: order.id,
           orderNumber: order.number,
           amountMillimes: order.totalMillimes,
+          actorId: ownerId,
         });
       }
       await restoreOrderStock(order, ownerId);

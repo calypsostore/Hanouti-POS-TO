@@ -3,6 +3,7 @@ import { catalogService } from './catalogService';
 import { readData, writeData } from './storage';
 import { shiftService } from './shiftService';
 import { userService } from './userService';
+import { activityService } from './activityService';
 
 const REASONS: CompReason[] = ['dropped', 'staff_drink', 'free_customer', 'remake', 'other'];
 const getComps = () => readData<CompRecord[]>('comps', []);
@@ -140,6 +141,15 @@ export const compService = {
         { cause: saveError },
       );
     }
+    await activityService.log({
+      storeId: store.id,
+      actorId: staff.id,
+      action: 'comp.created',
+      summary: `Comped ${input.quantity} × ${item.name} (${input.reason}).`,
+      entityType: 'comp',
+      entityId: record.id,
+      meta: { after: record },
+    });
     return record;
   },
 };

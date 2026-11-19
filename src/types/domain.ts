@@ -182,6 +182,36 @@ export interface CashMovementRecord {
   createdAt: string;
 }
 
+export interface SupplierRecord {
+  id: string;
+  storeId: string;
+  name: string;
+  phone?: string;
+  notes?: string;
+}
+
+export type ExpenseCategory = 'rent' | 'electricity' | 'water' | 'supplier' | 'salary' | 'other';
+
+export interface ExpenseRecord {
+  id: string;
+  storeId: string;
+  category: ExpenseCategory;
+  supplierId?: string;
+  amountMillimes: number;
+  paidMillimes: number;
+  date: string;
+  note?: string;
+  createdBy: string;
+}
+
+export interface SupplierPaymentRecord {
+  id: string;
+  supplierId: string;
+  expenseId?: string;
+  amountMillimes: number;
+  date: string;
+}
+
 export interface ScheduleShiftRecord {
   id: string;
   storeId: string;
@@ -298,6 +328,10 @@ export interface ReportRecord {
   businessDate: string;
   createdAt: string;
   salesMillimes: number;
+  salesCollectedMillimes?: number;
+  expensesMillimes?: number;
+  netProfitMillimes?: number;
+  receivableMillimes?: number;
   orderCount: number;
   cashDifferenceMillimes: number;
   zNumber?: number;
@@ -352,31 +386,23 @@ export interface TabRecord {
   createdAt: string;
 }
 
-interface ActivityLogBase {
+export interface ActivityRecord {
   id: string;
   storeId: string;
   actorId: string;
+  actorName: string;
+  actorRole: string;
+  action: string;
+  summary: string;
+  entityType: string;
+  entityId: string;
+  meta: {
+    before?: unknown;
+    after?: unknown;
+    [key: string]: unknown;
+  };
   createdAt: string;
 }
-
-export type ActivityLogRecord = (ActivityLogBase & {
-  action: 'customer_payment_reversed';
-  targetType: 'customer_payment';
-  targetId: string;
-  customerId: string;
-  amountMillimes: number;
-  reason: string;
-}) | (ActivityLogBase & {
-  action: 'catalog_item_availability_changed';
-  targetType: 'catalog_item';
-  targetId: string;
-  itemName: string;
-  outOfStock: boolean;
-}) | (ActivityLogBase & {
-  action: 'staff_session_locked' | 'staff_session_unlocked';
-  targetType: 'staff_session';
-  targetId: string;
-});
 
 export interface AuthSession {
   userId: string;

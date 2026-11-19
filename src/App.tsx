@@ -29,6 +29,8 @@ const OwnerVoidRequestsScreen = lazy(() => import('./screens/OwnerVoidRequestsSc
 const OwnerReportsScreen = lazy(() => import('./screens/OwnerReportsScreen').then((module) => ({ default: module.OwnerReportsScreen })));
 const OwnerInventoryScreen = lazy(() => import('./screens/OwnerInventoryScreen').then((module) => ({ default: module.OwnerInventoryScreen })));
 const OwnerWasteScreen = lazy(() => import('./screens/OwnerWasteScreen').then((module) => ({ default: module.OwnerWasteScreen })));
+const OwnerExpensesScreen = lazy(() => import('./screens/OwnerFinancialScreens').then((module) => ({ default: module.OwnerExpensesScreen })));
+const OwnerSuppliersScreen = lazy(() => import('./screens/OwnerFinancialScreens').then((module) => ({ default: module.OwnerSuppliersScreen })));
 const OwnerActivityLogScreen = lazy(() => import('./screens/OwnerUtilityScreens').then((module) => ({ default: module.OwnerActivityLogScreen })));
 const OwnerNotificationsScreen = lazy(() => import('./screens/OwnerUtilityScreens').then((module) => ({ default: module.OwnerNotificationsScreen })));
 const CustomersScreen = lazy(() => import('./screens/CustomersScreen').then((module) => ({ default: module.CustomersScreen })));
@@ -304,8 +306,8 @@ export default function App() {
           <Route path="/owner/reports" element={<ProtectedRoute roles={['owner']}><OwnerReportsScreen /></ProtectedRoute>} />
           <Route path="/owner/inventory" element={<ProtectedRoute roles={['owner']}><OwnerInventoryScreen /></ProtectedRoute>} />
           <Route path="/owner/waste" element={<ProtectedRoute roles={['owner']}><OwnerWasteScreen /></ProtectedRoute>} />
-          <Route path="/owner/expenses" element={<ProtectedRoute roles={['owner']}><ShiftScreen ownerMode ownerView="expenses" /></ProtectedRoute>} />
-          <Route path="/owner/suppliers" element={<ProtectedRoute roles={['owner']}><ShiftScreen ownerMode ownerView="suppliers" /></ProtectedRoute>} />
+          <Route path="/owner/expenses" element={<ProtectedRoute roles={['owner']}><OwnerExpensesScreen /></ProtectedRoute>} />
+          <Route path="/owner/suppliers" element={<ProtectedRoute roles={['owner']}><OwnerSuppliersScreen /></ProtectedRoute>} />
           <Route path="/owner/activity" element={<ProtectedRoute roles={['owner']}><OwnerActivityLogScreen /></ProtectedRoute>} />
           <Route path="/owner/notifications" element={<ProtectedRoute roles={['owner']}><OwnerNotificationsScreen /></ProtectedRoute>} />
           <Route path="/owner/settings" element={<ProtectedRoute roles={['owner']}><SettingsScreen /></ProtectedRoute>} />

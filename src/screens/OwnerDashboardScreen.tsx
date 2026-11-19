@@ -34,6 +34,10 @@ type DashboardSummary = Awaited<ReturnType<typeof reportService.getDashboard>>;
 
 const emptySummary: DashboardSummary = {
   salesMillimes: 0,
+  salesCollectedMillimes: 0,
+  expensesMillimes: 0,
+  netProfitMillimes: 0,
+  receivableMillimes: 0,
   orderCount: 0,
   cashDifferenceMillimes: 0,
   topItems: {},
@@ -257,7 +261,11 @@ function OwnerDashboardContent() {
       </article>
 
       <section aria-label="Period summary" className="mt-4 flex flex-col gap-3">
-        <SummaryCard icon="payments" label={`Sales · ${t(periodLabels[period])}`} value={`${formatTnd(summary.salesMillimes / 1000)} DT`} tone="primary" />
+        <SummaryCard icon="payments" label={`${t('finance.sales')} · ${t(periodLabels[period])}`} value={`${formatTnd(summary.salesCollectedMillimes / 1000)} DT`} tone="primary" />
+        <p className="-mt-2 px-1 font-body text-body-xs text-on-surface-variant">{t('finance.salesHelp')} {t('finance.receivableHelp')}</p>
+        <SummaryCard icon="request_quote" label={`${t('finance.expenses')} · ${t(periodLabels[period])}`} value={`${formatTnd(summary.expensesMillimes / 1000)} DT`} tone="warning" />
+        <SummaryCard icon="account_balance" label={`${t('finance.netProfit')} · ${t(periodLabels[period])}`} value={`${formatTnd(summary.netProfitMillimes / 1000)} DT`} tone={summary.netProfitMillimes < 0 ? 'error' : 'success'} />
+        <SummaryCard icon="account_balance_wallet" label={t('finance.receivable')} value={`${formatTnd(summary.receivableMillimes / 1000)} DT`} tone="warning" />
         <SummaryCard icon="receipt_long" label={`Orders · ${t(periodLabels[period])}`} value={String(summary.orderCount)} tone="success" />
         <SummaryCard icon="price_change" label={`${t('owner.cashDifferences')} · ${t(periodLabels[period])}`} value={formatSignedAmount(summary.cashDifferenceMillimes)} tone={summary.cashDifferenceMillimes === 0 ? 'success' : 'warning'} />
       </section>

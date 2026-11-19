@@ -4,6 +4,7 @@ import { seedShiftsForStore } from './seedData';
 import { userService } from './userService';
 import { orderService } from './orderService';
 import { notificationService } from './notificationService';
+import { activityService } from './activityService';
 
 const getShifts = () => readData('shifts', seedShiftsForStore);
 const getCashMovements = () => readData<CashMovementRecord[]>('cash-movements', []);
@@ -100,6 +101,15 @@ export const shiftService = {
       createdAt: new Date().toISOString(),
     };
     writeData('cash-movements', [...getCashMovements(), movement]);
+    await activityService.log({
+      storeId: store.id,
+      actorId: actor.id,
+      action: movement.kind === 'in' ? 'cash.in' : 'cash.out',
+      summary: `Recorded cash ${movement.kind} of ${movement.amountMillimes} millimes (${movement.reason}).`,
+      entityType: 'cash_movement',
+      entityId: movement.id,
+      meta: { after: movement },
+    });
     if (movement.kind === 'out') {
       try {
         await notificationService.notifyCashOutAboveThreshold(movement, actor.name);
@@ -124,6 +134,17 @@ export const shiftService = {
       openedAt: new Date().toISOString(),
     };
     saveShifts([...getShifts(), shift]);
+    const actor = await userService.getUser(staffId);
+    await activityService.log({
+      storeId,
+      actorId: staffId,
+      actorName: actor?.name,
+      action: 'shift.opened',
+      summary: `${actor?.name ?? 'Staff member'} opened a shift with ${startingCashMillimes} millimes starting cash.`,
+      entityType: 'shift',
+      entityId: shift.id,
+      meta: { after: shift },
+    });
     if (store.dayClosedOn === todayKey()) await userService.clearDayClosed(storeId);
     return shift;
   },
@@ -146,6 +167,17 @@ export const shiftService = {
       closedAt: new Date().toISOString(),
     };
     saveShifts(shifts.map((candidate) => candidate.id === shiftId ? updated : candidate));
+    const actor = await userService.getUser(shift.staffId);
+    await activityService.log({
+      storeId: shift.storeId,
+      actorId: shift.staffId,
+      actorName: actor?.name,
+      action: 'shift.closed',
+      summary: `Closed shift with a cash difference of ${differenceMillimes} millimes.`,
+      entityType: 'shift',
+      entityId: shift.id,
+      meta: { before: shift, after: updated },
+    });
     return updated;
   },
 
@@ -171,10 +203,19 @@ export const shiftService = {
       closedByUserId: ownerId,
     };
     saveShifts(shifts.map((candidate) => candidate.id === shiftId ? updated : candidate));
+    await activityService.log({
+      storeId: shift.storeId,
+      actorId: ownerId,
+      action: 'shift.force_closed',
+      summary: `Force-closed ${shift.staffId}'s shift with a cash difference of ${differenceMillimes} millimes.`,
+      entityType: 'shift',
+      entityId: shift.id,
+      meta: { before: shift, after: updated },
+    });
     return updated;
   },
 
-  async recordClosedShiftVoidAdjustment(input: { shiftId: string; orderId: string; orderNumber: number; amountMillimes: number }): Promise<void> {
+  async recordClosedShiftVoidAdjustment(input: { shiftId: string; orderId: string; orderNumber: number; amountMillimes: number; actorId?: string }): Promise<void> {
     if (!Number.isInteger(input.amountMillimes) || input.amountMillimes <= 0) throw new Error('Void adjustment must be a positive amount in millimes.');
     const shifts = getShifts();
     const shift = shifts.find((candidate) => candidate.id === input.shiftId && candidate.status === 'closed');
@@ -185,9 +226,19 @@ export const shiftService = {
       amountMillimes: -input.amountMillimes,
       createdAt: new Date().toISOString(),
     };
+    const updatedShift = { ...shift, voidAdjustments: [...(shift.voidAdjustments ?? []), adjustment] };
     saveShifts(shifts.map((candidate) => candidate.id === input.shiftId
-      ? { ...candidate, voidAdjustments: [...(candidate.voidAdjustments ?? []), adjustment] }
+      ? updatedShift
       : candidate));
+    await activityService.log({
+      storeId: shift.storeId,
+      actorId: input.actorId,
+      action: 'shift.void_adjustment',
+      summary: `Applied a void adjustment for order #${input.orderNumber}.`,
+      entityType: 'shift',
+      entityId: shift.id,
+      meta: { before: shift.voidAdjustments ?? [], after: updatedShift.voidAdjustments },
+    });
   },
 
   async getShift(shiftId: string): Promise<ShiftRecord | undefined> {

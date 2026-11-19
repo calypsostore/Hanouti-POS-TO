@@ -2,7 +2,7 @@ import type { AuthSession, UserRecord, UserSummary } from '../types/domain';
 import { readData, removeData, writeData } from './storage';
 import { seedStores, seedUsers } from './seedData';
 import { hashSecret, verifySecret } from './secretService';
-import { activityLogService } from './activityLogService';
+import { activityService } from './activityService';
 
 const USERS_KEY = 'users';
 const SESSION_KEY = 'auth-session';
@@ -73,6 +73,16 @@ export const authService = {
     writeData(SESSION_KEY, session);
     clearSessionStorageLock();
     removeData(PIN_ATTEMPTS_PREFIX + user.id);
+    if (user.storeId) {
+      await activityService.log({
+        storeId: user.storeId,
+        actorId: user.id,
+        action: 'login',
+        summary: `${user.name} signed in.`,
+        entityType: 'session',
+        entityId: user.id,
+      });
+    }
     return withoutPassword(user);
   },
 
@@ -104,12 +114,14 @@ export const authService = {
     if (await this.isSessionLocked()) return;
     if (typeof window !== 'undefined') window.sessionStorage.setItem(SESSION_LOCK_KEY, user.id);
     writeData(SESSION_KEY, { ...session, locked: true });
-    await activityLogService.recordStaffSessionChange({
-      action: 'staff_session_locked',
-      targetType: 'staff_session',
-      targetId: user.id,
+    await activityService.log({
       actorId: user.id,
       storeId: user.storeId,
+      action: 'lock.locked',
+      summary: `${user.name}'s session was locked.`,
+      entityType: 'session',
+      entityId: user.id,
+      meta: { before: { locked: false }, after: { locked: true } },
     });
   },
 
@@ -128,6 +140,17 @@ export const authService = {
     const pinHash = await hashSecret(pin);
     saveUsers(users.map((candidate) => candidate.id === userId ? { ...candidate, pinHash } : candidate));
     removeData(PIN_ATTEMPTS_PREFIX + userId);
+    if (user.storeId) {
+      await activityService.log({
+        storeId: user.storeId,
+        actorId: user.id,
+        action: 'staff.pin_set',
+        summary: `${user.name} set a personal PIN.`,
+        entityType: 'staff',
+        entityId: user.id,
+        meta: { before: { hasPin: Boolean(user.pinHash) }, after: { hasPin: true } },
+      });
+    }
   },
 
   async unlockCurrentSessionWithPin(pin: string): Promise<UserSummary> {
@@ -174,6 +197,17 @@ export const authService = {
     if (!user.mustChangePassword) throw new Error('The account is not awaiting a first password change.');
     const updatedUser = { ...user, password: undefined, passwordHash: await hashSecret(newPassword), mustChangePassword: false };
     saveUsers(users.map((candidate) => candidate.id === userId ? updatedUser : candidate));
+    if (user.storeId) {
+      await activityService.log({
+        storeId: user.storeId,
+        actorId: user.id,
+        action: 'staff.password_changed',
+        summary: `${user.name} set an initial password.`,
+        entityType: 'staff',
+        entityId: user.id,
+        meta: { before: { mustChangePassword: user.mustChangePassword }, after: { mustChangePassword: false } },
+      });
+    }
     return withoutPassword(updatedUser);
   },
 
@@ -184,22 +218,48 @@ export const authService = {
     if (!user || !(await verifySecret(user.passwordHash ?? user.password, currentPassword)).valid) throw new Error('Current password is incorrect.');
     const passwordHash = await hashSecret(newPassword);
     saveUsers(users.map((candidate) => candidate.id === userId ? { ...candidate, password: undefined, passwordHash } : candidate));
+    if (user.storeId) {
+      await activityService.log({
+        storeId: user.storeId,
+        actorId: user.id,
+        action: 'staff.password_changed',
+        summary: `${user.name} changed their password.`,
+        entityType: user.role,
+        entityId: user.id,
+      });
+    }
   },
 
   async logout(): Promise<void> {
+    const session = readData<AuthSession | null>(SESSION_KEY, null);
+    const user = session ? getUsers().find((candidate) => candidate.id === session.userId) : undefined;
+    if (user?.storeId) {
+      await activityService.log({
+        storeId: user.storeId,
+        actorId: user.id,
+        action: 'logout',
+        summary: `${user.name} signed out.`,
+        entityType: 'session',
+        entityId: user.id,
+      });
+    }
     writeData<AuthSession | null>(SESSION_KEY, null);
     clearSessionStorageLock();
   },
 
   async unlockSession(session: AuthSession, user: UserRecord): Promise<void> {
-    await activityLogService.recordStaffSessionChange({
-      action: 'staff_session_unlocked',
-      targetType: 'staff_session',
-      targetId: user.id,
-      actorId: user.id,
-      storeId: user.storeId ?? '',
-    });
     clearSessionStorageLock();
     writeData(SESSION_KEY, { ...session, locked: false });
+    if (user.storeId) {
+      await activityService.log({
+        actorId: user.id,
+        storeId: user.storeId,
+        action: 'lock.unlocked',
+        summary: `${user.name}'s session was unlocked.`,
+        entityType: 'session',
+        entityId: user.id,
+        meta: { before: { locked: true }, after: { locked: false } },
+      });
+    }
   },
 };

@@ -4,7 +4,7 @@ import { MaterialIcon } from '../components/MaterialIcon';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
-import { t } from '../i18n/translations';
+import { t, type TranslationKey } from '../i18n/translations';
 import { formatTnd } from '../lib/format';
 import { reportService } from '../services/reportService';
 import { shiftService } from '../services/shiftService';
@@ -14,8 +14,16 @@ import type { ReportRecord, ShiftRecord, StoreRecord } from '../types/domain';
 import { ReportView } from '../components/ReportView';
 
 type DashboardSummary = Awaited<ReturnType<typeof reportService.getDashboard>>;
+type Period = 'day' | 'week' | 'month' | 'year';
+const periodLabels: Record<Period, TranslationKey> = {
+  day: 'owner.today',
+  week: 'owner.week',
+  month: 'owner.month',
+  year: 'owner.year',
+};
 const emptySummary: DashboardSummary = {
   salesMillimes: 0, orderCount: 0, cashDifferenceMillimes: 0, topItems: {}, shifts: [],
+  salesCollectedMillimes: 0, expensesMillimes: 0, netProfitMillimes: 0, receivableMillimes: 0,
   tabsOutstandingMillimes: 0, salesByCategory: [], itemsSold: [], voids: { count: 0, totalMillimes: 0, orders: [] },
   comps: { count: 0, quantity: 0, totalMillimes: 0, records: [] },
   shiftLines: [], paymentSplit: { cash: 0, card: 0, other: 0, tab: 0 }, totalExpectedCashMillimes: 0,
@@ -31,8 +39,10 @@ function OwnerReportsContent() {
   const [reports, setReports] = useState<ReportRecord[]>([]);
   const [openShifts, setOpenShifts] = useState<ShiftRecord[]>([]);
   const [liveSummary, setLiveSummary] = useState<DashboardSummary>(emptySummary);
+  const [reportingSummary, setReportingSummary] = useState<DashboardSummary>(emptySummary);
   const [latestReport, setLatestReport] = useState<ReportRecord | null>(null);
   const [selectedReport, setSelectedReport] = useState<ReportRecord | null>(null);
+  const [period, setPeriod] = useState<Period>('day');
   const [ownerPin, setOwnerPin] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -45,25 +55,30 @@ function OwnerReportsContent() {
     void Promise.all([
       reportService.listReports(storeId),
       shiftService.listOpenShifts(storeId),
+      reportService.getDashboard(storeId, period),
       reportService.getCurrentPeriodSummary(storeId),
       userService.getStore(storeId),
-    ]).then(([nextReports, nextOpenShifts, nextSummary, nextStore]) => {
+    ]).then(([nextReports, nextOpenShifts, nextSummary, nextReportingSummary, nextStore]) => {
       setReports(nextReports);
       setOpenShifts(nextOpenShifts);
       setLiveSummary(nextSummary);
+      setReportingSummary(nextReportingSummary);
       setStore(nextStore);
     }).catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : t('common.loadFailed')));
-  }, [storeId]);
+  }, [period, storeId]);
 
   async function refresh(report: ReportRecord, message: string) {
-    const [nextReports, nextOpenShifts, nextStore] = await Promise.all([
+    const [nextReports, nextOpenShifts, nextSummary, nextReportingSummary, nextStore] = await Promise.all([
       reportService.listReports(storeId),
       shiftService.listOpenShifts(storeId),
+      reportService.getDashboard(storeId, period),
+      reportService.getCurrentPeriodSummary(storeId),
       userService.getStore(storeId),
     ]);
-    setLiveSummary(await reportService.getCurrentPeriodSummary(storeId));
     setReports(nextReports);
     setOpenShifts(nextOpenShifts);
+    setLiveSummary(nextSummary);
+    setReportingSummary(nextReportingSummary);
     setStore(nextStore);
     setLatestReport(report);
     setNotice(message);
@@ -98,15 +113,36 @@ function OwnerReportsContent() {
         <p className="mt-1 font-body text-body-md text-on-surface-variant">X reports are live snapshots. Z reports close the current reporting period.</p>
       </header>
 
+      <section className="mb-4 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-display text-headline-md text-on-surface">Financial summary</h2>
+          <div className="flex gap-1 rounded-xl bg-surface-container-high p-1">
+            {(['day', 'week', 'month', 'year'] as Period[]).map((value) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={period === value}
+                onClick={() => setPeriod(value)}
+                className={`min-h-10 rounded-lg px-3 font-body text-label-sm ${period === value ? 'bg-primary text-on-primary shadow-card' : 'text-on-surface-variant'}`}
+              >
+                {t(periodLabels[value])}
+              </button>
+            ))}
+          </div>
+        </div>
+        <FinanceSummary summary={liveSummary} />
+        <p className="mt-3 font-body text-body-xs text-on-surface-variant">{t('finance.salesHelp')} {t('finance.receivableHelp')}</p>
+      </section>
+
       <section className="grid gap-3 md:grid-cols-2">
         <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
           <div className="mb-3 flex items-center gap-2"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-fixed text-primary"><MaterialIcon name="visibility" /></span><div><h2 className="font-display text-headline-sm">{t('reports.xReport')}</h2><p className="font-body text-body-sm text-outline">{t('reports.xDescription')}</p></div></div>
-          <Summary sales={liveSummary.salesMillimes} orders={liveSummary.orderCount} />
+          <Summary sales={reportingSummary.salesCollectedMillimes} orders={reportingSummary.orderCount} />
           <Button onClick={() => { void createX(); }} className="mt-4 w-full"><MaterialIcon name="summarize" />{t('reports.xReport')}</Button>
         </article>
         <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
           <div className="mb-3 flex items-center gap-2"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-warning-container text-on-warning-container"><MaterialIcon name="lock" /></span><div><h2 className="font-display text-headline-sm">{t('reports.zReport')}</h2><p className="font-body text-body-sm text-outline">{t('reports.zDescription')}</p></div></div>
-          <Summary sales={liveSummary.salesMillimes} orders={liveSummary.orderCount} />
+          <Summary sales={reportingSummary.salesCollectedMillimes} orders={reportingSummary.orderCount} />
           {zBlocked && <p className="mt-3 rounded-lg bg-warning-container p-2.5 font-body text-body-sm text-on-warning-container">{t('reports.openShiftsBlock')} <a href="/owner/shifts" className="font-semibold underline">Review or force-close shifts</a></p>}
           {dayClosed && (
             <label className="mt-3 block font-body text-label-md text-on-surface">
@@ -130,7 +166,7 @@ function OwnerReportsContent() {
 
       {latestReport && (
         <section className="mt-4 flex items-center justify-between gap-3 rounded-xl bg-primary-fixed/40 p-4 text-primary">
-          <div><p className="font-body text-label-md">{latestReport.type} report • {new Date(latestReport.createdAt).toLocaleString()}</p><p className="mt-1 font-body text-body-sm">{formatTnd(latestReport.salesMillimes / 1000)} DT • {latestReport.orderCount} orders</p></div>
+          <div><p className="font-body text-label-md">{latestReport.type} report • {new Date(latestReport.createdAt).toLocaleString()}</p><p className="mt-1 font-body text-body-sm">{formatTnd((latestReport.salesCollectedMillimes ?? latestReport.salesMillimes) / 1000)} DT • {latestReport.orderCount} orders</p></div>
           <StatusTag status={latestReport.type === 'Z' ? 'closed' : 'open'}>{latestReport.type}</StatusTag>
         </section>
       )}
@@ -141,7 +177,7 @@ function OwnerReportsContent() {
         <div className="flex flex-col gap-2">
           {reports.map((report) => (
             <button type="button" key={report.id} onClick={() => setSelectedReport(report)} className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-lowest p-4 text-left shadow-card">
-              <div><p className="font-body text-label-md text-on-surface">{report.type} report • {report.businessDate}</p><p className="mt-1 font-body text-body-sm text-outline">{new Date(report.createdAt).toLocaleString()} • {report.orderCount} orders • {formatTnd(report.salesMillimes / 1000)} DT</p></div>
+              <div><p className="font-body text-label-md text-on-surface">{report.type} report • {report.businessDate}</p><p className="mt-1 font-body text-body-sm text-outline">{new Date(report.createdAt).toLocaleString()} • {report.orderCount} orders • Sales {formatTnd((report.salesCollectedMillimes ?? report.salesMillimes) / 1000)} DT • Expenses {formatTnd((report.expensesMillimes ?? 0) / 1000)} DT • Net {formatTnd((report.netProfitMillimes ?? 0) / 1000)} DT</p></div>
               <span className="flex items-center gap-2"><StatusTag status={report.type === 'Z' ? 'closed' : 'open'}>{report.type}</StatusTag><MaterialIcon name="open_in_new" /></span>
             </button>
           ))}
@@ -156,8 +192,27 @@ function OwnerReportsContent() {
 function Summary({ sales, orders }: { sales: number; orders: number }) {
   return (
     <div className="grid grid-cols-2 gap-3 rounded-xl bg-surface-container-low p-3">
-      <div><p className="font-body text-label-sm text-outline">{t('owner.sales')}</p><p className="font-display text-headline-sm tabular-nums text-primary">{formatTnd(sales / 1000)} DT</p></div>
+      <div><p className="font-body text-label-sm text-outline">{t('finance.sales')}</p><p className="font-display text-headline-sm tabular-nums text-primary">{formatTnd(sales / 1000)} DT</p></div>
       <div><p className="font-body text-label-sm text-outline">{t('owner.orderCount')}</p><p className="font-display text-headline-sm tabular-nums text-on-surface">{orders}</p></div>
+    </div>
+  );
+}
+
+function FinanceSummary({ summary }: { summary: DashboardSummary }) {
+  const values = [
+    { label: t('finance.sales'), value: summary.salesCollectedMillimes, tone: 'text-primary' },
+    { label: t('finance.expenses'), value: summary.expensesMillimes, tone: 'text-error-dark' },
+    { label: t('finance.netProfit'), value: summary.netProfitMillimes, tone: summary.netProfitMillimes < 0 ? 'text-error-dark' : 'text-success-dark' },
+    { label: t('finance.receivable'), value: summary.receivableMillimes, tone: 'text-on-surface' },
+  ];
+  return (
+    <div className="grid grid-cols-2 gap-3 tablet:grid-cols-4">
+      {values.map((item) => (
+        <article key={item.label} className="rounded-xl bg-surface-container-low p-3">
+          <p className="font-body text-label-sm text-on-surface-variant">{item.label}</p>
+          <p className={`mt-1 font-display text-title-md tabular-nums ${item.tone}`}>{formatTnd(item.value / 1000)} DT</p>
+        </article>
+      ))}
     </div>
   );
 }

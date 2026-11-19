@@ -1,5 +1,5 @@
 import type { CustomerRecord, OrderRecord, TabRecord } from '../types/domain';
-import { activityLogService } from './activityLogService';
+import { activityService } from './activityService';
 import { userService } from './userService';
 import { shiftService } from './shiftService';
 import { readData, writeData } from './storage';
@@ -236,6 +236,15 @@ export const customerService = {
       createdAt: new Date().toISOString(),
     };
     saveCustomers([...getCustomers(), customer]);
+    await activityService.log({
+      storeId: customer.storeId,
+      actorId: input.actorId,
+      action: 'customer.created',
+      summary: `Created customer "${customer.name}".`,
+      entityType: 'customer',
+      entityId: customer.id,
+      meta: { after: customer },
+    });
     return customer;
   },
 
@@ -256,6 +265,15 @@ export const customerService = {
       notes: changes.notes !== undefined ? changes.notes.trim() || undefined : customer.notes,
     };
     saveCustomers(customers.map((candidate) => candidate.id === customerId ? updated : candidate));
+    await activityService.log({
+      storeId: customer.storeId,
+      actorId,
+      action: 'customer.updated',
+      summary: `Updated customer "${updated.name}".`,
+      entityType: 'customer',
+      entityId: customer.id,
+      meta: { before: customer, after: updated },
+    });
     return updated;
   },
 
@@ -272,6 +290,15 @@ export const customerService = {
     const customers = getCustomers();
     const archived = { ...customer, isActive: false };
     saveCustomers(customers.map((candidate) => candidate.id === customerId ? archived : candidate));
+    await activityService.log({
+      storeId: customer.storeId,
+      actorId,
+      action: 'customer.archived',
+      summary: `Archived customer "${customer.name}".`,
+      entityType: 'customer',
+      entityId: customer.id,
+      meta: { before: { isActive: customer.isActive }, after: { isActive: archived.isActive } },
+    });
     return archived;
   },
 
@@ -419,6 +446,15 @@ export const customerService = {
     saveCustomers(getCustomers().map((candidate) => candidate.id === customer.id
       ? { ...candidate, lastPaymentAt: createdAt }
       : candidate));
+    await activityService.log({
+      storeId: record.storeId,
+      actorId: actor.id,
+      action: 'tab.payment',
+      summary: `Recorded a ${record.amountMillimes} millime payment for "${customer.name}".`,
+      entityType: 'tab_payment',
+      entityId: record.id,
+      meta: { after: { customerId: customer.id, amountMillimes: record.amountMillimes, note: record.note } },
+    });
     return record;
   },
 
@@ -475,15 +511,17 @@ export const customerService = {
       createdAt: new Date().toISOString(),
     };
     writeData('tabs', [...tabs, reversal]);
-    await activityLogService.recordCustomerPaymentReversal({
+    await activityService.log({
       storeId: store.id,
       actorId: owner.id,
-      action: 'customer_payment_reversed',
-      targetType: 'customer_payment',
-      targetId: payment.id,
-      customerId: customer.id,
-      amountMillimes: payment.amountMillimes,
-      reason,
+      action: 'tab.payment_reversed',
+      summary: `Reversed a ${payment.amountMillimes} millime payment for "${customer.name}". ${reason}`,
+      entityType: 'tab_payment',
+      entityId: payment.id,
+      meta: {
+        before: { amountMillimes: payment.amountMillimes, reversed: false },
+        after: { amountMillimes: reversal.amountMillimes, reversed: true, reason },
+      },
     });
     return reversal;
   },

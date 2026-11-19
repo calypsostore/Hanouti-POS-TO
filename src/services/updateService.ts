@@ -208,8 +208,13 @@ export const updateService = {
   startMonitoring(checkOverdueCustomers?: () => Promise<void>): () => void {
     if (monitorStarted) return () => undefined;
     monitorStarted = true;
-    const check = () => {
+    const isNative = Capacitor.isNativePlatform();
+    const check = (reason: 'startup' | 'interval') => {
       runOverdueCheck(checkOverdueCustomers);
+      if (isNative) {
+        runAutomaticCheck(reason);
+        return;
+      }
       const lastCheck = this.getLastCheck();
       if (!lastCheck || Date.now() - new Date(lastCheck).getTime() >= CHECK_INTERVAL_MS) {
         runAutomaticCheck(lastCheck ? 'interval' : 'startup');
@@ -221,9 +226,9 @@ export const updateService = {
         runAutomaticCheck('foreground');
       }
     };
-    const intervalId = window.setInterval(check, CHECK_INTERVAL_MS);
+    const intervalId = window.setInterval(() => check('interval'), CHECK_INTERVAL_MS);
     document.addEventListener('visibilitychange', onVisibilityChange);
-    check();
+    check('startup');
     return () => {
       monitorStarted = false;
       window.clearInterval(intervalId);

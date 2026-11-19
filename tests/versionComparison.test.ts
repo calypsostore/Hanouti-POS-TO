@@ -6,6 +6,15 @@ describe('compareVersions', () => {
     expect(compareVersions('1.0.0', '1.0.1')).toBe(-1);
   });
 
+  it('orders major and minor versions numerically', () => {
+    expect(compareVersions('1.0.1', '1.1.0')).toBe(-1);
+    expect(compareVersions('1.1.0', '2.0.0')).toBe(-1);
+  });
+
+  it('orders multi-digit patch versions numerically', () => {
+    expect(compareVersions('1.0.10', '1.0.9')).toBe(1);
+  });
+
   it('compares multi-digit minor versions numerically', () => {
     expect(compareVersions('1.2.0', '1.10.0')).toBe(-1);
   });

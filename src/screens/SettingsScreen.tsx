@@ -424,6 +424,7 @@ export function SettingsScreen() {
         setUpdateResult(result.updateAvailable ? t('settings.updateAvailable') : t('settings.upToDate'));
       }
     } catch (updateError) {
+      console.error('[updates] Manual update check failed.', updateError);
       if (Capacitor.isNativePlatform()) {
         setUpdateResult('Could not check, try again');
       } else {

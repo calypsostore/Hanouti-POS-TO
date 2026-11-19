@@ -3,7 +3,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 const serverUrl = process.env.CAP_SERVER_URL ?? process.env.VITE_CAP_SERVER_URL;
 
 const config: CapacitorConfig = {
-  appId: 'com.safran.anouti',
+  appId: 'com.hanouti.pos',
   appName: '7anouti-POS',
   webDir: 'dist',
   server: {

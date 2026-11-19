@@ -98,9 +98,7 @@ export function LoginScreen() {
                 <MaterialIcon name={role === 'staff' ? 'account_circle' : 'storefront'} />
                 {role === 'staff' ? t('login.staffIdentifier') : t('login.adminIdentifier')}
               </label>
-              <span className="login-field-helper">
-                {role === 'staff' ? t('login.exampleStaff') : t('login.emailAddress')}
-              </span>
+              {role === 'admin' && <span className="login-field-helper">{t('login.emailAddress')}</span>}
             </div>
             <div className="login-input-wrap">
               <MaterialIcon name={role === 'staff' ? 'person' : 'mail'} className="login-input-icon" />
@@ -114,12 +112,6 @@ export function LoginScreen() {
                 className="login-input"
               />
             </div>
-            {role === 'staff' && (
-              <p className="login-staff-hint">
-                <MaterialIcon name="info" />
-                {t('login.staffFormat')}
-              </p>
-            )}
           </div>
 
           <div className="login-field">

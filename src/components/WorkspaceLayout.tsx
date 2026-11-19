@@ -80,7 +80,7 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
   };
   const sidebarGroups: Array<{ title: string; links: WorkspaceLink[] }> = isOwnerWorkspace
     ? [
-        { title: 'Operations', links: links.filter((link) => ['/owner/dashboard', '/orders', '/owner/shifts', '/owner/voids'].includes(link.to)) },
+        { title: 'Operations', links: links.filter((link) => ['/owner/dashboard', '/pos', '/orders', '/owner/shifts', '/owner/voids'].includes(link.to)) },
         { title: 'People', links: links.filter((link) => ['/owner/staff', '/owner/schedule', '/customers'].includes(link.to)) },
         { title: 'Catalog', links: links.filter((link) => ['/owner/catalog', '/owner/inventory', '/owner/waste'].includes(link.to)) },
         { title: 'Money', links: links.filter((link) => ['/owner/reports', '/owner/expenses', '/owner/suppliers'].includes(link.to)) },

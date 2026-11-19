@@ -350,7 +350,7 @@ const en = {
   'admin.title': 'Super Admin',
   'admin.createOwner': 'Create owner account',
   'admin.ownerEmail': 'Owner email',
-  'admin.storeCode': 'Store code',
+  'admin.storeCode': 'Generated store ID',
   'admin.storeName': 'Store name',
   'admin.createAccount': 'Create account',
   'admin.storeList': 'Stores',

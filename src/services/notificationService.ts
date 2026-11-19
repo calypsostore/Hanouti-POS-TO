@@ -268,11 +268,15 @@ export const notificationService = {
   },
 
   async markAllRead(user: Pick<UserRecord, 'id' | 'role' | 'storeId'>): Promise<void> {
+    const unread = (await this.listFor(user)).filter((notification) => !notification.readAt);
+    if (unread.length === 0) return;
+    const unreadIds = new Set(unread.map((notification) => notification.id));
     if (isSupabaseDriver()) {
       if (!user.storeId) return;
       const { error } = await getSupabaseClient().from('notifications')
         .update({ read_at: new Date().toISOString() })
         .eq('store_id', user.storeId)
+        .in('id', [...unreadIds])
         .is('read_at', null)
         .or(`user_id.eq.${user.id},and(user_id.is.null,target_role.eq.${user.role})`);
       if (error) throw new Error(`Could not mark notifications as read: ${error.message}`, { cause: error });
@@ -283,7 +287,7 @@ export const notificationService = {
     const readAt = new Date().toISOString();
     let changed = false;
     const updated = notifications.map((notification) => {
-      if (notification.readAt ||
+      if (!unreadIds.has(notification.id) || notification.readAt ||
         (notification.storeId && notification.storeId !== user.storeId) ||
         (notification.userId !== user.id && notification.targetRole !== user.role)) return notification;
       changed = true;

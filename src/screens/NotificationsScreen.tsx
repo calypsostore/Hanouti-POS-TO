@@ -12,19 +12,9 @@ import { t } from '../i18n/translations';
 import { notificationService, OWNER_NOTIFICATIONS_CHANGED_EVENT } from '../services/notificationService';
 import { userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
-import type { NotificationRecord, UserRole } from '../types/domain';
+import { notificationPath } from '../lib/notificationPath';
+import type { NotificationRecord } from '../types/domain';
 import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
-
-function notificationPath(notification: NotificationRecord, role: UserRole): string {
-  if (notification.entityType === 'customer' && notification.entityId) return `/customers/${notification.entityId}`;
-  if (notification.entityType === 'catalog_item') return role === 'owner' ? '/owner/catalog' : '/pos';
-  if (notification.entityType === 'shift') return role === 'owner' ? '/owner/shifts' : '/shift';
-  if (notification.entityType === 'order') return '/orders';
-  if (notification.entityType === 'report') return role === 'owner' ? '/owner/reports' : '/notifications';
-  if (notification.entityType === 'schedule') return '/settings';
-  if (notification.entityType === 'store') return role === 'owner' ? '/owner/settings' : '/settings';
-  return '/settings';
-}
 
 export function NotificationsScreen() {
   const navigate = useNavigate();
@@ -55,6 +45,12 @@ export function NotificationsScreen() {
 
   useEffect(() => {
     void refresh();
+    if (user) {
+      void notificationService.markAllRead(user).catch((markError: unknown) => {
+        console.error('Unable to mark notifications as read.', markError);
+        setError('Unable to mark notifications as read. Please try again.');
+      });
+    }
     window.addEventListener('focus', refresh);
     window.addEventListener('storage', refresh);
     window.addEventListener(OWNER_NOTIFICATIONS_CHANGED_EVENT, refresh);
@@ -63,7 +59,7 @@ export function NotificationsScreen() {
       window.removeEventListener('storage', refresh);
       window.removeEventListener(OWNER_NOTIFICATIONS_CHANGED_EVENT, refresh);
     };
-  }, [refresh]);
+  }, [refresh, user]);
 
   useEffect(() => {
     if (!user?.storeId) return;

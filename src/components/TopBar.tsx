@@ -1,10 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MaterialIcon } from './MaterialIcon';
+import { BottomSheet } from './BottomSheet';
+import { Button } from './Button';
 import { t } from '../i18n/translations';
 import { notificationService, OWNER_NOTIFICATIONS_CHANGED_EVENT } from '../services/notificationService';
 import { offlineOrderQueue, OFFLINE_QUEUE_CHANGED_EVENT } from '../services/offlineOrderQueue';
 import { useAuthStore } from '../stores/authStore';
+import { notificationPath } from '../lib/notificationPath';
+import type { NotificationRecord } from '../types/domain';
 
 interface TopBarProps {
   title: string;
@@ -18,20 +22,37 @@ export function TopBar({ title, storeName, onProfileClick, onLockClick, showConn
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [recentNotifications, setRecentNotifications] = useState<NotificationRecord[]>([]);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notificationsLoading, setNotificationsLoading] = useState(true);
+  const [notificationsError, setNotificationsError] = useState('');
+  const [openingNotificationId, setOpeningNotificationId] = useState('');
   const [online, setOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine);
   const [waitingToSync, setWaitingToSync] = useState(0);
 
   useEffect(() => {
     if (!user) {
       setUnreadCount(0);
+      setRecentNotifications([]);
+      setNotificationsLoading(false);
       return;
     }
     let active = true;
     const refresh = () => {
-      void notificationService.unreadCount(user).then((count) => {
-        if (active) setUnreadCount(count);
+      setNotificationsLoading(true);
+      void notificationService.listFor(user).then((notifications) => {
+        if (!active) return;
+        const unread = notifications.filter((notification) => !notification.readAt);
+        setUnreadCount(unread.length);
+        setRecentNotifications(notifications.slice(0, 5));
+        setNotificationsError('');
+        setNotificationsLoading(false);
       }).catch((error: unknown) => {
         console.error('Could not load the notification badge.', error);
+        if (active) {
+          setNotificationsError('Unable to load notifications. Please try again.');
+          setNotificationsLoading(false);
+        }
       });
     };
     refresh();
@@ -45,6 +66,31 @@ export function TopBar({ title, storeName, onProfileClick, onLockClick, showConn
       window.removeEventListener(OWNER_NOTIFICATIONS_CHANGED_EVENT, refresh);
     };
   }, [user]);
+
+  async function openNotification(notification: NotificationRecord) {
+    if (!user) return;
+    setOpeningNotificationId(notification.id);
+    try {
+      await notificationService.markRead(user, notification.id);
+      setNotificationsOpen(false);
+      navigate(notificationPath(notification, user.role));
+    } catch (error) {
+      console.error('Unable to open this notification.', error);
+      setNotificationsError('Unable to open this notification. Please try again.');
+    } finally {
+      setOpeningNotificationId('');
+    }
+  }
+
+  function openNotifications() {
+    setNotificationsError('');
+    setNotificationsOpen(true);
+    if (!user) return;
+    void notificationService.markAllRead(user).catch((error: unknown) => {
+      console.error('Unable to mark notifications as read.', error);
+      setNotificationsError('Unable to mark notifications as read. Please try again.');
+    });
+  }
 
   useEffect(() => {
     if (!showConnectionStatus) return;
@@ -81,6 +127,7 @@ export function TopBar({ title, storeName, onProfileClick, onLockClick, showConn
   }, [showConnectionStatus, user?.storeId]);
 
   return (
+    <>
     <header className="safe-top sticky top-0 z-30 border-b border-outline-variant bg-surface/90 backdrop-blur-xl">
       <div className="top-bar-content flex h-16 items-center justify-between gap-3 px-4">
         <div className="flex min-w-0 items-center gap-3">
@@ -110,7 +157,8 @@ export function TopBar({ title, storeName, onProfileClick, onLockClick, showConn
             <button
               type="button"
               aria-label={unreadCount ? `Notifications, ${unreadCount} unread` : 'Notifications'}
-              onClick={() => navigate('/notifications')}
+              aria-expanded={notificationsOpen}
+              onClick={openNotifications}
               className="relative flex h-10 w-10 items-center justify-center rounded-full bg-surface-container text-primary"
             >
               <MaterialIcon name="notifications" />
@@ -127,5 +175,41 @@ export function TopBar({ title, storeName, onProfileClick, onLockClick, showConn
         </div>
       </div>
     </header>
+    <BottomSheet open={notificationsOpen} onClose={() => setNotificationsOpen(false)} title={t('nav.notifications')} panelClassName="h-[70dvh] lg:h-auto lg:max-h-[80dvh] lg:max-w-lg">
+      <div className="flex flex-col gap-3">
+        {notificationsError && <p role="alert" className="rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{notificationsError}</p>}
+        {notificationsLoading ? (
+          <p role="status" className="py-6 text-center font-body text-body-sm text-on-surface-variant">Loading notifications…</p>
+        ) : recentNotifications.length > 0 ? recentNotifications.map((notification) => (
+          <button
+            key={notification.id}
+            type="button"
+            disabled={openingNotificationId === notification.id}
+            onClick={() => { void openNotification(notification); }}
+            aria-label={`Open notification: ${notification.title}`}
+            className={`flex min-w-0 items-start gap-3 rounded-xl p-3 text-left disabled:opacity-60 ${
+              notification.readAt ? 'bg-surface-container-lowest' : 'bg-primary-fixed/40'
+            }`}
+          >
+            <span className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+              notification.readAt ? 'bg-surface-container text-outline' : 'bg-primary-fixed text-primary'
+            }`}>
+              <MaterialIcon name="notifications" className="text-xl" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block break-words font-body text-label-lg text-on-surface">{notification.title}</span>
+              <span className="mt-1 block break-words font-body text-body-sm text-on-surface-variant">{notification.body}</span>
+              <span className="mt-2 block font-body text-body-xs text-outline">{new Date(notification.createdAt).toLocaleString()}</span>
+            </span>
+          </button>
+        )) : (
+          <p className="py-6 text-center font-body text-body-sm text-on-surface-variant">You’re all caught up.</p>
+        )}
+        <Button type="button" variant="secondary" className="mt-1 w-full" onClick={() => { setNotificationsOpen(false); navigate('/notifications'); }}>
+          See all
+        </Button>
+      </div>
+    </BottomSheet>
+    </>
   );
 }

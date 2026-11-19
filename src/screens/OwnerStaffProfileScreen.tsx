@@ -6,6 +6,7 @@ import { Keypad } from '../components/Keypad';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { StatusTag } from '../components/StatusTag';
+import { ToggleSwitch } from '../components/ToggleSwitch';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
 import { formatTnd } from '../lib/format';
@@ -443,7 +444,7 @@ function ProfileContent() {
               <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
                 <Button variant="secondary" onClick={openEdit}><MaterialIcon name="edit" />Edit</Button>
                 <Button variant="secondary" onClick={() => { setError(''); setConfirmation('reset'); }}><MaterialIcon name="lock_reset" />Reset password</Button>
-                <Button variant="secondary" disabled={busy} onClick={() => { setError(''); setStaffPin(''); setPinResetOpen(true); }}><MaterialIcon name="pin" />Reset PIN</Button>
+                <Button variant="secondary" disabled={busy || staff.mustChangePassword || staff.mustSetPin} title={staff.mustChangePassword || staff.mustSetPin ? 'The staff member must complete first-login setup before their PIN can be reset.' : undefined} onClick={() => { setError(''); setStaffPin(''); setPinResetOpen(true); }}><MaterialIcon name="pin" />Reset PIN</Button>
                 <Button variant={staff.isActive ? 'danger' : 'secondary'} disabled={busy} onClick={() => { void toggleActive(); }}>
                   <MaterialIcon name={staff.isActive ? 'person_off' : 'person'} />
                   {staff.isActive ? 'Suspend' : 'Enable'}
@@ -624,7 +625,7 @@ function ProfileContent() {
         <div className="flex flex-col gap-4">
           <p className="font-body text-body-md text-on-surface-variant">
             {confirmation === 'reset'
-              ? `Create a new temporary password for ${staff?.name}?`
+              ? `Create a new temporary password for ${staff?.name}? This will clear their current PIN and require a new password and PIN at their next sign-in.`
               : `End ${staff?.name}'s current session? They will need to sign in again.`}
           </p>
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
@@ -645,7 +646,7 @@ function ProfileContent() {
               <input readOnly value={temporaryPassword} className="h-12 min-w-0 rounded-lg bg-surface-container-low px-3 font-mono tracking-widest" />
               <Button type="button" variant="secondary" className="px-3" onClick={() => { void copyPassword(); }}>Copy</Button>
             </div>
-            <p className="rounded-lg bg-primary-fixed/40 p-3 font-body text-body-sm text-on-surface">They must set a new password at their next login.</p>
+            <p className="rounded-lg bg-primary-fixed/40 p-3 font-body text-body-sm text-on-surface">They must set a new password and personal PIN at their next login.</p>
             {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
           </div>
         )}
@@ -742,17 +743,7 @@ function PermissionOverrideRow({ permission, state, enabled, disabled, onToggle 
         <p className="font-body text-body-sm text-on-surface">{permission.label}</p>
         <p className="font-body text-label-sm text-outline">{state}</p>
       </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={enabled}
-        aria-label={`${permission.label}: ${state}`}
-        disabled={disabled}
-        onClick={onToggle}
-        className={`flex min-h-12 min-w-14 shrink-0 items-center rounded-full p-1 disabled:opacity-50 ${enabled ? 'justify-end bg-primary' : 'justify-start bg-outline-variant'}`}
-      >
-        <span className="h-10 w-10 rounded-full bg-white shadow-card" />
-      </button>
+      <ToggleSwitch checked={enabled} label={`${permission.label}: ${state}`} disabled={disabled} onChange={onToggle} />
     </div>
   );
 }

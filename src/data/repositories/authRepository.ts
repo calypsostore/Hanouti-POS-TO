@@ -139,14 +139,29 @@ export const authRepository = {
     return Math.max(0, lockedUntil - Date.now());
   },
 
-  async setPersonalPin(userId: string, pin: string): Promise<void> {
+  async setPersonalPin(userId: string, pin: string): Promise<UserSummary> {
     if (!/^\d{4}$/.test(pin)) throw new Error('PIN must contain exactly 4 digits.');
     const user = await currentUser();
     if (!user || user.id !== userId) throw new Error('You must sign in as this staff member to set a PIN.');
     const { error } = await getSupabaseClient().rpc('set_personal_pin', { p_pin: pin });
     if (error) throwSupabaseError(error, 'Could not set the personal PIN');
     if (typeof window !== 'undefined') window.sessionStorage.removeItem(PIN_LOCK_KEY);
-    await writeActivity(user, 'staff.pin_set', `${user.name} set a personal PIN.`);
+    const updatedUser = await currentUser();
+    if (!updatedUser || updatedUser.mustSetPin) throw new Error('The PIN setup could not be confirmed.');
+    return updatedUser;
+  },
+
+  async changePersonalPin(userId: string, currentPin: string, newPin: string): Promise<void> {
+    if (!/^\d{4}$/.test(currentPin) || !/^\d{4}$/.test(newPin)) throw new Error('PIN must contain exactly 4 digits.');
+    const user = await currentUser();
+    if (!user || user.id !== userId || user.role !== 'staff') throw new Error('You must sign in as this staff member to change a PIN.');
+    if (user.mustChangePassword || user.mustSetPin) throw new Error('Complete the initial password and PIN setup first.');
+    const { error } = await getSupabaseClient().rpc('change_personal_pin', {
+      p_current_pin: currentPin,
+      p_new_pin: newPin,
+    });
+    if (error) throwSupabaseError(error, 'Could not change the personal PIN');
+    if (typeof window !== 'undefined') window.sessionStorage.removeItem(PIN_LOCK_KEY);
   },
 
   async unlockWithPin(pin: string): Promise<UserSummary> {

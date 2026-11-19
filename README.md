@@ -16,13 +16,14 @@ Local demo accounts are available only with `VITE_DATA_DRIVER=local`:
 
 | Role | Username / email | Initial password |
 | --- | --- | --- |
-| Staff | `cafe12.sarah` | `1234` |
+| Staff | `CFSD.sarah` | `1234` |
 | Owner | `owner@cafelamarsa.tn` | `owner123` |
 | Super admin | `admin@7anouti.tn` | `admin123` |
 
 These accounts are seeded in browser storage and are not production
-credentials. All three require a password change at first login. Production
-builds require `VITE_DATA_DRIVER=supabase` and replace demo seed data with empty
+credentials. All three require a password change at first login. Staff must
+also set a personal PIN before entering the workspace. Production builds
+require `VITE_DATA_DRIVER=supabase` and replace demo seed data with empty
 fixtures; a local-driver production build is rejected.
 
 ## First-time Supabase setup
@@ -90,8 +91,14 @@ enforces its project-level rate limits. Password hashes are managed by
 Supabase Auth; store and staff PIN hashes are generated and verified in
 PostgreSQL and are never hashed in the browser.
 
-Staff accounts are provisioned by an owner and sign in with their username;
-their Auth email is generated internally. RLS isolates store data, and
+Store IDs are generated from store names (for example, `Orange` becomes
+`ORNG` and `Oranges Bites` becomes `ORBT`); duplicate IDs receive an incrementing
+number. Staff accounts are provisioned by an owner and sign in with a username
+in the form `<STORE_ID>.<first-name>`; duplicate first names receive an
+incrementing number such as `ORBT.sarah1`. Staff Auth emails are generated
+internally. Staff password resets invalidate existing sessions, clear the old
+PIN, and require a new password and PIN at the next sign-in. Owners contact the super admin for an
+owner password reset. RLS isolates store data, and
 protected order, shift, tab, PIN, and void operations execute through database
 functions. Realtime updates are enabled for orders, shifts, notifications, and
 catalog availability. Server-registered sessions expire after 12 hours, are

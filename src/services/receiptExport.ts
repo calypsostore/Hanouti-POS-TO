@@ -57,52 +57,45 @@ export async function downloadOrSharePdf(element: HTMLElement | null, filename: 
     pdf.addImage(pageCanvas.toDataURL('image/png'), 'PNG', 10, 10, pageWidth, sliceHeight * scale);
   }
 
-  if (Capacitor.isNativePlatform()) {
-    const data = pdf.output('datauristring').split(',')[1];
-    if (!data) throw new Error('Could not generate the report PDF.');
-    const path = `${filename.replace(/[^a-z0-9_-]/gi, '-')}-${Date.now()}.pdf`;
-    const file = await Filesystem.writeFile({ path, data, directory: Directory.Cache });
-    await Share.share({ title, dialogTitle: title, files: [file.uri] });
-    return;
-  }
-
-  const file = new File([pdf.output('blob')], `${filename}.pdf`, { type: 'application/pdf' });
-  if (navigator.share && navigator.canShare?.({ files: [file] })) {
-    await navigator.share({ title, files: [file] });
-    return;
-  }
-  pdf.save(`${filename}.pdf`);
+  await sharePdfFile(pdf, filename, title);
 }
 
-export async function shareElementImage(element: HTMLElement | null, filename: string, title: string): Promise<void> {
-  if (!element) throw new Error('The report is not available for image export.');
-  const { default: html2canvas } = await import('html2canvas');
-  const canvas = await html2canvas(element, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
+export async function shareTextAsPdf(text: string, filename: string, title: string): Promise<void> {
+  const { jsPDF } = await import('jspdf');
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+  const normalizedText = text
+    .replace(/[—–−]/g, '-')
+    .replace(/[•·]/g, '-')
+    .replace(/[’‘]/g, "'")
+    .replaceAll('×', 'x');
+  const lines = pdf.splitTextToSize(normalizedText, 182) as string[];
+  let y = 14;
+  for (const line of lines) {
+    if (y > 282) {
+      pdf.addPage();
+      y = 14;
+    }
+    pdf.text(line, 14, y);
+    y += 6;
+  }
+  await sharePdfFile(pdf, filename, title);
+}
 
+async function sharePdfFile(pdf: import('jspdf').jsPDF, filename: string, title: string): Promise<void> {
+  const safeFilename = filename.replace(/[^a-z0-9_-]/gi, '-');
   if (Capacitor.isNativePlatform()) {
-    const data = canvas.toDataURL('image/png').split(',')[1];
-    if (!data) throw new Error('Could not generate the report image.');
-    const path = `${filename.replace(/[^a-z0-9_-]/gi, '-')}-${Date.now()}.png`;
+    const data = pdf.output('datauristring').split(',')[1];
+    if (!data) throw new Error('Could not generate the PDF.');
+    const path = `${safeFilename}-${Date.now()}.pdf`;
     const file = await Filesystem.writeFile({ path, data, directory: Directory.Cache });
     await Share.share({ title, dialogTitle: title, files: [file.uri] });
     return;
   }
 
-  const blob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((result) => {
-      if (result) resolve(result);
-      else reject(new Error('Could not generate the report image.'));
-    }, 'image/png');
-  });
-  const file = new File([blob], `${filename}.png`, { type: 'image/png' });
+  const file = new File([pdf.output('blob')], `${safeFilename}.pdf`, { type: 'application/pdf' });
   if (navigator.share && navigator.canShare?.({ files: [file] })) {
     await navigator.share({ title, files: [file] });
     return;
   }
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `${filename}.png`;
-  link.click();
-  URL.revokeObjectURL(url);
+  pdf.save(`${safeFilename}.pdf`);
 }

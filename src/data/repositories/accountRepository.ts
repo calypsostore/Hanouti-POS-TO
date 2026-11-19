@@ -26,7 +26,6 @@ export async function createOwnerAccount(input: {
   name: string;
   email: string;
   storeName: string;
-  storeCode: string;
 }): Promise<{ owner: UserSummary; store: StoreRecord; temporaryPassword: string }> {
   const result = await invokeProvisioner({ action: 'create_owner', ...input });
   if (!result.owner || !result.store || !result.temporaryPassword) {
@@ -41,7 +40,6 @@ export async function createStaff(input: {
   phone?: string;
   notes?: string;
   positionId: string;
-  usernameSuffix?: string;
   permissionOverrides?: PermissionOverrides;
 }): Promise<{ staff: UserSummary; temporaryPassword: string }> {
   const result = await invokeProvisioner({ action: 'create_staff', ...input });

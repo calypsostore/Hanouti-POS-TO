@@ -58,14 +58,14 @@ function GuestRoute() {
   const locked = useAuthStore((state) => state.locked);
   if (!user) return <LoginScreen />;
   if (locked) return <Navigate to="/lock" replace state={{ from: location.pathname }} />;
-  return <Navigate to={user.mustChangePassword ? '/set-password' : homeForRole(user.role)} replace />;
+  return <Navigate to={user.mustChangePassword || user.mustSetPin ? '/set-password' : homeForRole(user.role)} replace />;
 }
 
 function SetPasswordRoute() {
   const user = useAuthStore((state) => state.user);
-  const [setupActive, setSetupActive] = useState(Boolean(user?.mustChangePassword));
+  const [setupActive, setSetupActive] = useState(Boolean(user?.mustChangePassword || user?.mustSetPin));
   if (!user) return <Navigate to="/" replace />;
-  if (!user.mustChangePassword && !setupActive) return <Navigate to={homeForRole(user.role)} replace />;
+  if (!user.mustChangePassword && !user.mustSetPin && !setupActive) return <Navigate to={homeForRole(user.role)} replace />;
   return <SetNewPasswordScreen onSetupComplete={() => setSetupActive(false)} />;
 }
 
@@ -108,7 +108,7 @@ function ProtectedRoute({ roles, children, permission }: ProtectedRouteProps) {
 
   if (!user) return <Navigate to="/" replace state={{ from: location.pathname }} />;
   if (locked) return <Navigate to="/lock" replace />;
-  if (user.mustChangePassword) return <Navigate to="/set-password" replace />;
+  if (user.mustChangePassword || user.mustSetPin) return <Navigate to="/set-password" replace />;
   if (!roles.includes(user.role)) return <Navigate to={homeForRole(user.role)} replace />;
   if (permission && user.role === 'staff' && permissionAllowed === null) return <LoadingScreen message={t('app.loading')} />;
   if (permission && user.role === 'staff' && !permissionAllowed) return <AccessDenied />;
@@ -121,7 +121,7 @@ function LockRoute() {
   const locked = useAuthStore((state) => state.locked);
   const location = useLocation();
   if (!user) return <Navigate to="/" replace />;
-  if (user.mustChangePassword) return <Navigate to="/set-password" replace />;
+  if (user.mustChangePassword || user.mustSetPin) return <Navigate to="/set-password" replace />;
   if (user.role !== 'staff') return <Navigate to={homeForRole(user.role)} replace />;
   if (!locked) return <Navigate to={homeForRole(user.role)} replace />;
   const stateFrom = typeof location.state === 'object' && location.state !== null && 'from' in location.state
@@ -216,7 +216,7 @@ export default function App() {
   }, [ready, user?.id, user?.role, user?.storeId]);
 
   useEffect(() => {
-    if (!ready || locked || user?.role !== 'staff' || user.mustChangePassword || !user.storeId) return;
+    if (!ready || locked || user?.role !== 'staff' || user.mustChangePassword || user.mustSetPin || !user.storeId) return;
     let active = true;
     let timeoutId = 0;
     let timeoutMs = 5 * 60_000;
@@ -277,7 +277,7 @@ export default function App() {
       document.removeEventListener('visibilitychange', checkVisibility);
       window.removeEventListener('focus', checkForIdleLock);
     };
-  }, [ready, locked, user?.id, user?.mustChangePassword, user?.role, user?.storeId]);
+  }, [ready, locked, user?.id, user?.mustChangePassword, user?.mustSetPin, user?.role, user?.storeId]);
 
   useEffect(() => {
     if (!ready) return;

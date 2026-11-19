@@ -18,7 +18,7 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
   const setInitialPin = useAuthStore((state) => state.setInitialPin);
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
-  const [pinStep, setPinStep] = useState(false);
+  const [pinStep, setPinStep] = useState(Boolean(user?.role === 'staff' && user.mustSetPin && !user.mustChangePassword));
   const [pin, setPin] = useState('');
   const [visible, setVisible] = useState(false);
   const [error, setError] = useState('');
@@ -37,7 +37,7 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
       try {
         await setInitialPin(pin);
         onSetupComplete();
-        navigate('/dashboard');
+        navigate(user?.role === 'staff' ? '/dashboard' : '/');
       } catch (pinError) {
         setError(pinError instanceof Error ? pinError.message : 'Unable to set your PIN.');
       }
@@ -53,14 +53,14 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
     }
     setError('');
     try {
-      await setInitialPassword(password);
+      const updatedUser = await setInitialPassword(password);
       if (!user) throw new Error(t('auth.signInBeforePassword'));
-      if (user.role === 'staff') {
+      if (updatedUser.role === 'staff' && updatedUser.mustSetPin) {
         setPinStep(true);
         return;
       }
       onSetupComplete();
-      navigate(user.role === 'owner' ? '/owner/dashboard' : '/admin/overview');
+      navigate(updatedUser.role === 'owner' ? '/owner/dashboard' : '/admin/overview');
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : t('password.unableToUpdate'));
     }
@@ -92,7 +92,7 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
           </div>
           <h1 className="font-display text-headline-lg text-on-surface">{pinStep ? 'Set your PIN' : t('password.setNew')}</h1>
           <p className="mt-1.5 max-w-sm font-body text-body-md text-on-surface-variant">
-            {pinStep ? 'Set a personal 4-digit PIN to unlock this terminal quickly. You can also skip this step and use your password.' : t('password.firstLoginRequirement', { account: user?.role === 'staff' ? t('password.storeTerminal') : t('password.account') })}
+            {pinStep ? 'Set your personal 4-digit PIN to finish securing your account.' : t('password.firstLoginRequirement', { account: user?.role === 'staff' ? t('password.storeTerminal') : t('password.account') })}
           </p>
         </header>
 
@@ -206,7 +206,6 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
             <MaterialIcon name="check" filled />
             {pinStep ? 'Set PIN and continue' : t('password.saveContinue')}
           </Button>
-          {pinStep && <Button type="button" variant="secondary" onClick={() => { onSetupComplete(); navigate('/dashboard'); }} className="min-h-12 w-full">Skip for now</Button>}
         </form>
 
         <footer className="mt-6 flex flex-col items-center text-center">

@@ -52,6 +52,7 @@ export interface UserRecord {
   passwordHash?: string;
   pinHash?: string;
   mustChangePassword: boolean;
+  mustSetPin?: boolean;
   isActive: boolean;
   storeId?: string;
   positionId?: string;

@@ -5,12 +5,14 @@ import { Button } from '../components/Button';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { StatusTag } from '../components/StatusTag';
+import { ToggleSwitch } from '../components/ToggleSwitch';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
 import { CardGrid, PageHeader, StatGrid } from '../components/layout';
 import { t } from '../i18n/translations';
 import { catalogService } from '../services/catalogService';
 import { shiftService } from '../services/shiftService';
+import { shareTextAsPdf } from '../services/receiptExport';
 import { userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
 import type { CatalogItemRecord, CategoryRecord, PermissionDefinition, PermissionOverrides, PositionRecord, ShiftRecord, UserSummary } from '../types/domain';
@@ -55,8 +57,6 @@ function OwnerStaffContent() {
   const [phone, setPhone] = useState('');
   const [notes, setNotes] = useState('');
   const [positionId, setPositionId] = useState('');
-  const [usernameSuffix, setUsernameSuffix] = useState('');
-  const [newStaffPassword, setNewStaffPassword] = useState('');
   const [permissionOverrides, setPermissionOverrides] = useState<PermissionOverrides>({ granted: [], revoked: [] });
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>([]);
   const [selfServiceItemIds, setSelfServiceItemIds] = useState<string[]>([]);
@@ -120,8 +120,6 @@ function OwnerStaffContent() {
     setPhone('');
     setNotes('');
     setPositionId(positions[0]?.id ?? '');
-    setUsernameSuffix(userService.generateStaffUsernameSuffix());
-    setNewStaffPassword(userService.generateStaffTemporaryPassword());
     setPermissionOverrides({ granted: [], revoked: [] });
     setError('');
     setNotice('');
@@ -140,9 +138,7 @@ function OwnerStaffContent() {
         phone,
         notes,
         positionId,
-        temporaryPassword: newStaffPassword,
         permissionOverrides,
-        usernameSuffix,
       });
       const createdCredentials = {
         userId: result.staff.id,
@@ -205,12 +201,8 @@ function OwnerStaffContent() {
     const text = `Username: ${activeCredentials.username}\nTemporary password: ${activeCredentials.password}`;
     setError('');
     try {
-      if (navigator.share) {
-        await navigator.share({ title: activeCredentials.title, text });
-        setNotice('Credentials shared.');
-      } else {
-        await copyValue('Credentials', text);
-      }
+      await shareTextAsPdf(text, `staff-credentials-${activeCredentials.username}`, activeCredentials.title);
+      setNotice('Credentials PDF shared or downloaded.');
     } catch (shareError) {
       if (shareError instanceof DOMException && shareError.name === 'AbortError') return;
       setError(shareError instanceof Error ? shareError.message : 'Unable to share credentials.');
@@ -480,7 +472,9 @@ function OwnerStaffContent() {
     });
   const staffIds = new Set(staff.map((staffMember) => staffMember.id));
   const onShiftCount = new Set(openShifts.filter((shift) => staffIds.has(shift.staffId)).map((shift) => shift.staffId)).size;
-  const usernamePreview = name.trim() ? userService.formatStaffUsername(storeCode, name, usernameSuffix) : '';
+  const usernamePreview = name.trim()
+    ? userService.formatStaffUsername(storeCode, name, staff.flatMap((staffMember) => staffMember.username ? [staffMember.username] : []))
+    : '';
   const inheritedPermissions = positions.find((position) => position.id === positionId)?.permissionIds ?? [];
 
   return (
@@ -663,19 +657,10 @@ function OwnerStaffContent() {
 
           <section className="flex flex-col gap-3 rounded-xl border border-outline-variant p-3">
             <h3 className="font-body text-label-lg text-on-surface">Credentials</h3>
-            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-              <label className="min-w-0 font-body text-label-md">Username
-                <input readOnly value={usernamePreview} placeholder="Enter a name to preview" className="mt-1 h-12 w-full min-w-0 rounded-lg bg-surface-container-low px-3 font-mono text-body-sm" />
-              </label>
-              <Button type="button" variant="secondary" className="self-end" disabled={!usernamePreview} onClick={() => { void copyValue('Username', usernamePreview); }}>Copy username</Button>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
-              <label className="min-w-0 font-body text-label-md">Temporary password
-                <input readOnly value={newStaffPassword} className="mt-1 h-12 w-full min-w-0 rounded-lg bg-surface-container-low px-3 font-mono tracking-widest" />
-              </label>
-              <Button type="button" variant="secondary" className="self-end" onClick={() => setNewStaffPassword(userService.generateStaffTemporaryPassword())}>{newStaffPassword ? 'Regenerate' : 'Generate'}</Button>
-              <Button type="button" variant="secondary" className="self-end" onClick={() => { void copyValue('Temporary password', newStaffPassword); }}>Copy password</Button>
-            </div>
+            <label className="min-w-0 font-body text-label-md">Username preview
+              <input readOnly value={usernamePreview} placeholder="Enter a name to preview" className="mt-1 h-12 w-full min-w-0 rounded-lg bg-surface-container-low px-3 font-mono text-body-sm" />
+            </label>
+            <p className="font-body text-body-sm text-on-surface-variant">Duplicate first names are numbered automatically. A temporary password is generated after creation; the staff member must set a new password and PIN at their next sign-in.</p>
           </section>
 
           <details className="rounded-xl border border-outline-variant p-3">
@@ -694,16 +679,11 @@ function OwnerStaffContent() {
                           <p className="font-body text-body-sm text-on-surface">{permission.label}</p>
                           <p className="font-body text-label-sm text-outline">{state}</p>
                         </div>
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={enabled}
-                          aria-label={`${permission.label}: ${state}`}
-                          onClick={() => cyclePermissionOverride(permission.id)}
-                          className={`flex min-h-12 min-w-14 shrink-0 items-center rounded-full p-1 ${enabled ? 'justify-end bg-primary' : 'justify-start bg-outline-variant'}`}
-                        >
-                          <span className="h-10 w-10 rounded-full bg-white shadow-card" />
-                        </button>
+                        <ToggleSwitch
+                          checked={enabled}
+                          label={`${permission.label}: ${state}`}
+                          onChange={() => cyclePermissionOverride(permission.id)}
+                        />
                       </div>
                     );
                   })}
@@ -817,7 +797,7 @@ function OwnerStaffContent() {
                 <Button type="button" variant="secondary" className="px-3" onClick={() => { void copyValue('Temporary password', activeCredentials.password); }}>Copy</Button>
               </div>
             </label>
-            <p className="rounded-lg bg-primary-fixed/40 p-3 font-body text-body-sm text-on-surface">They must set a new password at first login.</p>
+            <p className="rounded-lg bg-primary-fixed/40 p-3 font-body text-body-sm text-on-surface">They must set a new password and personal PIN at their next sign-in.</p>
             {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
             <div className="grid grid-cols-2 gap-2">
               <Button type="button" variant="secondary" onClick={() => { void copyAllCredentials(); }}>Copy all</Button>
@@ -830,7 +810,7 @@ function OwnerStaffContent() {
 
       <BottomSheet open={Boolean(resetTarget)} onClose={() => setResetTarget(null)} title="Reset password?">
         <div className="flex flex-col gap-3">
-          <p className="font-body text-body-md text-on-surface-variant">Reset the temporary password for {resetTarget?.name}? Their next sign-in will require a new password.</p>
+          <p className="font-body text-body-md text-on-surface-variant">Reset the temporary password for {resetTarget?.name}? This also clears their current PIN and requires them to set a new password and PIN at their next sign-in.</p>
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
           <div className="grid grid-cols-2 gap-2">
             <Button type="button" variant="secondary" disabled={busy} onClick={() => setResetTarget(null)}>Cancel</Button>
@@ -912,16 +892,11 @@ function PermissionGroupSwitches({
             return (
               <div key={permission.id} className="flex min-h-12 items-center justify-between gap-3 rounded-lg bg-surface-container-low px-3">
                 <span className="font-body text-body-sm text-on-surface">{permission.label}</span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={enabled}
-                  aria-label={`${permission.label}: ${enabled ? 'On' : 'Off'}`}
-                  onClick={() => onToggle(permission.id)}
-                  className={`flex min-h-12 min-w-14 shrink-0 items-center rounded-full p-1 ${enabled ? 'justify-end bg-primary' : 'justify-start bg-outline-variant'}`}
-                >
-                  <span className="h-10 w-10 rounded-full bg-white shadow-card" />
-                </button>
+                <ToggleSwitch
+                  checked={enabled}
+                  label={`${permission.label}: ${enabled ? 'On' : 'Off'}`}
+                  onChange={() => onToggle(permission.id)}
+                />
               </div>
             );
           })}
@@ -950,6 +925,13 @@ function StaffDrinkRulesEditor({
   onItemToggle: (id: string) => void;
   onMaxQuantityChange: (value: string) => void;
 }) {
+  const [categorySearch, setCategorySearch] = useState('');
+  const [itemSearch, setItemSearch] = useState('');
+  const categoryQuery = categorySearch.trim().toLocaleLowerCase();
+  const itemQuery = itemSearch.trim().toLocaleLowerCase();
+  const visibleCategories = categories.filter((category) => category.name.toLocaleLowerCase().includes(categoryQuery));
+  const visibleItems = items.filter((item) => item.name.toLocaleLowerCase().includes(itemQuery));
+
   return (
     <section className="flex flex-col gap-3 rounded-xl bg-surface-container-low p-3">
       <div>
@@ -960,23 +942,58 @@ function StaffDrinkRulesEditor({
         <input type="number" min="0" step="1" required value={maxQuantity} onChange={(event) => onMaxQuantityChange(event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-lowest px-3 outline-none focus:ring-2 focus:ring-primary" />
       </label>
       <fieldset className="flex flex-col gap-2">
-        <legend className="mb-1 font-body text-label-md">Allowed categories</legend>
-        {categories.map((category) => (
-          <label key={category.id} className="flex min-h-11 items-center gap-3 rounded-lg bg-surface-container-lowest px-3 font-body text-body-sm">
-            <input type="checkbox" checked={selectedCategoryIds.includes(category.id)} onChange={() => onCategoryToggle(category.id)} />
-            {category.name}
-          </label>
-        ))}
+        <legend className="mb-1 flex w-full items-center justify-between gap-2 font-body text-label-md">
+          <span>Allowed categories</span>
+          <span className="text-label-sm text-outline">{selectedCategoryIds.length} selected</span>
+        </legend>
+        <label className="relative block">
+          <span className="sr-only">Search categories</span>
+          <MaterialIcon name="search" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xl text-outline" />
+          <input
+            type="search"
+            value={categorySearch}
+            onChange={(event) => setCategorySearch(event.target.value)}
+            placeholder="Search categories"
+            aria-label="Search allowed categories"
+            className="h-11 w-full rounded-lg bg-surface-container-lowest pl-10 pr-3 font-body text-body-sm outline-none focus:ring-2 focus:ring-primary"
+          />
+        </label>
+        <div className="max-h-40 space-y-2 overflow-y-auto overscroll-contain pr-1">
+          {visibleCategories.map((category) => (
+            <label key={category.id} className="flex min-h-11 items-center gap-3 rounded-lg bg-surface-container-lowest px-3 font-body text-body-sm">
+              <input type="checkbox" checked={selectedCategoryIds.includes(category.id)} onChange={() => onCategoryToggle(category.id)} />
+              {category.name}
+            </label>
+          ))}
+          {visibleCategories.length === 0 && <p className="px-1 py-2 font-body text-body-sm text-outline">{categories.length === 0 ? 'No categories available.' : 'No matching categories.'}</p>}
+        </div>
       </fieldset>
       <fieldset className="flex flex-col gap-2">
-        <legend className="mb-1 font-body text-label-md">Allowed items</legend>
-        {items.map((item) => (
-          <label key={item.id} className="flex min-h-11 items-center gap-3 rounded-lg bg-surface-container-lowest px-3 font-body text-body-sm">
-            <input type="checkbox" checked={selectedItemIds.includes(item.id)} onChange={() => onItemToggle(item.id)} />
-            {item.name}
-          </label>
-        ))}
-        {items.length === 0 && <p className="font-body text-body-sm text-outline">No active catalog items.</p>}
+        <legend className="mb-1 flex w-full items-center justify-between gap-2 font-body text-label-md">
+          <span>Allowed items</span>
+          <span className="text-label-sm text-outline">{selectedItemIds.length} selected</span>
+        </legend>
+        <label className="relative block">
+          <span className="sr-only">Search items</span>
+          <MaterialIcon name="search" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xl text-outline" />
+          <input
+            type="search"
+            value={itemSearch}
+            onChange={(event) => setItemSearch(event.target.value)}
+            placeholder="Search items"
+            aria-label="Search allowed items"
+            className="h-11 w-full rounded-lg bg-surface-container-lowest pl-10 pr-3 font-body text-body-sm outline-none focus:ring-2 focus:ring-primary"
+          />
+        </label>
+        <div className="max-h-40 space-y-2 overflow-y-auto overscroll-contain pr-1">
+          {visibleItems.map((item) => (
+            <label key={item.id} className="flex min-h-11 items-center gap-3 rounded-lg bg-surface-container-lowest px-3 font-body text-body-sm">
+              <input type="checkbox" checked={selectedItemIds.includes(item.id)} onChange={() => onItemToggle(item.id)} />
+              {item.name}
+            </label>
+          ))}
+          {visibleItems.length === 0 && <p className="px-1 py-2 font-body text-body-sm text-outline">{items.length === 0 ? 'No active catalog items.' : 'No matching items.'}</p>}
+        </div>
       </fieldset>
     </section>
   );

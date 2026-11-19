@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core';
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '../components/BottomNav';
 import { Button } from '../components/Button';
+import { ChangePersonalPinForm } from '../components/ChangePersonalPinForm';
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
 import { Keypad } from '../components/Keypad';
 import { ListSkeleton } from '../components/ListSkeleton';
@@ -563,7 +564,9 @@ export function SettingsScreen() {
         </>
       )}
 
+      {user?.role === 'staff' && <ChangePersonalPinForm userId={user.id} />}
       <ChangePasswordForm onError={setError} onNotice={setNotice} />
+      {user?.role === 'owner' && <p className="font-body text-body-sm text-on-surface-variant">If you forget your password, contact your platform super admin to issue a temporary reset password.</p>}
 
       {user?.role === 'owner' && store && (
         <>
@@ -571,7 +574,7 @@ export function SettingsScreen() {
             <h2 id="store-settings-heading" className="font-display text-headline-md text-on-surface">Store</h2>
             <form onSubmit={(event) => { void saveStoreInfo(event); }} className="flex flex-col gap-3">
               <label className="font-body text-label-md">{t('settings.storeName')}<input required value={storeName} onChange={(event) => setStoreName(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
-              <label className="font-body text-label-md">Store code<input readOnly value={store.code} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 text-on-surface-variant" /></label>
+              <label className="font-body text-label-md">Store ID<input readOnly value={store.code.toUpperCase()} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 text-on-surface-variant" /></label>
               <label className="font-body text-label-md">{t('settings.dailySalesTarget')} (DT)<input required type="number" min="0" step="0.001" inputMode="decimal" value={dailySalesTarget} onChange={(event) => setDailySalesTarget(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
               <p className="-mt-2 font-body text-body-sm text-outline">{t('settings.dailySalesTargetHelp')}</p>
               <Button type="submit" variant="secondary">{t('common.save')}</Button>

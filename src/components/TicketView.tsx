@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { Button } from './Button';
 import { formatTnd } from '../lib/format';
 import type { OrderRecord } from '../types/domain';
-import { printOrSharePdf } from '../services/receiptExport';
+import { downloadOrSharePdf, printOrSharePdf } from '../services/receiptExport';
 
 export function TicketView({ order, storeName, staffName, onClose }: {
   order: OrderRecord;
@@ -16,27 +16,10 @@ export function TicketView({ order, storeName, staffName, onClose }: {
   const ticketStoreName = order.storeName ?? storeName;
   const ticketStaffName = order.staffName ?? staffName;
   const ticketNumber = order.syncStatus ? `LOCAL-${Math.abs(order.number)}` : String(order.number);
-  const text = [
-    ticketStoreName,
-    `Ticket #${ticketNumber}`,
-    ...(order.syncStatus === 'queued' ? ['QUEUED - awaiting sync'] : []),
-    ...(order.syncStatus === 'needs_attention' ? ['NEEDS ATTENTION - order was not synced'] : []),
-    ...(order.verificationStatus === 'to_verify' ? ['Customer credit to verify'] : []),
-    new Date(order.createdAt).toLocaleString(),
-    `Staff: ${ticketStaffName}`,
-    ...order.items.map((item) => `${item.quantity} x ${item.name} = ${formatTnd(item.lineTotalMillimes / 1000)} DT${item.modifiers.length ? ` (${item.modifiers.join(', ')})` : ''}`),
-    ...(order.note ? [`Order note: ${order.note}`] : []),
-    `Total: ${formatTnd(order.totalMillimes / 1000)} DT`,
-    `Payment: ${order.paymentMethod}`,
-    ...(voided ? ['VOIDED', `Reason: ${order.voidReason ?? ''}`, `Voided by: ${order.voidedBy ?? ''}`] : []),
-  ].join('\n');
-
   async function share() {
     setShareError('');
     try {
-      if (navigator.share) await navigator.share({ title: `Ticket #${ticketNumber}`, text });
-      else if (navigator.clipboard) await navigator.clipboard.writeText(text);
-      else throw new Error('Sharing is not available in this browser.');
+      await downloadOrSharePdf(printTarget.current, `ticket-${ticketNumber}`, `Ticket #${ticketNumber}`);
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return;
       setShareError(error instanceof Error ? error.message : 'Unable to share this ticket.');
@@ -58,7 +41,7 @@ export function TicketView({ order, storeName, staffName, onClose }: {
       <section role="dialog" aria-modal="true" aria-label={`Ticket ${ticketNumber}`} className="receipt-dialog" onMouseDown={(event) => event.stopPropagation()}>
         <div className="receipt-actions no-print">
           <Button variant="secondary" onClick={() => { void printTicket(); }}>Print</Button>
-          <Button variant="secondary" onClick={() => { void share(); }}>Share text</Button>
+          <Button variant="secondary" onClick={() => { void share(); }}>Share PDF</Button>
           <Button variant="ghost" onClick={onClose}>Close</Button>
         </div>
         {shareError && <p role="alert" className="no-print receipt-error">{shareError}</p>}

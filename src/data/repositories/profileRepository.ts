@@ -12,6 +12,7 @@ interface ProfileRow {
   notes: string | null;
   position_id: string | null;
   must_change_password: boolean;
+  must_set_pin: boolean;
   is_active: boolean;
   session_version: number;
   created_at: string;
@@ -29,6 +30,7 @@ export function profileFromRow(row: ProfileRow): UserSummary {
     notes: row.notes ?? undefined,
     positionId: row.position_id ?? undefined,
     mustChangePassword: row.must_change_password,
+    mustSetPin: row.role === 'staff' && row.must_set_pin,
     isActive: row.is_active,
     sessionVersion: row.session_version,
     createdAt: row.created_at,
@@ -38,7 +40,7 @@ export function profileFromRow(row: ProfileRow): UserSummary {
 export async function getProfile(userId: string): Promise<UserSummary | undefined> {
   const { data, error } = await getSupabaseClient()
     .from('profiles')
-    .select('id, store_id, role, name, email, username, phone, notes, position_id, must_change_password, is_active, session_version, created_at')
+    .select('id, store_id, role, name, email, username, phone, notes, position_id, must_change_password, must_set_pin, is_active, session_version, created_at')
     .eq('id', userId)
     .maybeSingle();
   if (error) throw new Error(`Could not load the signed-in profile: ${error.message}`, { cause: error });
@@ -48,7 +50,7 @@ export async function getProfile(userId: string): Promise<UserSummary | undefine
 export async function listProfiles(storeId?: string): Promise<UserSummary[]> {
   let query = getSupabaseClient()
     .from('profiles')
-    .select('id, store_id, role, name, email, username, phone, notes, position_id, must_change_password, is_active, session_version, created_at')
+    .select('id, store_id, role, name, email, username, phone, notes, position_id, must_change_password, must_set_pin, is_active, session_version, created_at')
     .order('created_at');
   if (storeId) query = query.eq('store_id', storeId);
   const { data, error } = await query;

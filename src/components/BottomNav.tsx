@@ -1,25 +1,124 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { MaterialIcon } from './MaterialIcon';
+import { BottomSheet } from './BottomSheet';
 import { t } from '../i18n/translations';
+import { useAuthStore } from '../stores/authStore';
+import { ownerMoreLinks, ownerPrimaryLinks } from '../app/navigation';
+import { notificationService, OWNER_NOTIFICATIONS_CHANGED_EVENT } from '../services/notificationService';
+import { orderService } from '../services/orderService';
 
 const staffNavigation = [
   { to: '/pos', label: 'nav.pos', icon: 'point_of_sale' },
   { to: '/orders', label: 'nav.orders', icon: 'receipt_long' },
   { to: '/shift', label: 'nav.shift', icon: 'payments' },
-  { to: '/settings', label: 'nav.settings', icon: 'tune' },
+  { to: '/settings', label: 'nav.settings', icon: 'settings' },
 ] as const;
 
 export function BottomNav() {
+  const user = useAuthStore((state) => state.user);
+  const isOwner = user?.role === 'owner';
+  const navigation = staffNavigation;
   const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem('hanouti.sidebar-collapsed.v1') === 'true');
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [pendingVoidCount, setPendingVoidCount] = useState(0);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
 
   useEffect(() => {
-    document.documentElement.classList.add('staff-sidebar-layout');
-    document.documentElement.classList.toggle('staff-sidebar-collapsed', collapsed);
+    const storeId = user?.storeId;
+    if (!isOwner || !storeId) return;
+    let active = true;
+    const refreshBadges = () => {
+      void Promise.all([
+        orderService.listAll(storeId),
+        notificationService.listFor(user),
+      ]).then(([orders, notifications]) => {
+        if (!active) return;
+        setPendingVoidCount(orders.filter((order) => order.status === 'pending_void').length);
+        setUnreadNotificationCount(notifications.filter((notification) => !notification.readAt).length);
+      }).catch((error: unknown) => {
+        console.error('Could not load owner bottom navigation badges.', error);
+      });
+    };
+    refreshBadges();
+    window.addEventListener('focus', refreshBadges);
+    window.addEventListener('storage', refreshBadges);
+    window.addEventListener(OWNER_NOTIFICATIONS_CHANGED_EVENT, refreshBadges);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', refreshBadges);
+      window.removeEventListener('storage', refreshBadges);
+      window.removeEventListener(OWNER_NOTIFICATIONS_CHANGED_EVENT, refreshBadges);
+    };
+  }, [isOwner, user]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('staff-sidebar-layout', !isOwner);
+    document.documentElement.classList.toggle('staff-sidebar-collapsed', !isOwner && collapsed);
     return () => {
       document.documentElement.classList.remove('staff-sidebar-layout', 'staff-sidebar-collapsed');
     };
-  }, [collapsed]);
+  }, [collapsed, isOwner]);
+
+  const badgeCountFor = (to: string) => {
+    if (to === '/owner/voids') return pendingVoidCount;
+    if (to === '/notifications') return unreadNotificationCount;
+    return 0;
+  };
+  const totalBadgeCount = pendingVoidCount + unreadNotificationCount;
+
+  if (isOwner) {
+    return (
+      <>
+        <nav aria-label={t('nav.ownerNavigation')} className="owner-mobile-nav">
+          {ownerPrimaryLinks.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              aria-label={t(item.label)}
+              className={({ isActive }) => `owner-mobile-nav__item${isActive ? ' is-active' : ''}`}
+            >
+              <MaterialIcon name={item.icon} className="owner-mobile-nav__icon" />
+              <span>{t(item.label)}</span>
+            </NavLink>
+          ))}
+          <button
+            type="button"
+            aria-label={t('nav.more')}
+            aria-expanded={moreOpen}
+            aria-controls="owner-more-navigation"
+            onClick={() => setMoreOpen(true)}
+            className="owner-mobile-nav__item"
+          >
+            <span className="owner-mobile-nav__more-icon">
+              <MaterialIcon name="more_horiz" className="owner-mobile-nav__icon" />
+              {totalBadgeCount > 0 && <span className="owner-mobile-nav__badge">{totalBadgeCount > 99 ? '99+' : totalBadgeCount}</span>}
+            </span>
+            <span>{t('nav.more')}</span>
+          </button>
+        </nav>
+        <BottomSheet open={moreOpen} onClose={() => setMoreOpen(false)} title={t('nav.more')}>
+          <nav id="owner-more-navigation" aria-label={t('nav.moreNavigation')} className="owner-more-list">
+            {ownerMoreLinks.map((item) => {
+              const badgeCount = badgeCountFor(item.to);
+              return (
+                <NavLink
+                  key={`${item.to}-${item.label}`}
+                  to={item.to}
+                  onClick={() => setMoreOpen(false)}
+                  className={({ isActive }) => `owner-more-list__item${isActive ? ' is-active' : ''}`}
+                >
+                  <MaterialIcon name={item.icon} className="text-xl" />
+                  <span className="min-w-0 flex-1">{t(item.label)}</span>
+                  {badgeCount > 0 && <span className="owner-more-list__badge">{badgeCount > 99 ? '99+' : badgeCount}</span>}
+                </NavLink>
+              );
+            })}
+          </nav>
+        </BottomSheet>
+      </>
+    );
+  }
 
   const toggleCollapsed = () => {
     setCollapsed((current) => {
@@ -38,7 +137,7 @@ export function BottomNav() {
         <MaterialIcon name={collapsed ? 'chevron_right' : 'chevron_left'} />
       </button>
       <div className="staff-bottom-nav__items flex h-16 items-stretch justify-around px-1">
-        {staffNavigation.map((item) => (
+        {navigation.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}

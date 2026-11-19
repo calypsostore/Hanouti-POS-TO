@@ -16,7 +16,7 @@ interface AuthState {
   hydrate: () => Promise<void>;
   refreshCurrentUser: () => Promise<void>;
   login: (identifier: string, password: string, roles?: UserRole[]) => Promise<UserSummary>;
-  setInitialPassword: (password: string) => Promise<void>;
+  setInitialPassword: (password: string) => Promise<UserSummary>;
   setInitialPin: (pin: string) => Promise<void>;
   lock: () => Promise<void>;
   unlockWithPin: (pin: string) => Promise<void>;
@@ -75,11 +75,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (!user) throw new Error('You must sign in before setting a password.');
     const updatedUser = await authService.setInitialPassword(user.id, password);
     set({ user: updatedUser });
+    return updatedUser;
   },
   setInitialPin: async (pin) => {
     const user = get().user;
     if (!user) throw new Error('You must sign in before setting a PIN.');
-    await authService.setPersonalPin(user.id, pin);
+    const updatedUser = await authService.setPersonalPin(user.id, pin);
+    set({ user: updatedUser });
   },
   lock: async () => {
     await authService.lockCurrentSession();

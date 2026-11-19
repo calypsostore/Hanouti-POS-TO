@@ -5,6 +5,7 @@ import { hashSecret, verifySecret } from './secretService';
 import { activityService } from './activityService';
 import { authRepository } from '../data/repositories/authRepository';
 import { isSupabaseDriver } from '../data/driver';
+import { migrateLegacyDemoStoreIdentity } from './accountIdentity';
 
 const USERS_KEY = 'users';
 const SESSION_KEY = 'auth-session';
@@ -30,6 +31,7 @@ function clearSessionStorageLock(): void {
 }
 
 function getUsers(): UserRecord[] {
+  migrateLegacyDemoStoreIdentity();
   return readData(USERS_KEY, seedUsers);
 }
 
@@ -47,7 +49,26 @@ function isAccountActive(user: UserRecord): boolean {
 
 function withoutPassword(user: UserRecord): UserSummary {
   const { password: _password, passwordHash: _passwordHash, pinHash: _pinHash, ...safeUser } = user;
-  return safeUser;
+  return {
+    ...safeUser,
+    mustSetPin: user.role === 'staff' && (user.mustSetPin ?? (user.mustChangePassword || !user.pinHash)),
+  };
+}
+
+async function verifyStaffPin(user: UserRecord, pin: string): Promise<void> {
+  const attempts = getPinAttempts(user.id);
+  const remaining = Math.max(0, (attempts.lockedUntil ?? 0) - Date.now());
+  if (remaining > 0) throw new Error(`PIN locked. Try again in ${Math.ceil(remaining / 1000)} seconds.`);
+  if (!user.pinHash) throw new Error('No PIN is set for this account. Use your password instead.');
+  const result = await verifySecret(user.pinHash, pin);
+  if (!result.valid) {
+    const count = attempts.count + 1;
+    const lockedUntil = count >= 5 ? Date.now() + PIN_LOCKOUT_MS : undefined;
+    writeData<PinAttemptState>(PIN_ATTEMPTS_PREFIX + user.id, { count: lockedUntil ? 0 : count, lockedUntil });
+    if (lockedUntil) throw new Error('Five incorrect PINs. Try again in 60 seconds.');
+    throw new Error('Incorrect PIN.');
+  }
+  removeData(PIN_ATTEMPTS_PREFIX + user.id);
 }
 
 export const authService = {
@@ -153,7 +174,7 @@ export const authService = {
     return Math.max(0, (attempts.lockedUntil ?? 0) - Date.now());
   },
 
-  async setPersonalPin(userId: string, pin: string): Promise<void> {
+  async setPersonalPin(userId: string, pin: string): Promise<UserSummary> {
     if (isSupabaseDriver()) return authRepository.setPersonalPin(userId, pin);
     if (!/^\d{4}$/.test(pin)) throw new Error('PIN must contain exactly 4 digits.');
     const session = readData<AuthSession | null>(SESSION_KEY, null);
@@ -161,8 +182,10 @@ export const authService = {
     const users = getUsers();
     const user = users.find((candidate) => candidate.id === userId);
     if (!user || user.role !== 'staff' || user.mustChangePassword) throw new Error('The staff account is not ready to set a PIN.');
+    if (user.pinHash || user.mustSetPin === false) throw new Error('A personal PIN is already set for this account.');
     const pinHash = await hashSecret(pin);
-    saveUsers(users.map((candidate) => candidate.id === userId ? { ...candidate, pinHash } : candidate));
+    const updatedUser = { ...user, pinHash, mustSetPin: false };
+    saveUsers(users.map((candidate) => candidate.id === userId ? updatedUser : candidate));
     removeData(PIN_ATTEMPTS_PREFIX + userId);
     if (user.storeId) {
       await activityService.log({
@@ -175,6 +198,30 @@ export const authService = {
         meta: { before: { hasPin: Boolean(user.pinHash) }, after: { hasPin: true } },
       });
     }
+    return withoutPassword(updatedUser);
+  },
+
+  async changePersonalPin(userId: string, currentPin: string, newPin: string): Promise<void> {
+    if (isSupabaseDriver()) return authRepository.changePersonalPin(userId, currentPin, newPin);
+    if (!/^\d{4}$/.test(currentPin) || !/^\d{4}$/.test(newPin)) throw new Error('PIN must contain exactly 4 digits.');
+    const session = readData<AuthSession | null>(SESSION_KEY, null);
+    if (!session || session.userId !== userId) throw new Error('You must sign in as this staff member to change a PIN.');
+    const users = getUsers();
+    const user = users.find((candidate) => candidate.id === userId);
+    if (!user || user.role !== 'staff' || !user.storeId || user.mustChangePassword || !user.pinHash) {
+      throw new Error('The staff account is not ready to change a PIN.');
+    }
+    await verifyStaffPin(user, currentPin);
+    const pinHash = await hashSecret(newPin);
+    saveUsers(users.map((candidate) => candidate.id === userId ? { ...candidate, pinHash, mustSetPin: false } : candidate));
+    await activityService.log({
+      storeId: user.storeId,
+      actorId: user.id,
+      action: 'staff.pin_changed',
+      summary: `${user.name} changed their personal PIN.`,
+      entityType: 'staff',
+      entityId: user.id,
+    });
   },
 
   async unlockCurrentSessionWithPin(pin: string): Promise<UserSummary> {
@@ -184,20 +231,8 @@ export const authService = {
     if (!session) throw new Error('The staff session could not be found.');
     const user = getUsers().find((candidate) => candidate.id === session.userId);
     if (!user || user.role !== 'staff' || !user.storeId) throw new Error('The staff account could not be found.');
-    const remaining = this.getPinLockRemainingMs(user.id);
-    if (remaining > 0) throw new Error(`PIN locked. Try again in ${Math.ceil(remaining / 1000)} seconds.`);
-    if (!user.pinHash) throw new Error('No PIN is set for this account. Use your password instead.');
-    const result = await verifySecret(user.pinHash, pin);
-    if (!result.valid) {
-      const attempts = getPinAttempts(user.id);
-      const count = attempts.count + 1;
-      const lockedUntil = count >= 5 ? Date.now() + PIN_LOCKOUT_MS : undefined;
-      writeData<PinAttemptState>(PIN_ATTEMPTS_PREFIX + user.id, { count: lockedUntil ? 0 : count, lockedUntil });
-      if (lockedUntil) throw new Error('Five incorrect PINs. Try again in 60 seconds.');
-      throw new Error('Incorrect PIN.');
-    }
+    await verifyStaffPin(user, pin);
     await this.unlockSession(session, user);
-    removeData(PIN_ATTEMPTS_PREFIX + user.id);
     return withoutPassword(user);
   },
 
@@ -222,7 +257,14 @@ export const authService = {
     const user = users.find((candidate) => candidate.id === userId);
     if (!user) throw new Error('The signed-in account could not be found.');
     if (!user.mustChangePassword) throw new Error('The account is not awaiting a first password change.');
-    const updatedUser = { ...user, password: undefined, passwordHash: await hashSecret(newPassword), mustChangePassword: false };
+    const updatedUser = {
+      ...user,
+      password: undefined,
+      passwordHash: await hashSecret(newPassword),
+      mustChangePassword: false,
+      pinHash: user.role === 'staff' && user.mustChangePassword ? undefined : user.pinHash,
+      mustSetPin: user.role === 'staff' && user.mustChangePassword ? true : user.mustSetPin,
+    };
     saveUsers(users.map((candidate) => candidate.id === userId ? updatedUser : candidate));
     if (user.storeId) {
       await activityService.log({

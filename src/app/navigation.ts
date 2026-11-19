@@ -2,9 +2,9 @@ import type { WorkspaceLink } from '../components/WorkspaceLayout';
 
 export const ownerPrimaryLinks: WorkspaceLink[] = [
   { to: '/owner/dashboard', label: 'nav.dashboard', icon: 'space_dashboard' },
+  { to: '/pos', label: 'nav.pos', icon: 'point_of_sale' },
   { to: '/orders', label: 'nav.orders', icon: 'receipt_long' },
   { to: '/customers', label: 'nav.customers', icon: 'group' },
-  { to: '/owner/reports', label: 'nav.reports', icon: 'analytics' },
 ];
 
 export const ownerMoreLinks: WorkspaceLink[] = [
@@ -15,11 +15,12 @@ export const ownerMoreLinks: WorkspaceLink[] = [
   { to: '/owner/shifts', label: 'nav.shift', icon: 'payments' },
   { to: '/owner/voids', label: 'nav.voidRequests', icon: 'pending_actions' },
   { to: '/owner/waste', label: 'nav.wasteLog', icon: 'delete_sweep' },
+  { to: '/owner/reports', label: 'nav.reports', icon: 'analytics' },
   { to: '/owner/expenses', label: 'nav.expenses', icon: 'request_quote' },
   { to: '/owner/suppliers', label: 'nav.suppliers', icon: 'local_shipping' },
   { to: '/owner/activity', label: 'nav.activityLog', icon: 'history' },
   { to: '/notifications', label: 'nav.notifications', icon: 'notifications' },
-  { to: '/owner/settings', label: 'nav.settings', icon: 'tune' },
+  { to: '/owner/settings', label: 'nav.settings', icon: 'settings' },
 ];
 
 export const ownerWorkspaceLinks: WorkspaceLink[] = [...ownerPrimaryLinks, ...ownerMoreLinks];
@@ -27,5 +28,5 @@ export const ownerWorkspaceLinks: WorkspaceLink[] = [...ownerPrimaryLinks, ...ow
 export const adminWorkspaceLinks: WorkspaceLink[] = [
   { to: '/admin/overview', label: 'nav.dashboard', icon: 'space_dashboard' },
   { to: '/admin/stores', label: 'nav.stores', icon: 'storefront' },
-  { to: '/admin/settings', label: 'nav.settings', icon: 'tune' },
+  { to: '/admin/settings', label: 'nav.settings', icon: 'settings' },
 ];

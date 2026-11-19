@@ -6,10 +6,11 @@ interface BottomSheetProps {
   onClose: () => void;
   title?: string;
   children: ReactNode;
+  panelClassName?: string;
 }
 
-export function BottomSheet({ open, onClose, title, children }: BottomSheetProps) {
+export function BottomSheet({ open, onClose, title, children, panelClassName }: BottomSheetProps) {
   return (
-    <ResponsiveDialog open={open} onClose={onClose} title={title}>{children}</ResponsiveDialog>
+    <ResponsiveDialog open={open} onClose={onClose} title={title} panelClassName={panelClassName}>{children}</ResponsiveDialog>
   );
 }

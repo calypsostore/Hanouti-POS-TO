@@ -491,7 +491,13 @@ function OwnerDashboardContent() {
         </article>
 
         <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-          <h2 className="mb-4 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="schedule" className="text-primary" />Shift overview</h2>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="schedule" className="text-primary" />Shift overview</h2>
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => navigate('/owner/reports')}><MaterialIcon name="summarize" />X report</Button>
+              <Button variant="secondary" onClick={() => navigate('/owner/reports')}><MaterialIcon name="lock" />Z report</Button>
+            </div>
+          </div>
           <div className="flex flex-col gap-2">
             {summary.shifts.map((shift) => <ShiftSummary key={shift.id} shift={shift} />)}
             {summary.shifts.length === 0 && <p className="rounded-xl bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('common.noData')}</p>}

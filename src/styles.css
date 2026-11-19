@@ -158,6 +158,18 @@ button {
   display: none;
 }
 
+.customer-credit-progress-track {
+  background: linear-gradient(
+    to right,
+    rgb(var(--color-success-dark)) 0%,
+    rgb(var(--color-success-dark)) 45%,
+    rgb(var(--color-warning)) 45%,
+    rgb(var(--color-warning)) 55%,
+    rgb(var(--color-error)) 55%,
+    rgb(var(--color-error)) 100%
+  );
+}
+
 .receipt-overlay {
   position: fixed;
   inset: 0;
@@ -973,10 +985,6 @@ button {
   background: rgb(var(--color-surface-container));
 }
 
-:root.dark .login-toggle {
-  background: rgb(var(--color-surface-container-high));
-}
-
 .list-skeleton {
   display: grid;
   gap: 0.75rem;
@@ -1013,6 +1021,14 @@ button {
     display: none;
   }
 
+  .responsive-dialog {
+    bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .responsive-dialog__panel {
+    max-height: calc(100dvh - 4.5rem - env(safe-area-inset-bottom, 0px));
+  }
+
   .owner-workspace main {
     min-width: 0;
     padding-bottom: 6rem;
@@ -1033,6 +1049,10 @@ button {
     padding: 0.25rem 0 max(0.25rem, env(safe-area-inset-bottom, 0px));
     box-shadow: 0 -4px 16px rgb(var(--color-primary-dark) / 0.08);
     backdrop-filter: blur(16px);
+  }
+
+  .owner-workspace .customer-add-button {
+    bottom: calc(3.75rem + env(safe-area-inset-bottom, 0px) + 1rem);
   }
 
   .owner-mobile-nav__item {
@@ -2088,40 +2108,6 @@ button {
   margin-top: 3px;
   color: #607496;
   font-size: clamp(12px, min(2.8vw, 1.8vh), 20px);
-}
-
-.login-toggle {
-  position: relative;
-  width: clamp(48px, min(13vw, 7vh), 100px);
-  height: clamp(28px, min(7.5vw, 4vh), 60px);
-  flex: 0 0 auto;
-  padding: 3px;
-  border: 0;
-  border-radius: 999px;
-  background: rgb(102 127 158 / 28%);
-  box-shadow: inset 0 1px 3px rgb(43 75 119 / 16%);
-  cursor: pointer;
-  transition: background 240ms ease, box-shadow 240ms ease;
-}
-
-.login-toggle.is-on {
-  background: linear-gradient(110deg, #08a7b3, #00a7a5 58%, #12c4b5);
-  box-shadow: inset 0 1px 2px rgb(255 255 255 / 36%), 0 3px 10px rgb(0 145 156 / 20%);
-}
-
-.login-toggle span {
-  display: block;
-  width: calc(clamp(28px, min(7.5vw, 4vh), 60px) - 6px);
-  height: calc(clamp(28px, min(7.5vw, 4vh), 60px) - 6px);
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 2px 6px rgb(28 56 93 / 24%);
-  transform: translateX(0);
-  transition: transform 260ms cubic-bezier(0.2, 0.85, 0.25, 1);
-}
-
-.login-toggle.is-on span {
-  transform: translateX(calc(clamp(48px, min(13vw, 7vh), 100px) - clamp(28px, min(7.5vw, 4vh), 60px)));
 }
 
 .login-error {

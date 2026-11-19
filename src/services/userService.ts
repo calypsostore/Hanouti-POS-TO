@@ -8,6 +8,7 @@ import { isSupabaseDriver } from '../data/driver';
 import { createOwnerAccount, createStaff, resetPassword } from '../data/repositories/accountRepository';
 import { getPermissionOverrides, getProfile, listProfiles } from '../data/repositories/profileRepository';
 import { getStore as getRemoteStore, listStores as listRemoteStores } from '../data/repositories/storeRepository';
+import { formatStaffUsername, generateStoreCode, migrateLegacyDemoStoreIdentity } from './accountIdentity';
 
 const PERMISSIONS: PermissionDefinition[] = [
   { id: 'take_orders', group: 'Orders', label: 'Take orders' },
@@ -30,8 +31,14 @@ const PERMISSIONS: PermissionDefinition[] = [
   { id: 'view_own_hours', group: 'Other', label: 'View own hours' },
 ];
 
-const getUsers = () => readData('users', seedUsers);
-const getStores = () => readData('stores', seedStores);
+const getUsers = () => {
+  migrateLegacyDemoStoreIdentity();
+  return readData('users', seedUsers);
+};
+const getStores = () => {
+  migrateLegacyDemoStoreIdentity();
+  return readData('stores', seedStores);
+};
 const getPositions = () => {
   const positions = readData('positions', seedPositions);
   let migrated = false;
@@ -61,27 +68,12 @@ function makeTemporaryPassword(): string {
   return Array.from(values, (value) => (value % 10).toString()).join('');
 }
 
-function randomDigits(length: number): string {
-  const values = new Uint32Array(length);
-  crypto.getRandomValues(values);
-  return Array.from(values, (value) => (value % 10).toString()).join('');
-}
-
 const STAFF_TEMPORARY_PASSWORD_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
 
 function makeStaffTemporaryPassword(): string {
   const values = new Uint32Array(6);
   crypto.getRandomValues(values);
   return Array.from(values, (value) => STAFF_TEMPORARY_PASSWORD_ALPHABET[value % STAFF_TEMPORARY_PASSWORD_ALPHABET.length]).join('');
-}
-
-function slugify(name: string): string {
-  return name.trim().toLocaleLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.+|\.+$/g, '');
-}
-
-function formatStaffUsername(storeCode: string, name: string, suffix: string): string {
-  const firstName = name.trim().split(/\s+/)[0] ?? '';
-  return `${storeCode}.${slugify(firstName)}${suffix}`;
 }
 
 function normalizePermissionOverrides(overrides: PermissionOverrides): PermissionOverrides {
@@ -142,7 +134,10 @@ function positionFromRow(row: {
 
 function withoutPassword(user: UserRecord): UserSummary {
   const { password: _password, passwordHash: _passwordHash, pinHash: _pinHash, ...safeUser } = user;
-  return safeUser;
+  return {
+    ...safeUser,
+    mustSetPin: user.role === 'staff' && (user.mustSetPin ?? (user.mustChangePassword || !user.pinHash)),
+  };
 }
 
 async function logUserMutation(input: {
@@ -451,14 +446,16 @@ export const userService = {
     }
   },
 
-  async createOwnerAccount(input: { name: string; email: string; storeName: string; storeCode: string }): Promise<{ owner: UserSummary; store: StoreRecord; temporaryPassword: string }> {
+  async createOwnerAccount(input: { name: string; email: string; storeName: string }): Promise<{ owner: UserSummary; store: StoreRecord; temporaryPassword: string }> {
     if (isSupabaseDriver()) return createOwnerAccount(input);
     const users = getUsers();
     if (users.some((user) => user.email?.toLocaleLowerCase() === input.email.toLocaleLowerCase())) {
       throw new Error('An account already uses this email address.');
     }
-    const code = input.storeCode.trim().toLocaleLowerCase();
-    if (!code || getStores().some((store) => store.code === code)) throw new Error('Store code is empty or already in use.');
+    const storeName = input.storeName.trim();
+    if (!storeName) throw new Error('Store name is required.');
+    const existingStores = getStores();
+    const code = generateStoreCode(storeName, existingStores.map((store) => store.code));
 
     const temporaryPassword = makeTemporaryPassword();
     const ownerId = createId('owner');
@@ -467,7 +464,7 @@ export const userService = {
       id: createId('store'),
       ownerId,
       code,
-      name: input.storeName.trim(),
+      name: storeName,
       adminPinHash: defaultPinHash,
       pinMustChange: true,
       isActive: true,
@@ -510,16 +507,12 @@ export const userService = {
     return { owner: ownerSummary, store, temporaryPassword };
   },
 
-  generateStaffUsernameSuffix(): string {
-    return randomDigits(3);
+  generateStoreCode(storeName: string, existingCodes: string[] = []): string {
+    return generateStoreCode(storeName, existingCodes);
   },
 
-  formatStaffUsername(storeCode: string, name: string, suffix: string): string {
-    return formatStaffUsername(storeCode, name, suffix);
-  },
-
-  generateStaffTemporaryPassword(): string {
-    return makeStaffTemporaryPassword();
+  formatStaffUsername(storeCode: string, name: string, existingUsernames: string[] = []): string {
+    return formatStaffUsername(storeCode, name, existingUsernames);
   },
 
   async createStaff(input: {
@@ -528,9 +521,7 @@ export const userService = {
     phone?: string;
     notes?: string;
     positionId: string;
-    temporaryPassword?: string;
     permissionOverrides?: PermissionOverrides;
-    usernameSuffix?: string;
   }): Promise<{ staff: UserSummary; temporaryPassword: string }> {
     if (isSupabaseDriver()) return createStaff(input);
     const name = input.name.trim();
@@ -541,20 +532,8 @@ export const userService = {
     }
     if (!name) throw new Error('Staff name is required.');
     const users = getUsers();
-    let username: string;
-    if (input.usernameSuffix !== undefined && !/^\d{3}$/.test(input.usernameSuffix)) {
-      throw new Error('Username suffix must contain exactly 3 digits.');
-    }
-    username = input.usernameSuffix === undefined ? '' : formatStaffUsername(store.code, name, input.usernameSuffix);
-    if (!username || users.some((user) => user.username === username)) {
-      do {
-        username = formatStaffUsername(store.code, name, randomDigits(3));
-      } while (users.some((user) => user.username === username));
-    }
-    const temporaryPassword = input.temporaryPassword ?? makeStaffTemporaryPassword();
-    if (temporaryPassword.length !== 6 || [...temporaryPassword].some((character) => !STAFF_TEMPORARY_PASSWORD_ALPHABET.includes(character))) {
-      throw new Error('Temporary password must contain 6 readable characters.');
-    }
+    const username = formatStaffUsername(store.code, name, users.flatMap((user) => user.username ? [user.username] : []));
+    const temporaryPassword = makeStaffTemporaryPassword();
     const permissionOverrides = input.permissionOverrides ? normalizePermissionOverrides(input.permissionOverrides) : undefined;
     const staff: UserRecord = {
       id: createId('staff'),
@@ -565,6 +544,7 @@ export const userService = {
       username,
       passwordHash: await hashSecret(temporaryPassword),
       mustChangePassword: true,
+      mustSetPin: true,
       isActive: true,
       storeId: input.storeId,
       positionId: input.positionId,
@@ -610,8 +590,12 @@ export const userService = {
       passwordHash: await hashSecret(temporaryPassword),
       password: undefined,
       mustChangePassword: true,
+      pinHash: undefined,
+      mustSetPin: true,
+      sessionVersion: (staff.sessionVersion ?? 0) + 1,
     };
     saveUsers(users.map((candidate) => candidate.id === userId ? updated : candidate));
+    removeData(`staff-pin-attempts:${userId}`);
     await logUserMutation({
       storeId: staff.storeId ?? '',
       action: 'staff.password_reset',
@@ -619,7 +603,7 @@ export const userService = {
       entityType: 'staff',
       entityId: staff.id,
       before: { mustChangePassword: staff.mustChangePassword },
-      after: { mustChangePassword: true },
+      after: { mustChangePassword: true, mustSetPin: true, hasPin: false },
     });
     return temporaryPassword;
   },
@@ -697,8 +681,11 @@ export const userService = {
     if (!owner || !staff || !store || store.ownerId !== owner.id || owner.storeId !== staff.storeId) {
       throw new Error('Only this store owner can reset this staff PIN.');
     }
+    if (staff.mustChangePassword || staff.mustSetPin || !staff.pinHash) {
+      throw new Error('The staff member must complete first-login PIN setup before their PIN can be reset.');
+    }
     const pinHash = await hashSecret(pin);
-    saveUsers(users.map((candidate) => candidate.id === staffId ? { ...candidate, pinHash } : candidate));
+    saveUsers(users.map((candidate) => candidate.id === staffId ? { ...candidate, pinHash, mustSetPin: false } : candidate));
     removeData(`staff-pin-attempts:${staffId}`);
     await logUserMutation({
       storeId: store.id,

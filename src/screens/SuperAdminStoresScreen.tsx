@@ -14,9 +14,10 @@ import { useAuthStore } from '../stores/authStore';
 import { isSubscriptionExpired, type StoreRecord, type StoreSubscription, type UserSummary } from '../types/domain';
 import { userService } from '../services/userService';
 import { formatTnd } from '../lib/format';
+import { shareTextAsPdf } from '../services/receiptExport';
 
 type StoreFilter = 'all' | 'active' | 'suspended' | 'archived';
-type OwnerCredentials = { email: string; password: string; title: string };
+type OwnerCredentials = { email: string; password: string; title: string; storeCode?: string };
 
 function localDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -128,7 +129,7 @@ export function SuperAdminOverviewScreen() {
             <Link key={store.id} to={`/admin/stores/${store.id}`} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-surface-container-low p-3">
               <span className="min-w-0">
                 <span className="block truncate font-body text-label-md text-on-surface">{store.name}</span>
-                <span className="font-body text-body-sm text-outline">{store.code} · {new Date(store.createdAt).toLocaleDateString()}</span>
+                <span className="font-body text-body-sm text-outline">{store.code.toUpperCase()} · {new Date(store.createdAt).toLocaleDateString()}</span>
               </span>
               <span className="flex flex-wrap gap-2">
                 <StatusTag status={storeIsSuspended(store) ? 'suspended' : 'open'}>{storeIsSuspended(store) ? 'Suspended' : 'Active'}</StatusTag>
@@ -161,7 +162,6 @@ function SuperAdminStoresContent() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [storeName, setStoreName] = useState('');
-  const [storeCode, setStoreCode] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StoreFilter>('all');
   const [credentials, setCredentials] = useState<OwnerCredentials | null>(null);
@@ -197,12 +197,16 @@ function SuperAdminStoresContent() {
     setError('');
     setNotice('');
     try {
-      const result = await userService.createOwnerAccount({ name, email, storeName, storeCode });
-      setCredentials({ email: result.owner.email ?? email, password: result.temporaryPassword, title: 'New owner credentials' });
+      const result = await userService.createOwnerAccount({ name, email, storeName });
+      setCredentials({
+        email: result.owner.email ?? email,
+        password: result.temporaryPassword,
+        title: 'New owner credentials',
+        storeCode: result.store.code,
+      });
       setName('');
       setEmail('');
       setStoreName('');
-      setStoreCode('');
       setCreateOpen(false);
       await refresh();
     } catch (createError) {
@@ -246,8 +250,8 @@ function SuperAdminStoresContent() {
     try {
       const password = await userService.resetOwnerPassword(owner.id, admin.id);
       setResetTarget(null);
-      setCredentials({ email: owner.email ?? '', password, title: `Temporary password for ${owner.name}` });
-      setNotice('Owner password reset. The owner must change it at next login.');
+      setCredentials({ email: owner.email ?? '', password, title: `Temporary password for ${owner.name}`, storeCode: resetTarget.code });
+      setNotice('Owner password reset. The owner must sign in with the temporary password and change it at next login.');
       await refresh();
     } catch (resetError) {
       setError(resetError instanceof Error ? resetError.message : 'Unable to reset the owner password.');
@@ -299,7 +303,7 @@ function SuperAdminStoresContent() {
     if (!credentials) return;
     try {
       if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable.');
-      await navigator.clipboard.writeText(`Email: ${credentials.email}\nTemporary password: ${credentials.password}`);
+      await navigator.clipboard.writeText(`${credentials.storeCode ? `Store ID: ${credentials.storeCode.toUpperCase()}\n` : ''}Email: ${credentials.email}\nTemporary password: ${credentials.password}`);
       setNotice('Credentials copied.');
       setError('');
     } catch (copyError) {
@@ -320,13 +324,10 @@ function SuperAdminStoresContent() {
 
   async function shareCredentials() {
     if (!credentials) return;
-    const text = `Email: ${credentials.email}\nTemporary password: ${credentials.password}`;
+    const text = `${credentials.storeCode ? `Store ID: ${credentials.storeCode.toUpperCase()}\n` : ''}Email: ${credentials.email}\nTemporary password: ${credentials.password}`;
     try {
-      const shareAvailable = typeof navigator.share === 'function';
-      if (shareAvailable) await navigator.share({ title: credentials.title, text });
-      else if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
-      else throw new Error('Sharing and clipboard access are unavailable.');
-      setNotice(shareAvailable ? 'Credentials shared.' : 'Credentials copied.');
+      await shareTextAsPdf(text, `owner-credentials-${credentials.email}`, credentials.title);
+      setNotice('Credentials PDF shared or downloaded.');
       setError('');
     } catch (shareError) {
       if (shareError instanceof DOMException && shareError.name === 'AbortError') return;
@@ -345,6 +346,9 @@ function SuperAdminStoresContent() {
       return matchesStatus && matchesSearch;
     }).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }, [owners, search, statusFilter, stores]);
+  const storeCodePreview = storeName.trim()
+    ? userService.generateStoreCode(storeName, stores.map((store) => store.code))
+    : '';
 
   return (
     <WorkspaceLayout title={t('admin.storeList')} links={adminWorkspaceLinks}>
@@ -381,7 +385,7 @@ function SuperAdminStoresContent() {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h2 className="truncate font-body text-label-lg text-on-surface">{store.name}</h2>
-                  <p className="mt-1 break-all font-body text-body-sm text-outline">{store.code} · {owner?.email ?? 'Owner account unavailable'}</p>
+                  <p className="mt-1 break-all font-body text-body-sm text-outline">{store.code.toUpperCase()} · {owner?.email ?? 'Owner account unavailable'}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <StatusTag status={store.archivedAt ? 'suspended' : suspended ? 'suspended' : 'open'}>{store.archivedAt ? 'Archived' : suspended ? 'Suspended' : 'Active'}</StatusTag>
                     {owner && <StatusTag status={owner.isActive ? 'open' : 'suspended'}>{`Owner ${owner.isActive ? 'active' : 'suspended'}`}</StatusTag>}
@@ -430,7 +434,8 @@ function SuperAdminStoresContent() {
       <BottomSheet open={Boolean(credentials)} onClose={() => setCredentials(null)} title={credentials?.title}>
         {credentials && (
           <div className="flex flex-col gap-4">
-            <p className="font-body text-body-md text-on-surface-variant">Share these temporary credentials securely. The owner must set a new password at next login.</p>
+            <p className="font-body text-body-md text-on-surface-variant">Share these temporary credentials securely. The owner must set a new password at next login. The store ID is used in staff usernames.</p>
+            {credentials.storeCode && <CredentialField label="Store ID" value={credentials.storeCode.toUpperCase()} onCopy={() => { void copyCredentialValue('Store ID', credentials.storeCode?.toUpperCase() ?? ''); }} />}
             <CredentialField label="Email" value={credentials.email} onCopy={() => { void copyCredentialValue('Email', credentials.email); }} />
             <CredentialField label="Temporary password" value={credentials.password} onCopy={() => { void copyCredentialValue('Password', credentials.password); }} />
             {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
@@ -445,7 +450,7 @@ function SuperAdminStoresContent() {
 
       <BottomSheet open={Boolean(resetTarget)} onClose={() => setResetTarget(null)} title="Reset owner password?">
         <div className="flex flex-col gap-4">
-          <p className="font-body text-body-md text-on-surface-variant">Reset the temporary password for {owners[resetTarget?.ownerId ?? '']?.name ?? 'this owner'}? Existing owner sessions will be signed out.</p>
+          <p className="font-body text-body-md text-on-surface-variant">Issue a new temporary password for {owners[resetTarget?.ownerId ?? '']?.name ?? 'this owner'}? Existing owner sessions will be signed out, and the owner must sign in and change the password.</p>
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
           <div className="grid grid-cols-2 gap-2">
             <Button type="button" variant="secondary" className="min-h-12" onClick={() => setResetTarget(null)}>Cancel</Button>
@@ -498,7 +503,8 @@ function SuperAdminStoresContent() {
           <label className="font-body text-label-md">{t('common.name')}<input required value={name} onChange={(event) => setName(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
           <label className="font-body text-label-md">{t('admin.ownerEmail')}<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
           <label className="font-body text-label-md">{t('admin.storeName')}<input required value={storeName} onChange={(event) => setStoreName(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
-          <label className="font-body text-label-md">{t('admin.storeCode')}<input required pattern="[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*" value={storeCode} onChange={(event) => setStoreCode(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
+          <label className="font-body text-label-md">{t('admin.storeCode')}<input readOnly value={storeCodePreview.toUpperCase()} placeholder="Enter a store name to generate its ID" className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 font-mono outline-none" /></label>
+          <p className="-mt-2 font-body text-body-sm text-on-surface-variant">The store ID is generated from the store name and is kept unique automatically.</p>
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
           <div className="sheet-action-bar grid grid-cols-2 gap-2">
             <Button type="button" variant="ghost" onClick={() => setCreateOpen(false)}>{t('common.cancel')}</Button>

@@ -1,6 +1,5 @@
-import { Capacitor } from '@capacitor/core';
-import { Share } from '@capacitor/share';
 import { formatTnd } from '../lib/format';
+import { shareTextAsPdf } from './receiptExport';
 import type { CustomerStatementData } from './customerService';
 
 function formatAmount(amountMillimes: number): string {
@@ -29,16 +28,5 @@ export async function shareCustomerStatement(statement: CustomerStatementData): 
     `${balanceMillimes < 0 ? 'Credit balance' : 'Amount due'}: ${formatAmount(balanceMillimes)}`,
   ].join('\n');
 
-  if (Capacitor.isNativePlatform()) {
-    await Share.share({
-      title: `Tab statement - ${customer.name}`,
-      text,
-      dialogTitle: 'Share customer statement',
-    });
-    return;
-  }
-  if (!navigator.share) {
-    throw new Error('Statement sharing is not available in this browser.');
-  }
-  await navigator.share({ title: `Tab statement - ${customer.name}`, text });
+  await shareTextAsPdf(text, `tab-statement-${customer.name}`, `Tab statement - ${customer.name}`);
 }

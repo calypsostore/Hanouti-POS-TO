@@ -13,9 +13,9 @@ import { TabStatementView } from '../components/TabStatementView';
 import { TopBar } from '../components/TopBar';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { formatTnd } from '../lib/format';
-import { getCustomerCreditTone } from '../lib/customerCredit';
 import { customerService } from '../services/customerService';
 import { shareCustomerStatement } from '../services/customerStatementShare';
+import { shareTextAsPdf } from '../services/receiptExport';
 import { shiftService } from '../services/shiftService';
 import type { CustomerCreditAlert } from '../services/notificationService';
 import { notificationService } from '../services/notificationService';
@@ -83,10 +83,6 @@ function dateLabel(value?: string): string {
   if (!value) return 'No payments yet';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? 'No payments yet' : date.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-function progressColor(status?: CustomerCreditStatus) {
-  return getCustomerCreditTone(status?.state ?? 'no_limit', status?.percentUsed);
 }
 
 export function CustomersScreen() {
@@ -432,9 +428,7 @@ export function CustomersScreen() {
         `Balance after payment: ${money(paymentReceipt.balanceAfter)}`,
         ...(paymentReceipt.note ? [`Note: ${paymentReceipt.note}`] : []),
       ].filter(Boolean).join('\n');
-      if (navigator.share) await navigator.share({ title: `Payment receipt — ${selected.name}`, text });
-      else if (navigator.clipboard) await navigator.clipboard.writeText(text);
-      else throw new Error('Sharing is not available in this browser.');
+      await shareTextAsPdf(text, `payment-receipt-${selected.name}`, `Payment receipt — ${selected.name}`);
     } catch (shareError) {
       if (shareError instanceof Error && shareError.name === 'AbortError') return;
       setReceiptShareError(shareError instanceof Error ? shareError.message : 'Unable to share this payment receipt.');
@@ -631,7 +625,7 @@ export function CustomersScreen() {
       {canCreate && (
         <Button
           onClick={() => { setError(''); setAddOpen(true); }}
-          className={`fixed right-4 z-30 min-h-14 rounded-full px-5 shadow-overlay ${isOwner ? 'bottom-6' : 'bottom-24'}`}
+          className={`customer-add-button fixed right-4 z-30 min-h-14 rounded-full px-5 shadow-overlay ${isOwner ? 'bottom-6' : 'bottom-24'}`}
         >
           <MaterialIcon name="person_add" />Add customer
         </Button>
@@ -876,7 +870,7 @@ export function CustomersScreen() {
             </article>
             {receiptShareError && <FormError message={receiptShareError} />}
             <Button type="button" variant="secondary" onClick={() => { void sharePaymentReceipt(); }}>
-              <MaterialIcon name="share" />Share receipt
+              <MaterialIcon name="share" />Share PDF
             </Button>
             <Button type="button" variant="ghost" onClick={() => setPaymentReceipt(null)}>Done</Button>
           </div>
@@ -1002,7 +996,6 @@ function CustomerCard({ customer, status, overdue, onClick }: {
   const balance = status?.balance ?? 0;
   const used = Math.max(0, balance);
   const percent = status?.percentUsed ?? 0;
-  const tone = progressColor(status);
   const progress = Math.min(100, Math.max(0, percent));
   return (
     <button type="button" onClick={onClick} className="w-full rounded-2xl bg-surface-container-lowest p-4 text-left shadow-card transition active:scale-[0.995]">
@@ -1022,8 +1015,8 @@ function CustomerCard({ customer, status, overdue, onClick }: {
       </div>
       {status?.limit !== undefined ? (
         <span className="mt-3 block">
-          <span className="block h-2 overflow-hidden rounded-full bg-surface-container-high">
-            <span className={`block h-full rounded-full ${tone.barClass}`} style={{ width: `${progress}%` }} />
+          <span className="customer-credit-progress-track relative block h-2 overflow-hidden rounded-full">
+            <span aria-hidden="true" className="absolute inset-y-0 right-0 block bg-surface-container-high" style={{ width: `${100 - progress}%` }} />
           </span>
           <span className="mt-1.5 block font-body text-body-sm text-on-surface-variant">
             {formatTnd(used / 1000)} of {formatTnd(status.limit / 1000)} DT used • {formatTnd((status.remaining ?? 0) / 1000)} DT left
@@ -1042,12 +1035,17 @@ function CustomerCard({ customer, status, overdue, onClick }: {
 
 function CreditRing({ status }: { status?: CustomerCreditStatus }) {
   const percent = Math.min(100, Math.max(0, status?.percentUsed ?? 0));
-  const tone = progressColor(status);
+  const greenEnd = Math.min(percent, 45);
+  const orangeEnd = Math.min(percent, 55);
   return (
     <div
       aria-label={status?.limit === undefined ? 'No credit limit' : `${Math.round(percent)} percent of credit limit used`}
       className="flex h-36 w-36 shrink-0 items-center justify-center rounded-full"
-      style={{ background: `conic-gradient(${status?.limit === undefined ? '#c8c6c3' : tone.color} ${percent}%, #e8e6e1 ${percent}% 100%)` }}
+      style={{
+        background: status?.limit === undefined
+          ? 'conic-gradient(rgb(var(--color-surface-container-high)) 0% 100%)'
+          : `conic-gradient(rgb(var(--color-success-dark)) 0% ${greenEnd}%, rgb(var(--color-warning)) ${greenEnd}% ${orangeEnd}%, rgb(var(--color-error)) ${orangeEnd}% ${percent}%, rgb(var(--color-surface-container-high)) ${percent}% 100%)`,
+      }}
     >
       <div className="flex h-28 w-28 flex-col items-center justify-center rounded-full bg-surface-container-lowest">
         <span className="font-display text-headline-md tabular-nums text-on-surface">{status?.limit === undefined ? '—' : `${Math.round(percent)}%`}</span>

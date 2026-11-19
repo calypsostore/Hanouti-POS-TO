@@ -114,7 +114,7 @@ export function StoreReadOnlyScreen() {
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="font-display text-headline-lg text-on-surface">{store.name}</h1>
-          <p className="mt-1 break-all font-body text-body-sm text-outline">{store.code} · {store.subscription?.plan ?? 'Trial'} plan</p>
+          <p className="mt-1 break-all font-body text-body-sm text-outline">{store.code.toUpperCase()} · {store.subscription?.plan ?? 'Trial'} plan</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <StatusTag status={effectiveStoreActive(store) ? 'open' : 'suspended'}>{effectiveStoreActive(store) ? 'Active' : store.archivedAt ? 'Archived' : 'Suspended'}</StatusTag>

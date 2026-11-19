@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { MaterialIcon } from '../components/MaterialIcon';
+import { ToggleSwitch } from '../components/ToggleSwitch';
 import { t } from '../i18n/translations';
 import { updateService } from '../services/updateService';
 import { useAuthStore } from '../stores/authStore';
@@ -150,16 +151,11 @@ export function LoginScreen() {
               <p className="login-remember-title">{t('login.rememberTerminal')}</p>
               <p className="login-remember-subtitle">{t('login.keepUnlocked')}</p>
             </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={remember}
-              aria-label={t('login.rememberTerminal')}
-              onClick={() => setRemember((value) => !value)}
-              className={`login-toggle${remember ? ' is-on' : ''}`}
-            >
-              <span />
-            </button>
+            <ToggleSwitch
+              checked={remember}
+              label={t('login.rememberTerminal')}
+              onChange={() => setRemember((value) => !value)}
+            />
           </div>
 
           {error && <p role="alert" className="login-error">{error}</p>}

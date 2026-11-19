@@ -14,7 +14,6 @@ import { TicketRow } from '../components/TicketRow';
 import { TopBar } from '../components/TopBar';
 import { TicketView } from '../components/TicketView';
 import { formatTnd } from '../lib/format';
-import { getCustomerCreditTone } from '../lib/customerCredit';
 import { useDisplaySettings } from '../lib/displaySettings';
 import { t } from '../i18n/translations';
 import { catalogService } from '../services/catalogService';
@@ -377,9 +376,6 @@ export function PosScreen() {
     : selectedCustomerStatus.limit === undefined
       ? 'No limit'
       : `${formatTnd((selectedCustomerStatus.remaining ?? 0) / 1000)} DT left`;
-  const creditTone = creditStatus
-    ? getCustomerCreditTone(creditStatus.state, creditStatus.percentUsed)
-    : getCustomerCreditTone('no_limit');
 
   useEffect(() => {
     setCreditStatus(null);
@@ -547,6 +543,23 @@ export function PosScreen() {
       setUndoSnapshot(null);
       undoTimeoutRef.current = undefined;
     }, 5000);
+  }
+
+  function cancelTabOrder() {
+    if (undoTimeoutRef.current !== undefined) window.clearTimeout(undoTimeoutRef.current);
+    undoTimeoutRef.current = undefined;
+    setUndoSnapshot(null);
+    clearOrder();
+    setSelectedCustomerId('');
+    setPaymentMethod('cash');
+    setCustomerSearch('');
+    setCustomerPickerOpen(false);
+    setCreditOverrideOpen(false);
+    setCreditOverridePin('');
+    setCreditOverrideError('');
+    setDrawerOpen(false);
+    setToast('');
+    navigate('/pos', { replace: true });
   }
 
   function undoClearOrder() {
@@ -767,8 +780,8 @@ export function PosScreen() {
               <p className="mt-1">No credit limit set.</p>
             ) : (
               <>
-                <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-container-highest" role="progressbar" aria-valuenow={Math.min(100, Math.max(0, creditStatus.percentUsed ?? 0))} aria-valuemin={0} aria-valuemax={100} aria-label={`${Math.round(creditStatus.percentUsed ?? 0)} percent of credit limit used`}>
-                  <span className={`block h-full rounded-full ${creditTone.barClass}`} style={{ width: `${Math.min(100, Math.max(0, creditStatus.percentUsed ?? 0))}%` }} />
+                <div className="customer-credit-progress-track relative mt-2 h-2 overflow-hidden rounded-full" role="progressbar" aria-valuenow={Math.min(100, Math.max(0, creditStatus.percentUsed ?? 0))} aria-valuemin={0} aria-valuemax={100} aria-label={`${Math.round(creditStatus.percentUsed ?? 0)} percent of credit limit used`}>
+                  <span aria-hidden="true" className="absolute inset-y-0 right-0 block bg-surface-container-highest" style={{ width: `${100 - Math.min(100, Math.max(0, creditStatus.percentUsed ?? 0))}%` }} />
                 </div>
                 <p className="mt-1">{Math.round(creditStatus.percentUsed ?? 0)}% used · {formatTnd((creditStatus.remaining ?? 0) / 1000)} DT remaining</p>
               </>
@@ -926,7 +939,16 @@ export function PosScreen() {
           </span>
         </button>
         <div className="flex shrink-0 items-center gap-2">
-          {canUseTabs && (
+          {canUseTabs && (paymentMethod === 'tab' && selectedCustomer ? (
+            <Button
+              variant="danger"
+              onClick={cancelTabOrder}
+              aria-label="Cancel customer order"
+              className="!bg-red-600 !text-white hover:!bg-red-700 active:!bg-red-800 !h-[52px] !min-h-[52px] !w-[52px] !min-w-[52px] !p-0 rounded-full"
+            >
+              <MaterialIcon name="close" className="text-3xl" />
+            </Button>
+          ) : (
             <Button
               variant="secondary"
               onClick={() => { setPaymentMethod('tab'); setCustomerSearch(''); setCustomerPickerOpen(true); }}
@@ -935,7 +957,7 @@ export function PosScreen() {
               <MaterialIcon name="person_add" className="text-lg" />
               Add to tab
             </Button>
-          )}
+          ))}
           <Button variant="success" onClick={() => { void finishOrder(); }} disabled={!cart.length || tabCheckoutBlocked} className="min-h-[52px] rounded-2xl px-3 text-label-sm">
             <MaterialIcon name="check_circle" className="text-lg" />
             <span className="max-w-[38vw] truncate">{paymentMethod === 'tab' && selectedCustomer ? `Charge to ${selectedCustomer.name}` : t('common.done')}</span>
@@ -988,8 +1010,8 @@ export function PosScreen() {
           </div>
         )}
       </BottomSheet>
-      <BottomSheet open={customerPickerOpen} onClose={() => setCustomerPickerOpen(false)} title="Choose customer">
-        <div className="flex flex-col gap-2">
+      <BottomSheet open={customerPickerOpen} onClose={() => setCustomerPickerOpen(false)} title="Choose customer" panelClassName="h-[60dvh]">
+        <div className="flex flex-col gap-2 pt-2">
           <label className="relative block">
             <MaterialIcon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-lg text-outline" />
             <input
@@ -1157,7 +1179,6 @@ function CustomerCreditOption({ customer, status, selected, canOverrideCreditLim
   canOverrideCreditLimit: boolean;
   onSelect: () => void;
 }) {
-  const tone = getCustomerCreditTone(status?.state ?? 'no_limit', status?.percentUsed);
   const percent = Math.min(100, Math.max(0, status?.percentUsed ?? 0));
   const overLimit = status?.limit !== undefined && status.balance > status.limit;
   return (
@@ -1183,8 +1204,8 @@ function CustomerCreditOption({ customer, status, selected, canOverrideCreditLim
             : `${formatTnd((status.remaining ?? 0) / 1000)} DT remaining`}
         </span>
       </span>
-      <span className="mt-2 block h-1.5 overflow-hidden rounded-full bg-surface-container-high" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label={`${customer.name} credit used`}>
-        <span className={`block h-full rounded-full ${tone.barClass}`} style={{ width: `${percent}%` }} />
+      <span className="customer-credit-progress-track relative mt-2 block h-1.5 overflow-hidden rounded-full" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label={`${customer.name} credit used`}>
+        <span aria-hidden="true" className="absolute inset-y-0 right-0 block bg-surface-container-high" style={{ width: `${100 - percent}%` }} />
       </span>
       {overLimit && <span className="mt-1 block font-body text-label-sm text-error-dark">Over credit limit</span>}
     </button>

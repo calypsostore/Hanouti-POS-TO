@@ -28,12 +28,10 @@ interface ProvisionRequest {
   name?: string;
   email?: string;
   storeName?: string;
-  storeCode?: string;
   storeId?: string;
   phone?: string;
   notes?: string;
   positionId?: string;
-  usernameSuffix?: string;
   userId?: string;
   permissionOverrides?: { granted: string[]; revoked: string[] };
 }
@@ -56,13 +54,31 @@ function randomPassword(length: number): string {
   return Array.from(bytes, (byte) => passwordAlphabet[byte % passwordAlphabet.length]).join('');
 }
 
-function randomSuffix(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(3));
-  return Array.from(bytes, (byte) => String(byte % 10)).join('');
+function normalizedName(value: string): string {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
 }
 
-function slug(value: string): string {
-  return value.trim().toLocaleLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.+|\.+$/g, '');
+function identifierHash(value: string): string {
+  let hash = 2166136261;
+  for (const character of normalizedName(value)) {
+    hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function storeCodeBase(storeName: string): string {
+  const words = normalizedName(storeName).match(/[a-z0-9]+/g) ?? [];
+  if (words.length === 0) return `st${identifierHash(storeName).slice(0, 2)}`;
+  const compactWords = words.map((word) => word[0] + word.slice(1).replace(/[aeiou]/g, ''));
+  const code = (words.length === 1
+    ? compactWords[0].slice(0, 4)
+    : compactWords.map((word) => word.slice(0, 2)).join('').slice(0, 4));
+  return code || `st${identifierHash(storeName).slice(0, 2)}`;
+}
+
+function staffNameSlug(value: string): string {
+  const firstName = value.trim().split(/\s+/)[0] ?? '';
+  return normalizedName(firstName).replace(/[^a-z0-9]+/g, '') || `staff${identifierHash(firstName).slice(0, 6)}`;
 }
 
 function sessionIdFromAuthorization(authorization: string): string {
@@ -160,24 +176,35 @@ async function createOwner(
   const name = requiredText(input.name, 'Owner name');
   const email = requiredText(input.email, 'Owner email', 320).toLocaleLowerCase();
   const storeName = requiredText(input.storeName, 'Store name');
-  const storeCode = requiredText(input.storeCode, 'Store code', 32).toLocaleLowerCase();
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(storeCode)) throw new Error('Store code may use lowercase letters, digits, and hyphens.');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Enter a valid owner email.');
 
   const temporaryPassword = randomPassword(12);
   const storeId = crypto.randomUUID();
   const paidUntil = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const { data: store, error: storeError } = await admin.from('stores').insert({
-    id: storeId,
-    store_id: storeId,
-    code: storeCode,
-    name: storeName,
-    subscription_plan: 'trial',
-    subscription_paid_until: paidUntil,
-    subscription_notes: '',
-    pin_must_change: true,
-  }).select('store_id, code, name, created_at, is_active').single();
-  if (storeError) throw new Error(`Could not create store: ${storeError.message}`);
+  const codeBase = storeCodeBase(storeName);
+  let createdStore: { store_id: string; code: string; name: string; created_at: string; is_active: boolean } | undefined;
+  for (let suffix = 0; suffix < 10_000; suffix += 1) {
+    const code = suffix === 0 ? codeBase : `${codeBase}${suffix}`;
+    const { data, error } = await admin.from('stores').insert({
+      id: storeId,
+      store_id: storeId,
+      code,
+      name: storeName,
+      subscription_plan: 'trial',
+      subscription_paid_until: paidUntil,
+      subscription_notes: '',
+      pin_must_change: true,
+    }).select('store_id, code, name, created_at, is_active').single();
+    if (error) {
+      if (error.code === '23505' && error.message.toLowerCase().includes('code')) continue;
+      throw new Error(`Could not create store: ${error.message}`);
+    }
+    createdStore = data;
+    break;
+  }
+  if (!createdStore) throw new Error('Could not generate a unique store ID. Try again.');
+  const store = createdStore;
+  const storeCode = store.code;
 
   let ownerId: string | undefined;
   try {
@@ -261,7 +288,7 @@ async function createStaff(admin: SupabaseClient, caller: CallerProfile, input: 
 
   const { data: store, error: storeError } = await admin
     .from('stores')
-    .select('code')
+    .select('code, name')
     .eq('store_id', storeId)
     .maybeSingle();
   if (storeError || !store) throw new Error('The store could not be found.');
@@ -274,93 +301,92 @@ async function createStaff(admin: SupabaseClient, caller: CallerProfile, input: 
   if (positionError || !position) throw new Error('Select a position from this store.');
 
   const overrides = validateOverrides(input.permissionOverrides);
-  const firstName = slug(name.split(/\s+/)[0] ?? '');
-  if (!firstName) throw new Error('Staff name must contain letters or digits.');
-  let username = '';
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const suffix = attempt === 0 && input.usernameSuffix && /^\d{3}$/.test(input.usernameSuffix)
-      ? input.usernameSuffix
-      : randomSuffix();
-    const candidate = `${store.code}.${firstName}${suffix}`;
-    const { data: existing, error } = await admin.from('profiles').select('id').eq('username', candidate).maybeSingle();
-    if (error) throw new Error(`Could not check the staff username: ${error.message}`);
-    if (!existing) {
-      username = candidate;
-      break;
-    }
-  }
-  if (!username) throw new Error('Could not create a unique staff username. Try again.');
-
+  const usernameBase = `${store.code.toUpperCase()}.${staffNameSlug(name)}`;
   const temporaryPassword = randomPassword(6);
-  const email = `${username}@staff.7anouti.app`;
-  const { data: authData, error: authError } = await admin.auth.admin.createUser({
-    email,
-    password: temporaryPassword,
-    email_confirm: true,
-  });
-  if (authError || !authData.user) throw new Error(`Could not create staff sign-in: ${authError?.message ?? 'No user was returned.'}`);
-  const { error: profileError } = await admin.from('profiles').insert({
-    id: authData.user.id,
-    store_id: storeId,
-    role: 'staff',
-    name,
-    phone,
-    notes,
-    username,
-    position_id: positionId,
-    must_change_password: true,
-    is_active: true,
-  });
-  if (profileError) {
-    const { error: deleteError } = await admin.auth.admin.deleteUser(authData.user.id);
-    if (deleteError) console.error('Could not roll back the partially created staff account.', deleteError);
-    throw new Error(`Could not create staff profile: ${profileError.message}`);
-  }
-  if (overrides.granted.length || overrides.revoked.length) {
-    const { error: overrideError } = await admin.from('permission_overrides').insert({
-      store_id: storeId,
-      user_id: authData.user.id,
-      granted: overrides.granted,
-      revoked: overrides.revoked,
+  for (let attempt = 0; attempt < 10_000; attempt += 1) {
+    const username = attempt === 0 ? usernameBase : `${usernameBase}${attempt}`;
+    const { data: existing, error } = await admin.from('profiles').select('id').ilike('username', username).maybeSingle();
+    if (error) throw new Error(`Could not check the staff username: ${error.message}`);
+    if (existing) continue;
+
+    const email = `${username.toLowerCase()}@staff.7anouti.app`;
+    const { data: authData, error: authError } = await admin.auth.admin.createUser({
+      email,
+      password: temporaryPassword,
+      email_confirm: true,
     });
-    if (overrideError) {
-      const { error: deleteError } = await admin.auth.admin.deleteUser(authData.user.id);
-      if (deleteError) console.error('Could not roll back the partially created staff account.', deleteError);
-      throw new Error(`Could not save staff permissions: ${overrideError.message}`);
+    if (authError || !authData.user) {
+      if (authError?.code === 'email_exists') continue;
+      throw new Error(`Could not create staff sign-in: ${authError?.message ?? 'No user was returned.'}`);
     }
-  }
-  const { error: activityError } = await admin.from('activity_logs').insert({
-    store_id: storeId,
-    actor_id: caller.id,
-    actor_name: caller.name,
-    actor_role: caller.role,
-    action: 'staff.created',
-    summary: `Created staff account "${name}".`,
-    entity_type: 'staff',
-    entity_id: authData.user.id,
-  });
-  if (activityError) {
-    const { error: deleteError } = await admin.auth.admin.deleteUser(authData.user.id);
-    if (deleteError) console.error('Could not roll back the partially created staff account.', deleteError);
-    throw new Error(`Could not record staff creation: ${activityError.message}`);
-  }
-  return {
-    staff: {
+
+    const { error: profileError } = await admin.from('profiles').insert({
       id: authData.user.id,
+      store_id: storeId,
       role: 'staff',
       name,
-      phone: phone ?? undefined,
-      notes: notes ?? undefined,
+      phone,
+      notes,
       username,
-      mustChangePassword: true,
-      isActive: true,
-      storeId,
-      positionId,
-      permissionOverrides: overrides,
-      createdAt: authData.user.created_at,
-    },
-    temporaryPassword,
-  };
+      position_id: positionId,
+      must_change_password: true,
+      must_set_pin: true,
+      is_active: true,
+    });
+    if (profileError) {
+      const { error: deleteError } = await admin.auth.admin.deleteUser(authData.user.id);
+      if (deleteError) console.error('Could not roll back the partially created staff account.', deleteError);
+      if (profileError.code === '23505') continue;
+      throw new Error(`Could not create staff profile: ${profileError.message}`);
+    }
+    if (overrides.granted.length || overrides.revoked.length) {
+      const { error: overrideError } = await admin.from('permission_overrides').insert({
+        store_id: storeId,
+        user_id: authData.user.id,
+        granted: overrides.granted,
+        revoked: overrides.revoked,
+      });
+      if (overrideError) {
+        const { error: deleteError } = await admin.auth.admin.deleteUser(authData.user.id);
+        if (deleteError) console.error('Could not roll back the partially created staff account.', deleteError);
+        throw new Error(`Could not save staff permissions: ${overrideError.message}`);
+      }
+    }
+    const { error: activityError } = await admin.from('activity_logs').insert({
+      store_id: storeId,
+      actor_id: caller.id,
+      actor_name: caller.name,
+      actor_role: caller.role,
+      action: 'staff.created',
+      summary: `Created staff account "${name}".`,
+      entity_type: 'staff',
+      entity_id: authData.user.id,
+    });
+    if (activityError) {
+      const { error: deleteError } = await admin.auth.admin.deleteUser(authData.user.id);
+      if (deleteError) console.error('Could not roll back the partially created staff account.', deleteError);
+      throw new Error(`Could not record staff creation: ${activityError.message}`);
+    }
+    return {
+      staff: {
+        id: authData.user.id,
+        role: 'staff',
+        name,
+        phone: phone ?? undefined,
+        notes: notes ?? undefined,
+        username,
+        mustChangePassword: true,
+        mustSetPin: true,
+        isActive: true,
+        storeId,
+        positionId,
+        permissionOverrides: overrides,
+        createdAt: authData.user.created_at,
+      },
+      temporaryPassword,
+    };
+  }
+  throw new Error('Could not create a unique staff username. Try again.');
 }
 
 async function resetPassword(admin: SupabaseClient, caller: CallerProfile, input: ProvisionRequest): Promise<unknown> {
@@ -381,6 +407,9 @@ async function resetPassword(admin: SupabaseClient, caller: CallerProfile, input
   const { error: profileError } = await admin.from('profiles').update({
     must_change_password: true,
     session_version: target.session_version + 1,
+    ...(target.role === 'staff'
+      ? { must_set_pin: true, pin_hash: null }
+      : { must_set_pin: false }),
   }).eq('id', userId);
   if (profileError) throw new Error(`Could not update the account state: ${profileError.message}`);
   return { temporaryPassword };

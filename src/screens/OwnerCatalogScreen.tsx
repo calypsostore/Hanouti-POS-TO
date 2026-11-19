@@ -20,6 +20,7 @@ import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository
 type CatalogSheet = 'item' | 'category' | null;
 type Availability = 'available' | '86' | 'out';
 type StatusFilter = 'all' | Availability;
+type ProductStateFilter = 'active' | 'archived';
 
 interface ModifierOptionDraft {
   id: string;
@@ -122,11 +123,14 @@ function OwnerCatalogContent() {
   const [items, setItems] = useState<CatalogItemRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [categoryId, setCategoryId] = useState('all');
+  const [productStateFilter, setProductStateFilter] = useState<ProductStateFilter>('active');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [sheet, setSheet] = useState<CatalogSheet>(null);
+  const [categoryManagerOpen, setCategoryManagerOpen] = useState(false);
   const [logoPickerOpen, setLogoPickerOpen] = useState(false);
   const [categoryIcon, setCategoryIcon] = useState('');
+  const [editingCategory, setEditingCategory] = useState<CategoryRecord | null>(null);
   const [editingItem, setEditingItem] = useState<CatalogItemRecord | null>(null);
   const [historyItem, setHistoryItem] = useState<CatalogItemRecord | null>(null);
   const [itemHistory, setItemHistory] = useState<ItemHistoryRecord[]>([]);
@@ -135,11 +139,18 @@ function OwnerCatalogContent() {
   const [deleteTarget, setDeleteTarget] = useState<CatalogItemRecord | null>(null);
   const [draft, setDraft] = useState<ProductDraft>(emptyDraft());
   const [categoryName, setCategoryName] = useState('');
+  const [categoryPosition, setCategoryPosition] = useState('1');
+  const [categoryError, setCategoryError] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
+  const activeCategories = categories.filter((category) => category.isActive);
+
   const refresh = useCallback(async () => {
-    const [nextCategories, nextItems] = await Promise.all([catalogService.listCategories(storeId), catalogService.listItems(storeId)]);
+    const [nextCategories, nextItems] = await Promise.all([
+      catalogService.listCategories(storeId, true),
+      catalogService.listItems(storeId, undefined, '', true),
+    ]);
     setCategories(nextCategories);
     setItems(nextItems);
   }, [storeId]);
@@ -165,15 +176,28 @@ function OwnerCatalogContent() {
 
   function openNewItem() {
     setError('');
-    setDraft(emptyDraft(categories[0]?.id ?? ''));
+    setDraft(emptyDraft(activeCategories[0]?.id ?? ''));
     setEditingItem(null);
     setSheet('item');
   }
 
   function openNewCategory() {
     setError('');
+    setCategoryError('');
+    setEditingCategory(null);
     setCategoryIcon('');
     setCategoryName('');
+    setCategoryPosition(String(Math.max(-1, ...categories.map((category) => category.sortOrder)) + 2));
+    setSheet('category');
+  }
+
+  function openEditCategory(category: CategoryRecord) {
+    setCategoryError('');
+    setEditingCategory(category);
+    setCategoryName(category.name);
+    setCategoryIcon(category.icon);
+    setCategoryPosition(String(category.sortOrder + 1));
+    setCategoryManagerOpen(false);
     setSheet('category');
   }
 
@@ -204,7 +228,7 @@ function OwnerCatalogContent() {
     setError('');
     setNotice('');
     try {
-      if (!draft.categoryId || !categories.some((category) => category.id === draft.categoryId)) {
+      if (!draft.categoryId || !activeCategories.some((category) => category.id === draft.categoryId)) {
         throw new Error('Choose a category for this product.');
       }
       if (!draft.price.trim()) throw new Error('Enter a product price.');
@@ -269,27 +293,56 @@ function OwnerCatalogContent() {
     }
   }
 
-  async function addCategory(event: FormEvent<HTMLFormElement>) {
+  async function saveCategory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
+    setCategoryError('');
     setNotice('');
     try {
-      const category: Omit<CategoryRecord, 'id'> = {
-        storeId,
-        name: categoryName,
-        icon: categoryIcon,
-        sortOrder: categories.length,
-        isActive: true,
-      };
-      const created = await catalogService.createCategory(category);
+      const name = categoryName.trim();
+      const position = Number(categoryPosition);
+      if (!name) throw new Error('Category name is required.');
+      if (!Number.isInteger(position) || position < 1) throw new Error('Position must be a positive whole number.');
+      const sortOrder = position - 1;
+      if (categories.some((category) => category.id !== editingCategory?.id && category.sortOrder === sortOrder)) {
+        throw new Error('That position is already in use. Choose another position.');
+      }
+      if (editingCategory) {
+        await catalogService.updateCategory(editingCategory.id, { name, icon: categoryIcon, sortOrder });
+      } else {
+        await catalogService.createCategory({ storeId, name, icon: categoryIcon, sortOrder, isActive: true });
+      }
       await refresh();
       setCategoryName('');
       setCategoryIcon('');
+      setEditingCategory(null);
       setSheet(null);
-      setCategoryId(created.id);
-      setNotice('Category added.');
-    } catch (createError) {
-      setError(createError instanceof Error ? createError.message : 'Unable to add this category.');
+      setNotice(editingCategory ? 'Category updated.' : 'Category added.');
+    } catch (saveError) {
+      const message = saveError instanceof Error ? saveError.message : 'Unable to save this category.';
+      setCategoryError(message);
+      setError(message);
+    }
+  }
+
+  async function setCategoryActive(category: CategoryRecord, isActive: boolean) {
+    setCategoryError('');
+    setError('');
+    setNotice('');
+    try {
+      const assignedItems = await catalogService.listItems(storeId, category.id, '', true);
+      const assignedCount = assignedItems.length;
+      if (!isActive && assignedCount > 0) {
+        throw new Error(`Move all ${assignedCount} assigned product${assignedCount === 1 ? '' : 's'} to another category before archiving this category.`);
+      }
+      await catalogService.updateCategory(category.id, { isActive });
+      if (!isActive && categoryId === category.id) setCategoryId('all');
+      await refresh();
+      setNotice(`Category ${isActive ? 'restored' : 'archived'}.`);
+    } catch (updateError) {
+      const message = updateError instanceof Error ? updateError.message : 'Unable to update this category.';
+      setCategoryError(message);
+      setError(message);
     }
   }
 
@@ -322,18 +375,32 @@ function OwnerCatalogContent() {
     }
   }
 
+  async function restoreProduct(item: CatalogItemRecord) {
+    setError('');
+    setNotice('');
+    try {
+      await catalogService.updateItem(item.id, { isActive: true });
+      await refresh();
+      setNotice(`${item.name} was restored to the active catalog.`);
+    } catch (restoreError) {
+      setError(restoreError instanceof Error ? restoreError.message : 'Unable to restore this product.');
+    }
+  }
+
   const visibleItems = items.filter((item) => {
     const query = search.trim().toLocaleLowerCase();
     const matchesCategory = categoryId === 'all' || item.categoryId === categoryId;
     const matchesSearch = !query || [item.name, item.sku, item.description].some((value) => value?.toLocaleLowerCase().includes(query));
     const matchesStatus = statusFilter === 'all' || getAvailability(item) === statusFilter;
-    return matchesCategory && matchesSearch && matchesStatus;
+    const matchesProductState = item.isActive === (productStateFilter === 'active');
+    return matchesProductState && matchesCategory && matchesSearch && matchesStatus;
   });
 
   return (
     <WorkspaceLayout title={t('catalog.title')} storeName={store?.name} links={ownerWorkspaceLinks}>
       <PageHeader title={t('catalog.title')} subtitle="Manage products, categories, prices, and availability." actions={
         <>
+          <Button variant="secondary" onClick={() => { setCategoryError(''); setCategoryManagerOpen(true); }}><MaterialIcon name="tune" className="text-lg" />Manage categories</Button>
           <Button variant="secondary" onClick={openNewCategory}><MaterialIcon name="create_new_folder" className="text-lg" />{t('catalog.addCategory')}</Button>
           <Button onClick={openNewItem}><MaterialIcon name="add" />{t('catalog.addItem')}</Button>
         </>
@@ -346,7 +413,13 @@ function OwnerCatalogContent() {
         </label>
         <div className="scrollbar-hidden flex gap-2 overflow-x-auto py-1">
           <Chip selected={categoryId === 'all'} onClick={() => setCategoryId('all')}>{t('catalog.items')}</Chip>
-          {categories.map((category) => <Chip key={category.id} selected={categoryId === category.id} onClick={() => setCategoryId(category.id)}><ItemLogo id={category.icon} size="sm" />{category.name}</Chip>)}
+          {activeCategories.map((category) => <Chip key={category.id} selected={categoryId === category.id} onClick={() => setCategoryId(category.id)}><ItemLogo id={category.icon} size="sm" />{category.name}</Chip>)}
+        </div>
+        <div className="scrollbar-hidden flex gap-2 overflow-x-auto py-1">
+          {(['active', 'archived'] as const).map((state) => {
+            const count = items.filter((item) => item.isActive === (state === 'active')).length;
+            return <Chip key={state} selected={productStateFilter === state} onClick={() => setProductStateFilter(state)}>{state === 'active' ? 'Active products' : 'Archived products'} · {count}</Chip>;
+          })}
         </div>
         <div className="scrollbar-hidden flex gap-2 overflow-x-auto py-1">
           {(['all', 'available', '86', 'out'] as const).map((status) => (
@@ -370,19 +443,20 @@ function OwnerCatalogContent() {
               onToggle={() => { void toggleAvailability(item); }}
               onEdit={() => openEditItem(item)}
               onDelete={() => setDeleteTarget(item)}
+              onRestore={() => { void restoreProduct(item); }}
             />
           ))}
         </CardGrid>
       ) : (
         <section className="flex min-h-64 flex-col items-center justify-center rounded-2xl border border-dashed border-outline-variant bg-surface-container-lowest p-8 text-center">
           <span className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-surface-container text-primary"><MaterialIcon name={search || categoryId !== 'all' || statusFilter !== 'all' ? 'search_off' : 'inventory_2'} className="text-2xl" /></span>
-          <h2 className="font-display text-headline-sm text-on-surface">{search || categoryId !== 'all' || statusFilter !== 'all' ? 'No matching products' : 'Your catalog is empty'}</h2>
+          <h2 className="font-display text-headline-sm text-on-surface">{search || categoryId !== 'all' || statusFilter !== 'all' ? 'No matching products' : productStateFilter === 'archived' ? 'No archived products' : 'Your catalog is empty'}</h2>
           <p className="mt-1 max-w-sm font-body text-body-sm text-on-surface-variant">
-            {categories.length === 0 ? 'Create a category first, then add products to organize your menu.' : search || categoryId !== 'all' || statusFilter !== 'all' ? 'Try another search or clear the selected filters.' : 'Add your first product to start building your menu.'}
+            {activeCategories.length === 0 ? 'Create or restore a category first, then add products to organize your menu.' : search || categoryId !== 'all' || statusFilter !== 'all' ? 'Try another search or clear the selected filters.' : productStateFilter === 'archived' ? 'Products you remove from the active catalog will appear here and can be restored.' : 'Add your first product to start building your menu.'}
           </p>
           <div className="mt-4 flex flex-wrap justify-center gap-2">
-            {categories.length === 0 && <Button variant="secondary" onClick={openNewCategory}><MaterialIcon name="create_new_folder" />{t('catalog.addCategory')}</Button>}
-            {categories.length > 0 && !search && categoryId === 'all' && statusFilter === 'all' && <Button onClick={openNewItem}><MaterialIcon name="add" />{t('catalog.addItem')}</Button>}
+            {activeCategories.length === 0 && <Button variant="secondary" onClick={openNewCategory}><MaterialIcon name="create_new_folder" />{t('catalog.addCategory')}</Button>}
+            {activeCategories.length > 0 && productStateFilter === 'active' && !search && categoryId === 'all' && statusFilter === 'all' && <Button onClick={openNewItem}><MaterialIcon name="add" />{t('catalog.addItem')}</Button>}
             {(search || categoryId !== 'all' || statusFilter !== 'all') && <Button variant="secondary" onClick={() => { setSearch(''); setCategoryId('all'); setStatusFilter('all'); }}>Clear filters</Button>}
           </div>
         </section>
@@ -405,7 +479,7 @@ function OwnerCatalogContent() {
             <label className="font-body text-label-md">Product name<input required value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
             <label className="font-body text-label-md">{t('catalog.priceTnd')}<input required inputMode="decimal" value={draft.price} onChange={(event) => setDraft((current) => ({ ...current, price: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
             <label className="font-body text-label-md">SKU / barcode<input value={draft.sku} onChange={(event) => setDraft((current) => ({ ...current, sku: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
-            <label className="font-body text-label-md">Category<select required value={draft.categoryId} onChange={(event) => setDraft((current) => ({ ...current, categoryId: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary"><option value="">Select a category</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+            <label className="font-body text-label-md">Category<select required value={draft.categoryId} onChange={(event) => setDraft((current) => ({ ...current, categoryId: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary"><option value="">Select a category</option>{activeCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
             <label className="font-body text-label-md">Stock count <span className="text-outline">(leave blank for untracked)</span><input type="number" min="0" step="1" value={draft.availability === 'out' ? '0' : draft.stockCount} onChange={(event) => setDraft((current) => ({ ...current, stockCount: event.target.value, availability: event.target.value === '0' ? 'out' : current.availability === 'out' ? 'available' : current.availability }))} placeholder="Not tracked" className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
             <label className="font-body text-label-md">{t('catalog.lowStockThreshold')}<input type="number" min="0" step="1" required value={draft.lowStockThreshold} onChange={(event) => setDraft((current) => ({ ...current, lowStockThreshold: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
           </div>
@@ -472,9 +546,10 @@ function OwnerCatalogContent() {
         )}
       </BottomSheet>
 
-      <BottomSheet open={sheet === 'category'} onClose={() => setSheet(null)} title={t('catalog.addCategory')}>
-        <form onSubmit={addCategory} className="flex flex-col gap-3">
+      <BottomSheet open={sheet === 'category'} onClose={() => setSheet(null)} title={editingCategory ? 'Edit category' : t('catalog.addCategory')}>
+        <form onSubmit={saveCategory} className="flex flex-col gap-3">
           <label className="font-body text-label-md">{t('common.name')}<input required value={categoryName} onChange={(event) => setCategoryName(event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
+          <label className="font-body text-label-md">Position (1 is first)<input type="number" min="1" step="1" required value={categoryPosition} onChange={(event) => setCategoryPosition(event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
           <div className="flex items-center gap-3">
             <ItemLogo id={categoryIcon} size="md" />
             <Button type="button" variant="secondary" onClick={() => setLogoPickerOpen(true)}>
@@ -482,9 +557,38 @@ function OwnerCatalogContent() {
             </Button>
             <span className="font-body text-body-sm text-outline">{categoryIcon ? t('logo.selected') : t('logo.noLogo')}</span>
           </div>
-          {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
-          <Button type="submit">{t('common.save')}</Button>
+          {categoryError && <p role="alert" className="font-body text-body-sm text-error-dark">{categoryError}</p>}
+          <Button type="submit">{editingCategory ? 'Save category' : t('common.save')}</Button>
         </form>
+      </BottomSheet>
+
+      <BottomSheet open={categoryManagerOpen} onClose={() => setCategoryManagerOpen(false)} title="Manage categories" panelClassName="max-h-[85dvh] overflow-y-auto">
+        <div className="flex flex-col gap-3">
+          <p className="font-body text-body-sm text-on-surface-variant">Edit category details, control their order, and archive categories that no longer have products assigned.</p>
+          {categoryError && <p role="alert" className="rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{categoryError}</p>}
+          {categories.length === 0 ? (
+            <p className="rounded-lg bg-surface-container-low p-3 font-body text-body-sm text-on-surface-variant">No categories yet. Add one to organize your products.</p>
+          ) : categories.map((category) => {
+            const assignedCount = items.filter((item) => item.categoryId === category.id).length;
+            return (
+              <article key={category.id} className="flex flex-wrap items-center gap-3 rounded-xl bg-surface-container-low p-3">
+                <ItemLogo id={category.icon} size="md" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-body text-label-lg text-on-surface">{category.name}</p>
+                  <p className="font-body text-body-sm text-on-surface-variant">Position {category.sortOrder + 1} · {assignedCount} assigned {assignedCount === 1 ? 'product' : 'products'} · {category.isActive ? 'Active' : 'Archived'}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="secondary" className="min-h-10 px-3" onClick={() => openEditCategory(category)}><MaterialIcon name="edit" className="text-lg" />Edit</Button>
+                  {category.isActive ? (
+                    <Button variant="ghost" className="min-h-10 px-3 text-error-dark" onClick={() => { void setCategoryActive(category, false); }}><MaterialIcon name="archive" className="text-lg" />Archive</Button>
+                  ) : (
+                    <Button variant="secondary" className="min-h-10 px-3" onClick={() => { void setCategoryActive(category, true); }}><MaterialIcon name="unarchive" className="text-lg" />Restore</Button>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+        </div>
       </BottomSheet>
 
       <LogoPicker
@@ -508,7 +612,7 @@ function OwnerCatalogContent() {
   );
 }
 
-function CatalogItemCard({ item, category, onToggle, onEdit, onDelete }: { item: CatalogItemRecord; category?: CategoryRecord; onToggle: () => void; onEdit: () => void; onDelete: () => void }) {
+function CatalogItemCard({ item, category, onToggle, onEdit, onDelete, onRestore }: { item: CatalogItemRecord; category?: CategoryRecord; onToggle: () => void; onEdit: () => void; onDelete: () => void; onRestore: () => void }) {
   const availability = getAvailability(item);
   return (
     <article className="flex min-w-0 flex-col gap-3 rounded-xl bg-surface-container-lowest p-4 shadow-card">
@@ -518,6 +622,7 @@ function CatalogItemCard({ item, category, onToggle, onEdit, onDelete }: { item:
           <div className="flex flex-wrap items-center gap-2">
             <p className="truncate font-body text-label-lg text-on-surface">{item.name}</p>
             <span className={`rounded-full px-2 py-0.5 font-body text-label-sm ${availabilityStyle(availability)}`}>{availabilityLabel(availability)}</span>
+            {!item.isActive && <span className="rounded-full bg-surface-container px-2 py-0.5 font-body text-label-sm text-on-surface-variant">Archived</span>}
           </div>
           <p className="mt-1 font-body text-body-sm text-outline">{category?.name ?? 'Uncategorized'} · <span className="tabular-nums">{formatTnd(item.priceMillimes / 1000)} DT</span></p>
           {item.sku && <p className="mt-1 truncate font-body text-body-sm text-outline">SKU: {item.sku}</p>}
@@ -529,8 +634,14 @@ function CatalogItemCard({ item, category, onToggle, onEdit, onDelete }: { item:
       </div>
       <div className="flex flex-wrap gap-2 border-t border-outline-variant pt-3">
         <Button variant="secondary" className="min-h-10 flex-1 px-3" onClick={onEdit}><MaterialIcon name="edit" className="text-lg" />Edit</Button>
-        <Button variant="secondary" className="min-h-10 px-3" aria-label={`${availability === 'available' ? 'Mark 86' : 'Mark available'}: ${item.name}`} onClick={onToggle}><MaterialIcon name={availability === 'available' ? 'block' : 'check'} className="text-lg" />{availability === 'available' ? '86' : 'Available'}</Button>
-        <Button variant="ghost" className="min-h-10 px-3 text-error-dark" aria-label={`Remove ${item.name}`} onClick={onDelete}><MaterialIcon name="delete" className="text-lg" /></Button>
+        {item.isActive ? (
+          <>
+            <Button variant="secondary" className="min-h-10 px-3" aria-label={`${availability === 'available' ? 'Mark 86' : 'Mark available'}: ${item.name}`} onClick={onToggle}><MaterialIcon name={availability === 'available' ? 'block' : 'check'} className="text-lg" />{availability === 'available' ? '86' : 'Available'}</Button>
+            <Button variant="ghost" className="min-h-10 px-3 text-error-dark" aria-label={`Remove ${item.name}`} onClick={onDelete}><MaterialIcon name="archive" className="text-lg" />Archive</Button>
+          </>
+        ) : (
+          <Button variant="secondary" className="min-h-10 flex-1 px-3" onClick={onRestore}><MaterialIcon name="unarchive" className="text-lg" />Restore product</Button>
+        )}
       </div>
     </article>
   );

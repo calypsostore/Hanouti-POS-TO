@@ -227,17 +227,19 @@ async function updateCatalogItem(
 }
 
 export const catalogService = {
-  async listCategories(storeId: string): Promise<CategoryRecord[]> {
-    if (isSupabaseDriver()) return listRemoteCategories(storeId);
-    return getCategories().filter((category) => category.storeId === storeId && category.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
+  async listCategories(storeId: string, includeInactive = false): Promise<CategoryRecord[]> {
+    if (isSupabaseDriver()) return listRemoteCategories(storeId, includeInactive);
+    return getCategories()
+      .filter((category) => category.storeId === storeId && (includeInactive || category.isActive))
+      .sort((a, b) => a.sortOrder - b.sortOrder);
   },
 
-  async listItems(storeId: string, categoryId?: string, search = ''): Promise<CatalogItemRecord[]> {
-    if (isSupabaseDriver()) return listRemoteItems(storeId, categoryId, search);
+  async listItems(storeId: string, categoryId?: string, search = '', includeInactive = false): Promise<CatalogItemRecord[]> {
+    if (isSupabaseDriver()) return listRemoteItems(storeId, categoryId, search, includeInactive);
     const normalizedSearch = search.trim().toLocaleLowerCase();
     return getItems().filter((item) =>
       item.storeId === storeId &&
-      item.isActive &&
+      (includeInactive || item.isActive) &&
       (!categoryId || item.categoryId === categoryId) &&
       (!normalizedSearch || item.name.toLocaleLowerCase().includes(normalizedSearch)),
     );

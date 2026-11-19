@@ -94,24 +94,30 @@ function errorWithContext(error: { message: string }, context: string): never {
   throw new Error(`${context}: ${error.message}`, { cause: error });
 }
 
-export async function listCategories(storeId: string): Promise<CategoryRecord[]> {
-  const { data, error } = await getSupabaseClient()
+export async function listCategories(storeId: string, includeInactive = false): Promise<CategoryRecord[]> {
+  let query = getSupabaseClient()
     .from('categories')
     .select('id, store_id, name, icon, sort_order, is_active')
     .eq('store_id', storeId)
-    .eq('is_active', true)
     .order('sort_order');
+  if (!includeInactive) query = query.eq('is_active', true);
+  const { data, error } = await query;
   if (error) errorWithContext(error, 'Could not load categories');
   return (data ?? []).map((row) => mapCategory(row as CategoryRow));
 }
 
-export async function listItems(storeId: string, categoryId?: string, search = ''): Promise<CatalogItemRecord[]> {
+export async function listItems(
+  storeId: string,
+  categoryId?: string,
+  search = '',
+  includeInactive = false,
+): Promise<CatalogItemRecord[]> {
   let query = getSupabaseClient()
     .from('catalog_items')
     .select('*')
     .eq('store_id', storeId)
-    .eq('is_active', true)
     .order('name');
+  if (!includeInactive) query = query.eq('is_active', true);
   if (categoryId) query = query.eq('category_id', categoryId);
   if (search.trim()) query = query.ilike('name', `%${search.trim()}%`);
   const { data, error } = await query;

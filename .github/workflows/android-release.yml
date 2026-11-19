@@ -44,23 +44,22 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      - name: Check Android SDK
-        id: sdk
+      - name: Verify Android SDK
         shell: bash
         run: |
-          if { [[ -n "${ANDROID_HOME:-}" ]] && [[ -d "$ANDROID_HOME" ]]; } || { [[ -n "${ANDROID_SDK_ROOT:-}" ]] && [[ -d "$ANDROID_SDK_ROOT" ]]; }; then
-            if command -v sdkmanager >/dev/null 2>&1; then
-              echo "missing=false" >> "$GITHUB_OUTPUT"
-            else
-              echo "missing=true" >> "$GITHUB_OUTPUT"
+          sdk=""
+          for candidate in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" "/usr/local/lib/android/sdk"; do
+            if [[ -n "$candidate" && -d "$candidate/platforms/android-35" ]]; then
+              sdk="$candidate"
+              break
             fi
-          else
-            echo "missing=true" >> "$GITHUB_OUTPUT"
+          done
+          if [[ -z "$sdk" ]]; then
+            echo "::error::Android SDK platform 35 is not installed on this runner."
+            exit 1
           fi
-
-      - name: Set up Android SDK
-        if: steps.sdk.outputs.missing == 'true'
-        uses: android-actions/setup-android@v3
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
 
       - name: Install npm dependencies
         run: npm ci
@@ -171,23 +170,22 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      - name: Check Android SDK
-        id: sdk
+      - name: Verify Android SDK
         shell: bash
         run: |
-          if { [[ -n "${ANDROID_HOME:-}" ]] && [[ -d "$ANDROID_HOME" ]]; } || { [[ -n "${ANDROID_SDK_ROOT:-}" ]] && [[ -d "$ANDROID_SDK_ROOT" ]]; }; then
-            if command -v sdkmanager >/dev/null 2>&1; then
-              echo "missing=false" >> "$GITHUB_OUTPUT"
-            else
-              echo "missing=true" >> "$GITHUB_OUTPUT"
+          sdk=""
+          for candidate in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" "/usr/local/lib/android/sdk"; do
+            if [[ -n "$candidate" && -d "$candidate/platforms/android-35" ]]; then
+              sdk="$candidate"
+              break
             fi
-          else
-            echo "missing=true" >> "$GITHUB_OUTPUT"
+          done
+          if [[ -z "$sdk" ]]; then
+            echo "::error::Android SDK platform 35 is not installed on this runner."
+            exit 1
           fi
-
-      - name: Set up Android SDK
-        if: steps.sdk.outputs.missing == 'true'
-        uses: android-actions/setup-android@v3
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
 
       - name: Resolve and validate release version
         id: version

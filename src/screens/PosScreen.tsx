@@ -83,7 +83,6 @@ export function PosScreen() {
   const [category, setCategory] = useState('all');
   const [search, setSearch] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [posNavigationOpen, setPosNavigationOpen] = useState(false);
   const [toast, setToast] = useState('');
   const [undoSnapshot, setUndoSnapshot] = useState<CartSnapshot | null>(null);
   const [clearConfirmationOpen, setClearConfirmationOpen] = useState(false);
@@ -745,7 +744,7 @@ export function PosScreen() {
         </aside>
       </main>
 
-      <div className={`pos-mobile-action-bar fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-3 bg-surface-container-lowest/95 px-3 py-2.5 shadow-sheet backdrop-blur-xl tablet:hidden${posNavigationOpen ? ' is-pos-nav-open' : ''}`}>
+      <div className="pos-mobile-action-bar fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-3 bg-surface-container-lowest/95 px-3 py-2.5 shadow-sheet backdrop-blur-xl tablet:hidden">
         <button type="button" onClick={() => setDrawerOpen(true)} className="min-w-0 text-left">
           <span className="block">
             <span className="flex items-center gap-1.5 font-body text-label-sm uppercase text-outline">
@@ -773,7 +772,7 @@ export function PosScreen() {
         </div>
       </div>
 
-      <BottomNav posNavigationOpen={posNavigationOpen} onPosNavigationOpenChange={setPosNavigationOpen} />
+      <BottomNav />
       {ticketOrder && <TicketView order={ticketOrder} storeName={store?.name ?? t('pos.cafe')} staffName={user?.name ?? t('common.staff')} onClose={() => setTicketOrder(null)} />}
       <BottomSheet open={drawerOpen} onClose={() => setDrawerOpen(false)} title={t('pos.currentOrder')}>
         {renderTicketContent(true)}

@@ -3,6 +3,19 @@ import { readData, writeData } from './storage';
 import { seedCatalogItems, seedCategories } from './seedData';
 import { activityService } from './activityService';
 import { notificationService } from './notificationService';
+import { isSupabaseDriver } from '../data/driver';
+import {
+  createCategory as createRemoteCategory,
+  createItem as createRemoteItem,
+  getItem as getRemoteItem,
+  listCategories as listRemoteCategories,
+  listItemHistory as listRemoteItemHistory,
+  listItems as listRemoteItems,
+  setAvailability as setRemoteAvailability,
+  setStockCount as setRemoteStockCount,
+  updateCategory as updateRemoteCategory,
+  updateItem as updateRemoteItem,
+} from '../data/repositories/catalogRepository';
 
 interface CatalogActor {
   id: string;
@@ -27,8 +40,42 @@ async function updateCatalogItem(
   changes: Partial<Pick<CatalogItemRecord, 'name' | 'categoryId' | 'icon' | 'priceMillimes' | 'stockCount' | 'lowStockThreshold' | 'description' | 'sku' | 'modifiers' | 'modifierGroupName' | 'modifiersRequired' | 'modifierSelectionMode' | 'outOfStock' | 'isActive'>>,
   actor?: CatalogActor,
   notifyOnStockDepletion = true,
-  adjustmentReason?: StockAdjustmentReason,
+  adjustmentReason?: StockAdjustmentReason | 'stockTracking',
 ): Promise<CatalogItemRecord> {
+  if (isSupabaseDriver()) {
+    const item = await getRemoteItem(itemId);
+    if (!item) throw new Error('Catalog item could not be found.');
+    if (changes.priceMillimes !== undefined && changes.priceMillimes < 0) throw new Error('Price cannot be negative.');
+    if (changes.modifiers?.some((modifier) => !modifier.name.trim() || !Number.isInteger(modifier.priceMillimes) || modifier.priceMillimes < 0)) {
+      throw new Error('Each modifier needs a name and a valid non-negative add-on price.');
+    }
+    if (changes.stockCount !== undefined && changes.stockCount !== null &&
+      (!Number.isInteger(changes.stockCount) || changes.stockCount < 0)) {
+      throw new Error('Stock count must be a non-negative whole number.');
+    }
+    if (changes.lowStockThreshold !== undefined &&
+      (!Number.isInteger(changes.lowStockThreshold) || changes.lowStockThreshold < 0)) {
+      throw new Error('Low-stock threshold must be a non-negative whole number.');
+    }
+    const resultingStockCount = changes.stockCount !== undefined ? changes.stockCount : item.stockCount;
+    if (changes.outOfStock === false && resultingStockCount === 0) {
+      throw new Error('Add tracked stock before marking this item available.');
+    }
+    if ((changes.outOfStock !== undefined && changes.outOfStock !== item.outOfStock ||
+      changes.stockCount === 0 && item.stockCount !== 0) && !actor) {
+      throw new Error('An acting staff member is required to change catalog availability.');
+    }
+    const { stockCount, outOfStock, ...itemChanges } = changes;
+    let updated = Object.keys(itemChanges).length > 0
+      ? await updateRemoteItem(itemId, itemChanges)
+      : item;
+    if (stockCount !== undefined) {
+      updated = await setRemoteStockCount(itemId, stockCount, adjustmentReason ?? 'correction');
+    } else if (outOfStock !== undefined && outOfStock !== item.outOfStock) {
+      updated = await setRemoteAvailability(itemId, outOfStock);
+    }
+    return updated;
+  }
   const items = getItems();
   const item = items.find((candidate) => candidate.id === itemId);
   if (!item) throw new Error('Catalog item could not be found.');
@@ -88,7 +135,7 @@ async function updateCatalogItem(
     field: 'stockTracking',
     oldValue: item.stockCount,
     newValue: updated.stockCount,
-    reason: adjustmentReason,
+    reason: adjustmentReason === 'stockTracking' ? undefined : adjustmentReason,
   });
   if (availabilityChanged) historyChanges.push({ field: 'outOfStock', oldValue: item.outOfStock, newValue: updated.outOfStock });
   if (historyChanges.length > 0) {
@@ -181,10 +228,12 @@ async function updateCatalogItem(
 
 export const catalogService = {
   async listCategories(storeId: string): Promise<CategoryRecord[]> {
+    if (isSupabaseDriver()) return listRemoteCategories(storeId);
     return getCategories().filter((category) => category.storeId === storeId && category.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
   },
 
   async listItems(storeId: string, categoryId?: string, search = ''): Promise<CatalogItemRecord[]> {
+    if (isSupabaseDriver()) return listRemoteItems(storeId, categoryId, search);
     const normalizedSearch = search.trim().toLocaleLowerCase();
     return getItems().filter((item) =>
       item.storeId === storeId &&
@@ -195,6 +244,7 @@ export const catalogService = {
   },
 
   async listItemHistory(itemId: string): Promise<ItemHistoryRecord[]> {
+    if (isSupabaseDriver()) return listRemoteItemHistory(itemId);
     return getItemHistory()
       .filter((record) => record.itemId === itemId)
       .sort((left, right) => right.changedAt.localeCompare(left.changedAt));
@@ -202,6 +252,18 @@ export const catalogService = {
 
   async createCategory(input: Omit<CategoryRecord, 'id'>): Promise<CategoryRecord> {
     if (!input.name.trim()) throw new Error('Category name is required.');
+    if (isSupabaseDriver()) {
+      const category = await createRemoteCategory({ ...input, name: input.name.trim() });
+      await activityService.log({
+        storeId: category.storeId,
+        action: 'catalog.category_created',
+        summary: `Created category "${category.name}".`,
+        entityType: 'category',
+        entityId: category.id,
+        meta: { after: category },
+      });
+      return category;
+    }
     const category = { ...input, id: makeId('category'), name: input.name.trim() };
     writeData('categories', [...getCategories(), category]);
     await activityService.log({
@@ -216,6 +278,18 @@ export const catalogService = {
   },
 
   async updateCategory(categoryId: string, changes: Partial<Pick<CategoryRecord, 'name' | 'icon' | 'sortOrder' | 'isActive'>>): Promise<CategoryRecord> {
+    if (isSupabaseDriver()) {
+      const updated = await updateRemoteCategory(categoryId, changes);
+      await activityService.log({
+        storeId: updated.storeId,
+        action: 'catalog.category_updated',
+        summary: `Updated category "${updated.name}".`,
+        entityType: 'category',
+        entityId: categoryId,
+        meta: { after: updated },
+      });
+      return updated;
+    }
     const categories = getCategories();
     const category = categories.find((candidate) => candidate.id === categoryId);
     if (!category) throw new Error('Category could not be found.');
@@ -237,6 +311,18 @@ export const catalogService = {
     if (input.lowStockThreshold !== undefined &&
       (!Number.isInteger(input.lowStockThreshold) || input.lowStockThreshold < 0)) {
       throw new Error('Low-stock threshold must be a non-negative whole number.');
+    }
+    if (isSupabaseDriver()) {
+      const item = await createRemoteItem({ ...input, name: input.name.trim() });
+      await activityService.log({
+        storeId: item.storeId,
+        action: 'catalog.item_created',
+        summary: `Created item "${item.name}".`,
+        entityType: 'catalog_item',
+        entityId: item.id,
+        meta: { after: item },
+      });
+      return item;
     }
     const item = { ...input, id: makeId('item'), name: input.name.trim() };
     writeData('catalog-items', [...getItems(), item]);
@@ -268,7 +354,9 @@ export const catalogService = {
   },
 
   async setStockTracking(itemId: string, trackStock: boolean, actor: CatalogActor): Promise<CatalogItemRecord> {
-    const item = getItems().find((candidate) => candidate.id === itemId);
+    const item = isSupabaseDriver()
+      ? await getRemoteItem(itemId)
+      : getItems().find((candidate) => candidate.id === itemId);
     if (!item) throw new Error('Catalog item could not be found.');
     if (trackStock === (item.stockCount !== null)) return item;
     return await updateCatalogItem(
@@ -276,6 +364,7 @@ export const catalogService = {
       trackStock ? { stockCount: 0, outOfStock: true } : { stockCount: null, outOfStock: false },
       actor,
       false,
+      'stockTracking',
     );
   },
 
@@ -291,7 +380,9 @@ export const catalogService = {
         ? 'Corrected stock must be a non-negative whole number.'
         : 'Adjustment quantity must be a positive whole number.');
     }
-    const item = getItems().find((candidate) => candidate.id === itemId);
+    const item = isSupabaseDriver()
+      ? await getRemoteItem(itemId)
+      : getItems().find((candidate) => candidate.id === itemId);
     if (!item) throw new Error('Catalog item could not be found.');
     if (item.stockCount === null) throw new Error('Enable stock tracking before adjusting this item.');
     const stockCount = reason === 'restock'
@@ -305,20 +396,24 @@ export const catalogService = {
   },
 
   async decrementStock(itemId: string, quantity: number, actor: CatalogActor): Promise<CatalogItemRecord> {
-    const item = getItems().find((candidate) => candidate.id === itemId);
+    const item = isSupabaseDriver()
+      ? await getRemoteItem(itemId)
+      : getItems().find((candidate) => candidate.id === itemId);
     if (!item) throw new Error('Catalog item could not be found.');
     if (item.stockCount === null) return item;
     if (quantity > item.stockCount) throw new Error(`${item.name} has only ${item.stockCount} remaining.`);
     const stockCount = item.stockCount - quantity;
-    return await updateCatalogItem(itemId, { stockCount, outOfStock: stockCount === 0 }, actor, false);
+    return await updateCatalogItem(itemId, { stockCount, outOfStock: stockCount === 0 }, actor, false, 'correction');
   },
 
   async incrementStock(itemId: string, quantity: number, actor: CatalogActor): Promise<CatalogItemRecord> {
     if (!Number.isInteger(quantity) || quantity < 1) throw new Error('Stock quantity must be a positive whole number.');
-    const item = getItems().find((candidate) => candidate.id === itemId);
+    const item = isSupabaseDriver()
+      ? await getRemoteItem(itemId)
+      : getItems().find((candidate) => candidate.id === itemId);
     if (!item) throw new Error('Catalog item could not be found.');
     if (item.stockCount === null) return item;
-    return await updateCatalogItem(itemId, { stockCount: item.stockCount + quantity, outOfStock: false }, actor, false);
+    return await updateCatalogItem(itemId, { stockCount: item.stockCount + quantity, outOfStock: false }, actor, false, 'restock');
   },
 
   async setModifiers(itemId: string, modifiers: CatalogModifierRecord[]): Promise<CatalogItemRecord> {

@@ -3,6 +3,8 @@ import { activityService } from './activityService';
 import { readData, writeData } from './storage';
 import { supplierService } from './supplierService';
 import { userService } from './userService';
+import { isSupabaseDriver } from '../data/driver';
+import { createExpense as createRemoteExpense, listExpenses as listRemoteExpenses } from '../data/repositories/financialRepository';
 
 export interface ExpenseFilters {
   category?: ExpenseCategory;
@@ -30,7 +32,8 @@ async function assertOwner(storeId: string, actorId: string): Promise<void> {
 
 export const expenseService = {
   async list(storeId: string, filters: ExpenseFilters = {}): Promise<ExpenseRecord[]> {
-    return getExpenses()
+    const expenses = isSupabaseDriver() ? await listRemoteExpenses(storeId) : getExpenses();
+    return expenses
       .filter((expense) => expense.storeId === storeId)
       .filter((expense) => !filters.category || expense.category === filters.category)
       .filter((expense) => !filters.month || expense.date.startsWith(`${filters.month}-`))
@@ -40,7 +43,10 @@ export const expenseService = {
   async listForRange(storeId: string, from: number, to: number): Promise<ExpenseRecord[]> {
     const fromDate = localDateKey(from);
     const toDate = localDateKey(to);
-    return getExpenses().filter((expense) => {
+    const expenses = isSupabaseDriver()
+      ? await listRemoteExpenses(storeId, fromDate, toDate)
+      : getExpenses();
+    return expenses.filter((expense) => {
       return expense.storeId === storeId && expense.date >= fromDate && expense.date <= toDate;
     });
   },
@@ -67,8 +73,7 @@ export const expenseService = {
     if (input.supplierId && !await supplierService.get(input.storeId, input.supplierId)) {
       throw new Error('Supplier could not be found in this store.');
     }
-    const expense: ExpenseRecord = {
-      id: `expense-${crypto.randomUUID()}`,
+    const expenseInput = {
       storeId: input.storeId,
       category: input.category,
       supplierId: input.supplierId,
@@ -78,7 +83,13 @@ export const expenseService = {
       note: note || undefined,
       createdBy: input.actorId,
     };
-    writeData('expenses', [...getExpenses(), expense]);
+    const expense: ExpenseRecord = isSupabaseDriver()
+      ? await createRemoteExpense(expenseInput)
+      : {
+      id: `expense-${crypto.randomUUID()}`,
+      ...expenseInput,
+    };
+    if (!isSupabaseDriver()) writeData('expenses', [...getExpenses(), expense]);
     await activityService.log({
       storeId: expense.storeId,
       actorId: input.actorId,

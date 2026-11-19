@@ -11,6 +11,8 @@ import { formatTnd } from '../lib/format';
 import { readData, writeData } from './storage';
 import { customerService } from './customerService';
 import { userService } from './userService';
+import { getSupabaseClient } from '../data/supabaseClient';
+import { isSupabaseDriver } from '../data/driver';
 
 export interface CustomerCreditAlert {
   customerId: string;
@@ -52,13 +54,63 @@ function userPreferenceEnabled(userId: string | undefined, type: NotificationTyp
 
 function notificationEnabled(store: { settings?: StoreSettings } | undefined, type: NotificationType, userId?: string): boolean {
   return (!store || resolveStoreSettings(store.settings).notificationPreferences[type] !== false) &&
-    userPreferenceEnabled(userId, type);
+    (isSupabaseDriver() || userPreferenceEnabled(userId, type));
+}
+
+function mapNotificationRow(row: Record<string, unknown>): NotificationRecord {
+  return {
+    id: String(row.id),
+    storeId: typeof row.store_id === 'string' ? row.store_id : undefined,
+    userId: typeof row.user_id === 'string' ? row.user_id : undefined,
+    targetRole: typeof row.target_role === 'string' ? row.target_role as UserRecord['role'] : undefined,
+    type: String(row.type) as NotificationType,
+    title: String(row.title),
+    body: String(row.body),
+    createdAt: String(row.created_at),
+    entityType: typeof row.entity_type === 'string' ? row.entity_type : undefined,
+    entityId: typeof row.entity_id === 'string' ? row.entity_id : undefined,
+    readAt: typeof row.read_at === 'string' ? row.read_at : undefined,
+    staffId: typeof row.staff_id === 'string' ? row.staff_id : undefined,
+    message: typeof row.message === 'string' ? row.message : undefined,
+    customerId: typeof row.customer_id === 'string' ? row.customer_id : undefined,
+    catalogItemId: typeof row.catalog_item_id === 'string' ? row.catalog_item_id : undefined,
+    shiftId: typeof row.shift_id === 'string' ? row.shift_id : undefined,
+    cashMovementId: typeof row.cash_movement_id === 'string' ? row.cash_movement_id : undefined,
+    dueAt: typeof row.due_at === 'string' ? row.due_at : undefined,
+  };
 }
 
 async function createForUser(
   user: Pick<UserRecord, 'id' | 'role' | 'storeId'>,
   input: Omit<NotificationRecord, 'id' | 'createdAt' | 'readAt' | 'userId' | 'targetRole'>,
 ): Promise<NotificationRecord | undefined> {
+  if (isSupabaseDriver()) {
+    const storeId = input.storeId ?? user.storeId;
+    if (!storeId) throw new Error('A store is required to create a notification.');
+    const { data, error } = await getSupabaseClient().rpc('create_notification', {
+      p_store_id: storeId,
+      p_user_id: user.id,
+      p_target_role: null,
+      p_type: input.type,
+      p_title: input.title,
+      p_body: input.body,
+      p_entity_type: input.entityType ?? null,
+      p_entity_id: input.entityId ?? null,
+      p_staff_id: input.staffId ?? null,
+      p_message: input.message ?? null,
+      p_customer_id: input.customerId ?? null,
+      p_catalog_item_id: input.catalogItemId ?? null,
+      p_shift_id: input.shiftId ?? null,
+      p_cash_movement_id: input.cashMovementId ?? null,
+      p_due_at: input.dueAt ?? null,
+    });
+    if (error) throw new Error(`Could not create notification: ${error.message}`, { cause: error });
+    if (!data) return undefined;
+    const row = data as Record<string, unknown>;
+    const notification = mapNotificationRow(row);
+    notifyChanged();
+    return notification;
+  }
   const store = await userService.getStore(input.storeId ?? user.storeId ?? '');
   if (!notificationEnabled(store, input.type, user.id)) return undefined;
   const notification: NotificationRecord = {
@@ -133,11 +185,29 @@ export const notificationService = {
   },
 
   async getPreference(userId: string, type: NotificationType): Promise<boolean> {
+    if (isSupabaseDriver()) {
+      const { data, error } = await getSupabaseClient().rpc('get_notification_preference', { p_type: type });
+      if (error) throw new Error(`Could not load notification preferences: ${error.message}`, { cause: error });
+      return data === true;
+    }
     return userPreferenceEnabled(userId, type);
   },
 
   async setPreference(userId: string, type: NotificationType, enabled: boolean): Promise<void> {
     if (typeof enabled !== 'boolean') throw new Error('Notification preference must be enabled or disabled.');
+    if (isSupabaseDriver()) {
+      const user = await userService.getUser(userId);
+      if (!user?.storeId) throw new Error('The notification preference owner could not be found.');
+      const { error } = await getSupabaseClient().from('notification_preferences').upsert({
+        store_id: user.storeId,
+        user_id: userId,
+        type,
+        enabled,
+      });
+      if (error) throw new Error(`Could not save notification preference: ${error.message}`, { cause: error });
+      notifyChanged();
+      return;
+    }
     const preferences = getUserPreferences();
     writeData(USER_NOTIFICATION_PREFERENCES_KEY, {
       ...preferences,
@@ -147,6 +217,16 @@ export const notificationService = {
   },
 
   async listFor(user: Pick<UserRecord, 'id' | 'role' | 'storeId'>): Promise<NotificationRecord[]> {
+    if (isSupabaseDriver()) {
+      if (!user.storeId) return [];
+      const { data, error } = await getSupabaseClient()
+        .from('notifications')
+        .select('*')
+        .eq('store_id', user.storeId)
+        .order('created_at', { ascending: false });
+      if (error) throw new Error(`Could not load notifications: ${error.message}`, { cause: error });
+      return (data ?? []).map((row) => mapNotificationRow(row as unknown as Record<string, unknown>));
+    }
     return getNotifications()
       .filter((notification) =>
         (!notification.storeId || notification.storeId === user.storeId) &&
@@ -160,6 +240,19 @@ export const notificationService = {
   },
 
   async markRead(user: Pick<UserRecord, 'id' | 'role' | 'storeId'>, notificationId: string): Promise<void> {
+    if (isSupabaseDriver()) {
+      if (!user.storeId) throw new Error('A store is required to update notifications.');
+      const existing = (await this.listFor(user)).find((notification) => notification.id === notificationId);
+      if (!existing) throw new Error('Notification could not be found.');
+      if (existing.readAt) return;
+      const { error } = await getSupabaseClient().from('notifications')
+        .update({ read_at: new Date().toISOString() })
+        .eq('id', notificationId)
+        .eq('store_id', user.storeId);
+      if (error) throw new Error(`Could not mark notification as read: ${error.message}`, { cause: error });
+      notifyChanged();
+      return;
+    }
     const notifications = getNotifications();
     const target = notifications.find((notification) =>
       notification.id === notificationId &&
@@ -175,6 +268,17 @@ export const notificationService = {
   },
 
   async markAllRead(user: Pick<UserRecord, 'id' | 'role' | 'storeId'>): Promise<void> {
+    if (isSupabaseDriver()) {
+      if (!user.storeId) return;
+      const { error } = await getSupabaseClient().from('notifications')
+        .update({ read_at: new Date().toISOString() })
+        .eq('store_id', user.storeId)
+        .is('read_at', null)
+        .or(`user_id.eq.${user.id},and(user_id.is.null,target_role.eq.${user.role})`);
+      if (error) throw new Error(`Could not mark notifications as read: ${error.message}`, { cause: error });
+      notifyChanged();
+      return;
+    }
     const notifications = getNotifications();
     const readAt = new Date().toISOString();
     let changed = false;
@@ -203,7 +307,7 @@ export const notificationService = {
       }
       if (!notificationEnabled(store, 'customer_overdue', ownerId)) return 0;
       const overdueCustomers = await customerService.listOverdueCustomers(storeId);
-      const existing = getNotifications();
+      const existing = isSupabaseDriver() ? await this.listFor(owner) : getNotifications();
       const additions = overdueCustomers
         .filter(({ customer, dueInfo }) => !existing.some((notification) =>
           notification.type === 'customer_overdue' &&
@@ -213,7 +317,6 @@ export const notificationService = {
           notification.dueAt === dueInfo.nextDueAt,
         ))
         .map(({ customer, dueInfo, balanceMillimes }) => ({
-          id: `notification-${crypto.randomUUID()}`,
           storeId,
           userId: ownerId,
           type: 'customer_overdue' as const,
@@ -223,10 +326,17 @@ export const notificationService = {
           entityId: customer.id,
           customerId: customer.id,
           dueAt: dueInfo.nextDueAt,
-          createdAt: new Date().toISOString(),
         }));
       if (additions.length > 0) {
-        writeData('notifications', [...existing, ...additions]);
+        if (isSupabaseDriver()) {
+          await Promise.all(additions.map((addition) => createForUser(owner, addition)));
+        } else {
+          writeData('notifications', [...existing, ...additions.map((addition) => ({
+            ...addition,
+            id: `notification-${crypto.randomUUID()}`,
+            createdAt: new Date().toISOString(),
+          }))]);
+        }
         notifyChanged();
       }
       return additions.length;
@@ -250,7 +360,7 @@ export const notificationService = {
     if (daysRemaining !== 7) return;
     const owner = await userService.getUser(store.ownerId);
     if (!owner || owner.role !== 'owner') throw new Error('The store owner could not be found for subscription notifications.');
-    const alreadyNotified = getNotifications().some((notification) =>
+    const alreadyNotified = (isSupabaseDriver() ? await this.listFor(owner) : getNotifications()).some((notification) =>
       notification.userId === owner.id &&
       notification.type === 'subscription_expiring' &&
       notification.entityId === store.subscription?.paidUntil,
@@ -418,12 +528,14 @@ export const notificationService = {
   },
 
   async notifyAppUpdate(version: string): Promise<void> {
-    const users = (await userService.listUsers()).filter((user) => user.isActive);
-    const existing = getNotifications();
-    const recipients = users.filter((user) => !existing.some((notification) =>
-      notification.type === 'app_update' && notification.userId === user.id && notification.entityId === version,
-    ));
-    await Promise.all(recipients.map((user) => createForUser(user, {
+    const users = (await userService.listUsers()).filter((user) => user.isActive && (!isSupabaseDriver() || user.storeId));
+    const recipients = await Promise.all(users.map(async (user) => {
+      const existing = isSupabaseDriver() ? await this.listFor(user) : getNotifications();
+      return existing.some((notification) =>
+        notification.type === 'app_update' && notification.userId === user.id && notification.entityId === version,
+      ) ? undefined : user;
+    }));
+    await Promise.all(recipients.filter((user): user is NonNullable<typeof user> => Boolean(user)).map((user) => createForUser(user, {
       type: 'app_update',
       title: 'New app version available',
       body: `Version ${version} is ready to install.`,

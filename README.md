@@ -23,6 +23,42 @@ The local mock accounts are:
 These mock accounts are seeded in the browser's local storage. All three are
 configured to require a password change at their first login.
 
+## Supabase backend
+
+The app uses local storage by default for offline demos. To use the shared
+Supabase backend, copy `.env.example` to `.env.local`, set
+`VITE_DATA_DRIVER=supabase`, and provide the project URL and anon/publishable
+key. Never put a Supabase service-role key in a `VITE_` variable or in the
+client app.
+
+Apply the database migrations and deploy the account-provisioning Edge Function:
+
+```sh
+npx supabase login
+npx supabase link --project-ref YOUR_PROJECT_REF
+npx supabase db push
+npx supabase secrets set SUPABASE_URL=YOUR_PROJECT_URL SUPABASE_ANON_KEY=YOUR_ANON_KEY SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY
+npx supabase functions deploy provision-account
+```
+
+Create the first platform administrator through the Supabase Auth dashboard,
+then add its profile once in the SQL editor (replace the email and display name):
+
+```sql
+insert into public.profiles (id, store_id, role, name, email)
+select id, null, 'super_admin', 'Platform administrator', email
+from auth.users
+where lower(email) = lower('admin@example.com')
+on conflict (id) do nothing;
+```
+
+Sign in as that administrator and create store-owner accounts from the
+super-admin workflow. Staff accounts are provisioned by an owner and sign in
+with their username; their Auth email is generated internally. RLS isolates
+store data, and protected order, shift, tab, PIN, and void operations execute
+through database functions. Realtime updates are enabled for orders, shifts,
+notifications, and catalog availability.
+
 ## Build and preview
 
 ```sh

@@ -2,6 +2,17 @@ import type { ScheduleShiftRecord, ScheduleTemplateRecord } from '../types/domai
 import { readData, writeData } from './storage';
 import { userService } from './userService';
 import { activityService } from './activityService';
+import { isSupabaseDriver } from '../data/driver';
+import {
+  deleteScheduleIds,
+  deleteTemplate as deleteRemoteTemplate,
+  insertSchedule,
+  listSchedule,
+  listTemplates as listRemoteTemplates,
+  publishSchedule,
+  saveSchedule as saveRemoteSchedule,
+  saveTemplate as saveRemoteTemplate,
+} from '../data/repositories/scheduleRepository';
 
 const getTemplates = () => readData<ScheduleTemplateRecord[]>('schedule-templates', []);
 const saveTemplates = (templates: ScheduleTemplateRecord[]) => writeData('schedule-templates', templates);
@@ -80,6 +91,7 @@ function createId(prefix: string): string {
 
 export const scheduleService = {
   async listForStore(storeId: string): Promise<ScheduleShiftRecord[]> {
+    if (isSupabaseDriver()) return listSchedule(storeId);
     return getSchedule().filter((shift) => shift.storeId === storeId).sort((a, b) =>
       a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
   },
@@ -134,6 +146,18 @@ export const scheduleService = {
       id: existing?.id ?? createId('schedule'),
       publishedAt: undefined,
     };
+    if (isSupabaseDriver()) {
+      const saved = await saveRemoteSchedule(input, existing?.id);
+      await activityService.log({
+        storeId: saved.storeId,
+        action: existing ? 'schedule.updated' : 'schedule.created',
+        summary: `${existing ? 'Updated' : 'Scheduled'} ${staff.name}'s shift for ${saved.date}.`,
+        entityType: 'schedule_shift',
+        entityId: saved.id,
+        meta: { before: existing, after: saved },
+      });
+      return saved;
+    }
     saveSchedule(existing
       ? shifts.map((shift) => shift.id === existing.id ? updated : shift)
       : [...shifts, updated]);
@@ -149,6 +173,20 @@ export const scheduleService = {
   },
 
   async delete(shiftId: string, storeId: string): Promise<void> {
+    if (isSupabaseDriver()) {
+      const existing = (await listSchedule(storeId)).find((shift) => shift.id === shiftId);
+      if (!existing) throw new Error('The planned shift could not be found.');
+      await deleteScheduleIds([shiftId]);
+      await activityService.log({
+        storeId,
+        action: 'schedule.deleted',
+        summary: `Deleted ${existing.staffId}'s planned shift for ${existing.date}.`,
+        entityType: 'schedule_shift',
+        entityId: existing.id,
+        meta: { before: existing },
+      });
+      return;
+    }
     const shifts = getSchedule();
     const existing = shifts.find((shift) => shift.id === shiftId && shift.storeId === storeId);
     if (!existing) throw new Error('The planned shift could not be found.');
@@ -165,6 +203,21 @@ export const scheduleService = {
 
   async clearDay(storeId: string, date: string): Promise<number> {
     dateFromKey(date);
+    if (isSupabaseDriver()) {
+      const removed = (await listSchedule(storeId)).filter((shift) => shift.date === date);
+      if (removed.length > 0) {
+        await deleteScheduleIds(removed.map((shift) => shift.id));
+        await activityService.log({
+          storeId,
+          action: 'schedule.day_cleared',
+          summary: `Cleared ${removed.length} planned shift${removed.length === 1 ? '' : 's'} for ${date}.`,
+          entityType: 'schedule_day',
+          entityId: date,
+          meta: { before: removed, after: [] },
+        });
+      }
+      return removed.length;
+    }
     const shifts = getSchedule();
     const remaining = shifts.filter((shift) => shift.storeId !== storeId || shift.date !== date);
     const removed = shifts.length - remaining.length;
@@ -187,6 +240,31 @@ export const scheduleService = {
     const sourceWeekStart = shiftDate(targetWeekStart, -7);
     const sourceWeekEnd = shiftDate(targetWeekStart, -1);
     const targetWeekEnd = shiftDate(targetWeekStart, 6);
+    if (isSupabaseDriver()) {
+      const shifts = await listSchedule(storeId);
+      const source = shifts.filter((shift) => shift.date >= sourceWeekStart && shift.date <= sourceWeekEnd);
+      if (source.length === 0) return 0;
+      const target = shifts.filter((shift) => shift.date >= targetWeekStart && shift.date <= targetWeekEnd);
+      const copies = source.map((shift) => ({
+        storeId,
+        staffId: shift.staffId,
+        date: shiftDate(shift.date, 7),
+        startTime: shift.startTime,
+        endTime: shift.endTime,
+        note: shift.note,
+      }));
+      const saved = await insertSchedule(copies);
+      await deleteScheduleIds(target.map((shift) => shift.id));
+      await activityService.log({
+        storeId,
+        action: 'schedule.copied',
+        summary: `Copied ${saved.length} planned shift${saved.length === 1 ? '' : 's'} into the week of ${targetWeekStart}.`,
+        entityType: 'schedule_week',
+        entityId: targetWeekStart,
+        meta: { before: target, after: saved },
+      });
+      return saved.length;
+    }
     const shifts = getSchedule();
     const source = shifts.filter((shift) =>
       shift.storeId === storeId && shift.date >= sourceWeekStart && shift.date <= sourceWeekEnd);
@@ -214,6 +292,21 @@ export const scheduleService = {
   async publishWeek(storeId: string, weekStart: string): Promise<string[]> {
     dateFromKey(weekStart);
     const weekEnd = shiftDate(weekStart, 6);
+    if (isSupabaseDriver()) {
+      const published = await publishSchedule(storeId, weekStart, weekEnd, new Date().toISOString());
+      const staffIds = [...new Set(published.map((shift) => shift.staffId))];
+      if (staffIds.length > 0) {
+        await activityService.log({
+          storeId,
+          action: 'schedule.published',
+          summary: `Published the schedule for ${weekStart} to ${staffIds.length} staff member${staffIds.length === 1 ? '' : 's'}.`,
+          entityType: 'schedule_week',
+          entityId: weekStart,
+          meta: { after: { staffIds, publishedAt: published[0].publishedAt } },
+        });
+      }
+      return staffIds;
+    }
     const staffIds = new Set<string>();
     const publishedAt = new Date().toISOString();
     const shifts = getSchedule();
@@ -237,6 +330,25 @@ export const scheduleService = {
   },
 
   async listTemplates(storeId: string): Promise<ScheduleTemplateRecord[]> {
+    if (isSupabaseDriver()) {
+      let templates = await listRemoteTemplates(storeId);
+      if (templates.length === 0) {
+        const defaults = [
+          { storeId, name: 'Morning', startTime: '07:00', endTime: '15:00' },
+          { storeId, name: 'Evening', startTime: '15:00', endTime: '23:00' },
+        ];
+        templates = await Promise.all(defaults.map((template) => saveRemoteTemplate(template)));
+        await activityService.log({
+          storeId,
+          action: 'schedule.templates_initialized',
+          summary: 'Initialized the default schedule templates.',
+          entityType: 'schedule_template',
+          entityId: storeId,
+          meta: { after: templates },
+        });
+      }
+      return templates.sort((a, b) => a.name.localeCompare(b.name));
+    }
     let templates = getTemplates();
     const seededStores = readData<string[]>('schedule-template-seeded', []);
     if (!seededStores.includes(storeId)) {
@@ -262,10 +374,22 @@ export const scheduleService = {
   async saveTemplate(input: Omit<ScheduleTemplateRecord, 'id'>, templateId?: string): Promise<ScheduleTemplateRecord> {
     if (!input.name.trim()) throw new Error('Template name is required.');
     validateShift({ date: '2000-01-01', startTime: input.startTime, endTime: input.endTime });
-    const templates = getTemplates();
+    const templates = isSupabaseDriver() ? await listRemoteTemplates(input.storeId) : getTemplates();
     const existing = templateId ? templates.find((template) => template.id === templateId) : undefined;
     if (templateId && (!existing || existing.storeId !== input.storeId)) throw new Error('The schedule template could not be found.');
     const updated = { ...input, name: input.name.trim(), id: existing?.id ?? createId('template') };
+    if (isSupabaseDriver()) {
+      const saved = await saveRemoteTemplate({ ...input, name: input.name.trim() }, existing?.id);
+      await activityService.log({
+        storeId: saved.storeId,
+        action: existing ? 'schedule.template_updated' : 'schedule.template_created',
+        summary: `${existing ? 'Updated' : 'Created'} schedule template "${saved.name}".`,
+        entityType: 'schedule_template',
+        entityId: saved.id,
+        meta: { before: existing, after: saved },
+      });
+      return saved;
+    }
     saveTemplates(existing
       ? templates.map((template) => template.id === existing.id ? updated : template)
       : [...templates, updated]);
@@ -281,6 +405,20 @@ export const scheduleService = {
   },
 
   async deleteTemplate(templateId: string, storeId: string): Promise<void> {
+    if (isSupabaseDriver()) {
+      const existing = (await listRemoteTemplates(storeId)).find((template) => template.id === templateId);
+      if (!existing) throw new Error('The schedule template could not be found.');
+      await deleteRemoteTemplate(templateId);
+      await activityService.log({
+        storeId,
+        action: 'schedule.template_deleted',
+        summary: `Deleted schedule template "${existing.name}".`,
+        entityType: 'schedule_template',
+        entityId: existing.id,
+        meta: { before: existing },
+      });
+      return;
+    }
     const templates = getTemplates();
     const existing = templates.find((template) => template.id === templateId && template.storeId === storeId);
     if (!existing) throw new Error('The schedule template could not be found.');

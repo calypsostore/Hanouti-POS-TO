@@ -7,6 +7,19 @@ import { notificationService } from './notificationService';
 import { activityService } from './activityService';
 import { readData, writeData } from './storage';
 import { seedOrders } from './seedData';
+import { isSupabaseDriver } from '../data/driver';
+import {
+  countPendingVoids,
+  createOrder as createRemoteOrder,
+  getCashSales as getRemoteCashSales,
+  getNextOrderNumber as getRemoteNextOrderNumber,
+  getOrder as getRemoteOrder,
+  getShiftBreakdown as getRemoteShiftBreakdown,
+  listOrders as listRemoteOrders,
+  requestVoid as requestRemoteVoid,
+  resolveVoid as resolveRemoteVoid,
+  voidWithPin as voidRemoteOrder,
+} from '../data/repositories/orderRepository';
 
 const getOrders = () => readData('orders', seedOrders);
 const saveOrders = (orders: OrderRecord[]) => writeData('orders', orders);
@@ -63,7 +76,7 @@ async function authorizeCreditOverride(input: {
     const seconds = Math.ceil((attempt.lockedUntil - Date.now()) / 1000);
     throw new Error(`PIN pad locked. Try again in ${seconds} seconds.`);
   }
-  if (!await userService.verifyStorePin(input.storeId, input.pin)) {
+  if (!await userService.verifyStorePin(input.storeId, input.pin, 'credit_override')) {
     const count = attempt.count + 1;
     writeData('credit-override-pin-attempts', {
       ...attempts,
@@ -92,6 +105,7 @@ export interface ShiftSalesBreakdown {
 
 export const orderService = {
   async listToday(storeId: string, staffId?: string): Promise<OrderRecord[]> {
+    if (isSupabaseDriver()) return listRemoteOrders(storeId, staffId, businessDate(new Date()));
     const start = todayStart();
     return getOrders()
       .filter((order) => order.storeId === storeId && new Date(order.createdAt).getTime() >= start && (!staffId || order.staffId === staffId))
@@ -99,10 +113,32 @@ export const orderService = {
   },
 
   async listAll(storeId: string): Promise<OrderRecord[]> {
+    if (isSupabaseDriver()) return listRemoteOrders(storeId);
     return getOrders().filter((order) => order.storeId === storeId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },
 
   async createOrder(input: { storeId: string; staffId: string; items: OrderLineRecord[]; paymentMethod?: PaymentMethod; customerId?: string; location?: string; adminPin?: string; note?: string }): Promise<OrderRecord> {
+    if (isSupabaseDriver()) {
+      if (input.items.length === 0) throw new Error('Add at least one item before completing an order.');
+      const shift = await shiftService.getOpenShiftForUser(input.storeId, input.staffId);
+      if (!shift) throw new Error('Open a shift before taking orders.');
+      try {
+        return await createRemoteOrder({
+          shift,
+          items: input.items,
+          paymentMethod: input.paymentMethod,
+          customerId: input.customerId,
+          location: input.location,
+          adminPin: input.adminPin,
+          note: input.note,
+        });
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('Limit reached')) {
+          throw new OrderServiceError('Limit reached. Tell the customer.');
+        }
+        throw error;
+      }
+    }
     if (input.items.length === 0) throw new Error('Add at least one item before completing an order.');
     const store = await userService.getStore(input.storeId);
     if (!store?.isActive) throw new Error('This store is inactive.');
@@ -257,6 +293,10 @@ export const orderService = {
   },
 
   async requestVoid(orderId: string, staffId: string, reason: string): Promise<OrderRecord> {
+    if (isSupabaseDriver()) {
+      if (!reason.trim()) throw new Error('A reason is required to request an order void.');
+      return requestRemoteVoid(orderId, reason);
+    }
     if (!await userService.hasPermission(staffId, 'request_void')) {
       throw new Error('Your position does not allow void requests.');
     }
@@ -283,6 +323,15 @@ export const orderService = {
   },
 
   async voidWithPin(orderId: string, pin: string, actorId: string, reason: string): Promise<OrderRecord> {
+    if (isSupabaseDriver()) {
+      if (!reason.trim()) throw new Error('A reason is required to void an order.');
+      const order = await getRemoteOrder(orderId);
+      if (!order) throw new Error('This order is not available to void.');
+      if ((await userService.getStore(order.storeId))?.pinMustChange) {
+        throw new Error('Set your admin PIN in Settings before voiding orders.');
+      }
+      return voidRemoteOrder(orderId, reason, pin);
+    }
     const orders = getOrders();
     const order = orders.find((candidate) => candidate.id === orderId && candidate.status === 'done');
     if (!order) throw new Error('This order is not available to void.');
@@ -297,7 +346,7 @@ export const orderService = {
       const seconds = Math.ceil((attempt.lockedUntil - Date.now()) / 1000);
       throw new Error(`PIN pad locked. Try again in ${seconds} seconds.`);
     }
-    if (!await userService.verifyStorePin(order.storeId, pin)) {
+    if (!await userService.verifyStorePin(order.storeId, pin, 'void')) {
       const count = attempt.count + 1;
       writeData('void-pin-attempts', {
         ...attempts,
@@ -338,6 +387,15 @@ export const orderService = {
   },
 
   async resolveVoidRequest(orderId: string, ownerId: string, decision: 'approve' | 'reject', reason?: string): Promise<OrderRecord> {
+    if (isSupabaseDriver()) {
+      const order = await getRemoteOrder(orderId);
+      if (!order) throw new Error('Pending void request could not be found.');
+      const store = await userService.getStore(order.storeId);
+      if (!store || store.ownerId !== ownerId) throw new Error('Only this store owner can resolve the request.');
+      const cleanedReason = reason?.trim() || order.voidReason?.trim() || '';
+      if (decision === 'approve' && !cleanedReason) throw new Error('A reason is required to void an order.');
+      return resolveRemoteVoid(orderId, decision, cleanedReason, '');
+    }
     const orders = getOrders();
     const order = orders.find((candidate) => candidate.id === orderId && candidate.status === 'pending_void');
     if (!order) throw new Error('Pending void request could not be found.');
@@ -379,11 +437,13 @@ export const orderService = {
   },
 
   async getCashSalesForShift(shiftId: string): Promise<number> {
+    if (isSupabaseDriver()) return getRemoteCashSales(shiftId);
     const breakdown = await this.getShiftSalesBreakdown(shiftId);
     return breakdown.cashSalesMillimes + breakdown.tabPaymentsMillimes;
   },
 
   async getShiftSalesBreakdown(shiftId: string): Promise<ShiftSalesBreakdown> {
+    if (isSupabaseDriver()) return getRemoteShiftBreakdown(shiftId);
     const shiftOrders = getOrders().filter((order) => order.shiftId === shiftId);
     const completedOrders = shiftOrders.filter((order) => order.status === 'done');
     const shiftTabPayments = readData<TabRecord[]>('tabs', [])
@@ -410,6 +470,7 @@ export const orderService = {
   },
 
   async getPendingVoidCountForShift(shiftId: string): Promise<number> {
+    if (isSupabaseDriver()) return countPendingVoids(shiftId);
     return getOrders().filter((order) => order.shiftId === shiftId && order.status === 'pending_void').length;
   },
 
@@ -419,12 +480,17 @@ export const orderService = {
   },
 
   async getTotalForToday(storeId: string, staffId?: string): Promise<number> {
+    if (isSupabaseDriver()) {
+      const orders = await listRemoteOrders(storeId, staffId, businessDate(new Date()));
+      return orders.filter((order) => order.status === 'done').reduce((total, order) => total + order.totalMillimes, 0);
+    }
     return (await this.listToday(storeId, staffId))
       .filter((order) => order.status === 'done')
       .reduce((sum, order) => sum + order.totalMillimes, 0);
   },
 
   async getNextOrderNumber(storeId: string): Promise<number> {
+    if (isSupabaseDriver()) return getRemoteNextOrderNumber();
     const dateKey = businessDate(new Date());
     const counter = readData<Record<string, { businessDate: string; nextNumber: number }>>('order-counters', {})[storeId];
     return counter?.businessDate === dateKey ? counter.nextNumber : 1;

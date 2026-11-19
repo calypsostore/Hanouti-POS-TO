@@ -16,6 +16,8 @@ import { seedReports } from './seedData';
 import { activityService } from './activityService';
 import { expenseService } from './expenseService';
 import { notificationService } from './notificationService';
+import { isSupabaseDriver } from '../data/driver';
+import { listReports as listRemoteReports, saveReport as saveRemoteReport } from '../data/repositories/reportRepository';
 
 const getReports = () => readData('reports', seedReports);
 const todayKey = () => {
@@ -32,8 +34,8 @@ function getRangeStart(period: 'day' | 'week' | 'month' | 'year'): Date {
   return start;
 }
 
-function sinceLastZ(storeId: string): string {
-  const previous = getReports().filter((report) => report.storeId === storeId && report.type === 'Z')
+function sinceLastZ(storeId: string, reports = getReports()): string {
+  const previous = reports.filter((report) => report.storeId === storeId && report.type === 'Z')
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
   if (previous) return previous.createdAt;
   return getRangeStart('day').toISOString();
@@ -262,14 +264,15 @@ async function summarize(storeId: string, from: number, to: number) {
   };
 }
 
-async function createReport(storeId: string, type: 'X' | 'Z', generatedBy: string): Promise<ReportRecord> {
+async function createReport(storeId: string, type: 'X' | 'Z', generatedBy: string, ownerPin?: string): Promise<ReportRecord> {
   const store = await userService.getStore(storeId);
   if (!store) throw new Error('The store could not be found.');
   const createdAt = new Date().toISOString();
-  const periodFrom = sinceLastZ(storeId);
+  const reports = isSupabaseDriver() ? await listRemoteReports(storeId) : getReports();
+  const periodFrom = sinceLastZ(storeId, reports);
   const summary = await summarize(storeId, new Date(periodFrom).getTime(), Date.now());
   const zNumber = type === 'Z'
-    ? Math.max(0, ...getReports().filter((report) => report.storeId === storeId && report.type === 'Z').map((report) => report.zNumber ?? 0)) + 1
+    ? Math.max(0, ...reports.filter((report) => report.storeId === storeId && report.type === 'Z').map((report) => report.zNumber ?? 0)) + 1
     : undefined;
   const report: ReportRecord = {
     id: `report-${crypto.randomUUID()}`,
@@ -308,34 +311,38 @@ async function createReport(storeId: string, type: 'X' | 'Z', generatedBy: strin
     tabsSettledMillimes: summary.tabsSettledMillimes,
     tabsOutstandingMillimes: summary.tabsOutstandingMillimes,
   };
-  writeData('reports', [...getReports(), report]);
+  const savedReport = isSupabaseDriver()
+    ? await saveRemoteReport(report, ownerPin)
+    : report;
+  if (!isSupabaseDriver()) writeData('reports', [...getReports(), report]);
   await activityService.log({
     storeId,
     action: type === 'X' ? 'report.x' : 'report.z',
-    summary: `Generated ${type} report${report.zNumber ? ` #${report.zNumber}` : ''}.`,
+    summary: `Generated ${type} report${savedReport.zNumber ? ` #${savedReport.zNumber}` : ''}.`,
     entityType: 'report',
-    entityId: report.id,
+    entityId: savedReport.id,
     meta: {
       after: {
-        type: report.type,
-        businessDate: report.businessDate,
-        salesMillimes: report.salesMillimes,
-        salesCollectedMillimes: report.salesCollectedMillimes,
-        expensesMillimes: report.expensesMillimes,
-        netProfitMillimes: report.netProfitMillimes,
-        receivableMillimes: report.receivableMillimes,
-        orderCount: report.orderCount,
-        cashDifferenceMillimes: report.cashDifferenceMillimes,
-        generatedBy: report.generatedBy,
+        type: savedReport.type,
+        businessDate: savedReport.businessDate,
+        salesMillimes: savedReport.salesMillimes,
+        salesCollectedMillimes: savedReport.salesCollectedMillimes,
+        expensesMillimes: savedReport.expensesMillimes,
+        netProfitMillimes: savedReport.netProfitMillimes,
+        receivableMillimes: savedReport.receivableMillimes,
+        orderCount: savedReport.orderCount,
+        cashDifferenceMillimes: savedReport.cashDifferenceMillimes,
+        generatedBy: savedReport.generatedBy,
       },
     },
   });
-  return report;
+  return savedReport;
 }
 
 export const reportService = {
   async getCurrentPeriodSummary(storeId: string) {
-    return await summarize(storeId, new Date(sinceLastZ(storeId)).getTime(), Date.now());
+    const reports = isSupabaseDriver() ? await listRemoteReports(storeId) : getReports();
+    return await summarize(storeId, new Date(sinceLastZ(storeId, reports)).getTime(), Date.now());
   },
 
   async getInsights(storeId: string, from: number, to: number) {
@@ -458,6 +465,7 @@ export const reportService = {
   },
 
   async listReports(storeId: string): Promise<ReportRecord[]> {
+    if (isSupabaseDriver()) return listRemoteReports(storeId);
     return getReports().filter((report) => report.storeId === storeId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },
 
@@ -469,12 +477,14 @@ export const reportService = {
     if ((await shiftService.listOpenShifts(storeId)).length > 0) throw new Error('Force-close or close every shift before creating a Z report.');
     const store = await userService.getStore(storeId);
     if (!store) throw new Error('The store could not be found.');
-    if (store.dayClosedOn === todayKey()) {
+    if (!isSupabaseDriver() && store.dayClosedOn === todayKey()) {
       if (!ownerPin) throw new Error('Owner PIN is required to create another Z report today.');
-      if (!await userService.verifyStorePin(storeId, ownerPin)) throw new Error('The owner PIN is incorrect.');
+      if (!await userService.verifyStorePin(storeId, ownerPin, 'z_report')) throw new Error('The owner PIN is incorrect.');
     }
-    const report = await createReport(storeId, 'Z', generatedBy);
-    writeData('stores', (await userService.listStores()).map((candidate) => candidate.id === storeId ? { ...candidate, dayClosedOn: todayKey() } : candidate));
+    const report = await createReport(storeId, 'Z', generatedBy, ownerPin);
+    if (!isSupabaseDriver()) {
+      writeData('stores', (await userService.listStores()).map((candidate) => candidate.id === storeId ? { ...candidate, dayClosedOn: todayKey() } : candidate));
+    }
     await notificationService.notifyZReportClosed(storeId, report.id, report.zNumber);
     return report;
   },

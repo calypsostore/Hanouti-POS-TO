@@ -1,5 +1,8 @@
 import type { ActivityRecord, UserRecord } from '../types/domain';
 import { readData, writeData } from './storage';
+import { getProfile } from '../data/repositories/profileRepository';
+import { getSupabaseClient } from '../data/supabaseClient';
+import { isSupabaseDriver } from '../data/driver';
 
 type ActivityActorFields = Pick<ActivityRecord, 'actorId' | 'actorName' | 'actorRole'>;
 
@@ -127,6 +130,32 @@ export const activityService = {
       !entry.entityType.trim() || !entry.entityId.trim()) {
       throw new Error('Activity records require a store, action, summary, and entity.');
     }
+    if (isSupabaseDriver()) {
+      const { data: authData, error: authError } = await getSupabaseClient().auth.getUser();
+      if (authError || !authData.user) throw new Error('An active sign-in is required to record activity.', { cause: authError });
+      const actor = await getProfile(authData.user.id);
+      if (!actor) throw new Error('The active profile could not be loaded to record activity.');
+      if (entry.actorId && entry.actorId !== actor.id) {
+        throw new Error('Activity can only be recorded for the signed-in user.');
+      }
+      const { data: id, error } = await getSupabaseClient().rpc('log_activity', {
+        p_action: entry.action,
+        p_summary: entry.summary,
+        p_entity_type: entry.entityType,
+        p_entity_id: entry.entityId,
+        p_meta: entry.meta ?? {},
+      });
+      if (error) throw new Error(`Could not record activity: ${error.message}`, { cause: error });
+      return {
+        ...entry,
+        actorId: actor.id,
+        actorName: actor.name,
+        actorRole: actor.role,
+        id: id as string,
+        meta: entry.meta ?? {},
+        createdAt: new Date().toISOString(),
+      };
+    }
     const record: ActivityRecord = {
       ...entry,
       ...resolveActor(entry),
@@ -139,6 +168,41 @@ export const activityService = {
   },
 
   async list(storeId: string, filters: ActivityFilters = {}): Promise<ActivityRecord[]> {
+    if (isSupabaseDriver()) {
+      let query = getSupabaseClient()
+        .from('activity_logs')
+        .select('id, store_id, actor_id, actor_name, actor_role, action, summary, entity_type, entity_id, meta, created_at')
+        .eq('store_id', storeId)
+        .order('created_at', { ascending: false });
+      if (filters.staffId) query = query.eq('actor_id', filters.staffId);
+      if (filters.from) query = query.gte('created_at', `${filters.from}T00:00:00`);
+      if (filters.to) query = query.lt('created_at', `${filters.to}T23:59:59.999`);
+      const { data, error } = await query;
+      if (error) throw new Error(`Could not load activity history: ${error.message}`, { cause: error });
+      const records: ActivityRecord[] = (data ?? []).map((row) => ({
+        id: row.id,
+        storeId: row.store_id,
+        actorId: row.actor_id ?? '',
+        actorName: row.actor_name,
+        actorRole: row.actor_role,
+        action: row.action,
+        summary: row.summary,
+        entityType: row.entity_type,
+        entityId: row.entity_id,
+        meta: row.meta as ActivityRecord['meta'],
+        createdAt: row.created_at,
+      }));
+      const search = filters.search?.trim().toLocaleLowerCase();
+      return records.filter((entry) => !filters.actionGroup || actionGroup(entry.action) === filters.actionGroup)
+        .filter((entry) => !search || [
+          entry.summary,
+          entry.action,
+          entry.actorName,
+          entry.entityType,
+          entry.entityId,
+          JSON.stringify(entry.meta ?? {}),
+        ].some((value) => value.toLocaleLowerCase().includes(search)));
+    }
     const search = filters.search?.trim().toLocaleLowerCase();
     return readEntries()
       .filter((entry) => entry.storeId === storeId)

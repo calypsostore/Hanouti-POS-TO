@@ -4,6 +4,8 @@ import { readData, writeData } from './storage';
 import { shiftService } from './shiftService';
 import { userService } from './userService';
 import { activityService } from './activityService';
+import { isSupabaseDriver } from '../data/driver';
+import { createComp as createRemoteComp, listComps as listRemoteComps } from '../data/repositories/financialRepository';
 
 const REASONS: CompReason[] = ['dropped', 'staff_drink', 'free_customer', 'remake', 'other'];
 const getComps = () => readData<CompRecord[]>('comps', []);
@@ -22,6 +24,7 @@ function isAllowedSelfServiceItem(position: PositionRecord, itemId: string, cate
 
 export const compService = {
   async listComps(storeId: string): Promise<CompRecord[]> {
+    if (isSupabaseDriver()) return listRemoteComps(storeId);
     return getComps()
       .filter((comp) => comp.storeId === storeId)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
@@ -33,11 +36,12 @@ export const compService = {
     shiftId: string,
     itemId: string,
   ): Promise<StaffDrinkAllowance> {
-    const [staff, shift, items, positions] = await Promise.all([
+    const [staff, shift, items, positions, comps] = await Promise.all([
       userService.getUser(staffId),
       shiftService.getShift(shiftId),
       catalogService.listItems(storeId),
       userService.listPositions(storeId),
+      this.listComps(storeId),
     ]);
     const item = items.find((candidate) => candidate.id === itemId);
     const position = positions.find((candidate) => candidate.id === staff?.positionId);
@@ -46,7 +50,7 @@ export const compService = {
       shift?.storeId === storeId && shift.staffId === staffId &&
       Boolean(item && position && isAllowedSelfServiceItem(position, item.id, item.categoryId)) &&
       Number.isInteger(maxQuantity) && maxQuantity > 0;
-    const usedQuantity = getComps()
+    const usedQuantity = comps
       .filter((comp) => comp.storeId === storeId && comp.staffId === staffId &&
         comp.shiftId === shiftId && comp.reason === 'staff_drink')
       .reduce((sum, comp) => sum + comp.quantity, 0);
@@ -120,6 +124,26 @@ export const compService = {
       note: note || undefined,
       createdAt: new Date().toISOString(),
     };
+
+    if (isSupabaseDriver()) {
+      const comp = await createRemoteComp({
+        shiftId: shift.id,
+        itemId: item.id,
+        quantity: input.quantity,
+        reason: input.reason,
+        note,
+      });
+      await activityService.log({
+        storeId: store.id,
+        actorId: staff.id,
+        action: 'comp.created',
+        summary: `Comped ${input.quantity} × ${item.name} (${input.reason}).`,
+        entityType: 'comp',
+        entityId: comp.id,
+        meta: { after: comp },
+      });
+      return comp;
+    }
 
     await catalogService.decrementStock(item.id, input.quantity, { id: staff.id, name: staff.name });
     try {

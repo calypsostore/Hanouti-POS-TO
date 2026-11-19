@@ -2,6 +2,15 @@ import type { ExpenseRecord, SupplierPaymentRecord, SupplierRecord } from '../ty
 import { activityService } from './activityService';
 import { readData, writeData } from './storage';
 import { userService } from './userService';
+import { isSupabaseDriver } from '../data/driver';
+import {
+  createSupplier as createRemoteSupplier,
+  getSupplier as getRemoteSupplier,
+  listExpenses as listRemoteExpenses,
+  listSupplierPayments,
+  listSuppliers as listRemoteSuppliers,
+  recordSupplierPayment,
+} from '../data/repositories/financialRepository';
 
 export interface SupplierBalanceRecord extends SupplierRecord {
   amountOwedMillimes: number;
@@ -56,9 +65,23 @@ async function assertOwner(storeId: string, actorId: string): Promise<void> {
 
 export const supplierService = {
   async list(storeId: string): Promise<SupplierBalanceRecord[]> {
-    const expenses = getExpenses();
-    const payments = getPayments();
-    return getSuppliers()
+    let suppliers: SupplierRecord[];
+    let expenses: ExpenseRecord[];
+    let payments: SupplierPaymentRecord[];
+    if (isSupabaseDriver()) {
+      suppliers = await listRemoteSuppliers(storeId);
+      const [remoteExpenses, remotePayments] = await Promise.all([
+        listRemoteExpenses(storeId),
+        Promise.all(suppliers.map((supplier) => listSupplierPayments(supplier.id))),
+      ]);
+      expenses = remoteExpenses;
+      payments = remotePayments.flat();
+    } else {
+      suppliers = getSuppliers();
+      expenses = getExpenses();
+      payments = getPayments();
+    }
+    return suppliers
       .filter((supplier) => supplier.storeId === storeId)
       .map((supplier) => ({
         ...supplier,
@@ -68,14 +91,16 @@ export const supplierService = {
   },
 
   async get(storeId: string, supplierId: string): Promise<SupplierRecord | undefined> {
+    if (isSupabaseDriver()) return getRemoteSupplier(storeId, supplierId);
     return getSuppliers().find((supplier) => supplier.storeId === storeId && supplier.id === supplierId);
   },
 
   async getDetails(storeId: string, supplierId: string): Promise<SupplierDetails> {
     const supplier = await this.get(storeId, supplierId);
     if (!supplier) throw new Error('Supplier could not be found.');
-    const expenses = getExpenses();
-    const payments = getPayments().filter((payment) => payment.supplierId === supplierId);
+    const [expenses, payments] = isSupabaseDriver()
+      ? await Promise.all([listRemoteExpenses(storeId), listSupplierPayments(supplierId)])
+      : [getExpenses(), getPayments().filter((payment) => payment.supplierId === supplierId)];
     const purchases = expenses
       .filter((expense) => expense.storeId === storeId && expense.supplierId === supplierId)
       .map((expense) => ({ ...expense, paidMillimes: paidForExpense(expense, payments) }))
@@ -98,14 +123,19 @@ export const supplierService = {
     await assertOwner(input.storeId, input.actorId);
     const name = input.name.trim();
     if (!name) throw new Error('Supplier name is required.');
-    const supplier: SupplierRecord = {
-      id: `supplier-${crypto.randomUUID()}`,
+    const supplierInput = {
       storeId: input.storeId,
       name,
       phone: input.phone?.trim() || undefined,
       notes: input.notes?.trim() || undefined,
     };
-    writeData('suppliers', [...getSuppliers(), supplier]);
+    const supplier: SupplierRecord = isSupabaseDriver()
+      ? await createRemoteSupplier(supplierInput)
+      : {
+      id: `supplier-${crypto.randomUUID()}`,
+      ...supplierInput,
+    };
+    if (!isSupabaseDriver()) writeData('suppliers', [...getSuppliers(), supplier]);
     await activityService.log({
       storeId: supplier.storeId,
       actorId: input.actorId,
@@ -133,6 +163,33 @@ export const supplierService = {
       throw new Error('Payment must be a positive whole number of millimes.');
     }
     assertDate(input.date);
+    if (isSupabaseDriver()) {
+      const [supplier, supplierSummaries] = await Promise.all([
+        this.get(input.storeId, input.supplierId),
+        this.list(input.storeId),
+      ]);
+      if (!supplier) throw new Error('Supplier could not be found.');
+      const summary = supplierSummaries.find((candidate) => candidate.id === supplier.id);
+      const payment = await recordSupplierPayment({
+        supplierId: supplier.id,
+        amountMillimes: input.amountMillimes,
+        date: input.date,
+        expenseId: input.expenseId,
+      });
+      await activityService.log({
+        storeId: supplier.storeId,
+        actorId: input.actorId,
+        action: 'supplier.payment',
+        summary: `Paid ${payment.amountMillimes} millimes to "${supplier.name}".`,
+        entityType: 'supplier_payment',
+        entityId: payment.id,
+        meta: {
+          before: { amountOwedMillimes: summary?.amountOwedMillimes ?? 0 },
+          after: { amountOwedMillimes: Math.max(0, (summary?.amountOwedMillimes ?? 0) - payment.amountMillimes), expenseId: payment.expenseId },
+        },
+      });
+      return payment;
+    }
     const expenses = getExpenses();
     const payments = getPayments();
     const amountOwed = balanceForSupplier(supplier.id, expenses, payments);

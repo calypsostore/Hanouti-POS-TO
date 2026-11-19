@@ -5,6 +5,18 @@ import { userService } from './userService';
 import { orderService } from './orderService';
 import { notificationService } from './notificationService';
 import { activityService } from './activityService';
+import { isSupabaseDriver } from '../data/driver';
+import {
+  closeShift as closeRemoteShift,
+  forceCloseShift as forceCloseRemoteShift,
+  getExpectedCash as getRemoteExpectedCash,
+  getOpenShiftForUser as getRemoteOpenShiftForUser,
+  getShift as getRemoteShift,
+  listCashMovements as listRemoteCashMovements,
+  listShifts as listRemoteShifts,
+  openShift as openRemoteShift,
+  recordCashMovement as recordRemoteCashMovement,
+} from '../data/repositories/shiftRepository';
 
 const getShifts = () => readData('shifts', seedShiftsForStore);
 const getCashMovements = () => readData<CashMovementRecord[]>('cash-movements', []);
@@ -27,6 +39,7 @@ export class CashMovementNotificationError extends Error {
 
 export const shiftService = {
   async listShifts(storeId: string): Promise<ShiftRecord[]> {
+    if (isSupabaseDriver()) return listRemoteShifts(storeId);
     return getShifts().filter((shift) => shift.storeId === storeId).sort((a, b) => b.openedAt.localeCompare(a.openedAt));
   },
 
@@ -35,16 +48,19 @@ export const shiftService = {
   },
 
   async getOpenShiftForUser(storeId: string, userId: string): Promise<ShiftRecord | undefined> {
+    if (isSupabaseDriver()) return getRemoteOpenShiftForUser(storeId, userId);
     return getShifts().find((shift) => shift.storeId === storeId && shift.staffId === userId && shift.status === 'open');
   },
 
   async listCashMovements(storeId: string, shiftId?: string): Promise<CashMovementRecord[]> {
+    if (isSupabaseDriver()) return listRemoteCashMovements(storeId, shiftId);
     return getCashMovements()
       .filter((movement) => movement.storeId === storeId && (!shiftId || movement.shiftId === shiftId))
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   },
 
   async getExpectedCash(shiftId: string): Promise<number> {
+    if (isSupabaseDriver()) return getRemoteExpectedCash(shiftId);
     const shift = await this.getShift(shiftId);
     if (!shift) throw new Error('Shift could not be found.');
     if (shift.status === 'closed' && shift.expectedCashMillimes !== undefined) {
@@ -74,6 +90,15 @@ export const shiftService = {
     if (!CASH_MOVEMENT_REASONS.includes(input.reason)) throw new Error('Choose a valid cash movement reason.');
     const note = input.note?.trim();
     if (note && note.length > 500) throw new Error('Cash movement note must be 500 characters or fewer.');
+    if (isSupabaseDriver()) {
+      return recordRemoteCashMovement({
+        shiftId: input.shiftId,
+        kind: input.kind,
+        amountMillimes: input.amountMillimes,
+        reason: input.reason,
+        note,
+      });
+    }
     const shift = await this.getShift(input.shiftId);
     if (!shift || shift.status !== 'open') throw new Error('Cash movements can only be recorded during an open shift.');
     const [store, actor] = await Promise.all([
@@ -122,6 +147,7 @@ export const shiftService = {
 
   async openShift(storeId: string, staffId: string, startingCashMillimes: number): Promise<ShiftRecord> {
     if (!Number.isInteger(startingCashMillimes) || startingCashMillimes < 0) throw new Error('Starting cash must be a non-negative amount in millimes.');
+    if (isSupabaseDriver()) return openRemoteShift(startingCashMillimes);
     const store = await userService.getStore(storeId);
     if (!store?.isActive) throw new Error('This store is inactive.');
     if (await this.getOpenShiftForUser(storeId, staffId)) throw new Error('This user already has an open shift.');
@@ -152,6 +178,7 @@ export const shiftService = {
 
   async closeShift(shiftId: string, countedCashMillimes: number, differenceNote?: string): Promise<ShiftRecord> {
     if (!Number.isInteger(countedCashMillimes) || countedCashMillimes < 0) throw new Error('Counted cash must be a non-negative amount in millimes.');
+    if (isSupabaseDriver()) return closeRemoteShift(shiftId, countedCashMillimes, validateDifferenceNote(0, differenceNote));
     const shifts = getShifts();
     const shift = shifts.find((candidate) => candidate.id === shiftId && candidate.status === 'open');
     if (!shift) throw new Error('Open shift could not be found.');
@@ -185,6 +212,7 @@ export const shiftService = {
 
   async forceCloseShift(shiftId: string, ownerId: string, countedCashMillimes: number, differenceNote?: string): Promise<ShiftRecord> {
     if (!Number.isInteger(countedCashMillimes) || countedCashMillimes < 0) throw new Error('Counted cash must be a non-negative amount in millimes.');
+    if (isSupabaseDriver()) return forceCloseRemoteShift(shiftId, countedCashMillimes, differenceNote?.trim());
     const shifts = getShifts();
     const shift = shifts.find((candidate) => candidate.id === shiftId && candidate.status === 'open');
     if (!shift) throw new Error('Open shift could not be found.');
@@ -221,6 +249,7 @@ export const shiftService = {
 
   async recordClosedShiftVoidAdjustment(input: { shiftId: string; orderId: string; orderNumber: number; amountMillimes: number; actorId?: string }): Promise<void> {
     if (!Number.isInteger(input.amountMillimes) || input.amountMillimes <= 0) throw new Error('Void adjustment must be a positive amount in millimes.');
+    if (isSupabaseDriver()) return;
     const shifts = getShifts();
     const shift = shifts.find((candidate) => candidate.id === input.shiftId && candidate.status === 'closed');
     if (!shift || shift.voidAdjustments?.some((adjustment) => adjustment.orderId === input.orderId)) return;
@@ -246,6 +275,7 @@ export const shiftService = {
   },
 
   async getShift(shiftId: string): Promise<ShiftRecord | undefined> {
+    if (isSupabaseDriver()) return getRemoteShift(shiftId);
     return getShifts().find((shift) => shift.id === shiftId);
   },
 };

@@ -3,6 +3,18 @@ import { activityService } from './activityService';
 import { userService } from './userService';
 import { shiftService } from './shiftService';
 import { readData, writeData } from './storage';
+import { isSupabaseDriver } from '../data/driver';
+import {
+  createCustomer as createRemoteCustomer,
+  getBalance as getRemoteBalance,
+  getCustomer as getRemoteCustomer,
+  listCustomerOrders,
+  listCustomers as listRemoteCustomers,
+  listTransactions as listRemoteTransactions,
+  reversePayment as reverseRemotePayment,
+  settleTab as settleRemoteTab,
+  updateCustomer as updateRemoteCustomer,
+} from '../data/repositories/customerRepository';
 
 type CustomerChanges = Partial<Pick<CustomerRecord,
   'name' | 'phone' | 'email' | 'notes' | 'creditLimitMillimes' | 'settlementTerms'
@@ -98,14 +110,13 @@ function validateSettlementTerms(value: string): asserts value is CustomerRecord
   if (!['weekly', 'monthly', 'anytime'].includes(value)) throw new Error('Select valid customer settlement terms.');
 }
 
-function getLedgerEvents(customerId: string): LedgerEvent[] {
-  const allCustomerOrders = getOrders().filter((order) => order.customerId === customerId && order.paymentMethod === 'tab');
-  const orders = allCustomerOrders.filter((order) =>
+function getLedgerEvents(customerId: string, orders = getOrders(), tabs = getTabs()): LedgerEvent[] {
+  const allCustomerOrders = orders.filter((order) => order.customerId === customerId && order.paymentMethod === 'tab');
+  const tabOrders = allCustomerOrders.filter((order) =>
     order.customerId === customerId && order.paymentMethod === 'tab' && order.status === 'done',
   );
   const orderIds = new Set(allCustomerOrders.map((order) => order.id));
-  const tabs = getTabs();
-  const issued: LedgerEvent[] = orders.map((order) => ({
+  const issued: LedgerEvent[] = tabOrders.map((order) => ({
     id: order.id,
     kind: 'issued',
     occurredAt: order.createdAt,
@@ -157,10 +168,19 @@ function ledgerBalance(customerId: string): number {
     balance + (event.kind === 'payment' ? -event.amountMillimes : event.amountMillimes), 0);
 }
 
-function oldestUnpaidIssue(customerId: string): LedgerEvent | undefined {
+async function getLedgerEventsForCustomer(customerId: string): Promise<LedgerEvent[]> {
+  if (!isSupabaseDriver()) return getLedgerEvents(customerId);
+  const [orders, tabs] = await Promise.all([
+    listCustomerOrders(customerId),
+    listRemoteTransactions(customerId),
+  ]);
+  return getLedgerEvents(customerId, orders, tabs);
+}
+
+function oldestUnpaidIssue(events: LedgerEvent[]): LedgerEvent | undefined {
   const unpaid: { event: LedgerEvent; remaining: number }[] = [];
   let credit = 0;
-  for (const event of getLedgerEvents(customerId)) {
+  for (const event of events) {
     if (event.kind !== 'payment') {
       const covered = Math.min(credit, event.amountMillimes);
       credit -= covered;
@@ -198,12 +218,14 @@ function dueDateFor(issueAt: string, terms: CustomerRecord['settlementTerms']): 
 
 export const customerService = {
   async listCustomers(storeId: string): Promise<CustomerRecord[]> {
+    if (isSupabaseDriver()) return listRemoteCustomers(storeId);
     return getCustomers()
       .filter((customer) => customer.storeId === storeId && customer.isActive)
       .sort((a, b) => a.name.localeCompare(b.name));
   },
 
   async getCustomer(customerId: string, storeId?: string): Promise<CustomerRecord | undefined> {
+    if (isSupabaseDriver()) return getRemoteCustomer(customerId, storeId);
     return getCustomers().find((customer) => customer.id === customerId && (!storeId || customer.storeId === storeId));
   },
 
@@ -224,6 +246,28 @@ export const customerService = {
     await requireCustomerPermission(input.actorId, input.storeId, 'customers_create');
     validateCreditLimit(input.creditLimitMillimes);
     if (input.settlementTerms !== undefined) validateSettlementTerms(input.settlementTerms);
+    if (isSupabaseDriver()) {
+      const customer = await createRemoteCustomer({
+        storeId: input.storeId,
+        name: trimmedName,
+        phone: input.phone?.trim() || undefined,
+        email: input.email?.trim() || undefined,
+        notes: input.notes?.trim() || undefined,
+        creditLimitMillimes: input.creditLimitMillimes,
+        settlementTerms: input.settlementTerms ?? resolveStoreSettings(store.settings).defaultSettlementTerms,
+        isActive: true,
+      });
+      await activityService.log({
+        storeId: customer.storeId,
+        actorId: input.actorId,
+        action: 'customer.created',
+        summary: `Created customer "${customer.name}".`,
+        entityType: 'customer',
+        entityId: customer.id,
+        meta: { after: customer },
+      });
+      return customer;
+    }
     const customer: CustomerRecord = {
       id: `customer-${crypto.randomUUID()}`,
       storeId: input.storeId,
@@ -250,6 +294,31 @@ export const customerService = {
   },
 
   async updateCustomer(customerId: string, changes: CustomerChanges, actorId: string): Promise<CustomerRecord> {
+    if (isSupabaseDriver()) {
+      const customer = await getRemoteCustomer(customerId);
+      if (!customer) throw new Error('Customer could not be found.');
+      await requireCustomerPermission(actorId, customer.storeId, 'customers_edit');
+      if (changes.name !== undefined && !changes.name.trim()) throw new Error('Customer name is required.');
+      validateCreditLimit(changes.creditLimitMillimes);
+      if (changes.settlementTerms !== undefined) validateSettlementTerms(changes.settlementTerms);
+      const updated = await updateRemoteCustomer(customerId, {
+        ...changes,
+        ...(changes.name !== undefined ? { name: changes.name.trim() } : {}),
+        ...(changes.phone !== undefined ? { phone: changes.phone.trim() || undefined } : {}),
+        ...(changes.email !== undefined ? { email: changes.email.trim() || undefined } : {}),
+        ...(changes.notes !== undefined ? { notes: changes.notes.trim() || undefined } : {}),
+      });
+      await activityService.log({
+        storeId: customer.storeId,
+        actorId,
+        action: 'customer.updated',
+        summary: `Updated customer "${updated.name}".`,
+        entityType: 'customer',
+        entityId: customer.id,
+        meta: { before: customer, after: updated },
+      });
+      return updated;
+    }
     const customers = getCustomers();
     const customer = customers.find((candidate) => candidate.id === customerId);
     if (!customer) throw new Error('Customer could not be found.');
@@ -288,6 +357,19 @@ export const customerService = {
     if (await this.getBalance(customerId) !== 0) {
       throw new Error('This customer cannot be archived while their tab balance is not zero.');
     }
+    if (isSupabaseDriver()) {
+      const archived = await updateRemoteCustomer(customerId, { isActive: false });
+      await activityService.log({
+        storeId: customer.storeId,
+        actorId,
+        action: 'customer.archived',
+        summary: `Archived customer "${customer.name}".`,
+        entityType: 'customer',
+        entityId: customer.id,
+        meta: { before: { isActive: customer.isActive }, after: { isActive: archived.isActive } },
+      });
+      return archived;
+    }
     const customers = getCustomers();
     const archived = { ...customer, isActive: false };
     saveCustomers(customers.map((candidate) => candidate.id === customerId ? archived : candidate));
@@ -304,6 +386,7 @@ export const customerService = {
   },
 
   async getBalance(customerId: string): Promise<number> {
+    if (isSupabaseDriver()) return getRemoteBalance(customerId);
     return ledgerBalance(customerId);
   },
 
@@ -314,7 +397,7 @@ export const customerService = {
     const customer = await this.getCustomer(customerId);
     if (!customer) throw new Error('Customer could not be found.');
     validateCreditLimit(customer.creditLimitMillimes);
-    const balance = ledgerBalance(customerId) + additionalMillimes;
+    const balance = (isSupabaseDriver() ? await getRemoteBalance(customerId) : ledgerBalance(customerId)) + additionalMillimes;
     if (customer.creditLimitMillimes === undefined) return { balance, state: 'no_limit' };
     const limit = customer.creditLimitMillimes;
     const percentUsed = limit === 0 ? (balance > 0 ? 100 : 0) : Math.max(0, balance / limit * 100);
@@ -345,7 +428,7 @@ export const customerService = {
   },
 
   async getDueInfo(customer: CustomerRecord): Promise<CustomerDueInfo> {
-    const oldestIssue = oldestUnpaidIssue(customer.id);
+    const oldestIssue = oldestUnpaidIssue(await getLedgerEventsForCustomer(customer.id));
     if (!oldestIssue) return { overdue: false };
     const due = dueDateFor(oldestIssue.occurredAt, customer.settlementTerms);
     return {
@@ -386,7 +469,7 @@ export const customerService = {
   async listLedger(customerId: string): Promise<CustomerLedgerEntry[]> {
     if (!await this.getCustomer(customerId)) throw new Error('Customer could not be found.');
     let balance = 0;
-    return getLedgerEvents(customerId).map((event) => {
+    return (await getLedgerEventsForCustomer(customerId)).map((event) => {
       const amountMillimes = event.kind === 'payment' ? -event.amountMillimes : event.amountMillimes;
       balance += amountMillimes;
       return {
@@ -406,15 +489,29 @@ export const customerService = {
   },
 
   async getOrderHistory(customerId: string): Promise<OrderRecord[]> {
+    if (isSupabaseDriver()) return listCustomerOrders(customerId);
     return getOrders().filter((order) => order.customerId === customerId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },
 
   async listTransactions(customerId: string): Promise<TabRecord[]> {
+    if (isSupabaseDriver()) return listRemoteTransactions(customerId);
     return getTabs().filter((tab) => tab.customerId === customerId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },
 
   async settleTab(input: { storeId: string; customerId: string; staffId: string; amountMillimes: number; note?: string }): Promise<TabRecord> {
     if (!Number.isInteger(input.amountMillimes) || input.amountMillimes <= 0) throw new Error('Enter a payment greater than zero.');
+    if (isSupabaseDriver()) {
+      const customer = await getRemoteCustomer(input.customerId, input.storeId);
+      if (!customer?.isActive) throw new Error('Customer could not be found in this store.');
+      const shift = await shiftService.getOpenShiftForUser(input.storeId, input.staffId);
+      if (!shift) throw new Error('Open your shift before accepting a tab payment.');
+      return settleRemoteTab({
+        customerId: customer.id,
+        amountMillimes: input.amountMillimes,
+        shiftId: shift.id,
+        note: input.note,
+      });
+    }
     const actor = await userService.getUser(input.staffId);
     if (!actor || actor.storeId !== input.storeId || (actor.role !== 'staff' && actor.role !== 'owner')) {
       throw new Error('This account cannot settle tabs for the selected store.');
@@ -460,6 +557,19 @@ export const customerService = {
   },
 
   async reversePayment(input: { storeId: string; customerId: string; paymentId: string; ownerId: string; pin: string; reason: string }): Promise<TabRecord> {
+    if (isSupabaseDriver()) {
+      const customer = await getRemoteCustomer(input.customerId, input.storeId);
+      if (!customer) throw new Error('Customer could not be found in this store.');
+      const owner = await userService.getUser(input.ownerId);
+      const store = await userService.getStore(input.storeId);
+      if (!store || !owner || owner.role !== 'owner' || owner.storeId !== store.id || store.ownerId !== owner.id) {
+        throw new Error('Only this store owner can reverse a payment.');
+      }
+      const reason = input.reason.trim();
+      if (!reason) throw new Error('A reason is required to reverse a payment.');
+      if (store.pinMustChange) throw new Error('Set your admin PIN in Settings before reversing payments.');
+      return reverseRemotePayment(input.paymentId, input.pin, reason);
+    }
     const customer = await this.getCustomer(input.customerId, input.storeId);
     if (!customer) throw new Error('Customer could not be found in this store.');
     const owner = await userService.getUser(input.ownerId);
@@ -477,7 +587,7 @@ export const customerService = {
       const seconds = Math.ceil((attempt.lockedUntil - Date.now()) / 1000);
       throw new Error(`PIN pad locked. Try again in ${seconds} seconds.`);
     }
-    if (!await userService.verifyStorePin(store.id, input.pin)) {
+    if (!await userService.verifyStorePin(store.id, input.pin, 'credit_override')) {
       const count = attempt.count + 1;
       writeData('reverse-payment-pin-attempts', {
         ...attempts,

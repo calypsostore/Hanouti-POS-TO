@@ -287,7 +287,7 @@ function OwnerDashboardContent() {
     <>
     <WorkspaceLayout title={t('owner.dashboard')} storeName={store?.name} links={ownerWorkspaceLinks}>
       <PageHeader title={t('owner.dashboard')} subtitle={store?.name} actions={
-        <div className="flex gap-1 rounded-xl bg-surface-container-high p-1">
+        <div className="dashboard-period-switcher flex gap-1 rounded-xl bg-surface-container-high p-1">
           {(Object.keys(periodLabels) as Period[]).map((value) => (
             <button key={value} type="button" onClick={() => selectPeriod(value)} className={`min-h-10 rounded-lg px-3 font-body text-label-sm ${period === value ? 'bg-primary text-on-primary shadow-card' : 'text-on-surface-variant'}`}>
               {t(periodLabels[value])}

@@ -280,6 +280,10 @@ button {
   display: none;
 }
 
+.desktop-sidebar {
+  display: none;
+}
+
 .workspace-nav-badge,
 .owner-more-list__badge {
   display: inline-flex;
@@ -351,6 +355,38 @@ button {
   #root {
     max-width: 100%;
     overflow-x: clip;
+  }
+
+  .page-container {
+    display: flex;
+    flex-direction: column;
+    row-gap: 16px;
+  }
+
+  .page-container > * {
+    margin-top: 0;
+  }
+
+  .page-container {
+    padding-top: 16px;
+    padding-bottom: 16px;
+  }
+
+  .dashboard-period-switcher {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .dashboard-period-switcher > button {
+    width: 100%;
+    min-width: 0;
+    padding-right: 4px;
+    padding-left: 4px;
+  }
+
+  .dashboard-target-card {
+    padding: 16px;
   }
 
   button,

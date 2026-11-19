@@ -5,6 +5,19 @@ def keystoreProperties = new Properties()
 if (keystorePropertiesFile.exists()) {
     keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
 }
+def signingEnvironment = [
+    storeFile: System.getenv('ANDROID_KEYSTORE_PATH'),
+    storePassword: System.getenv('ANDROID_KEYSTORE_PASSWORD'),
+    keyAlias: System.getenv('ANDROID_KEY_ALIAS'),
+    keyPassword: System.getenv('ANDROID_KEY_PASSWORD'),
+]
+def populatedSigningEnvironment = signingEnvironment.findAll { key, value -> value?.trim() }
+def useEnvironmentSigning = populatedSigningEnvironment.size() == signingEnvironment.size()
+if (!populatedSigningEnvironment.isEmpty() && !useEnvironmentSigning) {
+    throw new GradleException('ANDROID_KEYSTORE_PATH, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD must be set together.')
+}
+def appVersionName = System.getenv('APP_VERSION_NAME') ?: '1.0.0'
+def appVersionCode = (System.getenv('APP_VERSION_CODE') ?: '10000').toInteger()
 
 android {
     namespace "com.hanouti.pos"
@@ -13,8 +26,8 @@ android {
         applicationId "com.hanouti.pos"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode appVersionCode
+        versionName appVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -22,8 +35,15 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
-    if (keystorePropertiesFile.exists()) {
-        signingConfigs {
+    signingConfigs {
+        if (useEnvironmentSigning) {
+            release {
+                storeFile file(signingEnvironment.storeFile)
+                storePassword signingEnvironment.storePassword
+                keyAlias signingEnvironment.keyAlias
+                keyPassword signingEnvironment.keyPassword
+            }
+        } else if (keystorePropertiesFile.exists()) {
             release {
                 storeFile rootProject.file(keystoreProperties['storeFile'])
                 storePassword keystoreProperties['storePassword']
@@ -34,7 +54,7 @@ android {
     }
     buildTypes {
         release {
-            if (keystorePropertiesFile.exists()) {
+            if (useEnvironmentSigning || keystorePropertiesFile.exists()) {
                 signingConfig signingConfigs.release
             }
             minifyEnabled false

@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '../components/BottomNav';
 import { Button } from '../components/Button';
@@ -415,9 +416,19 @@ export function SettingsScreen() {
     try {
       const result = await updateService.checkForUpdates();
       setLastCheck(result.checkedAt);
-      setUpdateResult(result.updateAvailable ? t('settings.updateAvailable') : t('settings.upToDate'));
+      if (Capacitor.isNativePlatform()) {
+        setUpdateResult(result.updateAvailable && result.availableVersion
+          ? `New version v${result.availableVersion} available`
+          : `You are up to date (v${result.currentVersion})`);
+      } else {
+        setUpdateResult(result.updateAvailable ? t('settings.updateAvailable') : t('settings.upToDate'));
+      }
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : 'Unable to check for updates.');
+      if (Capacitor.isNativePlatform()) {
+        setUpdateResult('Could not check, try again');
+      } else {
+        setError(updateError instanceof Error ? updateError.message : 'Unable to check for updates.');
+      }
     } finally {
       setChecking(false);
     }

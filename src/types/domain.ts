@@ -5,6 +5,7 @@ export type ShiftStatus = 'open' | 'closed';
 
 export interface PermissionDefinition {
   id: string;
+  group: string;
   label: string;
 }
 
@@ -13,32 +14,67 @@ export interface PositionRecord {
   storeId: string;
   name: string;
   permissionIds: string[];
+  selfServiceItemIds?: string[];
+  selfServiceCategoryIds?: string[];
+  maxStaffDrinkQuantityPerShift?: number;
+}
+
+export type CompReason = 'dropped' | 'staff_drink' | 'free_customer' | 'remake' | 'other';
+
+export interface CompRecord {
+  id: string;
+  storeId: string;
+  staffId: string;
+  shiftId: string;
+  itemId: string;
+  name: string;
+  quantity: number;
+  valueMillimes: number;
+  reason: CompReason;
+  note?: string;
+  createdAt: string;
+}
+
+export interface PermissionOverrides {
+  granted: string[];
+  revoked: string[];
 }
 
 export interface UserRecord {
   id: string;
   role: UserRole;
   name: string;
+  phone?: string;
+  notes?: string;
   email?: string;
   username?: string;
   password?: string;
   passwordHash?: string;
+  pinHash?: string;
   mustChangePassword: boolean;
   isActive: boolean;
   storeId?: string;
   positionId?: string;
+  permissionOverrides?: PermissionOverrides;
+  sessionVersion?: number;
   createdAt: string;
 }
 
-export type UserSummary = Omit<UserRecord, 'password' | 'passwordHash'>;
+export type UserSummary = Omit<UserRecord, 'password' | 'passwordHash' | 'pinHash'>;
 
 export interface StoreRecord {
   id: string;
   ownerId: string;
   code: string;
   name: string;
+  allowCustomerCreditBalance?: boolean;
+  allowCardPayments?: boolean;
+  allowOtherPayments?: boolean;
+  staffAutoLockMinutes?: number;
+  cashOutAlertThresholdMillimes?: number;
   adminPin?: string;
   adminPinHash?: string;
+  pinMustChange?: boolean;
   isActive: boolean;
   dayClosedOn?: string;
   createdAt: string;
@@ -63,12 +99,13 @@ export interface CatalogItemRecord {
   stockCount: number | null;
   description?: string;
   sku?: string;
-  imageDataUrl?: string;
   modifiers?: CatalogModifierRecord[];
   modifierGroupName?: string;
   modifiersRequired?: boolean;
   modifierSelectionMode?: 'single' | 'multiple';
   outOfStock: boolean;
+  outOfStockBy?: string;
+  outOfStockAt?: string;
   isActive: boolean;
 }
 
@@ -101,6 +138,7 @@ export interface OrderRecord {
   status: OrderStatus;
   paymentMethod: PaymentMethod;
   customerId?: string;
+  note?: string;
   items: OrderLineRecord[];
   totalMillimes: number;
   createdAt: string;
@@ -125,6 +163,55 @@ export interface ShiftRecord {
   forceClosedByOwner?: boolean;
   closedByUserId?: string;
   voidAdjustments?: ShiftVoidAdjustment[];
+}
+
+export type CashMovementReason = 'supplier' | 'change' | 'expense' | 'other';
+
+export interface CashMovementRecord {
+  id: string;
+  storeId: string;
+  shiftId: string;
+  staffId: string;
+  kind: 'in' | 'out';
+  amountMillimes: number;
+  reason: CashMovementReason;
+  note?: string;
+  createdAt: string;
+}
+
+export interface ScheduleShiftRecord {
+  id: string;
+  storeId: string;
+  staffId: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  note?: string;
+  publishedAt?: string;
+}
+
+export interface ScheduleTemplateRecord {
+  id: string;
+  storeId: string;
+  name: string;
+  startTime: string;
+  endTime: string;
+}
+
+export interface NotificationRecord {
+  id: string;
+  storeId: string;
+  staffId: string;
+  type: 'schedule_published' | 'customer_credit_warning' | 'customer_credit_limit' | 'customer_overdue' | 'stock_depleted' | 'cash_out_alert';
+  title: string;
+  message: string;
+  createdAt: string;
+  customerId?: string;
+  catalogItemId?: string;
+  shiftId?: string;
+  cashMovementId?: string;
+  dueAt?: string;
+  readAt?: string;
 }
 
 export interface ShiftVoidAdjustment {
@@ -152,6 +239,14 @@ export interface ReportVoidLine {
   ticketNumber: number;
   reason: string;
   totalMillimes: number;
+}
+
+export interface ReportCompLine {
+  staffName: string;
+  itemName: string;
+  quantity: number;
+  valueMillimes: number;
+  reason: CompReason;
 }
 
 export interface ReportShiftLine {
@@ -185,6 +280,7 @@ export interface ReportRecord {
   salesByCategory?: ReportCategoryLine[];
   itemsSold?: ReportItemLine[];
   voids?: { count: number; totalMillimes: number; orders: ReportVoidLine[] };
+  comps?: { count: number; quantity: number; totalMillimes: number; records: ReportCompLine[] };
   shifts?: ReportShiftLine[];
   paymentSplit?: Record<PaymentMethod, number>;
   totalExpectedCashMillimes?: number;
@@ -200,7 +296,12 @@ export interface CustomerRecord {
   storeId: string;
   name: string;
   phone?: string;
+  email?: string;
+  notes?: string;
   creditLimitMillimes?: number;
+  settlementTerms: 'weekly' | 'monthly' | 'anytime';
+  isActive: boolean;
+  lastPaymentAt?: string;
   createdAt: string;
 }
 
@@ -211,11 +312,41 @@ export interface TabRecord {
   orderId?: string;
   shiftId: string;
   staffId: string;
-  kind: 'issued' | 'settled';
+  kind: 'issued' | 'settled' | 'reversal';
   amountMillimes: number;
+  note?: string;
+  reversesTabId?: string;
   createdAt: string;
 }
 
+interface ActivityLogBase {
+  id: string;
+  storeId: string;
+  actorId: string;
+  createdAt: string;
+}
+
+export type ActivityLogRecord = (ActivityLogBase & {
+  action: 'customer_payment_reversed';
+  targetType: 'customer_payment';
+  targetId: string;
+  customerId: string;
+  amountMillimes: number;
+  reason: string;
+}) | (ActivityLogBase & {
+  action: 'catalog_item_availability_changed';
+  targetType: 'catalog_item';
+  targetId: string;
+  itemName: string;
+  outOfStock: boolean;
+}) | (ActivityLogBase & {
+  action: 'staff_session_locked' | 'staff_session_unlocked';
+  targetType: 'staff_session';
+  targetId: string;
+});
+
 export interface AuthSession {
   userId: string;
+  sessionVersion?: number;
+  locked?: boolean;
 }

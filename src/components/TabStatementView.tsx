@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from './Button';
 import { formatTnd } from '../lib/format';
 import type { CustomerRecord, OrderRecord, TabRecord } from '../types/domain';
@@ -8,13 +8,14 @@ function money(amountMillimes: number): string {
   return `${formatTnd(Math.abs(amountMillimes) / 1000)} DT`;
 }
 
-export function TabStatementView({ customer, storeName, balanceMillimes, transactions, orders, onClose }: {
+export function TabStatementView({ customer, storeName, balanceMillimes, transactions, orders, onClose, autoShare = false }: {
   customer: CustomerRecord;
   storeName: string;
   balanceMillimes: number;
   transactions: TabRecord[];
   orders: OrderRecord[];
   onClose: () => void;
+  autoShare?: boolean;
 }) {
   const [error, setError] = useState('');
   const printTarget = useRef<HTMLElement>(null);
@@ -22,7 +23,7 @@ export function TabStatementView({ customer, storeName, balanceMillimes, transac
   const entries = useMemo(() => [...transactions].sort((left, right) => left.createdAt.localeCompare(right.createdAt)), [transactions]);
   const balanceLabel = balanceMillimes < 0 ? `Credit balance ${money(balanceMillimes)}` : `Amount due ${money(balanceMillimes)}`;
 
-  async function printStatement() {
+  const printStatement = useCallback(async () => {
     setError('');
     try {
       await printOrSharePdf(printTarget.current, `tab-statement-${customer.name}`, `Tab statement — ${customer.name}`);
@@ -30,7 +31,11 @@ export function TabStatementView({ customer, storeName, balanceMillimes, transac
       if (printError instanceof Error && printError.name === 'AbortError') return;
       setError(printError instanceof Error ? printError.message : 'Unable to create or share this statement.');
     }
-  }
+  }, [customer.name]);
+
+  useEffect(() => {
+    if (autoShare) void printStatement();
+  }, [autoShare, customer.id, printStatement]);
 
   return (
     <div className="receipt-overlay" onMouseDown={onClose}>
@@ -55,14 +60,16 @@ export function TabStatementView({ customer, storeName, balanceMillimes, transac
           {entries.map((entry) => {
             const order = entry.orderId ? orderIndex.get(entry.orderId) : undefined;
             const issued = entry.kind === 'issued';
-            const label = issued ? `Ticket #${order?.number ?? '—'}` : 'Cash payment';
+            const reversal = entry.kind === 'reversal';
+            const label = issued ? `Ticket #${order?.number ?? '—'}` : reversal ? 'Payment reversed' : 'Cash payment';
             return (
               <div className="receipt-item" key={entry.id}>
                 <div>{new Date(entry.createdAt).toLocaleString()}</div>
                 <div className="receipt-row">
                   <span>{label}</span>
-                  <strong>{issued ? '+' : '−'}{money(entry.amountMillimes)}</strong>
+                  <strong>{issued || reversal ? '+' : '−'}{money(entry.amountMillimes)}</strong>
                 </div>
+                {entry.note && <div className="receipt-subline">{entry.note}</div>}
               </div>
             );
           })}

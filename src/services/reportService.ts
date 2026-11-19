@@ -1,5 +1,6 @@
 import type { PaymentMethod, ReportRecord, ReportShiftLine, TabRecord } from '../types/domain';
 import { catalogService } from './catalogService';
+import { compService } from './compService';
 import { orderService } from './orderService';
 import { shiftService } from './shiftService';
 import { userService } from './userService';
@@ -39,12 +40,18 @@ async function summarize(storeId: string, from: number, to: number) {
     const voidedAt = new Date(order.voidedAt ?? order.createdAt).getTime();
     return order.status === 'voided' && voidedAt >= from && voidedAt <= to;
   });
-  const [shifts, categories, catalogItems, staff] = await Promise.all([
+  const [shifts, categories, catalogItems, staff, allComps] = await Promise.all([
     shiftService.listShifts(storeId),
     catalogService.listCategories(storeId),
     catalogService.listItems(storeId),
     userService.listUsers(storeId),
+    compService.listComps(storeId),
   ]);
+  const compRecords = allComps.filter((comp) => {
+    const timestamp = new Date(comp.createdAt).getTime();
+    return timestamp >= from && timestamp <= to;
+  });
+  const staffById = new Map(staff.map((user) => [user.id, user]));
   const includedShifts = shifts.filter((shift) => {
     const opened = new Date(shift.openedAt).getTime();
     const closed = shift.closedAt ? new Date(shift.closedAt).getTime() : Number.POSITIVE_INFINITY;
@@ -61,8 +68,8 @@ async function summarize(storeId: string, from: number, to: number) {
       return timestamp >= from && timestamp <= to;
     });
     const voidAdjustmentMillimes = periodAdjustments.reduce((sum, adjustment) => sum + adjustment.amountMillimes, 0);
-    const cashSales = inProgress ? 0 : await orderService.getCashSalesForShift(shift.id);
-    const expected = inProgress ? undefined : (shift.expectedCashMillimes ?? shift.startingCashMillimes + cashSales) + voidAdjustmentMillimes;
+    const expectedCash = inProgress ? undefined : await shiftService.getExpectedCash(shift.id);
+    const expected = expectedCash === undefined ? undefined : expectedCash + voidAdjustmentMillimes;
     const counted = shift.countedCashMillimes;
     const staffName = staff.find((user) => user.id === shift.staffId)?.name ?? 'Staff';
     return {
@@ -104,15 +111,22 @@ async function summarize(storeId: string, from: number, to: number) {
     tab.storeId === storeId && tab.kind === 'settled' &&
     new Date(tab.createdAt).getTime() >= from && new Date(tab.createdAt).getTime() <= to,
   );
+  const reversals = readData<TabRecord[]>('tabs', []).filter((tab) =>
+    tab.storeId === storeId && tab.kind === 'reversal' &&
+    new Date(tab.createdAt).getTime() >= from && new Date(tab.createdAt).getTime() <= to,
+  );
   const tabsIssuedMillimes = orders.filter((order) => order.paymentMethod === 'tab').reduce((sum, order) => sum + order.totalMillimes, 0);
-  const tabsSettledMillimes = settlements.reduce((sum, tab) => sum + tab.amountMillimes, 0);
+  const tabsSettledMillimes = settlements.reduce((sum, tab) => sum + tab.amountMillimes, 0) -
+    reversals.reduce((sum, tab) => sum + tab.amountMillimes, 0);
   const customers = readData<import('../types/domain').CustomerRecord[]>('customers', []).filter((customer) => customer.storeId === storeId);
-  const allSettlements = readData<TabRecord[]>('tabs', []).filter((tab) => tab.storeId === storeId && tab.kind === 'settled');
+  const allCustomerTransactions = readData<TabRecord[]>('tabs', []).filter((tab) => tab.storeId === storeId);
   const tabsOutstandingMillimes = customers.reduce((total, customer) => {
     const issued = allOrders.filter((order) => order.customerId === customer.id && order.paymentMethod === 'tab' && order.status === 'done')
       .reduce((sum, order) => sum + order.totalMillimes, 0);
-    const settled = allSettlements.filter((tab) => tab.customerId === customer.id).reduce((sum, tab) => sum + tab.amountMillimes, 0);
-    return total + issued - settled;
+    const transactions = allCustomerTransactions.filter((tab) => tab.customerId === customer.id);
+    const settled = transactions.filter((tab) => tab.kind === 'settled').reduce((sum, tab) => sum + tab.amountMillimes, 0);
+    const reversed = transactions.filter((tab) => tab.kind === 'reversal').reduce((sum, tab) => sum + tab.amountMillimes, 0);
+    return total + issued - settled + reversed;
   }, 0);
   const salesMillimes = orders.reduce((sum, order) => sum + order.totalMillimes, 0);
   const closedShiftLines = shiftLines.filter((shift) => shift.status !== 'in_progress');
@@ -132,6 +146,18 @@ async function summarize(storeId: string, from: number, to: number) {
       count: voidedOrders.length,
       totalMillimes: voidedOrders.reduce((sum, order) => sum + order.totalMillimes, 0),
       orders: voidedOrders.map((order) => ({ ticketNumber: order.number, reason: order.voidReason ?? '', totalMillimes: order.totalMillimes })),
+    },
+    comps: {
+      count: compRecords.length,
+      quantity: compRecords.reduce((sum, comp) => sum + comp.quantity, 0),
+      totalMillimes: compRecords.reduce((sum, comp) => sum + comp.valueMillimes, 0),
+      records: compRecords.map((comp) => ({
+        staffName: staffById.get(comp.staffId)?.name ?? 'Staff',
+        itemName: comp.name,
+        quantity: comp.quantity,
+        valueMillimes: comp.valueMillimes,
+        reason: comp.reason,
+      })),
     },
     shiftLines,
     paymentSplit,
@@ -170,6 +196,7 @@ async function createReport(storeId: string, type: 'X' | 'Z', generatedBy: strin
     salesByCategory: summary.salesByCategory,
     itemsSold: summary.itemsSold,
     voids: summary.voids,
+    comps: summary.comps,
     shifts: summary.shiftLines,
     paymentSplit: summary.paymentSplit,
     totalExpectedCashMillimes: summary.totalExpectedCashMillimes,

@@ -18,6 +18,14 @@ let monitorStarted = false;
 let controllerChangeObserved = false;
 const unsavedStateProviders = new Set<() => boolean>();
 
+function runOverdueCheck(checkOverdueCustomers?: () => Promise<void>): void {
+  if (checkOverdueCustomers) {
+    void checkOverdueCustomers().catch((error: unknown) => {
+      console.error('[customers] Automatic overdue check failed.', error);
+    });
+  }
+}
+
 function runAutomaticCheck(reason: 'startup' | 'interval' | 'foreground'): void {
   void updateService.checkForUpdates().then((result) => {
     console.info('[updates] Automatic check completed.', {
@@ -107,10 +115,11 @@ export const updateService = {
     if (hasUpdate) window.location.reload();
   },
 
-  startMonitoring(): () => void {
+  startMonitoring(checkOverdueCustomers?: () => Promise<void>): () => void {
     if (monitorStarted) return () => undefined;
     monitorStarted = true;
     const check = () => {
+      runOverdueCheck(checkOverdueCustomers);
       const lastCheck = this.getLastCheck();
       if (!lastCheck || Date.now() - new Date(lastCheck).getTime() >= CHECK_INTERVAL_MS) {
         runAutomaticCheck(lastCheck ? 'interval' : 'startup');
@@ -118,6 +127,7 @@ export const updateService = {
     };
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
+        runOverdueCheck(checkOverdueCustomers);
         runAutomaticCheck('foreground');
       }
     };

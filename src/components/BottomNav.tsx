@@ -3,13 +3,13 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { MaterialIcon } from './MaterialIcon';
 import { t } from '../i18n/translations';
 import { useAuthStore } from '../stores/authStore';
-import { userService } from '../services/userService';
+import { PERMISSIONS_CHANGED_EVENT, userService } from '../services/userService';
 
 const staffNavigation = [
   { to: '/dashboard', permission: null, label: 'nav.dashboard', icon: 'space_dashboard' },
   { to: '/pos', permission: 'take_orders', label: 'nav.pos', icon: 'point_of_sale' },
   { to: '/orders', permission: 'view_order_history', label: 'nav.orders', icon: 'receipt_long' },
-  { to: '/customers', permission: 'customers', label: 'nav.customers', icon: 'group' },
+  { to: '/customers', permission: 'customers_view', label: 'nav.customers', icon: 'group' },
   { to: '/shift', permission: 'open_close_shift', label: 'nav.shift', icon: 'payments' },
   { to: '/settings', label: 'nav.settings', icon: 'settings' },
 ] as const;
@@ -43,16 +43,36 @@ export function BottomNav({ posNavigationOpen: controlledPosNavigationOpen, onPo
   });
 
   useEffect(() => {
-    if (!user) return;
-    void Promise.all([
-      userService.hasPermission(user.id, 'take_orders'),
-      userService.hasPermission(user.id, 'view_order_history'),
-      userService.hasPermission(user.id, 'use_tabs'),
-      userService.hasPermission(user.id, 'settle_tabs'),
-      userService.hasPermission(user.id, 'open_close_shift'),
-    ]).then(([takeOrders, viewHistory, useTabs, settleTabs, manageShift]) => {
-      setAllowed({ '/pos': takeOrders, '/orders': viewHistory, '/customers': useTabs || settleTabs, '/shift': manageShift });
-    }).catch((error: unknown) => console.error('Could not load staff navigation permissions.', error));
+    if (!user) {
+      setAllowed({});
+      return;
+    }
+    let active = true;
+    let requestId = 0;
+    const refreshPermissions = () => {
+      const currentRequestId = ++requestId;
+      setAllowed({});
+      void Promise.all([
+        userService.hasPermission(user.id, 'take_orders'),
+        userService.hasPermission(user.id, 'view_order_history'),
+        userService.hasPermission(user.id, 'customers_view'),
+        userService.hasPermission(user.id, 'use_tabs'),
+        userService.hasPermission(user.id, 'settle_tabs'),
+        userService.hasPermission(user.id, 'open_close_shift'),
+      ]).then(([takeOrders, viewHistory, viewCustomers, useTabs, settleTabs, manageShift]) => {
+        if (active && currentRequestId === requestId) {
+          setAllowed({ '/pos': takeOrders, '/orders': viewHistory, '/customers': viewCustomers || useTabs || settleTabs, '/shift': manageShift });
+        }
+      }).catch((error: unknown) => console.error('Could not load staff navigation permissions.', error));
+    };
+    refreshPermissions();
+    window.addEventListener('focus', refreshPermissions);
+    window.addEventListener(PERMISSIONS_CHANGED_EVENT, refreshPermissions);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', refreshPermissions);
+      window.removeEventListener(PERMISSIONS_CHANGED_EVENT, refreshPermissions);
+    };
   }, [user]);
 
   const visibleNavigation = staffNavigation.filter((item) => {

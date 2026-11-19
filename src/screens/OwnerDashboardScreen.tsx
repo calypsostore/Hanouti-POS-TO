@@ -3,15 +3,22 @@ import { useNavigate } from 'react-router-dom';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { MaterialIcon } from '../components/MaterialIcon';
+import { Button } from '../components/Button';
+import { OverdueCustomerRow } from '../components/OverdueCustomerRow';
 import { StatusTag } from '../components/StatusTag';
+import { TabStatementView } from '../components/TabStatementView';
 import { ownerWorkspaceLinks } from '../app/navigation';
 import { t, type TranslationKey } from '../i18n/translations';
 import { formatTnd } from '../lib/format';
 import { reportService } from '../services/reportService';
 import { userService } from '../services/userService';
 import { orderService } from '../services/orderService';
+import { customerService } from '../services/customerService';
+import { notificationService } from '../services/notificationService';
+import { shareCustomerStatement } from '../services/customerStatementShare';
 import { useAuthStore } from '../stores/authStore';
-import type { OrderRecord, ShiftRecord, StoreRecord, UserSummary } from '../types/domain';
+import type { CustomerStatementData, OverdueCustomerRecord } from '../services/customerService';
+import type { NotificationRecord, OrderRecord, ShiftRecord, StoreRecord, UserSummary } from '../types/domain';
 
 type Period = 'day' | 'week' | 'month' | 'year';
 
@@ -34,6 +41,7 @@ const emptySummary: DashboardSummary = {
   salesByCategory: [],
   itemsSold: [],
   voids: { count: 0, totalMillimes: 0, orders: [] },
+  comps: { count: 0, quantity: 0, totalMillimes: 0, records: [] },
   shiftLines: [],
   paymentSplit: { cash: 0, card: 0, other: 0, tab: 0 },
   totalExpectedCashMillimes: 0,
@@ -53,24 +61,74 @@ function OwnerDashboardContent() {
   const [todaySummary, setTodaySummary] = useState<DashboardSummary>(emptySummary);
   const [periodOrders, setPeriodOrders] = useState<OrderRecord[]>([]);
   const [staff, setStaff] = useState<UserSummary[]>([]);
+  const [overdueCustomers, setOverdueCustomers] = useState<OverdueCustomerRecord[]>([]);
+  const [ownerNotifications, setOwnerNotifications] = useState<NotificationRecord[]>([]);
+  const [overdueStatement, setOverdueStatement] = useState<CustomerStatementData | null>(null);
+  const [overdueAction, setOverdueAction] = useState<{ customerId: string; action: 'statement' | 'share' } | null>(null);
+  const [overdueActionError, setOverdueActionError] = useState('');
 
   useEffect(() => {
-    void Promise.all([
-      reportService.getDashboard(storeId, 'day'),
-      reportService.getDashboard(storeId, 'day'),
-      orderService.listAll(storeId),
-      userService.listUsers(storeId),
-      userService.getStore(storeId),
-    ])
-      .then(([nextSummary, nextTodaySummary, allOrders, allUsers, nextStore]) => {
-        setSummary(nextSummary);
-        setTodaySummary(nextTodaySummary);
-        setPeriodOrders(filterOrdersForPeriod(allOrders, 'day'));
-        setStaff(allUsers.filter((member) => member.role === 'staff'));
-        setStore(nextStore);
-      })
-      .catch((loadError: unknown) => console.error('Unable to load owner dashboard.', loadError));
-  }, [storeId]);
+    let active = true;
+    async function loadDashboard() {
+      const [nextSummary, allOrders, allUsers, nextStore, nextOverdueCustomers] = await Promise.all([
+        reportService.getDashboard(storeId, 'day'),
+        orderService.listAll(storeId),
+        userService.listUsers(storeId),
+        userService.getStore(storeId),
+        customerService.listOverdueCustomers(storeId),
+      ]);
+      if (!active) return;
+      setSummary(nextSummary);
+      setTodaySummary(nextSummary);
+      setPeriodOrders(filterOrdersForPeriod(allOrders, 'day'));
+      setStaff(allUsers.filter((member) => member.role === 'staff'));
+      setStore(nextStore);
+      setOverdueCustomers(nextOverdueCustomers);
+
+      if (user?.role === 'owner') {
+        await notificationService.checkOverdueCustomers(storeId, user.id);
+        const notifications = await notificationService.listForStaff(storeId, user.id);
+        if (active) {
+          setOwnerNotifications(notifications.filter((notification) =>
+            notification.type === 'customer_overdue' || notification.type === 'stock_depleted' || notification.type === 'cash_out_alert',
+          ));
+        }
+      }
+    }
+    void loadDashboard().catch((loadError: unknown) => {
+      console.error('Unable to load owner dashboard.', loadError);
+      if (active) setOverdueActionError('Unable to load overdue customer information.');
+    });
+    return () => {
+      active = false;
+    };
+  }, [storeId, user?.id, user?.role]);
+
+  async function openOverdueStatement(customer: OverdueCustomerRecord['customer']) {
+    setOverdueAction({ customerId: customer.id, action: 'statement' });
+    setOverdueActionError('');
+    try {
+      setOverdueStatement(await customerService.getStatementData(customer.id, storeId));
+    } catch (statementError) {
+      setOverdueActionError(statementError instanceof Error ? statementError.message : 'Unable to load the customer statement.');
+    } finally {
+      setOverdueAction(null);
+    }
+  }
+
+  async function shareOverdueStatement(customer: OverdueCustomerRecord['customer']) {
+    setOverdueAction({ customerId: customer.id, action: 'share' });
+    setOverdueActionError('');
+    try {
+      await shareCustomerStatement(await customerService.getStatementData(customer.id, storeId));
+    } catch (shareError) {
+      if (!(shareError instanceof Error && shareError.name === 'AbortError')) {
+        setOverdueActionError(shareError instanceof Error ? shareError.message : 'Unable to share the customer statement.');
+      }
+    } finally {
+      setOverdueAction(null);
+    }
+  }
 
   async function selectPeriod(nextPeriod: Period) {
     setPeriod(nextPeriod);
@@ -109,9 +167,10 @@ function OwnerDashboardContent() {
   }, [periodOrders, staff]);
   const recentOrders = periodOrders.slice(0, 6);
   const todayKey = toBusinessDate(new Date());
-  const dayClosed = store?.dayClosedOn === todayKey;
+  const dayClosed = store?.dayClosedOn === todayKey && openShifts.length === 0;
 
   return (
+    <>
     <WorkspaceLayout title={t('owner.dashboard')} storeName={store?.name} links={ownerWorkspaceLinks}>
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
@@ -134,6 +193,46 @@ function OwnerDashboardContent() {
         <SummaryCard icon="schedule" label="Open shifts" value={String(openShifts.length)} tone="warning" />
         <SummaryCard icon="lock_clock" label="Closed shifts" value={String(closedShifts.length)} tone="success" />
         <SummaryCard icon={dayClosed ? 'lock' : 'storefront'} label="Business day" value={dayClosed ? 'Closed' : openShifts.length ? 'Open' : 'No open shift'} tone={dayClosed ? 'error' : openShifts.length ? 'success' : 'warning'} />
+      </section>
+
+      {ownerNotifications.length > 0 && (
+        <section aria-label="Owner notifications" className="mt-4 flex flex-col gap-2">
+          {ownerNotifications.slice(0, 5).map((notification) => (
+            <p key={notification.id} role="status" className={`rounded-xl p-3 font-body text-body-sm ${notification.type === 'stock_depleted' || notification.type === 'cash_out_alert' ? 'bg-warning-container text-on-warning-container' : 'bg-error-container text-on-error-container'}`}>
+              <strong>{notification.title}:</strong> {notification.message}
+            </p>
+          ))}
+        </section>
+      )}
+
+      <section aria-label="Overdue customers" className="mt-4 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="flex items-center gap-2 font-display text-headline-md text-on-surface">
+              <MaterialIcon name="event_busy" className="text-error-dark" />Overdue customers
+            </h2>
+            <p className="mt-1 font-body text-body-sm text-on-surface-variant">
+              {overdueCustomers.length} customer{overdueCustomers.length === 1 ? '' : 's'} past their settlement due date
+            </p>
+          </div>
+          <Button variant="secondary" onClick={() => navigate('/customers?filter=overdue')}>
+            View all
+          </Button>
+        </div>
+        {overdueActionError && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{overdueActionError}</p>}
+        <div className="flex flex-col gap-2">
+          {overdueCustomers.map((entry) => (
+            <OverdueCustomerRow
+              key={entry.customer.id}
+              entry={entry}
+              busyAction={overdueAction?.customerId === entry.customer.id ? overdueAction.action : null}
+              onStatement={() => { void openOverdueStatement(entry.customer); }}
+              onShare={() => { void shareOverdueStatement(entry.customer); }}
+            />
+          ))}
+          {overdueCustomers.length === 0 && <p className="rounded-xl bg-surface-container-low p-4 font-body text-body-sm text-outline">No overdue customer accounts.</p>}
+        </div>
+        <p className="mt-3 font-body text-body-xs text-on-surface-variant">Share opens your device or browser share sheet. No message is sent automatically.</p>
       </section>
 
       <section className="mt-4 grid gap-4 xl:grid-cols-2">
@@ -223,6 +322,17 @@ function OwnerDashboardContent() {
         </div>
       </section>
     </WorkspaceLayout>
+    {overdueStatement && (
+      <TabStatementView
+        customer={overdueStatement.customer}
+        storeName={store?.name ?? ''}
+        balanceMillimes={overdueStatement.balanceMillimes}
+        transactions={overdueStatement.transactions}
+        orders={overdueStatement.orders}
+        onClose={() => setOverdueStatement(null)}
+      />
+    )}
+    </>
   );
 }
 

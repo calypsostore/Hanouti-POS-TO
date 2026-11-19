@@ -8,7 +8,7 @@ import { TopBar } from '../components/TopBar';
 import { formatTnd } from '../lib/format';
 import { orderService } from '../services/orderService';
 import { shiftService } from '../services/shiftService';
-import { userService } from '../services/userService';
+import { PERMISSIONS_CHANGED_EVENT, userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
 import type { OrderRecord, ShiftRecord, StoreRecord } from '../types/domain';
 
@@ -20,6 +20,7 @@ export function StaffDashboardScreen() {
   const [openShift, setOpenShift] = useState<ShiftRecord>();
   const [latestShift, setLatestShift] = useState<ShiftRecord>();
   const [cashSales, setCashSales] = useState(0);
+  const [expectedCash, setExpectedCash] = useState(0);
   const [todayOrders, setTodayOrders] = useState<OrderRecord[]>([]);
   const [personalSales, setPersonalSales] = useState(0);
   const [canTakeOrders, setCanTakeOrders] = useState(false);
@@ -55,9 +56,15 @@ export function StaffDashboardScreen() {
       setCanRequestVoid(permissions[3]);
       setError('');
       if (nextOpenShift) {
-        setCashSales(await orderService.getCashSalesForShift(nextOpenShift.id));
+        const [cashReceived, cashExpected] = await Promise.all([
+          orderService.getCashSalesForShift(nextOpenShift.id),
+          shiftService.getExpectedCash(nextOpenShift.id),
+        ]);
+        setCashSales(cashReceived);
+        setExpectedCash(cashExpected);
       } else {
         setCashSales(0);
+        setExpectedCash(0);
       }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load dashboard.');
@@ -68,7 +75,11 @@ export function StaffDashboardScreen() {
     void refresh();
     const onFocus = () => { void refresh(); };
     window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
+    window.addEventListener(PERMISSIONS_CHANGED_EVENT, onFocus);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener(PERMISSIONS_CHANGED_EVENT, onFocus);
+    };
   }, [refresh]);
 
   const completedOrders = todayOrders.filter((order) => order.status === 'done');
@@ -80,7 +91,7 @@ export function StaffDashboardScreen() {
 
   return (
     <div className="min-h-screen bg-surface pb-24">
-      <TopBar title="Staff dashboard" storeName={store?.name} onProfileClick={() => navigate('/settings')} />
+      <TopBar title="Staff dashboard" storeName={store?.name} onProfileClick={() => navigate('/profile')} />
       <main className="mx-auto w-full max-w-5xl px-4 py-5">
         <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -166,8 +177,8 @@ export function StaffDashboardScreen() {
               <Metric label="Starting cash" value={shiftSummary.startingCashMillimes} />
               {openShift ? (
                 <>
-                  <Metric label="Cash sales" value={cashSales} />
-                  <Metric label="Expected cash" value={openShift.startingCashMillimes + cashSales} accent />
+                  <Metric label="Cash sales + tab payments" value={cashSales} />
+                  <Metric label="Expected cash" value={expectedCash} accent />
                 </>
               ) : (
                 <>

@@ -6,11 +6,12 @@ export const ownerWorkspaceLinks: WorkspaceLink[] = [
   { to: '/orders', label: 'nav.orders', icon: 'receipt_long' },
   { to: '/customers', label: 'nav.customers', icon: 'group' },
   { to: '/owner/staff', label: 'nav.staff', icon: 'groups' },
-  { to: '/customers', label: 'nav.customers', icon: 'group' },
+  { to: '/owner/schedule', label: 'nav.schedule', icon: 'calendar_month' },
   { to: '/owner/voids', label: 'nav.voidRequests', icon: 'pending_actions' },
   { to: '/owner/shifts', label: 'nav.shift', icon: 'payments' },
   { to: '/owner/reports', label: 'nav.reports', icon: 'analytics' },
   { to: '/owner/inventory', label: 'nav.inventory', icon: 'inventory' },
+  { to: '/owner/waste', label: 'nav.wasteLog', icon: 'delete_sweep' },
   { to: '/owner/settings', label: 'nav.settings', icon: 'tune' },
 ];
 

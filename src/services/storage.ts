@@ -8,11 +8,24 @@ export function readData<T>(key: string, initialValue: T): T {
     return initialValue;
   }
 
+  let parsedValue: unknown;
   try {
-    return JSON.parse(storedValue) as T;
+    parsedValue = JSON.parse(storedValue) as unknown;
   } catch (error) {
     throw new Error(`Could not read local mock data "${key}".`, { cause: error });
   }
+
+  if (key === 'catalog-items' && Array.isArray(parsedValue)) {
+    let migrated = false;
+    const items = parsedValue.map((item: unknown) => {
+      if (typeof item !== 'object' || item === null || !('imageDataUrl' in item)) return item;
+      migrated = true;
+      return Object.fromEntries(Object.entries(item).filter(([property]) => property !== 'imageDataUrl'));
+    });
+    if (migrated) writeData(key, items);
+    return items as T;
+  }
+  return parsedValue as T;
 }
 
 export function writeData<T>(key: string, value: T): void {

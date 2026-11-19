@@ -1,11 +1,28 @@
-import type { ShiftRecord } from '../types/domain';
+import type { CashMovementReason, CashMovementRecord, ShiftRecord } from '../types/domain';
 import { readData, writeData } from './storage';
 import { seedShiftsForStore } from './seedData';
 import { userService } from './userService';
 import { orderService } from './orderService';
+import { notificationService } from './notificationService';
 
 const getShifts = () => readData('shifts', seedShiftsForStore);
+const getCashMovements = () => readData<CashMovementRecord[]>('cash-movements', []);
 const saveShifts = (shifts: ShiftRecord[]) => writeData('shifts', shifts);
+const CASH_MOVEMENT_REASONS: CashMovementReason[] = ['supplier', 'change', 'expense', 'other'];
+const todayKey = () => {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
+
+export class CashMovementNotificationError extends Error {
+  readonly movement: CashMovementRecord;
+
+  constructor(movement: CashMovementRecord, cause: unknown) {
+    super(`Cash movement was recorded, but the owner could not be notified: ${cause instanceof Error ? cause.message : 'Unknown notification error.'}`, { cause });
+    this.name = 'CashMovementNotificationError';
+    this.movement = movement;
+  }
+}
 
 export const shiftService = {
   async listShifts(storeId: string): Promise<ShiftRecord[]> {
@@ -20,9 +37,83 @@ export const shiftService = {
     return getShifts().find((shift) => shift.storeId === storeId && shift.staffId === userId && shift.status === 'open');
   },
 
+  async listCashMovements(storeId: string, shiftId?: string): Promise<CashMovementRecord[]> {
+    return getCashMovements()
+      .filter((movement) => movement.storeId === storeId && (!shiftId || movement.shiftId === shiftId))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  },
+
+  async getExpectedCash(shiftId: string): Promise<number> {
+    const shift = await this.getShift(shiftId);
+    if (!shift) throw new Error('Shift could not be found.');
+    if (shift.status === 'closed' && shift.expectedCashMillimes !== undefined) {
+      return shift.expectedCashMillimes;
+    }
+    const [cashReceivedMillimes, movements] = await Promise.all([
+      orderService.getCashSalesForShift(shiftId),
+      this.listCashMovements(shift.storeId, shiftId),
+    ]);
+    const movementTotal = movements.reduce((total, movement) =>
+      total + (movement.kind === 'in' ? movement.amountMillimes : -movement.amountMillimes), 0);
+    return shift.startingCashMillimes + cashReceivedMillimes + movementTotal;
+  },
+
+  async recordCashMovement(input: {
+    shiftId: string;
+    actorId: string;
+    kind: 'in' | 'out';
+    amountMillimes: number;
+    reason: CashMovementReason;
+    note?: string;
+  }): Promise<CashMovementRecord> {
+    if (!Number.isSafeInteger(input.amountMillimes) || input.amountMillimes <= 0) {
+      throw new Error('Cash movement amount must be a positive whole number of millimes.');
+    }
+    if (input.kind !== 'in' && input.kind !== 'out') throw new Error('Choose cash in or cash out.');
+    if (!CASH_MOVEMENT_REASONS.includes(input.reason)) throw new Error('Choose a valid cash movement reason.');
+    const note = input.note?.trim();
+    if (note && note.length > 500) throw new Error('Cash movement note must be 500 characters or fewer.');
+    const shift = await this.getShift(input.shiftId);
+    if (!shift || shift.status !== 'open') throw new Error('Cash movements can only be recorded during an open shift.');
+    const [store, actor] = await Promise.all([
+      userService.getStore(shift.storeId),
+      userService.getUser(input.actorId),
+    ]);
+    if (!store?.isActive || !actor || actor.storeId !== store.id) {
+      throw new Error('This account cannot record cash movements for the selected store.');
+    }
+    const isOwner = actor.role === 'owner' && store.ownerId === actor.id;
+    const isAuthorizedStaff = actor.role === 'staff' && shift.staffId === actor.id &&
+      await userService.hasPermission(actor.id, 'cash_in_out');
+    if (!isOwner && !isAuthorizedStaff) {
+      throw new Error('Your position does not allow cash in / cash out for this shift.');
+    }
+    const movement: CashMovementRecord = {
+      id: `cash-movement-${crypto.randomUUID()}`,
+      storeId: store.id,
+      shiftId: shift.id,
+      staffId: actor.id,
+      kind: input.kind,
+      amountMillimes: input.amountMillimes,
+      reason: input.reason,
+      note: note || undefined,
+      createdAt: new Date().toISOString(),
+    };
+    writeData('cash-movements', [...getCashMovements(), movement]);
+    if (movement.kind === 'out') {
+      try {
+        await notificationService.notifyCashOutAboveThreshold(movement, actor.name);
+      } catch (notificationError) {
+        throw new CashMovementNotificationError(movement, notificationError);
+      }
+    }
+    return movement;
+  },
+
   async openShift(storeId: string, staffId: string, startingCashMillimes: number): Promise<ShiftRecord> {
     if (!Number.isInteger(startingCashMillimes) || startingCashMillimes < 0) throw new Error('Starting cash must be a non-negative amount in millimes.');
-    if (!(await userService.getStore(storeId))?.isActive) throw new Error('This store is inactive.');
+    const store = await userService.getStore(storeId);
+    if (!store?.isActive) throw new Error('This store is inactive.');
     if (await this.getOpenShiftForUser(storeId, staffId)) throw new Error('This user already has an open shift.');
     const shift: ShiftRecord = {
       id: `shift-${crypto.randomUUID()}`,
@@ -33,6 +124,7 @@ export const shiftService = {
       openedAt: new Date().toISOString(),
     };
     saveShifts([...getShifts(), shift]);
+    if (store.dayClosedOn === todayKey()) await userService.clearDayClosed(storeId);
     return shift;
   },
 
@@ -41,8 +133,7 @@ export const shiftService = {
     const shifts = getShifts();
     const shift = shifts.find((candidate) => candidate.id === shiftId && candidate.status === 'open');
     if (!shift) throw new Error('Open shift could not be found.');
-    const cashSalesMillimes = await orderService.getCashSalesForShift(shiftId);
-    const expectedCashMillimes = shift.startingCashMillimes + cashSalesMillimes;
+    const expectedCashMillimes = await this.getExpectedCash(shiftId);
     const updated: ShiftRecord = {
       ...shift,
       status: 'closed',
@@ -62,8 +153,7 @@ export const shiftService = {
     if (!shift) throw new Error('Open shift could not be found.');
     const store = await userService.getStore(shift.storeId);
     if (!store || store.ownerId !== ownerId) throw new Error('Only this store owner can force-close the shift.');
-    const cashSalesMillimes = await orderService.getCashSalesForShift(shiftId);
-    const expectedCashMillimes = shift.startingCashMillimes + cashSalesMillimes;
+    const expectedCashMillimes = await this.getExpectedCash(shiftId);
     const updated: ShiftRecord = {
       ...shift,
       status: 'closed',

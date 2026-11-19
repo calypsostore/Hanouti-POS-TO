@@ -38,7 +38,8 @@ function OwnerInventoryContent() {
       return;
     }
     try {
-      await catalogService.setStockCount(item.id, count);
+      if (!user) throw new Error('Your account could not be loaded.');
+      await catalogService.setStockCount(item.id, count, { id: user.id, name: user.name });
       setItems(await catalogService.listItems(storeId));
       setCounts((current) => ({ ...current, [item.id]: String(count) }));
       setError('');

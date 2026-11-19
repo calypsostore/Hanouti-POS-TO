@@ -10,7 +10,7 @@ import { TopBar } from '../components/TopBar';
 import { TicketView } from '../components/TicketView';
 import { formatTnd } from '../lib/format';
 import { orderService } from '../services/orderService';
-import { userService } from '../services/userService';
+import { PERMISSIONS_CHANGED_EVENT, userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
 import type { OrderRecord, StoreRecord } from '../types/domain';
 import { t, type TranslationKey } from '../i18n/translations';
@@ -31,7 +31,6 @@ interface OrderView {
   number: number;
   staffId: string;
   time: string;
-  location: string;
   status: OrderStatus;
   total: number;
   items: OrderItemView[];
@@ -49,7 +48,6 @@ async function toOrderView(order: OrderRecord): Promise<OrderView> {
     number: order.number,
     staffId: order.staffId,
     time: new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
-    location: order.location ?? t('orders.counterTakeaway'),
     status: order.status === 'pending_void' ? 'pending' : order.status,
     total: order.totalMillimes / 1000,
     items: order.items.map((item) => ({
@@ -105,11 +103,22 @@ export function OrdersScreen() {
   useEffect(() => {
     void refreshOrders().catch((loadError: unknown) => setFeedback(loadError instanceof Error ? loadError.message : t('common.loadFailed')));
     void userService.getStore(storeId).then(setStore).catch((loadError: unknown) => setFeedback(loadError instanceof Error ? loadError.message : t('common.storeLoadFailed')));
-    if (user?.role === 'staff') {
+  }, [refreshOrders, storeId, user]);
+
+  useEffect(() => {
+    if (user?.role !== 'staff') return;
+    const refreshPermission = () => {
       void userService.hasPermission(user.id, 'request_void').then(setCanRequestVoid)
         .catch((loadError: unknown) => setFeedback(loadError instanceof Error ? loadError.message : t('common.loadFailed')));
-    }
-  }, [refreshOrders, storeId, user]);
+    };
+    refreshPermission();
+    window.addEventListener('focus', refreshPermission);
+    window.addEventListener(PERMISSIONS_CHANGED_EVENT, refreshPermission);
+    return () => {
+      window.removeEventListener('focus', refreshPermission);
+      window.removeEventListener(PERMISSIONS_CHANGED_EVENT, refreshPermission);
+    };
+  }, [user]);
 
   useEffect(() => {
     if (!activeOrder) {
@@ -239,7 +248,6 @@ export function OrdersScreen() {
                       <span className={`font-display text-headline-sm text-on-surface ${order.status === 'voided' ? 'line-through decoration-error' : ''}`}>#{order.number}</span>
                       <span className="font-body text-label-sm text-outline">{order.time}</span>
                     </div>
-                    <p className="truncate font-body text-body-sm text-on-surface-variant">{order.location}</p>
                   </div>
                 </div>
                 <StatusTag status={statusType(order.status)}>{statusLabel(order.status)}</StatusTag>
@@ -252,6 +260,7 @@ export function OrdersScreen() {
                     <span className="shrink-0 font-body text-label-md tabular-nums">{formatTnd(item.total)} DT</span>
                   </div>
                 ))}
+                {order.record.note && <p className="border-t border-outline-variant pt-2 font-body text-body-sm"><strong>Order note:</strong> {order.record.note}</p>}
                 {order.reason && <p className="pt-1 font-body text-body-sm italic text-error-dark">{t('orders.voidReason', { reason: order.reason })}</p>}
               </div>
 

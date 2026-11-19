@@ -17,6 +17,7 @@ type DashboardSummary = Awaited<ReturnType<typeof reportService.getDashboard>>;
 const emptySummary: DashboardSummary = {
   salesMillimes: 0, orderCount: 0, cashDifferenceMillimes: 0, topItems: {}, shifts: [],
   tabsOutstandingMillimes: 0, salesByCategory: [], itemsSold: [], voids: { count: 0, totalMillimes: 0, orders: [] },
+  comps: { count: 0, quantity: 0, totalMillimes: 0, records: [] },
   shiftLines: [], paymentSplit: { cash: 0, card: 0, other: 0, tab: 0 }, totalExpectedCashMillimes: 0,
   totalCountedMillimes: 0, totalDifferenceMillimes: 0, tabsIssuedMillimes: 0, tabsSettledMillimes: 0,
 };

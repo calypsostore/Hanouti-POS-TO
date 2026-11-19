@@ -21,6 +21,7 @@ export function TicketView({ order, storeName, staffName, onClose }: {
     new Date(order.createdAt).toLocaleString(),
     `Staff: ${ticketStaffName}`,
     ...order.items.map((item) => `${item.quantity} x ${item.name} = ${formatTnd(item.lineTotalMillimes / 1000)} DT${item.modifiers.length ? ` (${item.modifiers.join(', ')})` : ''}`),
+    ...(order.note ? [`Order note: ${order.note}`] : []),
     `Total: ${formatTnd(order.totalMillimes / 1000)} DT`,
     `Payment: ${order.paymentMethod}`,
     ...(voided ? ['VOIDED', `Reason: ${order.voidReason ?? ''}`, `Voided by: ${order.voidedBy ?? ''}`] : []),
@@ -73,6 +74,12 @@ export function TicketView({ order, storeName, staffName, onClose }: {
               {item.modifiers.map((modifier) => <div className="receipt-subline" key={modifier}>+ {modifier}</div>)}
             </div>
           ))}
+          {order.note && (
+            <div className="receipt-item">
+              <strong>Order note</strong>
+              <div>{order.note}</div>
+            </div>
+          )}
           <ReceiptRule />
           <div className="receipt-row receipt-total"><strong>TOTAL</strong><strong>{formatTnd(order.totalMillimes / 1000)} DT</strong></div>
           <div className="receipt-row"><span>Payment</span><span>{order.paymentMethod.toUpperCase()}</span></div>

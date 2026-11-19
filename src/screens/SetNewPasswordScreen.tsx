@@ -6,12 +6,19 @@ import { useAuthStore } from '../stores/authStore';
 import { userService } from '../services/userService';
 import { t } from '../i18n/translations';
 
-export function SetNewPasswordScreen() {
+interface SetNewPasswordScreenProps {
+  onSetupComplete: () => void;
+}
+
+export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenProps) {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const setInitialPassword = useAuthStore((state) => state.setInitialPassword);
+  const setInitialPin = useAuthStore((state) => state.setInitialPin);
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
+  const [pinStep, setPinStep] = useState(false);
+  const [pin, setPin] = useState('');
   const [visible, setVisible] = useState(false);
   const [error, setError] = useState('');
 
@@ -20,6 +27,21 @@ export function SetNewPasswordScreen() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pinStep) {
+      if (!/^\d{4}$/.test(pin)) {
+        setError('PIN must contain exactly 4 digits.');
+        return;
+      }
+      setError('');
+      try {
+        await setInitialPin(pin);
+        onSetupComplete();
+        navigate('/dashboard');
+      } catch (pinError) {
+        setError(pinError instanceof Error ? pinError.message : 'Unable to set your PIN.');
+      }
+      return;
+    }
     if (!longEnough) {
       setError(t('password.useSixCharacters'));
       return;
@@ -32,7 +54,12 @@ export function SetNewPasswordScreen() {
     try {
       await setInitialPassword(password);
       if (!user) throw new Error(t('auth.signInBeforePassword'));
-      navigate(user.role === 'staff' ? '/dashboard' : user.role === 'owner' ? '/owner/dashboard' : '/admin/stores');
+      if (user.role === 'staff') {
+        setPinStep(true);
+        return;
+      }
+      onSetupComplete();
+      navigate(user.role === 'owner' ? '/owner/dashboard' : '/admin/stores');
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : t('password.unableToUpdate'));
     }
@@ -62,9 +89,9 @@ export function SetNewPasswordScreen() {
               <MaterialIcon name="key" className="text-base" />
             </span>
           </div>
-          <h1 className="font-display text-headline-lg text-on-surface">{t('password.setNew')}</h1>
+          <h1 className="font-display text-headline-lg text-on-surface">{pinStep ? 'Set your PIN' : t('password.setNew')}</h1>
           <p className="mt-1.5 max-w-sm font-body text-body-md text-on-surface-variant">
-            {t('password.firstLoginRequirement', { account: user?.role === 'staff' ? t('password.storeTerminal') : t('password.account') })}
+            {pinStep ? 'Set a personal 4-digit PIN to unlock this terminal quickly. You can also skip this step and use your password.' : t('password.firstLoginRequirement', { account: user?.role === 'staff' ? t('password.storeTerminal') : t('password.account') })}
           </p>
         </header>
 
@@ -88,6 +115,24 @@ export function SetNewPasswordScreen() {
         </section>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          {pinStep ? (
+            <div>
+              <label htmlFor="staff-pin" className="mb-1.5 block font-body text-label-lg text-on-surface">Personal 4-digit PIN</label>
+              <input
+                id="staff-pin"
+                required
+                pattern="[0-9]{4}"
+                maxLength={4}
+                inputMode="numeric"
+                autoComplete="new-password"
+                value={pin}
+                onChange={(event) => setPin(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                placeholder="••••"
+                className="h-14 w-full rounded-xl bg-surface-container-lowest px-4 text-center font-display text-headline-md tracking-[0.5em] shadow-card outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+          ) : (
+            <>
           <div>
             <label htmlFor="new-password" className="mb-1.5 flex items-center justify-between font-body text-label-lg text-on-surface">
               {t('password.newPassword')}
@@ -147,12 +192,15 @@ export function SetNewPasswordScreen() {
             <p className="flex items-center gap-2 font-body text-body-sm"><MaterialIcon name="check_circle" className="text-lg text-success-dark" />{t('password.easyToRemember')}</p>
             <p className="flex items-center gap-2 font-body text-body-sm"><MaterialIcon name={matching ? 'check_circle' : 'radio_button_unchecked'} className={matching ? 'text-lg text-success-dark' : 'text-lg text-outline'} />{t('password.match')}</p>
           </section>
+            </>
+          )}
 
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
-          <Button type="submit" disabled={!matching || !longEnough} className="mt-1 min-h-14 w-full text-body-lg">
+          <Button type="submit" disabled={pinStep ? !/^\d{4}$/.test(pin) : !matching || !longEnough} className="mt-1 min-h-14 w-full text-body-lg">
             <MaterialIcon name="check" filled />
-            {t('password.saveContinue')}
+            {pinStep ? 'Set PIN and continue' : t('password.saveContinue')}
           </Button>
+          {pinStep && <Button type="button" variant="secondary" onClick={() => { onSetupComplete(); navigate('/dashboard'); }} className="min-h-12 w-full">Skip for now</Button>}
         </form>
 
         <footer className="mt-6 flex flex-col items-center text-center">

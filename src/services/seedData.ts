@@ -37,7 +37,7 @@ export const seedPositions: PositionRecord[] = [
     id: 'position-barista',
     storeId,
     name: 'Barista',
-    permissionIds: ['take_orders', 'request_void', '86_items', 'open_close_shift', 'view_order_history', 'use_tabs', 'settle_tabs'],
+    permissionIds: ['take_orders', 'request_void', '86_items', 'open_close_shift', 'view_order_history', 'use_tabs', 'settle_tabs', 'customers_view'],
   },
 ];
 

@@ -5,6 +5,7 @@ import type { ReportRecord } from '../types/domain';
 import { printOrSharePdf } from '../services/receiptExport';
 
 const money = (amount: number | undefined) => `${formatTnd((amount ?? 0) / 1000)} DT`;
+const compReasonLabel = (reason: string) => reason.replaceAll('_', ' ');
 
 export function ReportView({ report, storeName, onClose }: { report: ReportRecord; storeName: string; onClose: () => void }) {
   const [shareError, setShareError] = useState('');
@@ -29,6 +30,8 @@ export function ReportView({ report, storeName, onClose }: { report: ReportRecor
     ...Object.entries(report.paymentSplit ?? {}).map(([method, total]) => `${method}: ${money(total)}`),
     `Voids (${report.voids?.count ?? 0}), total ${money(report.voids?.totalMillimes)}:`,
     ...(report.voids?.orders ?? []).map((item) => `Ticket #${item.ticketNumber}: ${item.reason} (${money(item.totalMillimes)})`),
+    `Comps / waste (${report.comps?.count ?? 0} records, ${report.comps?.quantity ?? 0} units), total ${money(report.comps?.totalMillimes)}:`,
+    ...(report.comps?.records ?? []).map((item) => `${item.quantity} x ${item.itemName}, ${item.staffName}, ${compReasonLabel(item.reason)} (${money(item.valueMillimes)})`),
     'Shifts:',
     ...(report.shifts ?? []).map((shift) => {
       if (shift.status === 'in_progress') return `${shift.staffName}, in progress, opened ${new Date(shift.openedAt).toLocaleString()}`;
@@ -102,6 +105,15 @@ export function ReportView({ report, storeName, onClose }: { report: ReportRecor
             <div className="receipt-item" key={`${item.ticketNumber}-${item.reason}`}>
               <div>Ticket #{item.ticketNumber} • {money(item.totalMillimes)}</div>
               <div>{item.reason || 'No reason recorded'}</div>
+            </div>
+          ))}
+          <Rule />
+          <strong>COMPS / WASTE ({report.comps?.count ?? 0} RECORDS, {report.comps?.quantity ?? 0} UNITS)</strong>
+          <ReceiptRow label="Comp total" amount={money(report.comps?.totalMillimes)} />
+          {(report.comps?.records ?? []).map((item, index) => (
+            <div className="receipt-item" key={`${item.staffName}-${item.itemName}-${index}`}>
+              <div>{item.quantity} × {item.itemName} • {money(item.valueMillimes)}</div>
+              <div>{item.staffName} • {compReasonLabel(item.reason)}</div>
             </div>
           ))}
           <Rule />

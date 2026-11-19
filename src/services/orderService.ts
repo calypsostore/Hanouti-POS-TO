@@ -1,7 +1,9 @@
-import type { CustomerRecord, OrderLineRecord, OrderRecord, PaymentMethod, TabRecord } from '../types/domain';
+import type { CatalogItemRecord, OrderLineRecord, OrderRecord, PaymentMethod, TabRecord } from '../types/domain';
 import { shiftService } from './shiftService';
 import { userService } from './userService';
 import { catalogService } from './catalogService';
+import { customerService } from './customerService';
+import { notificationService } from './notificationService';
 import { readData, writeData } from './storage';
 import { seedOrders } from './seedData';
 
@@ -18,6 +20,57 @@ export interface OfflineOrderQueue {
   enqueue(order: OrderRecord): Promise<void>;
   flush(): Promise<void>;
   pendingCount(): Promise<number>;
+}
+
+export class OrderServiceError extends Error {
+  readonly code = 'CREDIT_LIMIT';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'OrderServiceError';
+  }
+}
+
+export class OrderNotificationError extends Error {
+  readonly order: OrderRecord;
+
+  constructor(order: OrderRecord, cause: unknown) {
+    super(`Order #${order.number} was created, but an owner notification could not be saved: ${cause instanceof Error ? cause.message : 'Unknown notification error.'}`, { cause });
+    this.name = 'OrderNotificationError';
+    this.order = order;
+  }
+}
+
+async function authorizeCreditOverride(input: {
+  storeId: string;
+  staffId: string;
+  pin: string;
+  storePinMustChange: boolean;
+}): Promise<void> {
+  const actor = await userService.getUser(input.staffId);
+  const store = await userService.getStore(input.storeId);
+  const isOwner = actor?.role === 'owner' && actor.id === store?.ownerId && actor.storeId === store.id;
+  const staffCanOverride = actor?.role === 'staff' && actor.storeId === store?.id &&
+    await userService.hasPermission(actor.id, 'tab_override_limit');
+  if (!isOwner && !staffCanOverride) {
+    throw new Error('Your position does not allow overriding customer credit limits.');
+  }
+  if (input.storePinMustChange) throw new Error('Set your admin PIN in Settings before overriding credit limits.');
+  const attempts = readData<Record<string, { count: number; lockedUntil: number }>>('credit-override-pin-attempts', {});
+  const attempt = attempts[input.storeId] ?? { count: 0, lockedUntil: 0 };
+  if (attempt.lockedUntil > Date.now()) {
+    const seconds = Math.ceil((attempt.lockedUntil - Date.now()) / 1000);
+    throw new Error(`PIN pad locked. Try again in ${seconds} seconds.`);
+  }
+  if (!await userService.verifyStorePin(input.storeId, input.pin)) {
+    const count = attempt.count + 1;
+    writeData('credit-override-pin-attempts', {
+      ...attempts,
+      [input.storeId]: { count: count >= 3 ? 0 : count, lockedUntil: count >= 3 ? Date.now() + 60_000 : 0 },
+    });
+    throw new Error(count >= 3 ? 'PIN pad locked for 60 seconds after 3 incorrect PINs.' : 'Incorrect Admin PIN.');
+  }
+  writeData('credit-override-pin-attempts', { ...attempts, [input.storeId]: { count: 0, lockedUntil: 0 } });
 }
 
 export const offlineOrderQueue: OfflineOrderQueue = {
@@ -40,7 +93,7 @@ export const orderService = {
     return getOrders().filter((order) => order.storeId === storeId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },
 
-  async createOrder(input: { storeId: string; staffId: string; items: OrderLineRecord[]; paymentMethod?: PaymentMethod; customerId?: string; location?: string }): Promise<OrderRecord> {
+  async createOrder(input: { storeId: string; staffId: string; items: OrderLineRecord[]; paymentMethod?: PaymentMethod; customerId?: string; location?: string; adminPin?: string; note?: string }): Promise<OrderRecord> {
     if (input.items.length === 0) throw new Error('Add at least one item before completing an order.');
     const store = await userService.getStore(input.storeId);
     if (!store?.isActive) throw new Error('This store is inactive.');
@@ -48,12 +101,12 @@ export const orderService = {
     if (store.dayClosedOn === businessDate(new Date())) throw new Error('The business day is closed. Open a new shift to continue.');
     const shift = await shiftService.getOpenShiftForUser(input.storeId, input.staffId);
     if (!shift) throw new Error('Open a shift before taking orders.');
-    let tabCustomer: CustomerRecord | undefined;
+    let tabCustomer: Awaited<ReturnType<typeof customerService.getCustomer>>;
     if (input.paymentMethod === 'tab') {
       if (!input.customerId) throw new Error('Select a customer before charging this order to a tab.');
-      if (!await userService.hasPermission(input.staffId, 'use_tabs')) throw new Error('Your position does not allow customer tabs.');
-      tabCustomer = readData<CustomerRecord[]>('customers', []).find((candidate) => candidate.id === input.customerId && candidate.storeId === input.storeId);
-      if (!tabCustomer) throw new Error('Select a customer from this store.');
+      if (staff?.role !== 'owner' && !await userService.hasPermission(input.staffId, 'use_tabs')) throw new Error('Your position does not allow customer tabs.');
+      tabCustomer = await customerService.getCustomer(input.customerId, input.storeId);
+      if (!tabCustomer?.isActive) throw new Error('Select an active customer from this store.');
     }
     const [catalogItems, categories] = await Promise.all([
       catalogService.listItems(input.storeId),
@@ -92,18 +145,19 @@ export const orderService = {
       }
     }
     const totalMillimes = items.reduce((sum, item) => sum + item.lineTotalMillimes, 0);
-    if (input.paymentMethod === 'tab' && tabCustomer?.creditLimitMillimes !== undefined) {
-      if (!Number.isInteger(tabCustomer.creditLimitMillimes) || tabCustomer.creditLimitMillimes < 0) {
-        throw new Error('This customer has an invalid credit limit.');
-      }
-      const currentOrders = getOrders()
-        .filter((order) => order.customerId === tabCustomer.id && order.paymentMethod === 'tab' && order.status === 'done')
-        .reduce((sum, order) => sum + order.totalMillimes, 0);
-      const settled = readData<TabRecord[]>('tabs', [])
-        .filter((tab) => tab.customerId === tabCustomer.id && tab.kind === 'settled')
-        .reduce((sum, tab) => sum + tab.amountMillimes, 0);
-      if (currentOrders - settled + totalMillimes > tabCustomer.creditLimitMillimes) {
-        throw new Error('This order would exceed the customer credit limit.');
+    let creditStatusBefore: Awaited<ReturnType<typeof customerService.getCreditStatus>> | undefined;
+    let creditStatusAfter: Awaited<ReturnType<typeof customerService.getCreditStatus>> | undefined;
+    if (input.paymentMethod === 'tab' && tabCustomer) {
+      creditStatusBefore = await customerService.getCreditStatus(tabCustomer.id);
+      creditStatusAfter = await customerService.getCreditStatus(tabCustomer.id, totalMillimes);
+      if (creditStatusAfter.limit !== undefined && creditStatusAfter.balance > creditStatusAfter.limit) {
+        if (!input.adminPin) throw new OrderServiceError('Limit reached. Tell the customer.');
+        await authorizeCreditOverride({
+          storeId: input.storeId,
+          staffId: input.staffId,
+          pin: input.adminPin,
+          storePinMustChange: Boolean(store.pinMustChange),
+        });
       }
     }
     const dateKey = businessDate(new Date());
@@ -118,16 +172,25 @@ export const orderService = {
       staffId: input.staffId,
       staffName: staff?.name,
       shiftId: shift.id,
-      location: input.location ?? 'Counter • Takeaway',
+      location: input.location,
       status: 'done',
       paymentMethod: input.paymentMethod ?? 'cash',
       customerId: input.customerId,
+      note: input.note?.trim() || undefined,
       items,
       totalMillimes,
       createdAt: new Date().toISOString(),
     };
+    const stockDepletedItems: CatalogItemRecord[] = [];
     for (const [itemId, quantity] of requestedQuantities) {
-      await catalogService.decrementStock(itemId, quantity);
+      const previousItem = catalogItems.find((candidate) => candidate.id === itemId);
+      const updatedItem = await catalogService.decrementStock(itemId, quantity, {
+        id: input.staffId,
+        name: staff?.name ?? input.staffId,
+      });
+      if (previousItem && !previousItem.outOfStock && previousItem.stockCount !== null && updatedItem.stockCount === 0) {
+        stockDepletedItems.push(updatedItem);
+      }
     }
     saveOrders([...getOrders(), order]);
     if (order.paymentMethod === 'tab' && order.customerId) {
@@ -145,6 +208,23 @@ export const orderService = {
       }]);
     }
     writeData('order-counters', { ...counters, [input.storeId]: { businessDate: dateKey, nextNumber: number + 1 } });
+    const ownerNotifications: Promise<void>[] = stockDepletedItems.map((item) =>
+      notificationService.notifyStockDepleted(input.storeId, item.id, item.name),
+    );
+    if (tabCustomer && creditStatusBefore && creditStatusAfter) {
+      ownerNotifications.push(notificationService.notifyCustomerCreditThresholds(
+        input.storeId,
+        tabCustomer.id,
+        tabCustomer.name,
+        creditStatusBefore.percentUsed ?? 0,
+        creditStatusAfter.percentUsed ?? 0,
+      ));
+    }
+    try {
+      await Promise.all(ownerNotifications);
+    } catch (notificationError) {
+      throw new OrderNotificationError(order, notificationError);
+    }
     return order;
   },
 
@@ -168,6 +248,9 @@ export const orderService = {
     if (!order) throw new Error('This order is not available to void.');
     const cleanedReason = reason.trim();
     if (!cleanedReason) throw new Error('A reason is required to void an order.');
+    if ((await userService.getStore(order.storeId))?.pinMustChange) {
+      throw new Error('Set your admin PIN in Settings before voiding orders.');
+    }
     const attempts = readData<Record<string, { count: number; lockedUntil: number }>>('void-pin-attempts', {});
     const attempt = attempts[order.storeId] ?? { count: 0, lockedUntil: 0 };
     if (attempt.lockedUntil > Date.now()) {
@@ -200,7 +283,7 @@ export const orderService = {
         amountMillimes: order.totalMillimes,
       });
     }
-    await restoreOrderStock(order);
+    await restoreOrderStock(order, actorId);
     return updated;
   },
 
@@ -227,7 +310,7 @@ export const orderService = {
           amountMillimes: order.totalMillimes,
         });
       }
-      await restoreOrderStock(order);
+      await restoreOrderStock(order, ownerId);
     }
     return updated;
   },
@@ -236,10 +319,15 @@ export const orderService = {
     const orderSales = getOrders()
       .filter((order) => order.shiftId === shiftId && order.status === 'done' && order.paymentMethod === 'cash')
       .reduce((sum, order) => sum + order.totalMillimes, 0);
-    const settlements = readData<import('../types/domain').TabRecord[]>('tabs', [])
-      .filter((tab) => tab.shiftId === shiftId && tab.kind === 'settled')
+    const shiftTabPayments = readData<TabRecord[]>('tabs', [])
+      .filter((tab) => tab.shiftId === shiftId);
+    const settlements = shiftTabPayments
+      .filter((tab) => tab.kind === 'settled')
       .reduce((sum, tab) => sum + tab.amountMillimes, 0);
-    return orderSales + settlements;
+    const reversals = shiftTabPayments
+      .filter((tab) => tab.kind === 'reversal')
+      .reduce((sum, tab) => sum + tab.amountMillimes, 0);
+    return orderSales + settlements - reversals;
   },
 
   async getPendingVoidCountForShift(shiftId: string): Promise<number> {
@@ -264,8 +352,12 @@ export const orderService = {
   },
 };
 
-async function restoreOrderStock(order: OrderRecord): Promise<void> {
+async function restoreOrderStock(order: OrderRecord, actorId: string): Promise<void> {
+  const actor = await userService.getUser(actorId);
+  if (!actor) throw new Error('The staff member restoring this stock could not be found.');
   const quantities = new Map<string, number>();
   for (const item of order.items) quantities.set(item.itemId, (quantities.get(item.itemId) ?? 0) + item.quantity);
-  for (const [itemId, quantity] of quantities) await catalogService.incrementStock(itemId, quantity);
+  for (const [itemId, quantity] of quantities) {
+    await catalogService.incrementStock(itemId, quantity, { id: actor.id, name: actor.name });
+  }
 }

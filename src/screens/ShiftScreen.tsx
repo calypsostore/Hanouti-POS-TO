@@ -1,24 +1,35 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { BottomNav } from '../components/BottomNav';
+import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
+import { Chip } from '../components/Chip';
+import { Keypad } from '../components/Keypad';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { formatTnd } from '../lib/format';
 import { orderService } from '../services/orderService';
-import { shiftService } from '../services/shiftService';
+import { CashMovementNotificationError, shiftService } from '../services/shiftService';
 import { userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
-import type { ShiftRecord } from '../types/domain';
+import type { CashMovementReason, CashMovementRecord, ShiftRecord } from '../types/domain';
 import { t } from '../i18n/translations';
 import { ownerWorkspaceLinks } from '../app/navigation';
 import { updateService } from '../services/updateService';
 
 function parseTnd(value: string): number {
   const parsed = Number(value.trim().replace(',', '.'));
-  if (!Number.isFinite(parsed) || parsed < 0) throw new Error('Enter a non-negative cash amount.');
-  return Math.round(parsed * 1000);
+  const millimes = Math.round(parsed * 1000);
+  if (!Number.isFinite(parsed) || parsed < 0 || !Number.isSafeInteger(millimes)) throw new Error('Enter a non-negative cash amount.');
+  return millimes;
 }
+
+const cashMovementReasons: { reason: CashMovementReason; label: string }[] = [
+  { reason: 'supplier', label: 'Bought milk' },
+  { reason: 'change', label: 'Change float' },
+  { reason: 'expense', label: 'Expense' },
+  { reason: 'other', label: 'Other' },
+];
 
 function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const user = useAuthStore((state) => state.user);
@@ -32,37 +43,55 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const [notice, setNotice] = useState('');
   const [store, setStore] = useState<Awaited<ReturnType<typeof userService.getStore>>>();
   const [cashSales, setCashSales] = useState(0);
+  const [expectedCash, setExpectedCash] = useState(0);
   const [pendingVoidCount, setPendingVoidCount] = useState(0);
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
   const [forceCountedCash, setForceCountedCash] = useState<Record<string, string>>({});
-  const [cashByShift, setCashByShift] = useState<Record<string, number>>({});
+  const [expectedCashByShift, setExpectedCashByShift] = useState<Record<string, number>>({});
+  const [cashMovements, setCashMovements] = useState<CashMovementRecord[]>([]);
+  const [canCashInOut, setCanCashInOut] = useState(false);
+  const [movementSheetOpen, setMovementSheetOpen] = useState(false);
+  const [movementShiftId, setMovementShiftId] = useState('');
+  const [movementKind, setMovementKind] = useState<'in' | 'out'>('in');
+  const [movementAmount, setMovementAmount] = useState('');
+  const [movementReason, setMovementReason] = useState<CashMovementReason>('supplier');
+  const [movementNote, setMovementNote] = useState('');
+  const [movementBusy, setMovementBusy] = useState(false);
 
   useEffect(() => updateService.registerUnsavedState(() => startingCashEdited || countedCash.length > 0), [startingCashEdited, countedCash.length]);
 
   const refresh = useCallback(async () => {
-    const [nextShifts, nextOpenShift, nextStore] = await Promise.all([
+    const [nextShifts, nextOpenShift, nextStore, nextMovements, users, cashPermission] = await Promise.all([
       shiftService.listShifts(storeId),
       user ? shiftService.getOpenShiftForUser(storeId, user.id) : Promise.resolve(undefined),
       userService.getStore(storeId),
+      shiftService.listCashMovements(storeId),
+      userService.listUsers(storeId),
+      user?.role === 'owner' ? Promise.resolve(true) : user ? userService.hasPermission(user.id, 'cash_in_out') : Promise.resolve(false),
     ]);
     setShifts(nextShifts);
     setOwnOpenShift(nextOpenShift);
     setStore(nextStore);
+    setCashMovements(nextMovements);
+    setStaffNames(Object.fromEntries(users.map((member) => [member.id, member.name])));
+    setCanCashInOut(cashPermission);
     if (nextOpenShift) {
-      const [sales, pendingCount] = await Promise.all([
+      const [sales, pendingCount, expected] = await Promise.all([
         orderService.getCashSalesForShift(nextOpenShift.id),
         orderService.getPendingVoidCountForShift(nextOpenShift.id),
+        shiftService.getExpectedCash(nextOpenShift.id),
       ]);
       setCashSales(sales);
       setPendingVoidCount(pendingCount);
+      setExpectedCash(expected);
     } else {
       setCashSales(0);
       setPendingVoidCount(0);
+      setExpectedCash(0);
     }
-    const staffRecords = await Promise.all(nextShifts.map((shift) => userService.getUser(shift.staffId)));
-    setStaffNames(Object.fromEntries(nextShifts.map((shift, index) => [shift.staffId, staffRecords[index]?.name ?? 'Staff'])));
-    const salesByShift = await Promise.all(nextShifts.filter((shift) => shift.status === 'open').map(async (shift) => [shift.id, await orderService.getCashSalesForShift(shift.id)] as const));
-    setCashByShift(Object.fromEntries(salesByShift));
+    const expectedByShift = await Promise.all(nextShifts.filter((shift) => shift.status === 'open')
+      .map(async (shift) => [shift.id, await shiftService.getExpectedCash(shift.id)] as const));
+    setExpectedCashByShift(Object.fromEntries(expectedByShift));
   }, [storeId, user]);
 
   useEffect(() => {
@@ -117,7 +146,67 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     }
   }
 
+  function openCashMovement(kind: 'in' | 'out', shiftId: string) {
+    setMovementKind(kind);
+    setMovementShiftId(shiftId);
+    setMovementAmount('');
+    setMovementReason('supplier');
+    setMovementNote('');
+    setError('');
+    setMovementSheetOpen(true);
+  }
+
+  function pressMovementAmount(value: string) {
+    setMovementAmount((current) => {
+      if (value === '.') {
+        if (current.includes('.')) return current;
+        return current ? `${current}.` : '0.';
+      }
+      const [whole, fraction] = current.split('.');
+      if (whole.length >= 9 || (fraction !== undefined && fraction.length >= 3)) return current;
+      return current + value;
+    });
+  }
+
+  async function submitCashMovement(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!user || !movementShiftId) return;
+    setError('');
+    setNotice('');
+    setMovementBusy(true);
+    let recorded = false;
+    try {
+      await shiftService.recordCashMovement({
+        shiftId: movementShiftId,
+        actorId: user.id,
+        kind: movementKind,
+        amountMillimes: parseTnd(movementAmount),
+        reason: movementReason,
+        note: movementNote,
+      });
+      recorded = true;
+      setNotice(movementKind === 'in' ? 'Cash in recorded.' : 'Cash out recorded.');
+      setMovementSheetOpen(false);
+    } catch (movementError) {
+      if (movementError instanceof CashMovementNotificationError) {
+        recorded = true;
+        setMovementSheetOpen(false);
+      }
+      setError(movementError instanceof Error ? movementError.message : 'Unable to record the cash movement.');
+    } finally {
+      if (recorded) {
+        try {
+          await refresh();
+        } catch (refreshError) {
+          setError(`Cash movement was recorded, but the shift could not refresh: ${refreshError instanceof Error ? refreshError.message : t('common.refreshFailed')}`);
+        }
+      }
+      setMovementBusy(false);
+    }
+  }
+
   const openCount = shifts.filter((shift) => shift.status === 'open').length;
+  const enteredMovementMillimes = Math.round(Number(movementAmount.replace(',', '.')) * 1000);
   return (
     <>
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -140,9 +229,16 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             </div>
             <div className="space-y-3">
               <Metric label={t('shift.startingCash')} amount={ownOpenShift.startingCashMillimes} />
-              <Metric label={t('shift.cashSales')} amount={cashSales} />
-              <Metric label={t('shift.expectedCash')} amount={ownOpenShift.startingCashMillimes + cashSales} prominent />
+              <Metric label="Cash sales + tab payments" amount={cashSales} />
+              <Metric label={t('shift.expectedCash')} amount={expectedCash} prominent />
             </div>
+            {canCashInOut && !ownerMode && (
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <Button type="button" variant="secondary" onClick={() => openCashMovement('in', ownOpenShift.id)}><MaterialIcon name="add" />Cash in</Button>
+                <Button type="button" variant="secondary" onClick={() => openCashMovement('out', ownOpenShift.id)}><MaterialIcon name="remove" />Cash out</Button>
+              </div>
+            )}
+            <CashMovementList movements={cashMovements.filter((movement) => movement.shiftId === ownOpenShift.id)} staffNames={staffNames} />
           </section>
           <form onSubmit={(event) => { void closeShift(event); }} className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
             <h2 className="font-display text-headline-md text-on-surface">{t('shift.closeShift')}</h2>
@@ -150,7 +246,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             <input id="counted-cash" inputMode="decimal" required value={countedCash} onChange={(event) => setCountedCash(event.target.value)} placeholder="50.000" className="h-14 rounded-xl bg-surface-container-low px-4 font-body text-title-md tabular-nums outline-none focus:ring-2 focus:ring-primary" />
             {pendingVoidCount > 0 && <p role="alert" className="rounded-lg bg-warning-container p-3 font-body text-body-sm text-on-warning-container">{t('shift.pendingVoidWarning', { count: pendingVoidCount })}</p>}
             {countedCash && Number.isFinite(Number(countedCash.replace(',', '.'))) && (
-              <Metric label={t('shift.difference')} amount={Math.round(Number(countedCash.replace(',', '.')) * 1000) - (ownOpenShift.startingCashMillimes + cashSales)} signed />
+              <Metric label={t('shift.difference')} amount={Math.round(Number(countedCash.replace(',', '.')) * 1000) - expectedCash} signed />
             )}
             <p className="font-body text-body-sm text-on-surface-variant">{t('shift.cashDifferenceRecorded')}</p>
             <Button type="submit" variant="danger" className="w-full"><MaterialIcon name="lock" />{t('shift.closeShift')}</Button>
@@ -189,9 +285,16 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
                 <StatusTag status={shift.status === 'open' ? 'started' : 'closed'}>{shift.status === 'open' ? 'Started' : 'Closed'}</StatusTag>
                 {shift.differenceMillimes !== undefined && <p className={`mt-1 font-body text-label-sm tabular-nums ${shift.differenceMillimes === 0 ? 'text-success-dark' : 'text-error-dark'}`}>{t('shift.difference')}: {formatTnd(shift.differenceMillimes / 1000)} DT</p>}
               </div>
+              {ownerMode && canCashInOut && shift.status === 'open' && user?.role === 'owner' && (
+                <div className="flex w-full gap-2">
+                  <Button type="button" variant="secondary" onClick={() => openCashMovement('in', shift.id)}><MaterialIcon name="add" />Cash in</Button>
+                  <Button type="button" variant="secondary" onClick={() => openCashMovement('out', shift.id)}><MaterialIcon name="remove" />Cash out</Button>
+                </div>
+              )}
+              <CashMovementList movements={cashMovements.filter((movement) => movement.shiftId === shift.id)} staffNames={staffNames} />
               {ownerMode && shift.status === 'open' && user?.role === 'owner' && (
                 <form onSubmit={(event) => { void forceCloseShift(event, shift); }} className="mt-3 flex w-full flex-wrap items-end gap-2 border-t border-outline-variant pt-3">
-                  <p className="w-full font-body text-body-sm text-on-surface-variant">Expected cash: {formatTnd((shift.startingCashMillimes + (cashByShift[shift.id] ?? 0)) / 1000)} DT. Enter the drawer count you verified.</p>
+                  <p className="w-full font-body text-body-sm text-on-surface-variant">Expected cash: {formatTnd((expectedCashByShift[shift.id] ?? shift.startingCashMillimes) / 1000)} DT. Enter the drawer count you verified.</p>
                   <label className="min-w-40 flex-1 font-body text-label-sm">Owner-counted cash (TND)
                     <input required inputMode="decimal" value={forceCountedCash[shift.id] ?? ''} onChange={(event) => setForceCountedCash((current) => ({ ...current, [shift.id]: event.target.value }))} placeholder="0.000" className="mt-1 h-11 w-full rounded-lg bg-surface-container-low px-3" />
                   </label>
@@ -203,6 +306,47 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           {shifts.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">{t('common.noData')}</p>}
         </div>
       </section>
+      <BottomSheet
+        open={movementSheetOpen}
+        onClose={() => setMovementSheetOpen(false)}
+        title={movementKind === 'in' ? 'Cash in' : 'Cash out'}
+      >
+        <form onSubmit={(event) => { void submitCashMovement(event); }} className="flex flex-col gap-3">
+          <label htmlFor="cash-movement-amount" className="font-body text-label-md text-on-surface">Amount (TND)</label>
+          <input
+            id="cash-movement-amount"
+            readOnly
+            inputMode="none"
+            value={movementAmount}
+            placeholder="0.000"
+            className="h-12 w-full rounded-lg bg-surface-container-low px-3 font-display text-title-md tabular-nums"
+          />
+          <Keypad
+            decimal
+            disabled={movementBusy}
+            onPress={pressMovementAmount}
+            onClear={() => setMovementAmount('')}
+            onBackspace={() => setMovementAmount((value) => value.slice(0, -1))}
+          />
+          <div>
+            <p className="mb-2 font-body text-label-md text-on-surface">Reason</p>
+            <div className="flex flex-wrap gap-2">
+              {cashMovementReasons.map(({ reason, label }) => (
+                <Chip key={reason} selected={movementReason === reason} onClick={() => setMovementReason(reason)}>{label}</Chip>
+              ))}
+            </div>
+          </div>
+          <label className="font-body text-label-md text-on-surface">Note (optional)
+            <textarea maxLength={500} rows={2} value={movementNote} onChange={(event) => setMovementNote(event.target.value)} className="mt-1.5 w-full rounded-lg bg-surface-container-low p-3" />
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <Button type="button" variant="ghost" onClick={() => setMovementSheetOpen(false)}>Cancel</Button>
+            <Button type="submit" disabled={movementBusy || !movementShiftId || !Number.isSafeInteger(enteredMovementMillimes) || enteredMovementMillimes <= 0}>
+              <MaterialIcon name={movementKind === 'in' ? 'add' : 'remove'} />Record {movementKind === 'in' ? 'cash in' : 'cash out'}
+            </Button>
+          </div>
+        </form>
+      </BottomSheet>
     </>
   );
 }
@@ -215,6 +359,43 @@ function Metric({ label, amount, prominent = false, signed = false }: { label: s
       <span className="font-body text-body-sm text-on-surface-variant">{label}</span>
       <span className={`font-display tabular-nums ${prominent ? 'text-headline-md text-primary' : 'text-title-md text-on-surface'} ${signed && amount !== 0 ? 'text-error-dark' : ''}`}>{prefix}{formatted} DT</span>
     </div>
+  );
+}
+
+function CashMovementList({ movements, staffNames }: {
+  movements: CashMovementRecord[];
+  staffNames: Record<string, string>;
+}) {
+  const reasonLabel = (reason: CashMovementReason) => {
+    if (reason === 'supplier') return 'Bought milk';
+    if (reason === 'change') return 'Change float';
+    if (reason === 'expense') return 'Expense';
+    return 'Other';
+  };
+  return (
+    <section className="mt-4 border-t border-outline-variant pt-3">
+      <h3 className="mb-2 font-body text-label-md text-on-surface">Cash movements</h3>
+      {movements.length > 0 ? (
+        <ul className="flex flex-col gap-2">
+          {movements.map((movement) => (
+            <li key={movement.id} className="flex items-start justify-between gap-3 rounded-lg bg-surface-container-low p-3">
+              <div className="min-w-0">
+                <p className="font-body text-label-md text-on-surface">
+                  {movement.kind === 'in' ? 'Cash in' : 'Cash out'} · {reasonLabel(movement.reason)}
+                </p>
+                <p className="mt-0.5 font-body text-body-sm text-outline">
+                  {staffNames[movement.staffId] ?? 'Staff'} · {new Date(movement.createdAt).toLocaleString()}
+                </p>
+                {movement.note && <p className="mt-0.5 break-words font-body text-body-sm text-on-surface-variant">{movement.note}</p>}
+              </div>
+              <strong className={`shrink-0 font-display tabular-nums ${movement.kind === 'in' ? 'text-success-dark' : 'text-error-dark'}`}>
+                {movement.kind === 'in' ? '+' : '−'}{formatTnd(movement.amountMillimes / 1000)} DT
+              </strong>
+            </li>
+          ))}
+        </ul>
+      ) : <p className="font-body text-body-sm text-outline">No cash movements for this shift.</p>}
+    </section>
   );
 }
 

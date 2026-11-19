@@ -1,10 +1,75 @@
 import type { CatalogItemRecord, CatalogModifierRecord, CategoryRecord } from '../types/domain';
 import { readData, writeData } from './storage';
 import { seedCatalogItems, seedCategories } from './seedData';
+import { activityLogService } from './activityLogService';
+import { notificationService } from './notificationService';
+
+interface CatalogActor {
+  id: string;
+  name: string;
+}
 
 const getItems = () => readData('catalog-items', seedCatalogItems);
 const getCategories = () => readData('categories', seedCategories);
 const makeId = (kind: string) => `${kind}-${crypto.randomUUID()}`;
+
+async function updateCatalogItem(
+  itemId: string,
+  changes: Partial<Pick<CatalogItemRecord, 'name' | 'categoryId' | 'icon' | 'priceMillimes' | 'stockCount' | 'description' | 'sku' | 'modifiers' | 'modifierGroupName' | 'modifiersRequired' | 'modifierSelectionMode' | 'outOfStock' | 'isActive'>>,
+  actor?: CatalogActor,
+  notifyOnStockDepletion = true,
+): Promise<CatalogItemRecord> {
+  const items = getItems();
+  const item = items.find((candidate) => candidate.id === itemId);
+  if (!item) throw new Error('Catalog item could not be found.');
+  if (changes.priceMillimes !== undefined && changes.priceMillimes < 0) throw new Error('Price cannot be negative.');
+  if (changes.modifiers?.some((modifier) => !modifier.name.trim() || !Number.isInteger(modifier.priceMillimes) || modifier.priceMillimes < 0)) {
+    throw new Error('Each modifier needs a name and a valid non-negative add-on price.');
+  }
+  if (changes.stockCount !== undefined && changes.stockCount !== null &&
+    (!Number.isInteger(changes.stockCount) || changes.stockCount < 0)) {
+    throw new Error('Stock count must be a non-negative whole number.');
+  }
+  const stockReachedZero = changes.stockCount === 0 && item.stockCount !== 0;
+  const resultingStockCount = changes.stockCount !== undefined ? changes.stockCount : item.stockCount;
+  if (changes.outOfStock === false && resultingStockCount === 0) {
+    throw new Error('Add tracked stock before marking this item available.');
+  }
+  const nextOutOfStock = changes.stockCount === 0 ? true : changes.outOfStock ?? item.outOfStock;
+  const availabilityChanged = item.outOfStock !== nextOutOfStock;
+  if ((availabilityChanged || stockReachedZero) && !actor) {
+    throw new Error('An acting staff member is required to change catalog availability.');
+  }
+
+  const markedAt = new Date().toISOString();
+  const updated: CatalogItemRecord = {
+    ...item,
+    ...changes,
+    outOfStock: nextOutOfStock,
+    ...(availabilityChanged
+      ? nextOutOfStock
+        ? { outOfStockBy: actor?.name, outOfStockAt: markedAt }
+        : { outOfStockBy: undefined, outOfStockAt: undefined }
+      : {}),
+  };
+  writeData('catalog-items', items.map((candidate) => candidate.id === itemId ? updated : candidate));
+
+  if (availabilityChanged && actor) {
+    await activityLogService.recordCatalogItemAvailabilityChange({
+      storeId: item.storeId,
+      actorId: actor.id,
+      action: 'catalog_item_availability_changed',
+      targetType: 'catalog_item',
+      targetId: item.id,
+      itemName: item.name,
+      outOfStock: nextOutOfStock,
+    });
+  }
+  if (stockReachedZero && notifyOnStockDepletion) {
+    await notificationService.notifyStockDepleted(item.storeId, item.id, item.name);
+  }
+  return updated;
+}
 
 export const catalogService = {
   async listCategories(storeId: string): Promise<CategoryRecord[]> {
@@ -44,43 +109,37 @@ export const catalogService = {
     return item;
   },
 
-  async updateItem(itemId: string, changes: Partial<Pick<CatalogItemRecord, 'name' | 'categoryId' | 'icon' | 'priceMillimes' | 'stockCount' | 'description' | 'sku' | 'imageDataUrl' | 'modifiers' | 'modifierGroupName' | 'modifiersRequired' | 'modifierSelectionMode' | 'outOfStock' | 'isActive'>>): Promise<CatalogItemRecord> {
-    const items = getItems();
-    const item = items.find((candidate) => candidate.id === itemId);
-    if (!item) throw new Error('Catalog item could not be found.');
-    if (changes.priceMillimes !== undefined && changes.priceMillimes < 0) throw new Error('Price cannot be negative.');
-    if (changes.modifiers?.some((modifier) => !modifier.name.trim() || !Number.isInteger(modifier.priceMillimes) || modifier.priceMillimes < 0)) {
-      throw new Error('Each modifier needs a name and a valid non-negative add-on price.');
-    }
-    const updated = { ...item, ...changes };
-    writeData('catalog-items', items.map((candidate) => candidate.id === itemId ? updated : candidate));
-    return updated;
+  async updateItem(
+    itemId: string,
+    changes: Partial<Pick<CatalogItemRecord, 'name' | 'categoryId' | 'icon' | 'priceMillimes' | 'stockCount' | 'description' | 'sku' | 'modifiers' | 'modifierGroupName' | 'modifiersRequired' | 'modifierSelectionMode' | 'outOfStock' | 'isActive'>>,
+    actor?: CatalogActor,
+  ): Promise<CatalogItemRecord> {
+    return await updateCatalogItem(itemId, changes, actor);
   },
 
-  async setOutOfStock(itemId: string, outOfStock: boolean): Promise<CatalogItemRecord> {
-    return await this.updateItem(itemId, { outOfStock });
+  async setOutOfStock(itemId: string, outOfStock: boolean, actor: CatalogActor): Promise<CatalogItemRecord> {
+    return await updateCatalogItem(itemId, { outOfStock }, actor, false);
   },
 
-  async setStockCount(itemId: string, stockCount: number | null): Promise<CatalogItemRecord> {
-    if (stockCount !== null && (!Number.isInteger(stockCount) || stockCount < 0)) throw new Error('Stock count must be a non-negative whole number.');
-    return await this.updateItem(itemId, { stockCount, outOfStock: stockCount === 0 });
+  async setStockCount(itemId: string, stockCount: number | null, actor: CatalogActor): Promise<CatalogItemRecord> {
+    return await updateCatalogItem(itemId, { stockCount, outOfStock: stockCount === 0 }, actor);
   },
 
-  async decrementStock(itemId: string, quantity: number): Promise<CatalogItemRecord> {
+  async decrementStock(itemId: string, quantity: number, actor: CatalogActor): Promise<CatalogItemRecord> {
     const item = getItems().find((candidate) => candidate.id === itemId);
     if (!item) throw new Error('Catalog item could not be found.');
     if (item.stockCount === null) return item;
     if (quantity > item.stockCount) throw new Error(`${item.name} has only ${item.stockCount} remaining.`);
     const stockCount = item.stockCount - quantity;
-    return await this.updateItem(itemId, { stockCount, outOfStock: stockCount === 0 });
+    return await updateCatalogItem(itemId, { stockCount, outOfStock: stockCount === 0 }, actor, false);
   },
 
-  async incrementStock(itemId: string, quantity: number): Promise<CatalogItemRecord> {
+  async incrementStock(itemId: string, quantity: number, actor: CatalogActor): Promise<CatalogItemRecord> {
     if (!Number.isInteger(quantity) || quantity < 1) throw new Error('Stock quantity must be a positive whole number.');
     const item = getItems().find((candidate) => candidate.id === itemId);
     if (!item) throw new Error('Catalog item could not be found.');
     if (item.stockCount === null) return item;
-    return await this.updateItem(itemId, { stockCount: item.stockCount + quantity, outOfStock: false });
+    return await updateCatalogItem(itemId, { stockCount: item.stockCount + quantity, outOfStock: false }, actor, false);
   },
 
   async setModifiers(itemId: string, modifiers: CatalogModifierRecord[]): Promise<CatalogItemRecord> {

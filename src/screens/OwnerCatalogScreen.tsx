@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
 import { Chip } from '../components/Chip';
@@ -32,7 +32,6 @@ interface ProductDraft {
   stockCount: string;
   availability: Availability;
   isActive: boolean;
-  imageDataUrl: string;
   modifierGroupName: string;
   modifiersRequired: boolean;
   modifierSelectionMode: 'single' | 'multiple';
@@ -49,7 +48,6 @@ const emptyDraft = (categoryId = ''): ProductDraft => ({
   stockCount: '',
   availability: 'available',
   isActive: true,
-  imageDataUrl: '',
   modifierGroupName: '',
   modifiersRequired: false,
   modifierSelectionMode: 'multiple',
@@ -67,7 +65,6 @@ function draftFromItem(item: CatalogItemRecord): ProductDraft {
     stockCount: item.stockCount === null ? '' : String(item.stockCount),
     availability: item.stockCount === 0 ? 'out' : item.outOfStock ? '86' : 'available',
     isActive: item.isActive,
-    imageDataUrl: item.imageDataUrl ?? '',
     modifierGroupName: item.modifierGroupName ?? '',
     modifiersRequired: item.modifiersRequired ?? false,
     modifierSelectionMode: item.modifierSelectionMode ?? 'multiple',
@@ -94,33 +91,6 @@ function availabilityStyle(status: Availability) {
   if (status === 'out') return 'bg-error-container text-on-error-container';
   if (status === '86') return 'bg-amber-100 text-amber-900';
   return 'bg-success-container text-success-dark';
-}
-
-async function readProductImage(file: File): Promise<string> {
-  if (!file.type.startsWith('image/')) throw new Error('Choose an image file.');
-  if (file.size > 10 * 1024 * 1024) throw new Error('Choose an image smaller than 10 MB.');
-
-  const source = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Unable to read this image.'));
-    reader.onerror = () => reject(new Error('Unable to read this image.'));
-    reader.readAsDataURL(file);
-  });
-  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const loadedImage = new Image();
-    loadedImage.onload = () => resolve(loadedImage);
-    loadedImage.onerror = () => reject(new Error('Unable to preview this image.'));
-    loadedImage.src = source;
-  });
-
-  const scale = Math.min(1, 900 / Math.max(image.naturalWidth, image.naturalHeight));
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('Unable to process this image.');
-  context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL('image/jpeg', 0.8);
 }
 
 function OwnerCatalogContent() {
@@ -208,7 +178,6 @@ function OwnerCatalogContent() {
         stockCount,
         outOfStock: draft.availability !== 'available',
         isActive: draft.isActive,
-        imageDataUrl: draft.imageDataUrl,
         modifierGroupName: draft.modifierGroupName.trim(),
         modifiersRequired: draft.modifiersRequired,
         modifierSelectionMode: draft.modifierSelectionMode,
@@ -217,7 +186,8 @@ function OwnerCatalogContent() {
       if (!changes.name) throw new Error('Product name is required.');
 
       if (editingItem) {
-        await catalogService.updateItem(editingItem.id, changes);
+        if (!user) throw new Error('Your account could not be loaded.');
+        await catalogService.updateItem(editingItem.id, changes, { id: user.id, name: user.name });
       } else {
         await catalogService.createItem({ storeId, ...changes });
       }
@@ -257,10 +227,11 @@ function OwnerCatalogContent() {
     setError('');
     setNotice('');
     try {
+      if (!user) throw new Error('Your account could not be loaded.');
       await catalogService.updateItem(item.id, {
         outOfStock: !item.outOfStock,
         stockCount: item.stockCount === 0 ? null : item.stockCount,
-      });
+      }, { id: user.id, name: user.name });
       await refresh();
     } catch (updateError) {
       setError(updateError instanceof Error ? updateError.message : 'Unable to update availability.');
@@ -278,19 +249,6 @@ function OwnerCatalogContent() {
       setDeleteTarget(null);
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : 'Unable to remove this product.');
-    }
-  }
-
-  async function selectImage(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-    setError('');
-    try {
-      const imageDataUrl = await readProductImage(file);
-      setDraft((current) => ({ ...current, imageDataUrl }));
-    } catch (imageError) {
-      setError(imageError instanceof Error ? imageError.message : 'Unable to upload this image.');
     }
   }
 
@@ -322,7 +280,7 @@ function OwnerCatalogContent() {
         </label>
         <div className="scrollbar-hidden flex gap-2 overflow-x-auto py-1">
           <Chip selected={categoryId === 'all'} onClick={() => setCategoryId('all')}>{t('catalog.items')}</Chip>
-          {categories.map((category) => <Chip key={category.id} selected={categoryId === category.id} onClick={() => setCategoryId(category.id)}>{category.name}</Chip>)}
+          {categories.map((category) => <Chip key={category.id} selected={categoryId === category.id} onClick={() => setCategoryId(category.id)}><MaterialIcon name={category.icon} className="text-lg" />{category.name}</Chip>)}
         </div>
         <div className="scrollbar-hidden flex gap-2 overflow-x-auto py-1">
           {(['all', 'available', '86', 'out'] as const).map((status) => (
@@ -366,23 +324,9 @@ function OwnerCatalogContent() {
 
       <BottomSheet open={sheet === 'item'} onClose={() => setSheet(null)} title={editingItem ? 'Edit product' : t('catalog.addItem')}>
         <form onSubmit={saveItem} className="flex flex-col gap-4">
-          <div>
-            <span className="font-body text-label-md">Product image</span>
-            <div className="mt-2 flex items-center gap-3">
-              <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-surface-container text-primary">
-                {draft.imageDataUrl ? <img src={draft.imageDataUrl} alt="Product preview" className="h-full w-full object-cover" /> : <MaterialIcon name={draft.icon || 'image'} className="text-3xl" />}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-lg bg-surface-container-high px-3 font-body text-label-md text-primary">
-                  <MaterialIcon name="upload" />Upload image
-                  <input type="file" accept="image/*" onChange={(event) => { void selectImage(event); }} className="sr-only" />
-                </label>
-                {draft.imageDataUrl && <Button type="button" variant="ghost" onClick={() => setDraft((current) => ({ ...current, imageDataUrl: '' }))}>Remove</Button>}
-                <p className="basis-full font-body text-body-sm text-outline">Image is resized and stored on this device.</p>
-              </div>
-            </div>
+          <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-surface-container text-primary">
+            <MaterialIcon name={draft.icon} className="text-3xl" />
           </div>
-
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="font-body text-label-md">Product name<input required value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
             <label className="font-body text-label-md">{t('catalog.priceTnd')}<input required inputMode="decimal" value={draft.price} onChange={(event) => setDraft((current) => ({ ...current, price: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
@@ -458,8 +402,8 @@ function CatalogItemCard({ item, category, onToggle, onEdit, onDelete }: { item:
   return (
     <article className="flex min-w-0 flex-col gap-3 rounded-xl bg-surface-container-lowest p-4 shadow-card">
       <div className="flex min-w-0 items-start gap-3">
-        <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-surface-container text-primary">
-          {item.imageDataUrl ? <img src={item.imageDataUrl} alt="" className="h-full w-full object-cover" /> : <MaterialIcon name={item.icon} className="text-2xl" />}
+        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-surface-container text-primary">
+          <MaterialIcon name={item.icon} className="text-2xl" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">

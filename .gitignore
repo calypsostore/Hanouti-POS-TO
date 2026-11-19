@@ -16,3 +16,4 @@ keystore.properties
 android/local.properties
 android/app/build/
 android/.gradle/
+apk-output/

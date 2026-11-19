@@ -38,7 +38,7 @@ Complete this checklist once for each environment:
    ```sh
    npx supabase login
    npx supabase link --project-ref YOUR_PROJECT_REF
-   npx supabase db push
+   npx supabase db push --remote
    ```
 
 3. **Set Edge Function secrets.** Use the project URL and keys from the
@@ -108,9 +108,10 @@ authenticated API requests.
 
 ## Known limits
 
-- Native push notifications are not implemented yet.
-- Offline mode only queues new orders. Shifts, voids, and tab payments require
-  an internet connection.
+- Native local notifications are supported; remote push delivery (FCM/APNs) is
+  not implemented yet.
+- The offline queue only covers new orders. Shifts, voids, and tab payments
+  require an internet connection.
 
 ## Build and preview
 

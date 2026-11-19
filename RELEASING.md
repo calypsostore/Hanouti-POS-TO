@@ -11,3 +11,11 @@ Before publishing a new app version:
 7. Only then bump the app version and publish the web or Android release.
 
 Do not publish while the database migration check is failing. The app compares its expected schema version with `public.app_schema_version` at startup and blocks with a retry screen while the server is behind.
+
+## PL/pgSQL diagnostics
+
+In the Supabase SQL Editor, run `supabase/tests/plpgsql_check.sql`. It enables
+`plpgsql_check` and checks every non-trigger PL/pgSQL function in `public`.
+Every returned row is a problem to investigate and fix; the release check
+should return zero rows. If the extension is not available, enable it under
+the project's Database Extensions settings first.

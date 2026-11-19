@@ -1,6 +1,11 @@
 const en = {
   'app.loading': 'Preparing your terminal...',
-  'app.initializationError': 'Could not load local data: {error}',
+  'app.initializationError': 'Could not initialize the app: {error}',
+  'app.startupErrorTitle': 'Unable to start 7anouti-POS',
+  'app.serverUpdating': 'The server is being updated. Please try again in a few minutes',
+  'app.serverSetupOutOfDate': 'Server setup is out of date',
+  'app.serverUnreachable': 'Could not reach the server',
+  'app.retry': 'Retry',
   'app.accessDenied': 'Access not available',
   'app.permissionDenied': 'Your assigned position does not allow this action.',
   'app.workspacePreparing': 'This workspace is being prepared.',

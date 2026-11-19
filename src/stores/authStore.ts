@@ -5,6 +5,7 @@ import { initializeMockData } from '../services/mockDataService';
 import { useCartStore } from './cartStore';
 import { getSupabaseClient } from '../data/supabaseClient';
 import { isSupabaseDriver } from '../data/driver';
+import { assertExpectedSchemaVersion } from '../services/schemaVersionService';
 
 let authStateSubscription: { unsubscribe: () => void } | undefined;
 
@@ -12,7 +13,7 @@ interface AuthState {
   user: UserSummary | null;
   locked: boolean;
   ready: boolean;
-  initializationError: string | null;
+  initializationError: Error | null;
   hydrate: () => Promise<void>;
   refreshCurrentUser: () => Promise<void>;
   login: (identifier: string, password: string, roles?: UserRole[]) => Promise<UserSummary>;
@@ -24,8 +25,10 @@ interface AuthState {
   logout: () => Promise<void>;
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'An unexpected error occurred.';
+function normalizeError(error: unknown): Error {
+  if (error instanceof Error) return error;
+  if (typeof error === 'string') return new Error(error);
+  return new Error('An unexpected error occurred.', { cause: error });
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -34,7 +37,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   ready: false,
   initializationError: null,
   hydrate: async () => {
+    set({ ready: false, initializationError: null });
     try {
+      await assertExpectedSchemaVersion();
       await initializeMockData();
       const user = await authService.getCurrentUser();
       const locked = user ? await authService.isSessionLocked() : false;
@@ -53,7 +58,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         authStateSubscription = data.subscription;
       }
     } catch (error) {
-      set({ ready: true, initializationError: errorMessage(error) });
+      console.error('[startup] Could not initialize the application.', error);
+      set({ ready: true, initializationError: normalizeError(error) });
     }
   },
   refreshCurrentUser: async () => {
@@ -62,7 +68,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const locked = user ? await authService.isSessionLocked() : false;
       set({ user, locked, initializationError: null });
     } catch (error) {
-      set({ initializationError: errorMessage(error) });
+      console.error('[startup] Could not refresh the signed-in user.', error);
+      set({ initializationError: normalizeError(error) });
     }
   },
   login: async (identifier, password, roles) => {

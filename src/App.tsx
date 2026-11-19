@@ -21,6 +21,7 @@ import { StaffDashboardScreen } from './screens/StaffDashboardScreen';
 import { StaffProfileScreen } from './screens/StaffProfileScreen';
 import { LockScreen } from './components/LockScreen';
 import { permissionService } from './services/permissionService';
+import { classifyInitializationError } from './services/serverErrorService';
 
 const OwnerDashboardScreen = lazy(() => import('./screens/OwnerDashboardScreen').then((module) => ({ default: module.OwnerDashboardScreen })));
 const OwnerCatalogScreen = lazy(() => import('./screens/OwnerCatalogScreen').then((module) => ({ default: module.OwnerCatalogScreen })));
@@ -50,6 +51,28 @@ function LoadingScreen({ message }: { message: string }) {
       <div>
         <MaterialIcon name="local_cafe" className="text-5xl text-primary" />
         <p className="mt-3 font-body text-body-md text-on-surface-variant">{message}</p>
+      </div>
+    </main>
+  );
+}
+
+function InitializationErrorScreen({ error, onRetry }: { error: Error; onRetry: () => void }) {
+  const kind = classifyInitializationError(error);
+  const message = kind === 'schema-behind'
+    ? t('app.serverUpdating')
+    : kind === 'schema-out-of-date'
+      ? t('app.serverSetupOutOfDate')
+      : kind === 'network'
+        ? t('app.serverUnreachable')
+        : t('app.initializationError', { error: error.message });
+
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-surface p-6 text-center">
+      <div className="w-full max-w-md rounded-2xl bg-surface-container-lowest p-8 shadow-card">
+        <MaterialIcon name="error_outline" className="text-5xl text-error" />
+        <h1 className="mt-3 font-display text-headline-lg text-on-surface">{t('app.startupErrorTitle')}</h1>
+        <p role="alert" className="mt-2 font-body text-body-md text-on-surface-variant">{message}</p>
+        <Button onClick={onRetry} className="mt-5">{t('app.retry')}</Button>
       </div>
     </main>
   );
@@ -317,7 +340,7 @@ export default function App() {
   }, [ready]);
 
   if (!ready) return <LoadingScreen message="Preparing your terminal..." />;
-  if (initializationError) return <LoadingScreen message={`Could not load local data: ${initializationError}`} />;
+  if (initializationError) return <InitializationErrorScreen error={initializationError} onRetry={() => void hydrate()} />;
 
   return (
     <>

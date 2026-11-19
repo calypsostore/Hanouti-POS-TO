@@ -1,6 +1,6 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
-const serverUrl = process.env.CAP_SERVER_URL ?? process.env.VITE_CAP_SERVER_URL;
+const serverUrl = process.env.CAP_SERVER_URL;
 
 const config: CapacitorConfig = {
   appId: 'com.hanouti.pos',

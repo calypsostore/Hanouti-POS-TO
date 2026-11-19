@@ -12,7 +12,10 @@
     "typecheck": "tsc -b --pretty",
     "cap:add": "npx cap add android",
     "cap:sync": "npx cap sync",
-    "cap:open": "npx cap open android"
+    "cap:open": "npx cap open android",
+    "apk:sync": "npm run build && npx cap sync android",
+    "apk:debug": "npm run apk:sync && cd android && gradlew.bat assembleDebug",
+    "apk:release": "npm run apk:sync && cd android && gradlew.bat assembleRelease"
   },
   "dependencies": {
     "@capacitor/android": "^7.4.3",
@@ -29,6 +32,7 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
+    "@capacitor/assets": "^4.0.0",
     "@capacitor/cli": "^7.4.3",
     "@eslint/js": "^10.0.1",
     "@types/react": "^19.1.12",

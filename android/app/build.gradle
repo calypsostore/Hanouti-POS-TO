@@ -16,8 +16,12 @@ def useEnvironmentSigning = populatedSigningEnvironment.size() == signingEnviron
 if (!populatedSigningEnvironment.isEmpty() && !useEnvironmentSigning) {
     throw new GradleException('ANDROID_KEYSTORE_PATH, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD must be set together.')
 }
-def appVersionName = System.getenv('APP_VERSION_NAME') ?: '1.0.0'
-def appVersionCode = (System.getenv('APP_VERSION_CODE') ?: '10000').toInteger()
+def appVersionName = new groovy.json.JsonSlurper().parse(rootProject.file('../package.json')).version
+def versionParts = appVersionName.tokenize('.').collect { it.toInteger() }
+if (versionParts.size() != 3) {
+    throw new GradleException("Expected a three-part package.json version, got ${appVersionName}.")
+}
+def appVersionCode = versionParts[0] * 10000 + versionParts[1] * 100 + versionParts[2]
 
 android {
     namespace "com.hanouti.pos"

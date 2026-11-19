@@ -1,38 +1,41 @@
-import { App } from '@capacitor/app';
-import { Capacitor, registerPlugin } from '@capacitor/core';
-import { Directory, Filesystem } from '@capacitor/filesystem';
+import { Browser } from '@capacitor/browser';
+import { Capacitor } from '@capacitor/core';
 import { notificationService } from './notificationService';
-import { UPDATE_GITHUB_REPOSITORY } from '../config/updateConfig';
-import { isUpdateCheckDue, parseAppUpdateManifest, type AppUpdateManifest } from './appUpdateManifest';
+import { PRODUCTION_URL } from '../config/appConfig';
 
 declare const __APP_VERSION__: string;
+declare const __BUILD_ID__: string;
+
 const LAST_CHECK_KEY = '7anouti-pos:last-update-check';
-const UPDATE_CACHE_KEY = '7anouti-pos:available-update';
+const LAST_RESULT_KEY = '7anouti-pos:last-update-result';
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
-const CHECK_REQUEST_TIMEOUT_MS = 15_000;
-const VERSION_URL = `https://github.com/${UPDATE_GITHUB_REPOSITORY}/releases/latest/download/version.json`;
-const ApkInstaller = registerPlugin<{ installApk(options: { path: string }): Promise<void> }>('ApkInstaller');
+const CHECK_REQUEST_TIMEOUT_MS = 10_000;
+const WORKER_UPDATE_TIMEOUT_MS = 5_000;
+
+export type UpdateMode = 'hosted' | 'bundled' | 'web';
 
 export interface UpdateCheckResult {
+  mode: UpdateMode;
   currentVersion: string;
+  currentBuild: string;
+  latestVersion: string | null;
+  latestBuild: string | null;
   checkedAt: string;
   updateAvailable: boolean;
-  availableVersion?: string;
+  error?: string;
 }
 
 type UpdateListener = (available: boolean) => void;
+type ResultListener = (result: UpdateCheckResult) => void;
 const listeners = new Set<UpdateListener>();
+const resultListeners = new Set<ResultListener>();
 let registration: ServiceWorkerRegistration | undefined;
 let observedRegistration: ServiceWorkerRegistration | undefined;
+let controllerChangeObserved = false;
 let hasUpdate = false;
 let availableVersion: string | undefined;
-let apkDownloadUrl: string | undefined;
 let monitorStarted = false;
-let controllerChangeObserved = false;
 const unsavedStateProviders = new Set<() => boolean>();
-let nativeCheckInFlight: Promise<UpdateCheckResult> | undefined;
-let cachedUpdate: AppUpdateManifest | null = null;
-let inMemoryLastCheck = 0;
 
 function runOverdueCheck(checkOverdueCustomers?: () => Promise<void>): void {
   if (checkOverdueCustomers) {
@@ -48,76 +51,32 @@ function runAutomaticCheck(reason: 'startup' | 'interval' | 'foreground'): void 
       reason,
       checkedAt: result.checkedAt,
       updateAvailable: result.updateAvailable,
+      error: result.error,
     });
   }).catch((error: unknown) => {
     console.error(`[updates] ${reason} check failed.`, error);
   });
 }
 
-function notifyListeners() {
+function notifyListeners(): void {
   for (const listener of listeners) listener(hasUpdate);
 }
 
-function setUpdateAvailable(version = __APP_VERSION__, downloadUrl?: string): void {
+function notifyResultListeners(result: UpdateCheckResult): void {
+  for (const listener of resultListeners) listener(result);
+}
+
+function setUpdateAvailable(version: string): void {
   const shouldNotify = !hasUpdate || availableVersion !== version;
   hasUpdate = true;
   availableVersion = version;
-  if (downloadUrl) apkDownloadUrl = downloadUrl;
   if (!shouldNotify) return;
   notifyListeners();
   void notificationService.notifyAppUpdate(version).catch((error: unknown) => {
     console.error('[updates] Could not create in-app update notifications.', error);
   });
   if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-    new Notification('7anouti-POS', { body: 'New version available, tap to refresh' });
-  }
-}
-
-function getLastCheckTimestamp(): number {
-  try {
-    return Math.max(inMemoryLastCheck, Date.parse(localStorage.getItem(LAST_CHECK_KEY) ?? '') || 0);
-  } catch (error) {
-    console.error('[updates] Could not read the last update check time.', error);
-    return inMemoryLastCheck;
-  }
-}
-
-function recordLastCheck(timestamp: number): void {
-  inMemoryLastCheck = timestamp;
-  try {
-    localStorage.setItem(LAST_CHECK_KEY, new Date(timestamp).toISOString());
-  } catch (error) {
-    console.error('[updates] Could not save the last update check time.', error);
-  }
-}
-
-function readCachedUpdate(): AppUpdateManifest | null {
-  try {
-    const raw = localStorage.getItem(UPDATE_CACHE_KEY);
-    if (!raw) return cachedUpdate;
-    cachedUpdate = parseAppUpdateManifest(JSON.parse(raw), UPDATE_GITHUB_REPOSITORY);
-    if (!cachedUpdate) localStorage.removeItem(UPDATE_CACHE_KEY);
-  } catch (error) {
-    console.error('[updates] Could not read the cached update.', error);
-  }
-  return cachedUpdate;
-}
-
-function saveCachedUpdate(update: AppUpdateManifest): void {
-  cachedUpdate = update;
-  try {
-    localStorage.setItem(UPDATE_CACHE_KEY, JSON.stringify(update));
-  } catch (error) {
-    console.error('[updates] Could not cache the available update.', error);
-  }
-}
-
-function clearCachedUpdate(): void {
-  cachedUpdate = null;
-  try {
-    localStorage.removeItem(UPDATE_CACHE_KEY);
-  } catch (error) {
-    console.error('[updates] Could not clear the cached update.', error);
+    new Notification('7anouti-POS', { body: 'A new app build is available.' });
   }
 }
 
@@ -125,91 +84,207 @@ function clearUpdateAvailable(): void {
   const shouldNotify = hasUpdate;
   hasUpdate = false;
   availableVersion = undefined;
-  apkDownloadUrl = undefined;
   if (shouldNotify) notifyListeners();
 }
 
-async function requestUpdateManifest(): Promise<AppUpdateManifest> {
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), CHECK_REQUEST_TIMEOUT_MS);
-  let response: Response;
+function isLocalhost(origin: string): boolean {
   try {
-    response = await fetch(VERSION_URL, {
-      headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' },
-      cache: 'no-store',
-      signal: controller.signal,
-    });
+    const url = new URL(origin);
+    return url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+  } catch {
+    return false;
+  }
+}
+
+function getOriginDetails(): { mode: UpdateMode; origin: string } {
+  const origin = window.location.origin;
+  const native = Capacitor.isNativePlatform();
+  const bundledNative = native && (
+    origin === 'capacitor://localhost'
+    || ((origin.startsWith('http://') || origin.startsWith('https://')) && isLocalhost(origin))
+  );
+  if (bundledNative) return { mode: 'bundled', origin: PRODUCTION_URL };
+  if (native) return { mode: 'hosted', origin };
+  return { mode: 'web', origin };
+}
+
+function readLastResult(): UpdateCheckResult | null {
+  try {
+    const raw = localStorage.getItem(LAST_RESULT_KEY);
+    if (!raw) return null;
+    const result: unknown = JSON.parse(raw);
+    if (
+      typeof result !== 'object'
+      || result === null
+      || !('mode' in result)
+      || !('checkedAt' in result)
+    ) return null;
+    return result as UpdateCheckResult;
+  } catch (error) {
+    console.error('[updates] Could not read the last update result.', error);
+    return null;
+  }
+}
+
+function saveResult(result: UpdateCheckResult, notify = true): void {
+  try {
+    localStorage.setItem(LAST_CHECK_KEY, result.checkedAt);
+    localStorage.setItem(LAST_RESULT_KEY, JSON.stringify(result));
+  } catch (error) {
+    console.error('[updates] Could not save the last update result.', error);
+  }
+  if (notify) notifyResultListeners(result);
+}
+
+function resultErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message === 'Request timed out after 10s') return error.message;
+  return 'No internet connection';
+}
+
+async function fetchVersionManifest(url: string): Promise<{ version: string; buildId: string }> {
+  const controller = new AbortController();
+  let rejectTimeout: (reason: Error) => void = () => undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    rejectTimeout = reject;
+  });
+  const timeoutId = window.setTimeout(() => {
+    controller.abort();
+    rejectTimeout(new Error('Request timed out after 10s'));
+  }, CHECK_REQUEST_TIMEOUT_MS);
+
+  try {
+    const request = async () => {
+      const response = await fetch(url, {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`Server returned ${response.status} for version.json`);
+      let manifest: unknown;
+      try {
+        manifest = await response.json();
+      } catch (error) {
+        throw new Error('Server returned invalid JSON for version.json', { cause: error });
+      }
+      if (
+        typeof manifest !== 'object'
+        || manifest === null
+        || !('version' in manifest)
+        || typeof manifest.version !== 'string'
+        || !('buildId' in manifest)
+        || typeof manifest.buildId !== 'string'
+      ) {
+        throw new Error('Server returned invalid version.json');
+      }
+      return { version: manifest.version, buildId: manifest.buildId };
+    };
+    return await Promise.race([request(), timeout]);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Server returned ')) throw error;
+    throw new Error(resultErrorMessage(error), { cause: error });
   } finally {
     window.clearTimeout(timeoutId);
   }
-  if (!response.ok) throw new Error(`Update manifest request failed with status ${response.status}.`);
-  const manifest: unknown = await response.json();
-  const update = parseAppUpdateManifest(manifest, UPDATE_GITHUB_REPOSITORY);
-  if (!update) throw new Error('The update manifest is invalid or does not include a trusted APK.');
-  return update;
 }
 
-async function performNativeUpdateCheck(force: boolean): Promise<UpdateCheckResult> {
-  const installed = await App.getInfo();
-  const installedVersionCode = Number.parseInt(installed.build, 10);
-  if (!Number.isSafeInteger(installedVersionCode)) {
-    throw new Error('Could not read the installed Android version code.');
-  }
+function waitForWaitingWorker(workerRegistration: ServiceWorkerRegistration): Promise<boolean> {
+  if (workerRegistration.waiting) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let timeoutId = 0;
+    const finish = (found: boolean) => {
+      window.clearTimeout(timeoutId);
+      workerRegistration.removeEventListener('updatefound', onUpdateFound);
+      resolve(found);
+    };
+    const checkInstalling = () => {
+      const installing = workerRegistration.installing;
+      if (!installing) return;
+      installing.addEventListener('statechange', () => {
+        if (installing.state === 'installed' && workerRegistration.waiting) finish(true);
+      });
+    };
+    const onUpdateFound = () => checkInstalling();
+    timeoutId = window.setTimeout(() => finish(Boolean(workerRegistration.waiting)), WORKER_UPDATE_TIMEOUT_MS);
+    workerRegistration.addEventListener('updatefound', onUpdateFound);
+    checkInstalling();
+  });
+}
 
-  const now = Date.now();
-  const lastCheckTimestamp = getLastCheckTimestamp();
-  if (!force && !isUpdateCheckDue(lastCheckTimestamp ? new Date(lastCheckTimestamp).toISOString() : null, now, CHECK_INTERVAL_MS)) {
-    const cached = readCachedUpdate();
-    if (cached && cached.versionCode > installedVersionCode) {
-      setUpdateAvailable(cached.versionName, cached.apkUrl);
-    } else if (cached) {
-      clearCachedUpdate();
+async function updateHostedServiceWorker(updateAvailable: boolean): Promise<void> {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+  registration ??= await navigator.serviceWorker.getRegistration();
+  if (!registration) return;
+  await registration.update();
+  if (updateAvailable && !(await waitForWaitingWorker(registration))) {
+    await updateService.forceRefresh();
+  }
+}
+
+async function checkForUpdates(): Promise<UpdateCheckResult> {
+  const { mode, origin } = getOriginDetails();
+  const checkedAt = new Date().toISOString();
+  const result: UpdateCheckResult = {
+    mode,
+    currentVersion: __APP_VERSION__,
+    currentBuild: __BUILD_ID__,
+    latestVersion: null,
+    latestBuild: null,
+    checkedAt,
+    updateAvailable: false,
+  };
+
+  try {
+    const originUrl = new URL(origin);
+    if (originUrl.protocol !== 'https:' && originUrl.protocol !== 'http:') {
+      throw new Error('App origin is not an HTTP(S) URL.');
+    }
+    const latest = await fetchVersionManifest(
+      `${originUrl.origin}/version.json?t=${Date.now()}`,
+    );
+    result.latestVersion = latest.version;
+    result.latestBuild = latest.buildId;
+    result.updateAvailable = latest.buildId !== __BUILD_ID__;
+
+    if (result.updateAvailable) {
+      setUpdateAvailable(latest.version);
+    } else {
       clearUpdateAvailable();
     }
-    return {
-      currentVersion: installed.version,
-      checkedAt: new Date(lastCheckTimestamp).toISOString(),
-      updateAvailable: hasUpdate,
-      availableVersion,
-    };
+    saveResult(result, false);
+    if (mode !== 'bundled') {
+      try {
+        await updateHostedServiceWorker(result.updateAvailable);
+      } catch (error) {
+        result.error = error instanceof Error
+          ? `Could not update the service worker: ${error.message}`
+          : 'Could not update the service worker.';
+      }
+    }
+  } catch (error) {
+    result.error = error instanceof Error
+      ? error.message
+      : 'No internet connection';
+    if (result.error === 'Failed to fetch' || result.error === 'NetworkError when attempting to fetch resource.') {
+      result.error = 'No internet connection';
+    }
+    console.error('[updates] Update check failed.', error);
   }
 
-  recordLastCheck(now);
-  const update = await requestUpdateManifest();
-  if (update.versionCode <= installedVersionCode) {
-    clearCachedUpdate();
-    clearUpdateAvailable();
-    return {
-      currentVersion: installed.version,
-      checkedAt: new Date(now).toISOString(),
-      updateAvailable: false,
-    };
-  }
-
-  saveCachedUpdate(update);
-  setUpdateAvailable(update.versionName, update.apkUrl);
-  return {
-    currentVersion: installed.version,
-    checkedAt: new Date(now).toISOString(),
-    updateAvailable: true,
-    availableVersion: update.versionName,
-  };
-}
-
-async function checkNativeForUpdates(force: boolean): Promise<UpdateCheckResult> {
-  if (nativeCheckInFlight) return nativeCheckInFlight;
-  const request = performNativeUpdateCheck(force);
-  nativeCheckInFlight = request;
-  try {
-    return await request;
-  } finally {
-    nativeCheckInFlight = undefined;
-  }
+  saveResult(result);
+  return result;
 }
 
 export const updateService = {
   getCurrentVersion(): string {
     return __APP_VERSION__;
+  },
+
+  getCurrentBuild(): string {
+    return __BUILD_ID__;
+  },
+
+  getMode(): UpdateMode {
+    return getOriginDetails().mode;
   },
 
   getAvailableVersion(): string | undefined {
@@ -225,10 +300,19 @@ export const updateService = {
     }
   },
 
+  getLastResult(): UpdateCheckResult | null {
+    return readLastResult();
+  },
+
   subscribe(callback: UpdateListener): () => void {
     listeners.add(callback);
     callback(hasUpdate);
     return () => listeners.delete(callback);
+  },
+
+  subscribeResults(callback: ResultListener): () => void {
+    resultListeners.add(callback);
+    return () => resultListeners.delete(callback);
   },
 
   registerUnsavedState(provider: () => boolean): () => void {
@@ -241,15 +325,17 @@ export const updateService = {
   },
 
   async register(): Promise<void> {
-    if (Capacitor.isNativePlatform() || import.meta.env.DEV || !('serviceWorker' in navigator)) return;
+    if (this.getMode() === 'bundled' || import.meta.env.DEV || !('serviceWorker' in navigator)) return;
     registration = await navigator.serviceWorker.register('/sw.js');
-    if (registration.waiting) setUpdateAvailable();
+    if (registration.waiting) setUpdateAvailable(__APP_VERSION__);
     if (observedRegistration !== registration) {
       observedRegistration = registration;
       registration.addEventListener('updatefound', () => {
         const installing = registration?.installing;
         installing?.addEventListener('statechange', () => {
-          if (installing.state === 'installed' && navigator.serviceWorker.controller) setUpdateAvailable();
+          if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+            setUpdateAvailable(__APP_VERSION__);
+          }
         });
       });
     }
@@ -259,44 +345,28 @@ export const updateService = {
     }
   },
 
-  async checkForUpdates(options: { force?: boolean } = {}): Promise<UpdateCheckResult> {
-    if (Capacitor.isNativePlatform()) {
-      return checkNativeForUpdates(options.force === true);
-    }
+  checkForUpdates,
 
-    if (!registration && 'serviceWorker' in navigator) {
-      registration = await navigator.serviceWorker.getRegistration();
+  async forceRefresh(): Promise<void> {
+    if ('serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((workerRegistration) => workerRegistration.unregister()));
     }
-    const checkedAt = new Date().toISOString();
-    if (registration) await registration.update();
-    localStorage.setItem(LAST_CHECK_KEY, checkedAt);
-    if (registration?.waiting) setUpdateAvailable();
-    return { currentVersion: __APP_VERSION__, checkedAt, updateAvailable: hasUpdate };
+    if ('caches' in window) {
+      const cacheNames = await caches.keys();
+      await Promise.all(cacheNames.map((cacheName) => caches.delete(cacheName)));
+    }
+    window.location.reload();
   },
 
-  async applyUpdate(onProgress?: (progress: number | null) => void): Promise<void> {
+  async openHostedApp(): Promise<void> {
+    await Browser.open({ url: PRODUCTION_URL });
+  },
+
+  async applyUpdate(): Promise<void> {
     if (this.hasUnsavedChanges() && !window.confirm('You have unsaved work. Reload and discard it?')) return;
-    if (Capacitor.isNativePlatform()) {
-      if (!apkDownloadUrl) {
-        throw new Error('No APK download URL is available.');
-      }
-      const updateUrl = apkDownloadUrl;
-      const progressListener = await Filesystem.addListener('progress', (status) => {
-        if (status.url !== updateUrl || status.contentLength <= 0) return;
-        onProgress?.(Math.min(100, Math.round((status.bytes / status.contentLength) * 100)));
-      });
-      try {
-        const result = await Filesystem.downloadFile({
-          url: updateUrl,
-          path: '7anouti-pos-update.apk',
-          directory: Directory.Cache,
-          progress: true,
-        });
-        if (!result.path) throw new Error('The downloaded APK path was not returned.');
-        await ApkInstaller.installApk({ path: result.path });
-      } finally {
-        await progressListener.remove();
-      }
+    if (this.getMode() === 'bundled') {
+      await this.openHostedApp();
       return;
     }
     const waitingWorker = registration?.waiting;
@@ -304,19 +374,14 @@ export const updateService = {
       waitingWorker.postMessage({ type: 'SKIP_WAITING' });
       return;
     }
-    if (hasUpdate) window.location.reload();
+    await this.forceRefresh();
   },
 
   startMonitoring(checkOverdueCustomers?: () => Promise<void>): () => void {
     if (monitorStarted) return () => undefined;
     monitorStarted = true;
-    const isNative = Capacitor.isNativePlatform();
-    const check = (reason: 'startup' | 'interval') => {
+    const check = () => {
       runOverdueCheck(checkOverdueCustomers);
-      if (isNative) {
-        runAutomaticCheck(reason);
-        return;
-      }
       const lastCheck = this.getLastCheck();
       if (!lastCheck || Date.now() - new Date(lastCheck).getTime() >= CHECK_INTERVAL_MS) {
         runAutomaticCheck(lastCheck ? 'interval' : 'startup');
@@ -328,9 +393,9 @@ export const updateService = {
         runAutomaticCheck('foreground');
       }
     };
-    const intervalId = window.setInterval(() => check('interval'), CHECK_INTERVAL_MS);
+    const intervalId = window.setInterval(check, CHECK_INTERVAL_MS);
     document.addEventListener('visibilitychange', onVisibilityChange);
-    check('startup');
+    check();
     return () => {
       monitorStarted = false;
       window.clearInterval(intervalId);
@@ -338,3 +403,9 @@ export const updateService = {
     };
   },
 };
+
+const initialResult = readLastResult();
+if (initialResult?.updateAvailable && initialResult.latestVersion) {
+  hasUpdate = true;
+  availableVersion = initialResult.latestVersion;
+}

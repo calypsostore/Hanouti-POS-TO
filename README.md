@@ -164,15 +164,15 @@ artifact cannot be restored.
 
 Import the Git repository into Vercel and deploy the Vite project with the
 default build command `npm run build` and output directory `dist`. Pushes to the
-connected production branch trigger a web deployment. Set `VITE_CAP_SERVER_URL`
-to the deployed HTTPS Vercel URL only when an Android app should load the hosted
-web build.
+connected production branch trigger a web deployment. Set `VITE_APP_URL` to the
+production URL only if it differs from `https://hanoutipos.vercel.app`.
 
 ## Android / Capacitor
 
-Set `CAP_SERVER_URL` or `VITE_CAP_SERVER_URL` to the HTTPS deployment URL when
-you want the Android wrapper to load hosted content. Leave it unset to package
-the locally built `dist` files.
+The Android wrapper loads `https://hanoutipos.vercel.app` by default, so web
+deployments update installed apps without rebuilding the APK. Override the
+server URL with `CAP_SERVER_URL` when needed. To explicitly create an offline,
+bundled APK, set `CAP_BUNDLED=1` when syncing Capacitor.
 
 ```sh
 npm run build
@@ -190,11 +190,10 @@ Bundle(s) / APK(s) > Build APK(s)**, then use the generated APK from
 
 ## When a new APK is needed
 
-- A normal Git push updates the hosted web app. If the installed Capacitor app
-  uses `CAP_SERVER_URL` / `VITE_CAP_SERVER_URL`, it receives the deployed web
-  changes without rebuilding or redistributing the APK.
+- The default APK loads the hosted site, so pushes update it automatically
+  after the Vercel deployment finishes. No new APK is needed for web changes.
 - Rebuild and distribute an APK when native Android code, Capacitor/native
   plugin configuration, permissions, app identity, or other bundled native
-  resources change.
-- If the app packages local `dist` assets instead of loading the hosted URL,
-  rebuild the APK to ship web changes as well.
+  resources change. An APK built with `CAP_BUNDLED=1` also needs rebuilding to
+  include web changes; the app can instead open the hosted site when an update
+  is available.

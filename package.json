@@ -1,7 +1,7 @@
 {
   "name": "7anouti-pos",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.0.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -15,7 +15,8 @@
     "cap:open": "npx cap open android",
     "apk:sync": "npm run build && npx cap sync android",
     "apk:debug": "npm run apk:sync && cd android && gradlew.bat assembleDebug",
-    "apk:release": "npm run apk:sync && cd android && gradlew.bat assembleRelease"
+    "apk:release": "npm run apk:sync && cd android && gradlew.bat assembleRelease",
+    "release:bump": "npm version patch --no-git-tag-version"
   },
   "dependencies": {
     "@capacitor/android": "^7.4.3",

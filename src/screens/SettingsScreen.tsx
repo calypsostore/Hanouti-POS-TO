@@ -1,5 +1,4 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Capacitor } from '@capacitor/core';
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '../components/BottomNav';
 import { Button } from '../components/Button';
@@ -14,7 +13,7 @@ import { catalogService } from '../services/catalogService';
 import { notificationService } from '../services/notificationService';
 import { scheduleService } from '../services/scheduleService';
 import { settingsService } from '../services/settingsService';
-import { updateService } from '../services/updateService';
+import { updateService, type UpdateCheckResult } from '../services/updateService';
 import { userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
 import { updateDisplaySettings, useDisplaySettings, type DisplayTheme } from '../lib/displaySettings';
@@ -113,7 +112,7 @@ export function SettingsScreen() {
   const [language, setLanguage] = useState<'en' | 'ar'>('en');
   const [lastCheck, setLastCheck] = useState(updateService.getLastCheck());
   const [checking, setChecking] = useState(false);
-  const [updateResult, setUpdateResult] = useState('');
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(() => updateService.getLastResult());
   const [mySchedule, setMySchedule] = useState<ScheduleShiftRecord[]>([]);
   const [scheduleNotifications, setScheduleNotifications] = useState<NotificationRecord[]>([]);
   const [scheduleLoading, setScheduleLoading] = useState(false);
@@ -121,6 +120,11 @@ export function SettingsScreen() {
   const [scheduleDate, setScheduleDate] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+
+  useEffect(() => updateService.subscribeResults((result) => {
+    setLastCheck(result.checkedAt);
+    setUpdateResult(result);
+  }), []);
 
   function saveDisplayPreference(changes: { theme?: DisplayTheme; largeButtons?: boolean; compactDensity?: boolean }) {
     setError('');
@@ -415,26 +419,45 @@ export function SettingsScreen() {
     setError('');
     setNotice('');
     try {
-      const result = await updateService.checkForUpdates({ force: true });
+      const result = await updateService.checkForUpdates();
       setLastCheck(result.checkedAt);
-      if (Capacitor.isNativePlatform()) {
-        setUpdateResult(result.updateAvailable && result.availableVersion
-          ? `New version v${result.availableVersion} available`
-          : `You are up to date (v${result.currentVersion})`);
-      } else {
-        setUpdateResult(result.updateAvailable ? t('settings.updateAvailable') : t('settings.upToDate'));
-      }
+      setUpdateResult(result);
     } catch (updateError) {
       console.error('[updates] Manual update check failed.', updateError);
-      if (Capacitor.isNativePlatform()) {
-        setUpdateResult('Could not check, try again');
-      } else {
-        setError(updateError instanceof Error ? updateError.message : 'Unable to check for updates.');
-      }
+      setError(updateError instanceof Error ? updateError.message : 'Unable to check for updates.');
     } finally {
       setChecking(false);
     }
   }
+
+  async function applyAvailableUpdate() {
+    setError('');
+    try {
+      await updateService.applyUpdate();
+    } catch (updateError) {
+      console.error('[updates] Could not apply the available update.', updateError);
+      setError(updateError instanceof Error ? updateError.message : 'Unable to apply the update.');
+    }
+  }
+
+  async function forceRefresh() {
+    setError('');
+    try {
+      await updateService.forceRefresh();
+    } catch (refreshError) {
+      console.error('[updates] Could not force-refresh the app.', refreshError);
+      setError(refreshError instanceof Error ? refreshError.message : 'Unable to force-refresh the app.');
+    }
+  }
+
+  const updateStatus = updateResult?.error
+    ?? (updateResult?.mode === 'bundled' && updateResult.updateAvailable
+      ? 'New APK required'
+      : updateResult?.updateAvailable
+        ? 'Update available: tap Update now'
+        : updateResult
+          ? 'You are up to date'
+          : 'Not checked yet');
 
   async function handleLogout() {
     await logout();
@@ -744,14 +767,47 @@ export function SettingsScreen() {
           <span className="font-semibold text-on-surface">v{updateService.getCurrentVersion()}</span>
         </div>
         <div className="flex items-center justify-between gap-2 font-body text-body-sm">
+          <span className="text-on-surface-variant">Build ID</span>
+          <span className="font-semibold text-on-surface">{updateService.getCurrentBuild()}</span>
+        </div>
+        <div className="flex items-center justify-between gap-2 font-body text-body-sm">
+          <span className="text-on-surface-variant">Mode</span>
+          <span className="font-semibold capitalize text-on-surface">{updateService.getMode()}</span>
+        </div>
+        <div className="flex items-center justify-between gap-2 font-body text-body-sm">
           <span className="text-on-surface-variant">{t('settings.lastCheck')}</span>
           <span className="text-right text-on-surface">{lastCheck ? new Date(lastCheck).toLocaleString() : t('settings.neverChecked')}</span>
         </div>
+        <div className="flex items-center justify-between gap-2 font-body text-body-sm">
+          <span className="text-on-surface-variant">Latest version</span>
+          <span className="text-right text-on-surface">{updateResult?.latestVersion ? `v${updateResult.latestVersion}` : 'Not checked'}</span>
+        </div>
+        <div className="flex items-center justify-between gap-2 font-body text-body-sm">
+          <span className="text-on-surface-variant">Latest build</span>
+          <span className="text-right text-on-surface">{updateResult?.latestBuild ?? 'Not checked'}</span>
+        </div>
+        <p role={updateResult?.error ? 'alert' : 'status'} className={`font-body text-body-sm ${updateResult?.error ? 'text-error' : 'text-on-surface-variant'}`}>{updateStatus}</p>
         <Button onClick={checkForUpdates} disabled={checking} variant="secondary" className="w-full">
           <MaterialIcon name={checking ? 'sync' : 'refresh'} className={`text-lg ${checking ? 'animate-spin' : ''}`} />
           {checking ? t('settings.checkingUpdates') : t('settings.checkUpdates')}
         </Button>
-        {updateResult && <p role="status" className="font-body text-body-sm text-on-surface-variant">{updateResult}</p>}
+        <Button onClick={() => { void applyAvailableUpdate(); }} disabled={!updateResult?.updateAvailable} className="w-full">
+          Update now
+        </Button>
+        {updateResult?.mode === 'bundled' && (
+          <Button onClick={() => { void updateService.openHostedApp().catch((openError: unknown) => setError(openError instanceof Error ? openError.message : 'Unable to open the hosted app.')); }} variant="secondary" className="w-full">
+            Open hosted app
+          </Button>
+        )}
+        <Button onClick={() => { void forceRefresh(); }} variant="secondary" className="w-full">
+          Force refresh app
+        </Button>
+        <details className="rounded-lg bg-surface-container-low p-3">
+          <summary className="cursor-pointer font-body text-label-md text-on-surface">Update diagnostics</summary>
+          <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-on-surface-variant">
+            {updateResult ? JSON.stringify(updateResult, null, 2) : 'No update check has run yet.'}
+          </pre>
+        </details>
       </section>
 
       {(error || notice) && <p role={error ? 'alert' : 'status'} className={`rounded-lg p-3 font-body text-body-sm ${error ? 'bg-error-container text-on-error-container' : 'bg-success-container text-on-success-container'}`}>{error || notice}</p>}

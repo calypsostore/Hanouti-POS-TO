@@ -6,9 +6,10 @@ import { PosScreen } from './screens/PosScreen';
 import { OrdersScreen } from './screens/OrdersScreen';
 import { ShiftScreen } from './screens/ShiftScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
-import { updateService } from './services/updateService';
+import { updateService, type UpdateCheckResult } from './services/updateService';
 import { notificationService } from './services/notificationService';
-import { UpdateBanner } from './components/UpdateBanner';
+import { UpdateRequiredModal } from './components/UpdateRequiredModal';
+import { PermissionsPrompt } from './components/PermissionsPrompt';
 import { StoreReadOnlyScreen } from './screens/StoreReadOnlyScreen';
 import { useAuthStore } from './stores/authStore';
 import { PERMISSIONS_CHANGED_EVENT, userService } from './services/userService';
@@ -19,6 +20,7 @@ import { t } from './i18n/translations';
 import { StaffDashboardScreen } from './screens/StaffDashboardScreen';
 import { StaffProfileScreen } from './screens/StaffProfileScreen';
 import { LockScreen } from './components/LockScreen';
+import { permissionService } from './services/permissionService';
 
 const OwnerDashboardScreen = lazy(() => import('./screens/OwnerDashboardScreen').then((module) => ({ default: module.OwnerDashboardScreen })));
 const OwnerCatalogScreen = lazy(() => import('./screens/OwnerCatalogScreen').then((module) => ({ default: module.OwnerCatalogScreen })));
@@ -169,10 +171,20 @@ export default function App() {
   const locked = useAuthStore((state) => state.locked);
   const initializationError = useAuthStore((state) => state.initializationError);
   const hydrate = useAuthStore((state) => state.hydrate);
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(() => updateService.getLastResult());
+
+  useEffect(() => updateService.subscribeResults(setUpdateResult), []);
 
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void permissionService.createDefaultChannel().catch((error: unknown) => {
+      console.error('[permissions] Could not create the default notification channel.', error);
+    });
+  }, [ready]);
 
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
@@ -309,7 +321,8 @@ export default function App() {
 
   return (
     <>
-      <UpdateBanner />
+      <UpdateRequiredModal result={updateResult} />
+      <PermissionsPrompt />
       <Suspense fallback={<LoadingScreen message={t('app.loading')} />}>
         <Routes>
           <Route path="/" element={<GuestRoute />} />

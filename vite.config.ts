@@ -54,7 +54,7 @@ export default defineConfig(({ command, mode }) => {
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,txt,webmanifest,woff2}'],
           globIgnores: ['**/version.json'],
-          navigateFallbackDenylist: [/^\/version\.json/, /^\/sw\.js/, /^\/workbox-/],
+          navigateFallbackDenylist: [/^\/api\/update-manifest/, /^\/version\.json/, /^\/sw\.js/, /^\/workbox-/],
         },
         manifest: {
           name: '7anouti-POS',

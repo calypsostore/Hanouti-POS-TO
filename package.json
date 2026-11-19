@@ -1,7 +1,7 @@
 {
   "name": "7anouti-pos",
   "private": true,
-  "version": "1.0.3",
+  "version": "1.0.4",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -24,6 +24,7 @@
     "@capacitor/browser": "^7.0.5",
     "@capacitor/core": "^7.4.3",
     "@capacitor/filesystem": "^7.1.9",
+    "@capacitor/local-notifications": "^7.0.7",
     "@capacitor/share": "^7.0.4",
     "@supabase/supabase-js": "^2.119.2",
     "html2canvas": "^1.4.1",

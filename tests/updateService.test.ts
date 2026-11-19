@@ -1,7 +1,14 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { Capacitor } from '@capacitor/core';
-import { PRODUCTION_URL } from '../src/config/appConfig';
+import { App } from '@capacitor/app';
 import { updateService } from '../src/services/updateService';
+
+const nativeApp = vi.hoisted(() => ({
+  getInfo: vi.fn(),
+  addListener: vi.fn(),
+}));
+
+vi.mock('@capacitor/app', () => ({ App: nativeApp }));
 
 vi.mock('../src/services/notificationService', () => ({
   notificationService: { notifyAppUpdate: vi.fn().mockResolvedValue(undefined) },
@@ -10,7 +17,7 @@ vi.mock('../src/services/notificationService', () => ({
 describe('updateService.checkForUpdates', () => {
   beforeEach(() => {
     localStorage.clear();
-    vi.stubGlobal('__APP_VERSION__', '1.1.0');
+    vi.stubGlobal('__APP_VERSION__', '1.0.4');
     vi.stubGlobal('__BUILD_ID__', 'current-build');
     vi.stubGlobal('window', {
       location: { origin: 'https://hanoutipos.vercel.app', reload: vi.fn() },
@@ -32,7 +39,7 @@ describe('updateService.checkForUpdates', () => {
 
   it('reports the app as up to date when the build IDs match', async () => {
     vi.mocked(fetch).mockResolvedValue(new Response(
-      JSON.stringify({ version: '1.1.0', buildId: 'current-build' }),
+      JSON.stringify({ version: '1.0.4', buildId: 'current-build' }),
       { status: 200 },
     ));
 
@@ -40,9 +47,9 @@ describe('updateService.checkForUpdates', () => {
 
     expect(result).toMatchObject({
       mode: 'web',
-      currentVersion: '1.1.0',
+      currentVersion: '1.0.4',
       currentBuild: 'current-build',
-      latestVersion: '1.1.0',
+      latestVersion: '1.0.4',
       latestBuild: 'current-build',
       updateAvailable: false,
     });
@@ -72,9 +79,10 @@ describe('updateService.checkForUpdates', () => {
       updateAvailable: true,
     });
     expect(workerRegistration.update).toHaveBeenCalledOnce();
+    expect(workerRegistration.waiting.postMessage).not.toHaveBeenCalled();
   });
 
-  it('checks the production site and reports APK requirement for bundled native apps', async () => {
+  it('reports an APK requirement when the release manifest has a newer APK version code', async () => {
     vi.stubGlobal('window', {
       location: { origin: 'https://localhost', reload: vi.fn() },
       setTimeout: (...args: Parameters<typeof setTimeout>) => globalThis.setTimeout(...args),
@@ -83,17 +91,36 @@ describe('updateService.checkForUpdates', () => {
       clearInterval: (...args: Parameters<typeof clearInterval>) => globalThis.clearInterval(...args),
     });
     vi.spyOn(Capacitor, 'isNativePlatform').mockReturnValue(true);
+    vi.mocked(App.getInfo).mockResolvedValue({
+      name: '7anouti-POS',
+      id: 'com.calypsostore.hanouti',
+      version: '1.0.3',
+      build: '10003',
+    });
     vi.mocked(fetch).mockResolvedValue(new Response(
-      JSON.stringify({ version: '1.1.0', buildId: 'deployed-build' }),
+      JSON.stringify({
+        versionCode: 10004,
+        versionName: '1.0.4',
+        apkUrl: 'https://github.com/calypsostore/Hanouti-POS-TO/releases/download/v1.0.4/7anouti-POS-v1.0.4.apk',
+        notes: 'Mandatory updates and notification permissions.',
+      }),
       { status: 200 },
     ));
 
     const result = await updateService.checkForUpdates();
 
-    expect(result).toMatchObject({ mode: 'bundled', updateAvailable: true });
+    expect(result).toMatchObject({
+      mode: 'bundled',
+      currentVersion: '1.0.3',
+      currentBuild: '10003',
+      latestVersion: '1.0.4',
+      latestBuild: '10004',
+      latestApkUrl: 'https://github.com/calypsostore/Hanouti-POS-TO/releases/download/v1.0.4/7anouti-POS-v1.0.4.apk',
+      updateAvailable: true,
+    });
     expect(fetch).toHaveBeenCalledWith(
-      expect.stringMatching(new RegExp(`^${PRODUCTION_URL}/version\\.json\\?t=`)),
-      expect.any(Object),
+      expect.stringMatching(/^https:\/\/hanoutipos\.vercel\.app\/api\/update-manifest\?t=/),
+      expect.objectContaining({ cache: 'no-store' }),
     );
   });
 

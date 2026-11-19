@@ -13,6 +13,8 @@ import { customerService } from './customerService';
 import { userService } from './userService';
 import { getSupabaseClient } from '../data/supabaseClient';
 import { isSupabaseDriver } from '../data/driver';
+import { permissionService } from './permissionService';
+import { useAuthStore } from '../stores/authStore';
 
 export interface CustomerCreditAlert {
   customerId: string;
@@ -27,6 +29,17 @@ const overdueChecks = new Map<string, Promise<number>>();
 
 function notifyChanged(): void {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(OWNER_NOTIFICATIONS_CHANGED_EVENT));
+}
+
+async function showLocalNotificationForActiveUser(notification: NotificationRecord): Promise<void> {
+  if (notification.type === 'app_update') return;
+  const activeUser = useAuthStore.getState().user;
+  if (!activeUser || activeUser.id !== notification.userId) return;
+  try {
+    await permissionService.showLocalNotification(notification.title, notification.body);
+  } catch (error) {
+    console.error('[notifications] Could not show a local notification.', error);
+  }
 }
 
 function getNotifications(): NotificationRecord[] {
@@ -109,6 +122,7 @@ async function createForUser(
     const row = data as Record<string, unknown>;
     const notification = mapNotificationRow(row);
     notifyChanged();
+    await showLocalNotificationForActiveUser(notification);
     return notification;
   }
   const store = await userService.getStore(input.storeId ?? user.storeId ?? '');
@@ -121,6 +135,7 @@ async function createForUser(
   };
   writeData('notifications', [...getNotifications(), notification]);
   notifyChanged();
+  await showLocalNotificationForActiveUser(notification);
   return notification;
 }
 
@@ -335,11 +350,13 @@ export const notificationService = {
         if (isSupabaseDriver()) {
           await Promise.all(additions.map((addition) => createForUser(owner, addition)));
         } else {
-          writeData('notifications', [...existing, ...additions.map((addition) => ({
+          const createdNotifications = additions.map((addition) => ({
             ...addition,
             id: `notification-${crypto.randomUUID()}`,
             createdAt: new Date().toISOString(),
-          }))]);
+          }));
+          writeData('notifications', [...existing, ...createdNotifications]);
+          await Promise.all(createdNotifications.map(showLocalNotificationForActiveUser));
         }
         notifyChanged();
       }
@@ -531,21 +548,27 @@ export const notificationService = {
     });
   },
 
-  async notifyAppUpdate(version: string): Promise<void> {
+  async notifyAppUpdate(version: string, buildId: string): Promise<void> {
     const users = (await userService.listUsers()).filter((user) => user.isActive && (!isSupabaseDriver() || user.storeId));
     const recipients = await Promise.all(users.map(async (user) => {
       const existing = isSupabaseDriver() ? await this.listFor(user) : getNotifications();
       return existing.some((notification) =>
-        notification.type === 'app_update' && notification.userId === user.id && notification.entityId === version,
+        notification.type === 'app_update' && notification.userId === user.id && notification.entityId === buildId,
       ) ? undefined : user;
     }));
+    const body = `Version ${version} (build ${buildId}) is ready to install.`;
     await Promise.all(recipients.filter((user): user is NonNullable<typeof user> => Boolean(user)).map((user) => createForUser(user, {
       type: 'app_update',
-      title: 'New app version available',
-      body: `Version ${version} is ready to install.`,
+      title: 'Update available',
+      body,
       entityType: 'app',
-      entityId: version,
+      entityId: buildId,
     })));
+    try {
+      await permissionService.showLocalNotification('Update available', body);
+    } catch (error) {
+      console.error('[notifications] Could not show the app update notification.', error);
+    }
   },
 
   async listCustomerCreditAlerts(storeId: string): Promise<CustomerCreditAlert[]> {

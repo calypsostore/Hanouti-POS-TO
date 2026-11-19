@@ -4,6 +4,7 @@ import { BottomNav } from '../components/BottomNav';
 import { Button } from '../components/Button';
 import { ChangePersonalPinForm } from '../components/ChangePersonalPinForm';
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
+import { PermissionsSettingsCard } from '../components/PermissionsSettingsCard';
 import { Keypad } from '../components/Keypad';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { MaterialIcon } from '../components/MaterialIcon';
@@ -456,7 +457,7 @@ export function SettingsScreen() {
       : updateResult?.updateAvailable
         ? 'Update available: tap Update now'
         : updateResult
-          ? 'You are up to date'
+          ? `You are up to date (v${updateResult.currentVersion}, build ${updateResult.currentBuild})`
           : 'Not checked yet');
 
   async function handleLogout() {
@@ -759,6 +760,8 @@ export function SettingsScreen() {
           <option value="en">{t('settings.englishOnly')}</option>
         </select>
       </section>
+
+      <PermissionsSettingsCard />
 
       <section className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
         <h2 className="flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="system_update" className="text-primary" />{t('settings.appUpdates')}</h2>

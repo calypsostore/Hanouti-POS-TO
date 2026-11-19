@@ -11,6 +11,8 @@ export interface CustomerCreditAlert {
   message: string;
 }
 
+export const OWNER_NOTIFICATIONS_CHANGED_EVENT = 'owner-notifications-changed';
+
 const getNotifications = () => readData<NotificationRecord[]>('notifications', []);
 const overdueChecks = new Map<string, Promise<number>>();
 
@@ -168,6 +170,23 @@ export const notificationService = {
     return getNotifications()
       .filter((notification) => notification.storeId === storeId && notification.staffId === staffId)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  },
+
+  async markAsRead(storeId: string, staffId: string, notificationId: string): Promise<void> {
+    const notifications = getNotifications();
+    const target = notifications.find((notification) =>
+      notification.id === notificationId &&
+      notification.storeId === storeId &&
+      notification.staffId === staffId,
+    );
+    if (!target) throw new Error('Notification could not be found.');
+    if (target.readAt) return;
+    writeData('notifications', notifications.map((notification) =>
+      notification.id === notificationId
+        ? { ...notification, readAt: new Date().toISOString() }
+        : notification,
+    ));
+    window.dispatchEvent(new Event(OWNER_NOTIFICATIONS_CHANGED_EVENT));
   },
 
   async listCustomerCreditAlerts(storeId: string): Promise<CustomerCreditAlert[]> {

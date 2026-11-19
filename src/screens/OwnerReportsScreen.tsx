@@ -19,7 +19,9 @@ const emptySummary: DashboardSummary = {
   tabsOutstandingMillimes: 0, salesByCategory: [], itemsSold: [], voids: { count: 0, totalMillimes: 0, orders: [] },
   comps: { count: 0, quantity: 0, totalMillimes: 0, records: [] },
   shiftLines: [], paymentSplit: { cash: 0, card: 0, other: 0, tab: 0 }, totalExpectedCashMillimes: 0,
-  totalCountedMillimes: 0, totalDifferenceMillimes: 0, tabsIssuedMillimes: 0, tabsSettledMillimes: 0,
+  totalCountedMillimes: 0, totalDifferenceMillimes: 0, cashSalesMillimes: 0, tabSalesMillimes: 0,
+  tabPaymentsReceivedMillimes: 0, cashFloatMillimes: 0, cashOuts: [], customerTabs: [],
+  tabsIssuedMillimes: 0, tabsSettledMillimes: 0,
 };
 
 function OwnerReportsContent() {

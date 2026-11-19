@@ -72,6 +72,7 @@ export interface StoreRecord {
   allowOtherPayments?: boolean;
   staffAutoLockMinutes?: number;
   cashOutAlertThresholdMillimes?: number;
+  dailySalesTargetMillimes?: number;
   adminPin?: string;
   adminPinHash?: string;
   pinMustChange?: boolean;
@@ -97,6 +98,7 @@ export interface CatalogItemRecord {
   icon: string;
   priceMillimes: number;
   stockCount: number | null;
+  lowStockThreshold?: number;
   description?: string;
   sku?: string;
   modifiers?: CatalogModifierRecord[];
@@ -162,6 +164,7 @@ export interface ShiftRecord {
   closedAt?: string;
   forceClosedByOwner?: boolean;
   closedByUserId?: string;
+  differenceNote?: string;
   voidAdjustments?: ShiftVoidAdjustment[];
 }
 
@@ -239,6 +242,7 @@ export interface ReportVoidLine {
   ticketNumber: number;
   reason: string;
   totalMillimes: number;
+  approvedBy?: string;
 }
 
 export interface ReportCompLine {
@@ -247,6 +251,25 @@ export interface ReportCompLine {
   quantity: number;
   valueMillimes: number;
   reason: CompReason;
+  note?: string;
+  createdAt?: string;
+}
+
+export interface ReportCustomerTabLine {
+  customerId: string;
+  customerName: string;
+  issuedMillimes: number;
+  paymentsMillimes: number;
+  outstandingMillimes: number;
+}
+
+export interface ReportCashOutLine {
+  shiftId: string;
+  staffName: string;
+  reason: CashMovementReason;
+  amountMillimes: number;
+  note?: string;
+  createdAt: string;
 }
 
 export interface ReportShiftLine {
@@ -256,6 +279,10 @@ export interface ReportShiftLine {
   openedAt: string;
   closedAt?: string;
   startingCashMillimes: number;
+  cashSalesMillimes?: number;
+  tabPaymentsMillimes?: number;
+  cashInMillimes?: number;
+  cashOutMillimes?: number;
   expectedCashMillimes?: number;
   countedCashMillimes?: number;
   differenceMillimes?: number;
@@ -286,6 +313,12 @@ export interface ReportRecord {
   totalExpectedCashMillimes?: number;
   totalCountedMillimes?: number;
   totalDifferenceMillimes?: number;
+  cashSalesMillimes?: number;
+  tabSalesMillimes?: number;
+  tabPaymentsReceivedMillimes?: number;
+  cashFloatMillimes?: number;
+  cashOuts?: ReportCashOutLine[];
+  customerTabs?: ReportCustomerTabLine[];
   tabsIssuedMillimes?: number;
   tabsSettledMillimes?: number;
   tabsOutstandingMillimes?: number;

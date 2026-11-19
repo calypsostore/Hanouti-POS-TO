@@ -16,9 +16,10 @@ import { orderService } from '../services/orderService';
 import { customerService } from '../services/customerService';
 import { notificationService } from '../services/notificationService';
 import { shareCustomerStatement } from '../services/customerStatementShare';
+import { catalogService } from '../services/catalogService';
 import { useAuthStore } from '../stores/authStore';
 import type { CustomerStatementData, OverdueCustomerRecord } from '../services/customerService';
-import type { NotificationRecord, OrderRecord, ShiftRecord, StoreRecord, UserSummary } from '../types/domain';
+import type { CatalogItemRecord, NotificationRecord, OrderRecord, ShiftRecord, StoreRecord, UserSummary } from '../types/domain';
 
 type Period = 'day' | 'week' | 'month' | 'year';
 
@@ -47,6 +48,12 @@ const emptySummary: DashboardSummary = {
   totalExpectedCashMillimes: 0,
   totalCountedMillimes: 0,
   totalDifferenceMillimes: 0,
+  cashSalesMillimes: 0,
+  tabSalesMillimes: 0,
+  tabPaymentsReceivedMillimes: 0,
+  cashFloatMillimes: 0,
+  cashOuts: [],
+  customerTabs: [],
   tabsIssuedMillimes: 0,
   tabsSettledMillimes: 0,
 };
@@ -58,9 +65,12 @@ function OwnerDashboardContent() {
   const [store, setStore] = useState<StoreRecord>();
   const [period, setPeriod] = useState<Period>('day');
   const [summary, setSummary] = useState<DashboardSummary>(emptySummary);
-  const [todaySummary, setTodaySummary] = useState<DashboardSummary>(emptySummary);
   const [periodOrders, setPeriodOrders] = useState<OrderRecord[]>([]);
+  const [todaySalesMillimes, setTodaySalesMillimes] = useState(0);
+  const [lastWeekSalesMillimes, setLastWeekSalesMillimes] = useState(0);
   const [staff, setStaff] = useState<UserSummary[]>([]);
+  const [catalogItems, setCatalogItems] = useState<CatalogItemRecord[]>([]);
+  const [pendingVoidOrders, setPendingVoidOrders] = useState<OrderRecord[]>([]);
   const [overdueCustomers, setOverdueCustomers] = useState<OverdueCustomerRecord[]>([]);
   const [ownerNotifications, setOwnerNotifications] = useState<NotificationRecord[]>([]);
   const [overdueStatement, setOverdueStatement] = useState<CustomerStatementData | null>(null);
@@ -70,18 +80,23 @@ function OwnerDashboardContent() {
   useEffect(() => {
     let active = true;
     async function loadDashboard() {
-      const [nextSummary, allOrders, allUsers, nextStore, nextOverdueCustomers] = await Promise.all([
+      const [nextSummary, allOrders, allUsers, nextStore, nextOverdueCustomers, nextCatalogItems] = await Promise.all([
         reportService.getDashboard(storeId, 'day'),
         orderService.listAll(storeId),
         userService.listUsers(storeId),
         userService.getStore(storeId),
         customerService.listOverdueCustomers(storeId),
+        catalogService.listItems(storeId),
       ]);
       if (!active) return;
       setSummary(nextSummary);
-      setTodaySummary(nextSummary);
       setPeriodOrders(filterOrdersForPeriod(allOrders, 'day'));
+      const salesComparison = getTodaySalesComparison(allOrders);
+      setTodaySalesMillimes(salesComparison.today);
+      setLastWeekSalesMillimes(salesComparison.lastWeek);
       setStaff(allUsers.filter((member) => member.role === 'staff'));
+      setCatalogItems(nextCatalogItems);
+      setPendingVoidOrders(allOrders.filter((order) => order.status === 'pending_void'));
       setStore(nextStore);
       setOverdueCustomers(nextOverdueCustomers);
 
@@ -131,25 +146,38 @@ function OwnerDashboardContent() {
   }
 
   async function selectPeriod(nextPeriod: Period) {
-    setPeriod(nextPeriod);
-    const [nextSummary, allOrders] = await Promise.all([
-      reportService.getDashboard(storeId, nextPeriod),
-      orderService.listAll(storeId),
-    ]);
-    setSummary(nextSummary);
-    setPeriodOrders(filterOrdersForPeriod(allOrders, nextPeriod));
+    try {
+      const [nextSummary, allOrders] = await Promise.all([
+        reportService.getDashboard(storeId, nextPeriod),
+        orderService.listAll(storeId),
+      ]);
+      setSummary(nextSummary);
+      setPeriodOrders(filterOrdersForPeriod(allOrders, nextPeriod));
+      setPendingVoidOrders(allOrders.filter((order) => order.status === 'pending_void'));
+      setPeriod(nextPeriod);
+      setOverdueActionError('');
+    } catch (loadError) {
+      console.error('Unable to load the selected dashboard period.', loadError);
+      setOverdueActionError(loadError instanceof Error ? loadError.message : 'Unable to load the selected period.');
+    }
   }
 
-  const topItems = summary.itemsSold?.length
-    ? summary.itemsSold
-      .map((item) => ({ name: item.name, quantity: item.quantity, sales: item.totalMillimes / 1000 }))
-      .sort((a, b) => b.quantity - a.quantity)
-      .slice(0, 5)
-    : Object.entries(summary.topItems)
-      .map(([name, quantity]) => ({ name, quantity, sales: 0 }))
-      .sort((a, b) => b.quantity - a.quantity)
-      .slice(0, 5);
-  const closedShifts = summary.shifts.filter((shift) => shift.status === 'closed');
+  const itemSales = new Map((summary.itemsSold ?? []).map((item) => [item.itemId, item]));
+  const rankedItems = catalogItems.map((item) => ({
+    id: item.id,
+    name: item.name,
+    quantity: itemSales.get(item.id)?.quantity ?? 0,
+    totalMillimes: itemSales.get(item.id)?.totalMillimes ?? 0,
+  })).sort((left, right) => right.quantity - left.quantity || left.name.localeCompare(right.name));
+  const bestSellers = rankedItems.filter((item) => item.quantity > 0).slice(0, 5);
+  const bestSellerIds = new Set(bestSellers.map((item) => item.id));
+  const slowSellers = rankedItems
+    .filter((item) => !bestSellerIds.has(item.id))
+    .sort((left, right) => left.quantity - right.quantity || left.name.localeCompare(right.name))
+    .slice(0, 5);
+  const lowStockItems = catalogItems.filter((item) =>
+    item.stockCount !== null && item.stockCount <= (item.lowStockThreshold ?? 5),
+  ).sort((left, right) => (left.stockCount ?? 0) - (right.stockCount ?? 0));
   const openShifts = summary.shifts.filter((shift) => shift.status === 'open');
   const currentlyWorking = openShifts.filter((shift, index, all) =>
     all.findIndex((candidate) => candidate.staffId === shift.staffId) === index,
@@ -166,8 +194,17 @@ function OwnerDashboardContent() {
     return [...totals.values()].sort((a, b) => b.sales - a.sales);
   }, [periodOrders, staff]);
   const recentOrders = periodOrders.slice(0, 6);
-  const todayKey = toBusinessDate(new Date());
-  const dayClosed = store?.dayClosedOn === todayKey && openShifts.length === 0;
+  const peakHours = useMemo(() => getOrdersPerHour(periodOrders), [periodOrders]);
+  const targetMillimes = store?.dailySalesTargetMillimes ?? 0;
+  const targetProgress = targetMillimes > 0 ? Math.round(todaySalesMillimes / targetMillimes * 100) : 0;
+  const targetProgressWidth = Math.min(100, targetProgress);
+  const salesDifference = todaySalesMillimes - lastWeekSalesMillimes;
+  const salesDifferencePercent = lastWeekSalesMillimes > 0
+    ? Math.round(salesDifference / lastWeekSalesMillimes * 100)
+    : undefined;
+  const salesComparisonLabel = salesDifferencePercent === undefined
+    ? (todaySalesMillimes > 0 ? t('owner.newSalesLastWeek') : t('owner.noSalesLastWeek'))
+    : `${salesDifference >= 0 ? '+' : '-'}${formatTnd(Math.abs(salesDifference) / 1000)} DT (${salesDifferencePercent > 0 ? '+' : ''}${salesDifferencePercent}%) ${t('owner.vsLastWeek')}`;
 
   return (
     <>
@@ -186,13 +223,90 @@ function OwnerDashboardContent() {
         </div>
       </div>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        <SummaryCard icon="payments" label="Today's sales" value={`${formatTnd(todaySummary.salesMillimes / 1000)} DT`} tone="primary" />
-        <SummaryCard icon="receipt_long" label="Today's orders" value={String(todaySummary.orderCount)} tone="success" />
-        <SummaryCard icon="groups" label="Currently working staff" value={String(currentlyWorking.length)} tone="primary" />
-        <SummaryCard icon="schedule" label="Open shifts" value={String(openShifts.length)} tone="warning" />
-        <SummaryCard icon="lock_clock" label="Closed shifts" value={String(closedShifts.length)} tone="success" />
-        <SummaryCard icon={dayClosed ? 'lock' : 'storefront'} label="Business day" value={dayClosed ? 'Closed' : openShifts.length ? 'Open' : 'No open shift'} tone={dayClosed ? 'error' : openShifts.length ? 'success' : 'warning'} />
+      <article className="rounded-2xl bg-surface-container-lowest p-5 shadow-card">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="font-display text-headline-md text-on-surface">{t('owner.salesTarget')}</h2>
+            <p className="mt-1 font-body text-body-sm text-on-surface-variant">
+              Today · {formatTnd(todaySalesMillimes / 1000)} DT
+              {targetMillimes > 0 && ` / ${formatTnd(targetMillimes / 1000)} DT`}
+            </p>
+          </div>
+          <MaterialIcon name="flag" className="shrink-0 text-2xl text-primary" />
+        </div>
+        {targetMillimes > 0 ? (
+          <>
+            <div
+              role="progressbar"
+              aria-label={t('owner.salesTarget')}
+              aria-valuemin={0}
+              aria-valuemax={targetMillimes}
+              aria-valuenow={Math.min(todaySalesMillimes, targetMillimes)}
+              className="mt-4 h-3 overflow-hidden rounded-full bg-surface-container"
+            >
+              <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${targetProgressWidth}%` }} />
+            </div>
+            <p className="mt-2 font-body text-label-md text-on-surface">{t('owner.salesProgress', { progress: targetProgress })}</p>
+          </>
+        ) : (
+          <button type="button" onClick={() => navigate('/owner/settings')} className="mt-3 min-h-12 text-left font-body text-label-md text-primary underline">
+            {t('owner.targetNotSet')}
+          </button>
+        )}
+        <p className="mt-2 font-body text-body-sm text-on-surface-variant">{salesComparisonLabel}</p>
+      </article>
+
+      <section aria-label="Period summary" className="mt-4 flex flex-col gap-3">
+        <SummaryCard icon="payments" label={`Sales · ${t(periodLabels[period])}`} value={`${formatTnd(summary.salesMillimes / 1000)} DT`} tone="primary" />
+        <SummaryCard icon="receipt_long" label={`Orders · ${t(periodLabels[period])}`} value={String(summary.orderCount)} tone="success" />
+        <SummaryCard icon="price_change" label={`${t('owner.cashDifferences')} · ${t(periodLabels[period])}`} value={formatSignedAmount(summary.cashDifferenceMillimes)} tone={summary.cashDifferenceMillimes === 0 ? 'success' : 'warning'} />
+      </section>
+
+      <section aria-label="Owner alerts" className="mt-4 flex flex-col gap-3">
+        <button type="button" onClick={() => navigate('/owner/voids')} className="w-full rounded-2xl bg-surface-container-lowest p-5 text-left shadow-card">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-display text-headline-md text-on-surface">{t('owner.pendingVoidRequests')}</h2>
+            <strong className="font-display text-headline-md tabular-nums text-error-dark">{pendingVoidOrders.length}</strong>
+          </div>
+          {pendingVoidOrders.length > 0 ? (
+            <p className="mt-2 font-body text-body-sm text-on-surface-variant">
+              {pendingVoidOrders.slice(0, 3).map((order) => `#${order.number}`).join(' · ')}
+            </p>
+          ) : <p className="mt-2 font-body text-body-sm text-on-surface-variant">No requests awaiting review.</p>}
+        </button>
+
+        <button type="button" onClick={() => navigate('/owner/inventory')} className="w-full rounded-2xl bg-surface-container-lowest p-5 text-left shadow-card">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-display text-headline-md text-on-surface">{t('owner.lowStockItems')}</h2>
+            <strong className="font-display text-headline-md tabular-nums text-warning-dark">{lowStockItems.length}</strong>
+          </div>
+          {lowStockItems.length > 0 ? (
+            <ul className="mt-2 flex flex-col gap-1">
+              {lowStockItems.slice(0, 4).map((item) => (
+                <li key={item.id} className="flex min-w-0 justify-between gap-3 font-body text-body-sm text-on-surface-variant">
+                  <span className="truncate">{item.name}</span>
+                  <span className="shrink-0 tabular-nums">{item.stockCount ?? 0} / {item.lowStockThreshold ?? 5}</span>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="mt-2 font-body text-body-sm text-on-surface-variant">No items below their stock thresholds.</p>}
+        </button>
+
+        <article className="rounded-2xl bg-surface-container-lowest p-5 shadow-card">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-display text-headline-md text-on-surface">{t('owner.staffOnShift')}</h2>
+            <strong className="font-display text-headline-md tabular-nums text-primary">{currentlyWorking.length}</strong>
+          </div>
+          <div className="mt-2 flex flex-col gap-2">
+            {currentlyWorking.map((shift) => (
+              <p key={shift.id} className="flex justify-between gap-3 font-body text-body-sm text-on-surface-variant">
+                <span>{staff.find((member) => member.id === shift.staffId)?.name ?? 'Staff'}</span>
+                <span className="shrink-0">{new Date(shift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              </p>
+            ))}
+            {currentlyWorking.length === 0 && <p className="font-body text-body-sm text-on-surface-variant">{t('owner.noStaffOnShift')}</p>}
+          </div>
+        </article>
       </section>
 
       {ownerNotifications.length > 0 && (
@@ -205,11 +319,11 @@ function OwnerDashboardContent() {
         </section>
       )}
 
-      <section aria-label="Overdue customers" className="mt-4 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+      <section aria-label={t('owner.overdueTabs')} className="mt-4 rounded-2xl bg-surface-container-lowest p-5 shadow-card">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="flex items-center gap-2 font-display text-headline-md text-on-surface">
-              <MaterialIcon name="event_busy" className="text-error-dark" />Overdue customers
+              <MaterialIcon name="event_busy" className="text-error-dark" />{t('owner.overdueTabs')}
             </h2>
             <p className="mt-1 font-body text-body-sm text-on-surface-variant">
               {overdueCustomers.length} customer{overdueCustomers.length === 1 ? '' : 's'} past their settlement due date
@@ -235,27 +349,41 @@ function OwnerDashboardContent() {
         <p className="mt-3 font-body text-body-xs text-on-surface-variant">Share opens your device or browser share sheet. No message is sent automatically.</p>
       </section>
 
-      <section className="mt-4 grid gap-4 xl:grid-cols-2">
+      <section className="mt-4 flex flex-col gap-3">
         <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-          <h2 className="mb-4 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="trending_up" className="text-primary" />Best-selling products</h2>
-          <p className="mb-3 font-body text-body-sm text-on-surface-variant">Based on completed orders for the selected period</p>
-          {topItems.length ? (
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={topItems} margin={{ left: 0, right: 12, top: 8, bottom: 8 }}>
-                  <CartesianGrid stroke="#E1ECEE" vertical={false} />
-                  <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                  <Tooltip />
-                  <Bar dataKey="quantity" name="Units sold" fill="#0F5F6E" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          ) : <p className="rounded-xl bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('common.noData')}</p>}
+          <h2 className="font-display text-headline-md text-on-surface">{t('owner.peakHours')} · {t(periodLabels[period])}</h2>
+          <p className="mt-1 font-body text-body-sm text-on-surface-variant">Completed orders by hour of day.</p>
+          <div className="mt-3 h-64 min-w-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={peakHours} margin={{ left: 0, right: 8, top: 8, bottom: 8 }}>
+                <CartesianGrid stroke="#E1ECEE" vertical={false} />
+                <XAxis dataKey="hour" tick={{ fontSize: 10 }} interval={2} tickFormatter={formatHour} />
+                <YAxis allowDecimals={false} width={28} tick={{ fontSize: 10 }} />
+                <Tooltip labelFormatter={(hour) => formatHour(Number(hour))} />
+                <Bar dataKey="orders" name="Orders" fill="#0F5F6E" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </article>
+
+        <article className="rounded-2xl bg-surface-container-lowest p-5 shadow-card">
+          <h2 className="font-display text-headline-md text-on-surface">{t('owner.bestSellers')} · {t(periodLabels[period])}</h2>
+          <p className="mt-1 font-body text-body-sm text-on-surface-variant">Completed product sales for the selected period.</p>
+          {bestSellers.length ? (
+            <ItemRankingList items={bestSellers} />
+          ) : <p className="mt-3 rounded-xl bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('owner.noItemsSold')}</p>}
+        </article>
+
+        <article className="rounded-2xl bg-surface-container-lowest p-5 shadow-card">
+          <h2 className="font-display text-headline-md text-on-surface">{t('owner.slowSellers')} · {t(periodLabels[period])}</h2>
+          <p className="mt-1 font-body text-body-sm text-on-surface-variant">Products with the fewest completed sales, including unsold items.</p>
+          {slowSellers.length ? (
+            <ItemRankingList items={slowSellers} />
+          ) : <p className="mt-3 rounded-xl bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('owner.noItemsSold')}</p>}
         </article>
 
         <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-          <h2 className="mb-4 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="group" className="text-primary" />Sales by staff member</h2>
+          <h2 className="mb-3 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="group" className="text-primary" />Sales by staff member · {t(periodLabels[period])}</h2>
           {salesByStaff.length ? (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
@@ -272,7 +400,7 @@ function OwnerDashboardContent() {
         </article>
       </section>
 
-      <section className="mt-4 grid gap-4 xl:grid-cols-[1.35fr_0.65fr]">
+      <section className="mt-4 flex flex-col gap-3">
         <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
           <h2 className="mb-4 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="receipt_long" className="text-primary" />Recent orders</h2>
           <div className="flex flex-col gap-2">
@@ -306,7 +434,7 @@ function OwnerDashboardContent() {
 
       <section className="mt-4">
         <h2 className="mb-3 font-display text-headline-md text-on-surface">Quick access</h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+        <div className="flex flex-col gap-3">
           {[
             { label: 'Orders', icon: 'receipt_long', to: '/orders' },
             { label: 'Staff', icon: 'groups', to: '/owner/staff' },
@@ -314,7 +442,7 @@ function OwnerDashboardContent() {
             { label: 'Inventory', icon: 'inventory', to: '/owner/inventory' },
             { label: 'Reports', icon: 'analytics', to: '/owner/reports' },
           ].map((item) => (
-            <button key={item.label} type="button" onClick={() => navigate(item.to)} className="flex min-h-24 items-center gap-3 rounded-2xl bg-surface-container-lowest p-4 text-left shadow-card">
+            <button key={item.label} type="button" onClick={() => navigate(item.to)} className="flex min-h-24 w-full items-center gap-3 rounded-2xl bg-surface-container-lowest p-5 text-left shadow-card">
               <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-fixed text-primary"><MaterialIcon name={item.icon} /></span>
               <span className="font-body text-label-lg text-on-surface">{item.label}</span>
             </button>
@@ -371,8 +499,64 @@ function ShiftSummary({ shift }: { shift: ShiftRecord }) {
   );
 }
 
-function toBusinessDate(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+function getTodaySalesComparison(orders: OrderRecord[]) {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayEnd = Date.now();
+  const previousWeekStart = new Date(todayStart);
+  previousWeekStart.setDate(previousWeekStart.getDate() - 7);
+  const previousWeekEnd = new Date(previousWeekStart);
+  previousWeekEnd.setDate(previousWeekEnd.getDate() + 1);
+  const salesBetween = (start: number, end: number) => orders
+    .filter((order) => {
+      const timestamp = new Date(order.createdAt).getTime();
+      return order.status === 'done' && timestamp >= start && timestamp < end;
+    })
+    .reduce((sum, order) => sum + order.totalMillimes, 0);
+  return {
+    today: salesBetween(todayStart.getTime(), todayEnd),
+    lastWeek: salesBetween(previousWeekStart.getTime(), previousWeekEnd.getTime()),
+  };
+}
+
+function getOrdersPerHour(orders: OrderRecord[]) {
+  const counts = Array.from({ length: 24 }, () => 0);
+  for (const order of orders) {
+    if (order.status === 'done') counts[new Date(order.createdAt).getHours()] += 1;
+  }
+  return counts.map((count, hour) => ({ hour, orders: count }));
+}
+
+function formatHour(hour: number) {
+  const suffix = hour < 12 ? 'AM' : 'PM';
+  const clockHour = hour % 12 || 12;
+  return `${clockHour} ${suffix}`;
+}
+
+function formatSignedAmount(amountMillimes: number) {
+  const sign = amountMillimes > 0 ? '+' : amountMillimes < 0 ? '-' : '';
+  return `${sign}${formatTnd(Math.abs(amountMillimes) / 1000)} DT`;
+}
+
+function ItemRankingList({ items }: {
+  items: { id: string; name: string; quantity: number; totalMillimes: number }[];
+}) {
+  return (
+    <ol className="mt-3 flex flex-col gap-2">
+      {items.map((item, index) => (
+        <li key={item.id} className="flex min-w-0 items-center justify-between gap-3 rounded-xl bg-surface-container-low p-3">
+          <span className="flex min-w-0 items-center gap-3">
+            <strong className="font-display text-title-md text-primary">{index + 1}</strong>
+            <span className="truncate font-body text-label-md text-on-surface">{item.name}</span>
+          </span>
+          <span className="shrink-0 text-right">
+            <strong className="block font-body text-label-md tabular-nums text-on-surface">{t('owner.unitsSold', { count: item.quantity })}</strong>
+            <span className="font-body text-body-xs tabular-nums text-on-surface-variant">{formatTnd(item.totalMillimes / 1000)} DT</span>
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
 }
 
 function filterOrdersForPeriod(orders: OrderRecord[], period: Period) {
@@ -381,8 +565,12 @@ function filterOrdersForPeriod(orders: OrderRecord[], period: Period) {
   if (period === 'week') start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
   else if (period === 'month') start.setDate(1);
   else if (period === 'year') start.setMonth(0, 1);
+  const end = Date.now();
   return orders
-    .filter((order) => new Date(order.createdAt).getTime() >= start.getTime())
+    .filter((order) => {
+      const timestamp = new Date(order.createdAt).getTime();
+      return timestamp >= start.getTime() && timestamp <= end;
+    })
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 

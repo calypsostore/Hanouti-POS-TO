@@ -81,6 +81,14 @@ export const offlineOrderQueue: OfflineOrderQueue = {
   },
 };
 
+export interface ShiftSalesBreakdown {
+  orderCount: number;
+  cashSalesMillimes: number;
+  tabSalesMillimes: number;
+  tabPaymentsMillimes: number;
+  voidsMillimes: number;
+}
+
 export const orderService = {
   async listToday(storeId: string, staffId?: string): Promise<OrderRecord[]> {
     const start = todayStart();
@@ -316,9 +324,13 @@ export const orderService = {
   },
 
   async getCashSalesForShift(shiftId: string): Promise<number> {
-    const orderSales = getOrders()
-      .filter((order) => order.shiftId === shiftId && order.status === 'done' && order.paymentMethod === 'cash')
-      .reduce((sum, order) => sum + order.totalMillimes, 0);
+    const breakdown = await this.getShiftSalesBreakdown(shiftId);
+    return breakdown.cashSalesMillimes + breakdown.tabPaymentsMillimes;
+  },
+
+  async getShiftSalesBreakdown(shiftId: string): Promise<ShiftSalesBreakdown> {
+    const shiftOrders = getOrders().filter((order) => order.shiftId === shiftId);
+    const completedOrders = shiftOrders.filter((order) => order.status === 'done');
     const shiftTabPayments = readData<TabRecord[]>('tabs', [])
       .filter((tab) => tab.shiftId === shiftId);
     const settlements = shiftTabPayments
@@ -327,7 +339,19 @@ export const orderService = {
     const reversals = shiftTabPayments
       .filter((tab) => tab.kind === 'reversal')
       .reduce((sum, tab) => sum + tab.amountMillimes, 0);
-    return orderSales + settlements - reversals;
+    return {
+      orderCount: completedOrders.length,
+      cashSalesMillimes: completedOrders
+        .filter((order) => order.paymentMethod === 'cash')
+        .reduce((sum, order) => sum + order.totalMillimes, 0),
+      tabSalesMillimes: completedOrders
+        .filter((order) => order.paymentMethod === 'tab')
+        .reduce((sum, order) => sum + order.totalMillimes, 0),
+      tabPaymentsMillimes: settlements - reversals,
+      voidsMillimes: shiftOrders
+        .filter((order) => order.status === 'voided')
+        .reduce((sum, order) => sum + order.totalMillimes, 0),
+    };
   },
 
   async getPendingVoidCountForShift(shiftId: string): Promise<number> {

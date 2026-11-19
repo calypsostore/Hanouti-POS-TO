@@ -15,7 +15,7 @@ const makeId = (kind: string) => `${kind}-${crypto.randomUUID()}`;
 
 async function updateCatalogItem(
   itemId: string,
-  changes: Partial<Pick<CatalogItemRecord, 'name' | 'categoryId' | 'icon' | 'priceMillimes' | 'stockCount' | 'description' | 'sku' | 'modifiers' | 'modifierGroupName' | 'modifiersRequired' | 'modifierSelectionMode' | 'outOfStock' | 'isActive'>>,
+  changes: Partial<Pick<CatalogItemRecord, 'name' | 'categoryId' | 'icon' | 'priceMillimes' | 'stockCount' | 'lowStockThreshold' | 'description' | 'sku' | 'modifiers' | 'modifierGroupName' | 'modifiersRequired' | 'modifierSelectionMode' | 'outOfStock' | 'isActive'>>,
   actor?: CatalogActor,
   notifyOnStockDepletion = true,
 ): Promise<CatalogItemRecord> {
@@ -29,6 +29,10 @@ async function updateCatalogItem(
   if (changes.stockCount !== undefined && changes.stockCount !== null &&
     (!Number.isInteger(changes.stockCount) || changes.stockCount < 0)) {
     throw new Error('Stock count must be a non-negative whole number.');
+  }
+  if (changes.lowStockThreshold !== undefined &&
+    (!Number.isInteger(changes.lowStockThreshold) || changes.lowStockThreshold < 0)) {
+    throw new Error('Low-stock threshold must be a non-negative whole number.');
   }
   const stockReachedZero = changes.stockCount === 0 && item.stockCount !== 0;
   const resultingStockCount = changes.stockCount !== undefined ? changes.stockCount : item.stockCount;
@@ -104,6 +108,10 @@ export const catalogService = {
 
   async createItem(input: Omit<CatalogItemRecord, 'id'>): Promise<CatalogItemRecord> {
     if (!input.name.trim() || input.priceMillimes < 0) throw new Error('Item name and a valid non-negative price are required.');
+    if (input.lowStockThreshold !== undefined &&
+      (!Number.isInteger(input.lowStockThreshold) || input.lowStockThreshold < 0)) {
+      throw new Error('Low-stock threshold must be a non-negative whole number.');
+    }
     const item = { ...input, id: makeId('item'), name: input.name.trim() };
     writeData('catalog-items', [...getItems(), item]);
     return item;
@@ -111,7 +119,7 @@ export const catalogService = {
 
   async updateItem(
     itemId: string,
-    changes: Partial<Pick<CatalogItemRecord, 'name' | 'categoryId' | 'icon' | 'priceMillimes' | 'stockCount' | 'description' | 'sku' | 'modifiers' | 'modifierGroupName' | 'modifiersRequired' | 'modifierSelectionMode' | 'outOfStock' | 'isActive'>>,
+    changes: Partial<Pick<CatalogItemRecord, 'name' | 'categoryId' | 'icon' | 'priceMillimes' | 'stockCount' | 'lowStockThreshold' | 'description' | 'sku' | 'modifiers' | 'modifierGroupName' | 'modifiersRequired' | 'modifierSelectionMode' | 'outOfStock' | 'isActive'>>,
     actor?: CatalogActor,
   ): Promise<CatalogItemRecord> {
     return await updateCatalogItem(itemId, changes, actor);

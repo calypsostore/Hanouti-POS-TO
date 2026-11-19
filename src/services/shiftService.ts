@@ -128,25 +128,28 @@ export const shiftService = {
     return shift;
   },
 
-  async closeShift(shiftId: string, countedCashMillimes: number): Promise<ShiftRecord> {
+  async closeShift(shiftId: string, countedCashMillimes: number, differenceNote?: string): Promise<ShiftRecord> {
     if (!Number.isInteger(countedCashMillimes) || countedCashMillimes < 0) throw new Error('Counted cash must be a non-negative amount in millimes.');
     const shifts = getShifts();
     const shift = shifts.find((candidate) => candidate.id === shiftId && candidate.status === 'open');
     if (!shift) throw new Error('Open shift could not be found.');
     const expectedCashMillimes = await this.getExpectedCash(shiftId);
+    const differenceMillimes = countedCashMillimes - expectedCashMillimes;
+    const cleanedDifferenceNote = validateDifferenceNote(differenceMillimes, differenceNote);
     const updated: ShiftRecord = {
       ...shift,
       status: 'closed',
       countedCashMillimes,
       expectedCashMillimes,
-      differenceMillimes: countedCashMillimes - expectedCashMillimes,
+      differenceMillimes,
+      differenceNote: cleanedDifferenceNote,
       closedAt: new Date().toISOString(),
     };
     saveShifts(shifts.map((candidate) => candidate.id === shiftId ? updated : candidate));
     return updated;
   },
 
-  async forceCloseShift(shiftId: string, ownerId: string, countedCashMillimes: number): Promise<ShiftRecord> {
+  async forceCloseShift(shiftId: string, ownerId: string, countedCashMillimes: number, differenceNote?: string): Promise<ShiftRecord> {
     if (!Number.isInteger(countedCashMillimes) || countedCashMillimes < 0) throw new Error('Counted cash must be a non-negative amount in millimes.');
     const shifts = getShifts();
     const shift = shifts.find((candidate) => candidate.id === shiftId && candidate.status === 'open');
@@ -154,12 +157,15 @@ export const shiftService = {
     const store = await userService.getStore(shift.storeId);
     if (!store || store.ownerId !== ownerId) throw new Error('Only this store owner can force-close the shift.');
     const expectedCashMillimes = await this.getExpectedCash(shiftId);
+    const differenceMillimes = countedCashMillimes - expectedCashMillimes;
+    const cleanedDifferenceNote = validateDifferenceNote(differenceMillimes, differenceNote);
     const updated: ShiftRecord = {
       ...shift,
       status: 'closed',
       countedCashMillimes,
       expectedCashMillimes,
-      differenceMillimes: countedCashMillimes - expectedCashMillimes,
+      differenceMillimes,
+      differenceNote: cleanedDifferenceNote,
       closedAt: new Date().toISOString(),
       forceClosedByOwner: true,
       closedByUserId: ownerId,
@@ -188,3 +194,10 @@ export const shiftService = {
     return getShifts().find((shift) => shift.id === shiftId);
   },
 };
+
+function validateDifferenceNote(differenceMillimes: number, note?: string): string | undefined {
+  const cleanedNote = note?.trim();
+  if (differenceMillimes !== 0 && !cleanedNote) throw new Error('Add a short note explaining the cash difference.');
+  if (cleanedNote && cleanedNote.length > 200) throw new Error('Cash difference note must be 200 characters or fewer.');
+  return cleanedNote || undefined;
+}

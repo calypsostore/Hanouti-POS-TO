@@ -4,6 +4,12 @@ import { readData, writeData } from './storage';
 const getEntries = () => readData<ActivityLogRecord[]>('activity-logs', []);
 
 export const activityLogService = {
+  async listForStore(storeId: string): Promise<ActivityLogRecord[]> {
+    return getEntries()
+      .filter((entry) => entry.storeId === storeId)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  },
+
   async recordCustomerPaymentReversal(
     input: Omit<Extract<ActivityLogRecord, { action: 'customer_payment_reversed' }>, 'id' | 'createdAt'>,
   ): Promise<ActivityLogRecord> {

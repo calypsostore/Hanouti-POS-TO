@@ -418,11 +418,22 @@ export const userService = {
     return result.valid;
   },
 
-  async updateStoreInfo(storeId: string, changes: { name?: string }): Promise<StoreRecord> {
+  async updateStoreInfo(
+    storeId: string,
+    ownerId: string,
+    changes: { name?: string; dailySalesTargetMillimes?: number },
+  ): Promise<StoreRecord> {
     const stores = getStores();
     const store = stores.find((candidate) => candidate.id === storeId);
-    if (!store) throw new Error('The store could not be found.');
+    const owner = getUsers().find((candidate) => candidate.id === ownerId);
+    if (!store || !owner || owner.role !== 'owner' || store.ownerId !== owner.id || owner.storeId !== store.id) {
+      throw new Error('Only this store owner can update store information.');
+    }
     if (changes.name !== undefined && !changes.name.trim()) throw new Error('Store name is required.');
+    if (changes.dailySalesTargetMillimes !== undefined &&
+      (!Number.isSafeInteger(changes.dailySalesTargetMillimes) || changes.dailySalesTargetMillimes < 0)) {
+      throw new Error('Daily sales target must be a non-negative amount in millimes.');
+    }
     const updated = { ...store, ...changes, name: changes.name?.trim() ?? store.name };
     saveStores(stores.map((candidate) => candidate.id === storeId ? updated : candidate));
     return updated;

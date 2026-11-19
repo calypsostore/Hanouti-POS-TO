@@ -10,12 +10,29 @@ import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { formatTnd } from '../lib/format';
 import { orderService } from '../services/orderService';
 import { CashMovementNotificationError, shiftService } from '../services/shiftService';
+import { compService } from '../services/compService';
 import { userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
 import type { CashMovementReason, CashMovementRecord, ShiftRecord } from '../types/domain';
 import { t } from '../i18n/translations';
 import { ownerWorkspaceLinks } from '../app/navigation';
 import { updateService } from '../services/updateService';
+import type { ShiftSalesBreakdown } from '../services/orderService';
+
+type ShiftCloseBreakdown = ShiftSalesBreakdown & {
+  pendingVoidCount: number;
+  compsMillimes: number;
+};
+
+const emptyShiftBreakdown: ShiftCloseBreakdown = {
+  orderCount: 0,
+  cashSalesMillimes: 0,
+  tabSalesMillimes: 0,
+  tabPaymentsMillimes: 0,
+  voidsMillimes: 0,
+  pendingVoidCount: 0,
+  compsMillimes: 0,
+};
 
 function parseTnd(value: string): number {
   const parsed = Number(value.trim().replace(',', '.'));
@@ -31,7 +48,7 @@ const cashMovementReasons: { reason: CashMovementReason; label: string }[] = [
   { reason: 'other', label: 'Other' },
 ];
 
-function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
+function ShiftContent({ ownerMode, ownerView }: { ownerMode: boolean; ownerView?: 'expenses' | 'suppliers' }) {
   const user = useAuthStore((state) => state.user);
   const storeId = user?.storeId ?? '';
   const [shifts, setShifts] = useState<ShiftRecord[]>([]);
@@ -39,15 +56,15 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const [startingCash, setStartingCash] = useState('50.000');
   const [startingCashEdited, setStartingCashEdited] = useState(false);
   const [countedCash, setCountedCash] = useState('');
+  const [differenceNote, setDifferenceNote] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [store, setStore] = useState<Awaited<ReturnType<typeof userService.getStore>>>();
-  const [cashSales, setCashSales] = useState(0);
-  const [expectedCash, setExpectedCash] = useState(0);
-  const [pendingVoidCount, setPendingVoidCount] = useState(0);
+  const [breakdownsByShift, setBreakdownsByShift] = useState<Record<string, ShiftCloseBreakdown>>({});
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
   const [forceCountedCash, setForceCountedCash] = useState<Record<string, string>>({});
-  const [expectedCashByShift, setExpectedCashByShift] = useState<Record<string, number>>({});
+  const [forceDifferenceNotes, setForceDifferenceNotes] = useState<Record<string, string>>({});
+  const [closedShiftSummary, setClosedShiftSummary] = useState<{ shift: ShiftRecord; breakdown: ShiftCloseBreakdown }>();
   const [cashMovements, setCashMovements] = useState<CashMovementRecord[]>([]);
   const [canCashInOut, setCanCashInOut] = useState(false);
   const [movementSheetOpen, setMovementSheetOpen] = useState(false);
@@ -61,13 +78,14 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   useEffect(() => updateService.registerUnsavedState(() => startingCashEdited || countedCash.length > 0), [startingCashEdited, countedCash.length]);
 
   const refresh = useCallback(async () => {
-    const [nextShifts, nextOpenShift, nextStore, nextMovements, users, cashPermission] = await Promise.all([
+    const [nextShifts, nextOpenShift, nextStore, nextMovements, users, cashPermission, comps] = await Promise.all([
       shiftService.listShifts(storeId),
       user ? shiftService.getOpenShiftForUser(storeId, user.id) : Promise.resolve(undefined),
       userService.getStore(storeId),
       shiftService.listCashMovements(storeId),
       userService.listUsers(storeId),
       user?.role === 'owner' ? Promise.resolve(true) : user ? userService.hasPermission(user.id, 'cash_in_out') : Promise.resolve(false),
+      compService.listComps(storeId),
     ]);
     setShifts(nextShifts);
     setOwnOpenShift(nextOpenShift);
@@ -75,23 +93,18 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     setCashMovements(nextMovements);
     setStaffNames(Object.fromEntries(users.map((member) => [member.id, member.name])));
     setCanCashInOut(cashPermission);
-    if (nextOpenShift) {
-      const [sales, pendingCount, expected] = await Promise.all([
-        orderService.getCashSalesForShift(nextOpenShift.id),
-        orderService.getPendingVoidCountForShift(nextOpenShift.id),
-        shiftService.getExpectedCash(nextOpenShift.id),
-      ]);
-      setCashSales(sales);
-      setPendingVoidCount(pendingCount);
-      setExpectedCash(expected);
-    } else {
-      setCashSales(0);
-      setPendingVoidCount(0);
-      setExpectedCash(0);
-    }
-    const expectedByShift = await Promise.all(nextShifts.filter((shift) => shift.status === 'open')
-      .map(async (shift) => [shift.id, await shiftService.getExpectedCash(shift.id)] as const));
-    setExpectedCashByShift(Object.fromEntries(expectedByShift));
+    const breakdowns = await Promise.all(nextShifts.filter((shift) => shift.status === 'open')
+      .map(async (shift) => {
+        const [sales, pendingVoidCount] = await Promise.all([
+          orderService.getShiftSalesBreakdown(shift.id),
+          orderService.getPendingVoidCountForShift(shift.id),
+        ]);
+        const compsMillimes = comps
+          .filter((comp) => comp.shiftId === shift.id)
+          .reduce((sum, comp) => sum + comp.valueMillimes, 0);
+        return [shift.id, { ...sales, pendingVoidCount, compsMillimes }] as const;
+      }));
+    setBreakdownsByShift(Object.fromEntries(breakdowns));
   }, [storeId, user]);
 
   useEffect(() => {
@@ -122,9 +135,12 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       const shift = await shiftService.closeShift(
         ownOpenShift.id,
         parseTnd(countedCash),
+        differenceNote,
       );
-      await refresh();
+      setClosedShiftSummary({ shift, breakdown: breakdownsByShift[shift.id] ?? emptyShiftBreakdown });
       setCountedCash('');
+      setDifferenceNote('');
+      await refresh();
       setNotice(shift.differenceMillimes === 0 ? t('shift.zeroDifference') : t('shift.cashDifferenceRecorded'));
     } catch (closeError) {
       setError(closeError instanceof Error ? closeError.message : 'Unable to close the shift.');
@@ -137,8 +153,15 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     setError('');
     setNotice('');
     try {
-      await shiftService.forceCloseShift(shift.id, user.id, parseTnd(forceCountedCash[shift.id] ?? ''));
+      const closedShift = await shiftService.forceCloseShift(
+        shift.id,
+        user.id,
+        parseTnd(forceCountedCash[shift.id] ?? ''),
+        forceDifferenceNotes[shift.id],
+      );
+      setClosedShiftSummary({ shift: closedShift, breakdown: breakdownsByShift[shift.id] ?? emptyShiftBreakdown });
       setForceCountedCash((current) => ({ ...current, [shift.id]: '' }));
+      setForceDifferenceNotes((current) => ({ ...current, [shift.id]: '' }));
       await refresh();
       setNotice(`${staffNames[shift.staffId] ?? 'Staff'}'s shift was force-closed by the owner.`);
     } catch (closeError) {
@@ -157,15 +180,18 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   }
 
   function pressMovementAmount(value: string) {
-    setMovementAmount((current) => {
-      if (value === '.') {
-        if (current.includes('.')) return current;
-        return current ? `${current}.` : '0.';
-      }
-      const [whole, fraction] = current.split('.');
-      if (whole.length >= 9 || (fraction !== undefined && fraction.length >= 3)) return current;
-      return current + value;
-    });
+    setMovementAmount((current) => appendDecimalAmount(current, value));
+  }
+
+  function pressCountedCash(value: string) {
+    setCountedCash((current) => appendDecimalAmount(current, value));
+  }
+
+  function pressForceCountedCash(shiftId: string, value: string) {
+    setForceCountedCash((current) => ({
+      ...current,
+      [shiftId]: appendDecimalAmount(current[shiftId] ?? '', value),
+    }));
   }
 
   async function submitCashMovement(event: FormEvent<HTMLFormElement>) {
@@ -207,15 +233,28 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
 
   const openCount = shifts.filter((shift) => shift.status === 'open').length;
   const enteredMovementMillimes = Math.round(Number(movementAmount.replace(',', '.')) * 1000);
+  const ownBreakdown = ownOpenShift ? breakdownsByShift[ownOpenShift.id] ?? emptyShiftBreakdown : emptyShiftBreakdown;
+  const pageTitle = ownerView ? t(`nav.${ownerView}`) : t('shift.title');
+  const movementsForShift = (shiftId: string) => cashMovements.filter((movement) =>
+    movement.shiftId === shiftId && (!ownerView || movement.reason === (ownerView === 'expenses' ? 'expense' : 'supplier')),
+  );
   return (
     <>
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
-          <h1 className="font-display text-headline-lg text-on-surface">{t('shift.title')}</h1>
+          <h1 className="font-display text-headline-lg text-on-surface">{pageTitle}</h1>
           <p className="mt-1 font-body text-body-md text-on-surface-variant">{store?.name}</p>
         </div>
         {ownerMode && <StatusTag status="started">{`${openCount} open`}</StatusTag>}
       </div>
+
+      {closedShiftSummary && (
+        <ClosedShiftSummary
+          shift={closedShiftSummary.shift}
+          breakdown={closedShiftSummary.breakdown}
+          onDone={() => setClosedShiftSummary(undefined)}
+        />
+      )}
 
       {ownOpenShift ? (
         <div className="grid gap-4 tablet:grid-cols-2">
@@ -229,8 +268,9 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             </div>
             <div className="space-y-3">
               <Metric label={t('shift.startingCash')} amount={ownOpenShift.startingCashMillimes} />
-              <Metric label="Cash sales + tab payments" amount={cashSales} />
-              <Metric label={t('shift.expectedCash')} amount={expectedCash} prominent />
+              <Metric label="Cash sales" amount={ownBreakdown.cashSalesMillimes} />
+              <Metric label="Tab payments received in cash" amount={ownBreakdown.tabPaymentsMillimes} />
+              <Metric label={t('shift.expectedCash')} amount={getExpectedCash(ownOpenShift, ownBreakdown, cashMovements)} prominent />
             </div>
             {canCashInOut && !ownerMode && (
               <div className="mt-4 grid grid-cols-2 gap-2">
@@ -238,21 +278,23 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
                 <Button type="button" variant="secondary" onClick={() => openCashMovement('out', ownOpenShift.id)}><MaterialIcon name="remove" />Cash out</Button>
               </div>
             )}
-            <CashMovementList movements={cashMovements.filter((movement) => movement.shiftId === ownOpenShift.id)} staffNames={staffNames} />
+            <CashMovementList movements={movementsForShift(ownOpenShift.id)} staffNames={staffNames} />
           </section>
-          <form onSubmit={(event) => { void closeShift(event); }} className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-            <h2 className="font-display text-headline-md text-on-surface">{t('shift.closeShift')}</h2>
-            <label htmlFor="counted-cash" className="font-body text-label-md">{t('shift.countedCash')} (TND)</label>
-            <input id="counted-cash" inputMode="decimal" required value={countedCash} onChange={(event) => setCountedCash(event.target.value)} placeholder="50.000" className="h-14 rounded-xl bg-surface-container-low px-4 font-body text-title-md tabular-nums outline-none focus:ring-2 focus:ring-primary" />
-            {pendingVoidCount > 0 && <p role="alert" className="rounded-lg bg-warning-container p-3 font-body text-body-sm text-on-warning-container">{t('shift.pendingVoidWarning', { count: pendingVoidCount })}</p>}
-            {countedCash && Number.isFinite(Number(countedCash.replace(',', '.'))) && (
-              <Metric label={t('shift.difference')} amount={Math.round(Number(countedCash.replace(',', '.')) * 1000) - expectedCash} signed />
-            )}
-            <p className="font-body text-body-sm text-on-surface-variant">{t('shift.cashDifferenceRecorded')}</p>
-            <Button type="submit" variant="danger" className="w-full"><MaterialIcon name="lock" />{t('shift.closeShift')}</Button>
-          </form>
+          <ShiftCloseForm
+            shift={ownOpenShift}
+            breakdown={ownBreakdown}
+            movements={cashMovements}
+            countedCash={countedCash}
+            differenceNote={differenceNote}
+            onCountPress={pressCountedCash}
+            onCountClear={() => setCountedCash('')}
+            onCountBackspace={() => setCountedCash((value) => value.slice(0, -1))}
+            onNoteChange={setDifferenceNote}
+            onSubmit={(event) => { void closeShift(event); }}
+            submitLabel={t('shift.closeShift')}
+          />
         </div>
-      ) : (
+      ) : !closedShiftSummary ? (
         <form onSubmit={(event) => { void openShift(event); }} className="max-w-xl rounded-2xl bg-surface-container-lowest p-4 shadow-card">
           <div className="mb-4 flex items-center gap-3">
             <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-fixed text-primary"><MaterialIcon name="payments" /></span>
@@ -265,7 +307,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           <input id="starting-cash" inputMode="decimal" required value={startingCash} onChange={(event) => { setStartingCash(event.target.value); setStartingCashEdited(true); }} className="mb-4 h-14 w-full rounded-xl bg-surface-container-low px-4 font-body text-title-md tabular-nums outline-none focus:ring-2 focus:ring-primary" />
           <Button type="submit" className="w-full"><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
         </form>
-      )}
+      ) : null}
 
       {(error || notice) && <p role={error ? 'alert' : 'status'} className={`mt-4 rounded-lg p-3 font-body text-body-sm ${error ? 'bg-error-container text-on-error-container' : 'bg-success-container text-on-success-container'}`}>{error || notice}</p>}
 
@@ -291,15 +333,23 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
                   <Button type="button" variant="secondary" onClick={() => openCashMovement('out', shift.id)}><MaterialIcon name="remove" />Cash out</Button>
                 </div>
               )}
-              <CashMovementList movements={cashMovements.filter((movement) => movement.shiftId === shift.id)} staffNames={staffNames} />
+              <CashMovementList movements={movementsForShift(shift.id)} staffNames={staffNames} />
               {ownerMode && shift.status === 'open' && user?.role === 'owner' && (
-                <form onSubmit={(event) => { void forceCloseShift(event, shift); }} className="mt-3 flex w-full flex-wrap items-end gap-2 border-t border-outline-variant pt-3">
-                  <p className="w-full font-body text-body-sm text-on-surface-variant">Expected cash: {formatTnd((expectedCashByShift[shift.id] ?? shift.startingCashMillimes) / 1000)} DT. Enter the drawer count you verified.</p>
-                  <label className="min-w-40 flex-1 font-body text-label-sm">Owner-counted cash (TND)
-                    <input required inputMode="decimal" value={forceCountedCash[shift.id] ?? ''} onChange={(event) => setForceCountedCash((current) => ({ ...current, [shift.id]: event.target.value }))} placeholder="0.000" className="mt-1 h-11 w-full rounded-lg bg-surface-container-low px-3" />
-                  </label>
-                  <Button type="submit" variant="danger"><MaterialIcon name="lock" />Force close</Button>
-                </form>
+                <ShiftCloseForm
+                  key={shift.id}
+                  shift={shift}
+                  breakdown={breakdownsByShift[shift.id] ?? emptyShiftBreakdown}
+                  movements={cashMovements}
+                  countedCash={forceCountedCash[shift.id] ?? ''}
+                  differenceNote={forceDifferenceNotes[shift.id] ?? ''}
+                  onCountPress={(value) => pressForceCountedCash(shift.id, value)}
+                  onCountClear={() => setForceCountedCash((current) => ({ ...current, [shift.id]: '' }))}
+                  onCountBackspace={() => setForceCountedCash((current) => ({ ...current, [shift.id]: (current[shift.id] ?? '').slice(0, -1) }))}
+                  onNoteChange={(value) => setForceDifferenceNotes((current) => ({ ...current, [shift.id]: value }))}
+                  onSubmit={(event) => { void forceCloseShift(event, shift); }}
+                  submitLabel="Force close"
+                  ownerMode
+                />
               )}
             </article>
           ))}
@@ -362,6 +412,190 @@ function Metric({ label, amount, prominent = false, signed = false }: { label: s
   );
 }
 
+function getCashMovementTotals(movements: CashMovementRecord[], shiftId: string) {
+  return movements
+    .filter((movement) => movement.shiftId === shiftId)
+    .reduce((totals, movement) => {
+      totals[movement.kind === 'in' ? 'cashInMillimes' : 'cashOutMillimes'] += movement.amountMillimes;
+      return totals;
+    }, { cashInMillimes: 0, cashOutMillimes: 0 });
+}
+
+function getExpectedCash(shift: ShiftRecord, breakdown: ShiftCloseBreakdown, movements: CashMovementRecord[]) {
+  const movementTotals = getCashMovementTotals(movements, shift.id);
+  return shift.startingCashMillimes + breakdown.cashSalesMillimes + breakdown.tabPaymentsMillimes +
+    movementTotals.cashInMillimes - movementTotals.cashOutMillimes;
+}
+
+function appendDecimalAmount(current: string, value: string) {
+  if (value === '.') {
+    if (current.includes('.')) return current;
+    return current ? `${current}.` : '0.';
+  }
+  const [whole, fraction] = current.split('.');
+  if (whole.length >= 9 || (fraction !== undefined && fraction.length >= 3)) return current;
+  return current + value;
+}
+
+function ShiftCloseForm({
+  shift,
+  breakdown,
+  movements,
+  countedCash,
+  differenceNote,
+  onCountPress,
+  onCountClear,
+  onCountBackspace,
+  onNoteChange,
+  onSubmit,
+  submitLabel,
+  ownerMode = false,
+}: {
+  shift: ShiftRecord;
+  breakdown: ShiftCloseBreakdown;
+  movements: CashMovementRecord[];
+  countedCash: string;
+  differenceNote: string;
+  onCountPress: (value: string) => void;
+  onCountClear: () => void;
+  onCountBackspace: () => void;
+  onNoteChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  submitLabel: string;
+  ownerMode?: boolean;
+}) {
+  const movementTotals = getCashMovementTotals(movements, shift.id);
+  const expectedCash = getExpectedCash(shift, breakdown, movements);
+  const parsedCount = countedCash.trim() ? Number(countedCash.replace(',', '.')) : Number.NaN;
+  const countedCashMillimes = Number.isFinite(parsedCount) && parsedCount >= 0
+    ? Math.round(parsedCount * 1000)
+    : undefined;
+  const difference = countedCashMillimes === undefined ? undefined : countedCashMillimes - expectedCash;
+
+  return (
+    <form onSubmit={onSubmit} className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+      <h2 className="font-display text-headline-md text-on-surface">{ownerMode ? 'Owner force close' : t('shift.closeShift')}</h2>
+      {breakdown.pendingVoidCount > 0 && (
+        <p role="alert" className="rounded-lg bg-warning-container p-3 font-body text-body-sm text-on-warning-container">
+          {t('shift.pendingVoidWarning', { count: breakdown.pendingVoidCount })}
+        </p>
+      )}
+      <div className="space-y-2 rounded-xl bg-surface-container-low p-3">
+        <Metric label="Starting cash (float)" amount={shift.startingCashMillimes} />
+        <Metric label="Cash sales" amount={breakdown.cashSalesMillimes} />
+        <Metric label="Tab sales (charged to customers; excluded from expected cash)" amount={breakdown.tabSalesMillimes} />
+        <Metric label="Tab payments received in cash" amount={breakdown.tabPaymentsMillimes} />
+        <Metric label="Cash in" amount={movementTotals.cashInMillimes} />
+        <Metric label="Cash out" amount={movementTotals.cashOutMillimes} />
+        <Metric label="Comps value" amount={breakdown.compsMillimes} />
+        <Metric label="Voids" amount={breakdown.voidsMillimes} />
+        <div className="border-t border-outline-variant pt-2">
+          <Metric label="Expected cash in drawer" amount={expectedCash} prominent />
+        </div>
+      </div>
+      <label htmlFor={`counted-cash-${shift.id}`} className="font-body text-label-md">{t('shift.countedCash')} (TND)</label>
+      <input
+        id={`counted-cash-${shift.id}`}
+        readOnly
+        inputMode="none"
+        value={countedCash}
+        placeholder="0.000"
+        className="h-14 rounded-xl bg-surface-container-low px-4 font-body text-title-md tabular-nums outline-none focus:ring-2 focus:ring-primary"
+      />
+      <Keypad
+        decimal
+        onPress={onCountPress}
+        onClear={onCountClear}
+        onBackspace={onCountBackspace}
+      />
+      {difference !== undefined && (
+        <p
+          aria-live="polite"
+          className={`rounded-lg p-3 text-center font-display text-title-md ${
+            difference === 0 ? 'bg-success-container text-success-dark' :
+              difference < 0 ? 'bg-error-container text-error-dark' : 'bg-warning-container text-on-warning-container'
+          }`}
+        >
+          {difference === 0
+            ? 'Balanced'
+            : `${difference < 0 ? 'Short' : 'Over'} ${formatTnd(Math.abs(difference) / 1000)} DT`}
+        </p>
+      )}
+      {difference !== undefined && difference !== 0 && (
+        <label className="font-body text-label-md text-on-surface">
+          Short note (required)
+          <textarea
+            required
+            maxLength={200}
+            rows={2}
+            value={differenceNote}
+            onChange={(event) => onNoteChange(event.target.value)}
+            className="mt-1.5 w-full rounded-lg bg-surface-container-low p-3 font-body text-body-md"
+          />
+        </label>
+      )}
+      <Button type="submit" variant="danger" className="w-full" disabled={countedCashMillimes === undefined}>
+        <MaterialIcon name="lock" />{submitLabel}
+      </Button>
+    </form>
+  );
+}
+
+function ClosedShiftSummary({
+  shift,
+  breakdown,
+  onDone,
+}: {
+  shift: ShiftRecord;
+  breakdown: ShiftCloseBreakdown;
+  onDone: () => void;
+}) {
+  const closedAt = shift.closedAt ? new Date(shift.closedAt) : new Date(shift.openedAt);
+  const durationMs = Math.max(0, closedAt.getTime() - new Date(shift.openedAt).getTime());
+  const durationMinutes = Math.floor(durationMs / 60_000);
+  const difference = shift.differenceMillimes ?? 0;
+  return (
+    <section className="mb-4 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+      <div className="mb-3">
+        <h2 className="font-display text-headline-md text-on-surface">Shift closed</h2>
+        <p className="font-body text-body-sm text-on-surface-variant">
+          {durationMinutes >= 60 ? `${Math.floor(durationMinutes / 60)}h ` : ''}{durationMinutes % 60}m duration
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-3 tablet:grid-cols-5">
+        <SummaryValue label="Orders" value={String(breakdown.orderCount)} />
+        <SummaryValue
+          label="Cash"
+          value={`${formatTnd((shift.countedCashMillimes ?? 0) / 1000)} DT`}
+          detail={`Expected ${formatTnd((shift.expectedCashMillimes ?? 0) / 1000)} DT`}
+        />
+        <SummaryValue label="Tabs" value={`${formatTnd(breakdown.tabSalesMillimes / 1000)} DT`} />
+        <SummaryValue
+          label="Difference"
+          value={`${difference < 0 ? 'Short ' : difference > 0 ? 'Over ' : ''}${formatTnd(Math.abs(difference) / 1000)} DT`}
+          valueClass={difference === 0 ? 'text-success-dark' : difference < 0 ? 'text-error-dark' : 'text-warning'}
+        />
+      </div>
+      <Button type="button" className="mt-4 w-full" onClick={onDone}>Done</Button>
+    </section>
+  );
+}
+
+function SummaryValue({ label, value, valueClass = 'text-on-surface', detail }: {
+  label: string;
+  value: string;
+  valueClass?: string;
+  detail?: string;
+}) {
+  return (
+    <div className="rounded-lg bg-surface-container-low p-3">
+      <p className="font-body text-label-sm text-on-surface-variant">{label}</p>
+      <p className={`mt-1 font-display text-title-md tabular-nums ${valueClass}`}>{value}</p>
+      {detail && <p className="mt-0.5 font-body text-body-sm text-on-surface-variant">{detail}</p>}
+    </div>
+  );
+}
+
 function CashMovementList({ movements, staffNames }: {
   movements: CashMovementRecord[];
   staffNames: Record<string, string>;
@@ -399,13 +633,13 @@ function CashMovementList({ movements, staffNames }: {
   );
 }
 
-export function ShiftScreen({ ownerMode = false }: { ownerMode?: boolean }) {
+export function ShiftScreen({ ownerMode = false, ownerView }: { ownerMode?: boolean; ownerView?: 'expenses' | 'suppliers' }) {
   const storeId = useAuthStore((state) => state.user?.storeId);
   const [storeName, setStoreName] = useState<string>();
   useEffect(() => {
     if (storeId) void userService.getStore(storeId).then((store) => setStoreName(store?.name));
   }, [storeId]);
-  const content = <ShiftContent ownerMode={ownerMode} />;
-  if (ownerMode) return <WorkspaceLayout title={t('shift.title')} storeName={storeName} links={ownerWorkspaceLinks}>{content}</WorkspaceLayout>;
+  const content = <ShiftContent ownerMode={ownerMode} ownerView={ownerView} />;
+  if (ownerMode) return <WorkspaceLayout title={ownerView ? t(`nav.${ownerView}`) : t('shift.title')} storeName={storeName} links={ownerWorkspaceLinks}>{content}</WorkspaceLayout>;
   return <div className="min-h-screen bg-surface px-4 pb-24 pt-5"><div className="mx-auto max-w-3xl">{content}</div><BottomNav /></div>;
 }

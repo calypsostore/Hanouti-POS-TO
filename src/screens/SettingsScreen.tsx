@@ -34,6 +34,7 @@ export function SettingsScreen() {
   const logout = useAuthStore((state) => state.logout);
   const [store, setStore] = useState<Awaited<ReturnType<typeof userService.getStore>>>();
   const [storeName, setStoreName] = useState(store?.name ?? '');
+  const [dailySalesTarget, setDailySalesTarget] = useState('0.000');
   const [adminPin, setAdminPin] = useState('');
   const [staffAutoLockMinutes, setStaffAutoLockMinutes] = useState('5');
   const [cashOutAlertThreshold, setCashOutAlertThreshold] = useState('50.000');
@@ -56,6 +57,7 @@ export function SettingsScreen() {
       void userService.getStore(user.storeId).then((nextStore) => {
         setStore(nextStore);
         setStoreName(nextStore?.name ?? '');
+        setDailySalesTarget(((nextStore?.dailySalesTargetMillimes ?? 0) / 1000).toFixed(3));
         setStaffAutoLockMinutes(String(nextStore?.staffAutoLockMinutes ?? 5));
         setCashOutAlertThreshold(((nextStore?.cashOutAlertThresholdMillimes ?? 50_000) / 1000).toFixed(3));
       }).catch((storeError: unknown) => setError(storeError instanceof Error ? storeError.message : t('common.storeLoadFailed')));
@@ -93,11 +95,14 @@ export function SettingsScreen() {
 
   async function saveStoreInfo(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!store) return;
+    if (!store || !user || user.role !== 'owner') return;
     setError('');
     setNotice('');
     try {
-      await userService.updateStoreInfo(store.id, { name: storeName });
+      setStore(await userService.updateStoreInfo(store.id, user.id, {
+        name: storeName,
+        dailySalesTargetMillimes: parseTndAmount(dailySalesTarget),
+      }));
       setNotice('Store information saved.');
     } catch (storeError) {
       setError(storeError instanceof Error ? storeError.message : 'Unable to save store information.');
@@ -266,6 +271,8 @@ export function SettingsScreen() {
           <form onSubmit={(event) => { void saveStoreInfo(event); }} className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
             <h2 className="font-display text-headline-md text-on-surface">{t('settings.storeInfo')}</h2>
             <label className="font-body text-label-md">{t('settings.storeName')}<input required value={storeName} onChange={(event) => setStoreName(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
+             <label className="font-body text-label-md">{t('settings.dailySalesTarget')}<input required type="number" min="0" step="0.001" inputMode="decimal" value={dailySalesTarget} onChange={(event) => setDailySalesTarget(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
+             <p className="-mt-2 font-body text-body-sm text-outline">{t('settings.dailySalesTargetHelp')}</p>
             <p className="font-body text-body-sm text-outline">Store code: {store.code}</p>
             <Button type="submit" variant="secondary">{t('common.save')}</Button>
           </form>

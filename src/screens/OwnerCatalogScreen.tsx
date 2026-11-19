@@ -30,6 +30,7 @@ interface ProductDraft {
   categoryId: string;
   icon: string;
   stockCount: string;
+  lowStockThreshold: string;
   availability: Availability;
   isActive: boolean;
   modifierGroupName: string;
@@ -46,6 +47,7 @@ const emptyDraft = (categoryId = ''): ProductDraft => ({
   categoryId,
   icon: 'local_cafe',
   stockCount: '',
+  lowStockThreshold: '5',
   availability: 'available',
   isActive: true,
   modifierGroupName: '',
@@ -63,6 +65,7 @@ function draftFromItem(item: CatalogItemRecord): ProductDraft {
     categoryId: item.categoryId,
     icon: item.icon,
     stockCount: item.stockCount === null ? '' : String(item.stockCount),
+    lowStockThreshold: String(item.lowStockThreshold ?? 5),
     availability: item.stockCount === 0 ? 'out' : item.outOfStock ? '86' : 'available',
     isActive: item.isActive,
     modifierGroupName: item.modifierGroupName ?? '',
@@ -150,6 +153,10 @@ function OwnerCatalogContent() {
 
       const stockCount = draft.availability === 'out' ? 0 : draft.stockCount.trim() ? Number(draft.stockCount) : null;
       if (stockCount !== null && (!Number.isInteger(stockCount) || stockCount < 0)) throw new Error('Stock count must be a non-negative whole number.');
+      const lowStockThreshold = Number(draft.lowStockThreshold);
+      if (!draft.lowStockThreshold.trim() || !Number.isInteger(lowStockThreshold) || lowStockThreshold < 0) {
+        throw new Error('Low-stock threshold must be a non-negative whole number.');
+      }
 
       const modifiers: CatalogModifierRecord[] = [];
       const names = new Set<string>();
@@ -176,6 +183,7 @@ function OwnerCatalogContent() {
         icon: draft.icon,
         priceMillimes,
         stockCount,
+        lowStockThreshold,
         outOfStock: draft.availability !== 'available',
         isActive: draft.isActive,
         modifierGroupName: draft.modifierGroupName.trim(),
@@ -334,6 +342,7 @@ function OwnerCatalogContent() {
             <label className="font-body text-label-md">Category<select required value={draft.categoryId} onChange={(event) => setDraft((current) => ({ ...current, categoryId: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary"><option value="">Select a category</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
             <label className="font-body text-label-md">Product icon<select value={draft.icon} onChange={(event) => setDraft((current) => ({ ...current, icon: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary">{Array.from(new Set(['local_cafe', 'coffee', 'bakery_dining', 'water_drop', ...categories.map((category) => category.icon), draft.icon])).map((icon) => <option key={icon} value={icon}>{icon}</option>)}</select></label>
             <label className="font-body text-label-md">Stock count <span className="text-outline">(leave blank for untracked)</span><input type="number" min="0" step="1" value={draft.availability === 'out' ? '0' : draft.stockCount} onChange={(event) => setDraft((current) => ({ ...current, stockCount: event.target.value, availability: event.target.value === '0' ? 'out' : current.availability === 'out' ? 'available' : current.availability }))} placeholder="Not tracked" className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
+            <label className="font-body text-label-md">{t('catalog.lowStockThreshold')}<input type="number" min="0" step="1" required value={draft.lowStockThreshold} onChange={(event) => setDraft((current) => ({ ...current, lowStockThreshold: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
           </div>
           <label className="font-body text-label-md">Description<textarea value={draft.description} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} rows={3} className="mt-1 w-full rounded-lg bg-surface-container-low px-3 py-2 outline-none focus:ring-2 focus:ring-primary" /></label>
 
@@ -414,6 +423,7 @@ function CatalogItemCard({ item, category, onToggle, onEdit, onDelete }: { item:
           {item.sku && <p className="mt-1 truncate font-body text-body-sm text-outline">SKU: {item.sku}</p>}
           {item.description && <p className="mt-1 truncate font-body text-body-sm text-on-surface-variant">{item.description}</p>}
           {item.stockCount !== null && <p className="mt-1 font-body text-body-sm text-outline">{item.stockCount} in stock</p>}
+          {item.stockCount !== null && <p className="mt-1 font-body text-body-sm text-outline">Low stock at {item.lowStockThreshold ?? 5}</p>}
           {(item.modifiers?.length ?? 0) > 0 && <p className="mt-1 font-body text-body-sm text-outline">{item.modifierGroupName || 'Options'} · {item.modifiers?.length} options</p>}
         </div>
       </div>

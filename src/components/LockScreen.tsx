@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { authService } from '../services/authService';
 import { userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
+import { t } from '../i18n/translations';
 import { Button } from './Button';
 import { Keypad } from './Keypad';
 import { MaterialIcon } from './MaterialIcon';
@@ -16,6 +17,7 @@ export function LockScreen({ returnTo }: LockScreenProps) {
   const user = useAuthStore((state) => state.user);
   const unlockWithPin = useAuthStore((state) => state.unlockWithPin);
   const unlockWithPassword = useAuthStore((state) => state.unlockWithPassword);
+  const logout = useAuthStore((state) => state.logout);
   const [hasPin, setHasPin] = useState(false);
   const [passwordMode, setPasswordMode] = useState(false);
   const [pin, setPin] = useState('');
@@ -23,6 +25,7 @@ export function LockScreen({ returnTo }: LockScreenProps) {
   const [storeName, setStoreName] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [lockRemainingMs, setLockRemainingMs] = useState(0);
 
   useEffect(() => {
@@ -72,6 +75,7 @@ export function LockScreen({ returnTo }: LockScreenProps) {
 
   async function submitPassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting || loggingOut) return;
     setSubmitting(true);
     setError('');
     try {
@@ -82,6 +86,20 @@ export function LockScreen({ returnTo }: LockScreenProps) {
       setPassword('');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleLogout() {
+    if (submitting || loggingOut) return;
+    setLoggingOut(true);
+    setError('');
+    try {
+      await logout();
+      navigate('/', { replace: true });
+    } catch (logoutError) {
+      setError(logoutError instanceof Error ? logoutError.message : 'Unable to log out.');
+    } finally {
+      setLoggingOut(false);
     }
   }
 
@@ -110,7 +128,7 @@ export function LockScreen({ returnTo }: LockScreenProps) {
               onChange={(event) => setPassword(event.target.value)}
               className="h-14 w-full rounded-xl bg-surface-container-low px-4 font-body text-body-lg outline-none focus:ring-2 focus:ring-primary"
             />
-            <Button type="submit" disabled={submitting || !password} className="min-h-12 w-full">
+            <Button type="submit" disabled={submitting || loggingOut || !password} className="min-h-12 w-full">
               <MaterialIcon name="lock_open" />
               Unlock
             </Button>
@@ -129,7 +147,7 @@ export function LockScreen({ returnTo }: LockScreenProps) {
               ))}
             </div>
             <Keypad
-              disabled={submitting || lockRemainingMs > 0}
+              disabled={submitting || loggingOut || lockRemainingMs > 0}
               onPress={(digit) => setPin((current) => current.length < 4 ? current + digit : current)}
               onClear={() => setPin('')}
               onBackspace={() => setPin((current) => current.slice(0, -1))}
@@ -139,7 +157,7 @@ export function LockScreen({ returnTo }: LockScreenProps) {
                 Try again in {Math.ceil(lockRemainingMs / 1000)} seconds.
               </p>
             )}
-            <Button type="button" disabled={submitting || pin.length !== 4 || lockRemainingMs > 0} onClick={() => { void submitPin(); }} className="min-h-12 w-full">
+            <Button type="button" disabled={submitting || loggingOut || pin.length !== 4 || lockRemainingMs > 0} onClick={() => { void submitPin(); }} className="min-h-12 w-full">
               <MaterialIcon name="lock_open" />
               Unlock
             </Button>
@@ -148,6 +166,11 @@ export function LockScreen({ returnTo }: LockScreenProps) {
             </button>
           </div>
         )}
+
+        <Button type="button" variant="ghost" disabled={submitting || loggingOut} onClick={() => { void handleLogout(); }} className="mt-4 w-full border border-outline-variant">
+          <MaterialIcon name={loggingOut ? 'sync' : 'logout'} className={loggingOut ? 'animate-spin' : ''} />
+          {loggingOut ? 'Signing out…' : t('app.logOut')}
+        </Button>
 
         {error && <p role="alert" className="mt-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       </section>

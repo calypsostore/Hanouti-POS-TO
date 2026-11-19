@@ -16,6 +16,7 @@ import { userService } from '../services/userService';
 import { orderService } from '../services/orderService';
 import { customerService } from '../services/customerService';
 import { notificationService } from '../services/notificationService';
+import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
 import { shareCustomerStatement } from '../services/customerStatementShare';
 import { catalogService } from '../services/catalogService';
 import { useAuthStore } from '../stores/authStore';
@@ -91,7 +92,7 @@ function OwnerDashboardContent() {
       setLoadError('');
       try {
         const [nextSummary, allOrders, allUsers, nextStore, nextOverdueCustomers, nextCatalogItems] = await Promise.all([
-        reportService.getDashboard(storeId, 'day'),
+        reportService.getDashboard(storeId, period),
         orderService.listAll(storeId),
         userService.listUsers(storeId),
         userService.getStore(storeId),
@@ -100,7 +101,7 @@ function OwnerDashboardContent() {
         ]);
         if (!active) return;
         setSummary(nextSummary);
-        setPeriodOrders(filterOrdersForPeriod(allOrders, 'day'));
+        setPeriodOrders(filterOrdersForPeriod(allOrders, period));
         const salesComparison = getTodaySalesComparison(allOrders);
         setTodaySalesMillimes(salesComparison.today);
         setLastWeekSalesMillimes(salesComparison.lastWeek);
@@ -130,10 +131,20 @@ function OwnerDashboardContent() {
       console.error('Unable to load owner dashboard.', loadError);
       if (active) setLoadError('Unable to load dashboard information. Please try again.');
     });
+    const refresh = () => {
+      void loadDashboard().catch((loadError: unknown) => {
+        console.error('Unable to refresh owner dashboard after a live update.', loadError);
+        if (active) setLoadError('Unable to refresh dashboard information. Please try again.');
+      });
+    };
+    window.addEventListener('focus', refresh);
+    const unsubscribe = subscribeToStoreChanges(storeId, ['orders', 'shifts', 'notifications', 'catalog_items'], refresh);
     return () => {
       active = false;
+      unsubscribe();
+      window.removeEventListener('focus', refresh);
     };
-  }, [storeId, user]);
+  }, [period, storeId, user]);
 
   async function openOverdueStatement(customer: OverdueCustomerRecord['customer']) {
     setOverdueAction({ customerId: customer.id, action: 'statement' });

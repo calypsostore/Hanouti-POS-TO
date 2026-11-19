@@ -10,7 +10,7 @@ const migrationsDirectory = resolve(repositoryRoot, 'supabase', 'migrations');
 
 function printReleaseReminder() {
   log('Before publishing a new app version:');
-  log('  1. Run npx supabase db push and verify the remote migration list.');
+  log('  1. Run npx supabase db push --remote and verify the remote migration list.');
   log('  2. Deploy every changed Edge Function with npx supabase functions deploy <function-name>.');
 }
 
@@ -72,7 +72,7 @@ function runReleaseCheck() {
 
     const pending = diskVersions.filter((version) => !remoteVersions.has(version));
     if (pending.length) {
-      throw new Error(`Unapplied local migration(s): ${pending.join(', ')}. Run npx supabase db push before publishing.`);
+      throw new Error(`Unapplied local migration(s): ${pending.join(', ')}. Run npx supabase db push --remote before publishing.`);
     }
 
     log('All local migrations are applied to the linked Supabase database.');

@@ -414,7 +414,7 @@ export function SettingsScreen() {
     setError('');
     setNotice('');
     try {
-      const result = await updateService.checkForUpdates();
+      const result = await updateService.checkForUpdates({ force: true });
       setLastCheck(result.checkedAt);
       if (Capacitor.isNativePlatform()) {
         setUpdateResult(result.updateAvailable && result.availableVersion

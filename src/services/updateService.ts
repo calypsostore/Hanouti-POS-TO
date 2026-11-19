@@ -1,13 +1,17 @@
-import { Browser } from '@capacitor/browser';
-import { Capacitor } from '@capacitor/core';
+import { App } from '@capacitor/app';
+import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Directory, Filesystem } from '@capacitor/filesystem';
 import { notificationService } from './notificationService';
 import { UPDATE_GITHUB_REPOSITORY } from '../config/updateConfig';
-import { compareVersions } from './versionComparison';
+import { isUpdateCheckDue, parseAppUpdateManifest, type AppUpdateManifest } from './appUpdateManifest';
 
 declare const __APP_VERSION__: string;
 const LAST_CHECK_KEY = '7anouti-pos:last-update-check';
+const UPDATE_CACHE_KEY = '7anouti-pos:available-update';
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const CHECK_REQUEST_TIMEOUT_MS = 15_000;
+const VERSION_URL = `https://github.com/${UPDATE_GITHUB_REPOSITORY}/releases/latest/download/version.json`;
+const ApkInstaller = registerPlugin<{ installApk(options: { path: string }): Promise<void> }>('ApkInstaller');
 
 export interface UpdateCheckResult {
   currentVersion: string;
@@ -26,6 +30,9 @@ let apkDownloadUrl: string | undefined;
 let monitorStarted = false;
 let controllerChangeObserved = false;
 const unsavedStateProviders = new Set<() => boolean>();
+let nativeCheckInFlight: Promise<UpdateCheckResult> | undefined;
+let cachedUpdate: AppUpdateManifest | null = null;
+let inMemoryLastCheck = 0;
 
 function runOverdueCheck(checkOverdueCustomers?: () => Promise<void>): void {
   if (checkOverdueCustomers) {
@@ -66,8 +73,138 @@ function setUpdateAvailable(version = __APP_VERSION__, downloadUrl?: string): vo
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+function getLastCheckTimestamp(): number {
+  try {
+    return Math.max(inMemoryLastCheck, Date.parse(localStorage.getItem(LAST_CHECK_KEY) ?? '') || 0);
+  } catch (error) {
+    console.error('[updates] Could not read the last update check time.', error);
+    return inMemoryLastCheck;
+  }
+}
+
+function recordLastCheck(timestamp: number): void {
+  inMemoryLastCheck = timestamp;
+  try {
+    localStorage.setItem(LAST_CHECK_KEY, new Date(timestamp).toISOString());
+  } catch (error) {
+    console.error('[updates] Could not save the last update check time.', error);
+  }
+}
+
+function readCachedUpdate(): AppUpdateManifest | null {
+  try {
+    const raw = localStorage.getItem(UPDATE_CACHE_KEY);
+    if (!raw) return cachedUpdate;
+    cachedUpdate = parseAppUpdateManifest(JSON.parse(raw), UPDATE_GITHUB_REPOSITORY);
+    if (!cachedUpdate) localStorage.removeItem(UPDATE_CACHE_KEY);
+  } catch (error) {
+    console.error('[updates] Could not read the cached update.', error);
+  }
+  return cachedUpdate;
+}
+
+function saveCachedUpdate(update: AppUpdateManifest): void {
+  cachedUpdate = update;
+  try {
+    localStorage.setItem(UPDATE_CACHE_KEY, JSON.stringify(update));
+  } catch (error) {
+    console.error('[updates] Could not cache the available update.', error);
+  }
+}
+
+function clearCachedUpdate(): void {
+  cachedUpdate = null;
+  try {
+    localStorage.removeItem(UPDATE_CACHE_KEY);
+  } catch (error) {
+    console.error('[updates] Could not clear the cached update.', error);
+  }
+}
+
+function clearUpdateAvailable(): void {
+  const shouldNotify = hasUpdate;
+  hasUpdate = false;
+  availableVersion = undefined;
+  apkDownloadUrl = undefined;
+  if (shouldNotify) notifyListeners();
+}
+
+async function requestUpdateManifest(): Promise<AppUpdateManifest> {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), CHECK_REQUEST_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(VERSION_URL, {
+      headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' },
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+  if (!response.ok) throw new Error(`Update manifest request failed with status ${response.status}.`);
+  const manifest: unknown = await response.json();
+  const update = parseAppUpdateManifest(manifest, UPDATE_GITHUB_REPOSITORY);
+  if (!update) throw new Error('The update manifest is invalid or does not include a trusted APK.');
+  return update;
+}
+
+async function performNativeUpdateCheck(force: boolean): Promise<UpdateCheckResult> {
+  const installed = await App.getInfo();
+  const installedVersionCode = Number.parseInt(installed.build, 10);
+  if (!Number.isSafeInteger(installedVersionCode)) {
+    throw new Error('Could not read the installed Android version code.');
+  }
+
+  const now = Date.now();
+  const lastCheckTimestamp = getLastCheckTimestamp();
+  if (!force && !isUpdateCheckDue(lastCheckTimestamp ? new Date(lastCheckTimestamp).toISOString() : null, now, CHECK_INTERVAL_MS)) {
+    const cached = readCachedUpdate();
+    if (cached && cached.versionCode > installedVersionCode) {
+      setUpdateAvailable(cached.versionName, cached.apkUrl);
+    } else if (cached) {
+      clearCachedUpdate();
+      clearUpdateAvailable();
+    }
+    return {
+      currentVersion: installed.version,
+      checkedAt: new Date(lastCheckTimestamp).toISOString(),
+      updateAvailable: hasUpdate,
+      availableVersion,
+    };
+  }
+
+  recordLastCheck(now);
+  const update = await requestUpdateManifest();
+  if (update.versionCode <= installedVersionCode) {
+    clearCachedUpdate();
+    clearUpdateAvailable();
+    return {
+      currentVersion: installed.version,
+      checkedAt: new Date(now).toISOString(),
+      updateAvailable: false,
+    };
+  }
+
+  saveCachedUpdate(update);
+  setUpdateAvailable(update.versionName, update.apkUrl);
+  return {
+    currentVersion: installed.version,
+    checkedAt: new Date(now).toISOString(),
+    updateAvailable: true,
+    availableVersion: update.versionName,
+  };
+}
+
+async function checkNativeForUpdates(force: boolean): Promise<UpdateCheckResult> {
+  if (nativeCheckInFlight) return nativeCheckInFlight;
+  const request = performNativeUpdateCheck(force);
+  nativeCheckInFlight = request;
+  try {
+    return await request;
+  } finally {
+    nativeCheckInFlight = undefined;
+  }
 }
 
 export const updateService = {
@@ -80,7 +217,12 @@ export const updateService = {
   },
 
   getLastCheck(): string | null {
-    return localStorage.getItem(LAST_CHECK_KEY);
+    try {
+      return localStorage.getItem(LAST_CHECK_KEY);
+    } catch (error) {
+      console.error('[updates] Could not read the last update check time.', error);
+      return null;
+    }
   },
 
   subscribe(callback: UpdateListener): () => void {
@@ -117,60 +259,9 @@ export const updateService = {
     }
   },
 
-  async checkForUpdates(): Promise<UpdateCheckResult> {
+  async checkForUpdates(options: { force?: boolean } = {}): Promise<UpdateCheckResult> {
     if (Capacitor.isNativePlatform()) {
-      const checkedAt = new Date().toISOString();
-      const controller = new AbortController();
-      const timeoutId = window.setTimeout(() => controller.abort(), CHECK_REQUEST_TIMEOUT_MS);
-      let response: Response;
-      try {
-        response = await fetch(`https://api.github.com/repos/${UPDATE_GITHUB_REPOSITORY}/releases/latest`, {
-          headers: { Accept: 'application/vnd.github+json' },
-          cache: 'no-store',
-          signal: controller.signal,
-        });
-      } finally {
-        window.clearTimeout(timeoutId);
-      }
-      if (!response.ok) {
-        throw new Error(`GitHub release check failed with status ${response.status}.`);
-      }
-
-      const release: unknown = await response.json();
-      if (!isRecord(release)) throw new Error('GitHub returned an invalid release response.');
-      if (release.draft === true || release.prerelease === true) {
-        localStorage.setItem(LAST_CHECK_KEY, checkedAt);
-        return { currentVersion: __APP_VERSION__, checkedAt, updateAvailable: hasUpdate, availableVersion };
-      }
-      if (typeof release.tag_name !== 'string') throw new Error('GitHub release is missing its tag.');
-
-      const releaseVersion = release.tag_name.replace(/^v/, '');
-      const comparison = compareVersions(releaseVersion, __APP_VERSION__);
-      if (comparison === null) throw new Error('GitHub release tag is not a major.minor.patch version.');
-
-      if (comparison > 0) {
-        const assets = Array.isArray(release.assets) ? release.assets : [];
-        const apkAsset = assets.find((asset: unknown) =>
-          isRecord(asset)
-          && typeof asset.name === 'string'
-          && asset.name.toLowerCase().endsWith('.apk')
-          && typeof asset.browser_download_url === 'string',
-        );
-        if (!isRecord(apkAsset) || typeof apkAsset.browser_download_url !== 'string') {
-          throw new Error('GitHub release does not include an APK.');
-        }
-        const downloadUrl = new URL(apkAsset.browser_download_url);
-        if (downloadUrl.protocol !== 'https:') throw new Error('GitHub APK download URL must use HTTPS.');
-        setUpdateAvailable(releaseVersion, downloadUrl.toString());
-      }
-
-      localStorage.setItem(LAST_CHECK_KEY, checkedAt);
-      return {
-        currentVersion: __APP_VERSION__,
-        checkedAt,
-        updateAvailable: hasUpdate,
-        availableVersion,
-      };
+      return checkNativeForUpdates(options.force === true);
     }
 
     if (!registration && 'serviceWorker' in navigator) {
@@ -183,17 +274,28 @@ export const updateService = {
     return { currentVersion: __APP_VERSION__, checkedAt, updateAvailable: hasUpdate };
   },
 
-  async applyUpdate(): Promise<void> {
+  async applyUpdate(onProgress?: (progress: number | null) => void): Promise<void> {
     if (this.hasUnsavedChanges() && !window.confirm('You have unsaved work. Reload and discard it?')) return;
     if (Capacitor.isNativePlatform()) {
       if (!apkDownloadUrl) {
-        console.error('[updates] No APK download URL is available.');
-        return;
+        throw new Error('No APK download URL is available.');
       }
+      const updateUrl = apkDownloadUrl;
+      const progressListener = await Filesystem.addListener('progress', (status) => {
+        if (status.url !== updateUrl || status.contentLength <= 0) return;
+        onProgress?.(Math.min(100, Math.round((status.bytes / status.contentLength) * 100)));
+      });
       try {
-        await Browser.open({ url: apkDownloadUrl });
-      } catch (error) {
-        console.error('[updates] Could not open the APK download.', error);
+        const result = await Filesystem.downloadFile({
+          url: updateUrl,
+          path: '7anouti-pos-update.apk',
+          directory: Directory.Cache,
+          progress: true,
+        });
+        if (!result.path) throw new Error('The downloaded APK path was not returned.');
+        await ApkInstaller.installApk({ path: result.path });
+      } finally {
+        await progressListener.remove();
       }
       return;
     }

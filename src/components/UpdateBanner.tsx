@@ -8,11 +8,28 @@ import { useAuthStore } from '../stores/authStore';
 export function UpdateBanner() {
   const [available, setAvailable] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
+  const [downloadError, setDownloadError] = useState('');
   const user = useAuthStore((state) => state.user);
   const locked = useAuthStore((state) => state.locked);
   const isNative = Capacitor.isNativePlatform();
 
   useEffect(() => updateService.subscribe(setAvailable), []);
+
+  async function downloadUpdate() {
+    setDownloading(true);
+    setDownloadProgress(null);
+    setDownloadError('');
+    try {
+      await updateService.applyUpdate(setDownloadProgress);
+    } catch (error) {
+      console.error('[updates] Could not download or open the Android installer.', error);
+      setDownloadError('Could not download or open the installer. Check your connection and install permission, then retry.');
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   useEffect(() => {
     if (!isNative) return;
@@ -46,13 +63,16 @@ export function UpdateBanner() {
             })}
           </p>
           <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
-            <Button onClick={() => void updateService.applyUpdate()} className="w-full sm:w-auto">
-              {t('updates.download')}
+            <Button onClick={() => void downloadUpdate()} disabled={downloading} className="w-full sm:w-auto">
+              {downloading
+                ? `Downloading${downloadProgress === null ? '…' : `… ${downloadProgress}%`}`
+                : t('updates.download')}
             </Button>
-            <Button variant="secondary" onClick={() => setDismissed(true)} className="w-full sm:w-auto">
+            <Button variant="secondary" onClick={() => setDismissed(true)} disabled={downloading} className="w-full sm:w-auto">
               {t('updates.later')}
             </Button>
           </div>
+          {downloadError && <p role="alert" className="mt-3 font-body text-body-sm text-error">{downloadError}</p>}
         </section>
       </div>
     );

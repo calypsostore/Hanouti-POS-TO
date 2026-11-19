@@ -9,7 +9,7 @@ import { t } from '../i18n/translations';
 import { formatTnd } from '../lib/format';
 import { catalogService } from '../services/catalogService';
 import { useAuthStore } from '../stores/authStore';
-import type { CatalogItemRecord, CatalogModifierRecord, CategoryRecord, StoreRecord } from '../types/domain';
+import type { CatalogItemRecord, CatalogModifierRecord, CategoryRecord, ItemHistoryRecord, StoreRecord } from '../types/domain';
 import { userService } from '../services/userService';
 
 type CatalogSheet = 'item' | 'category' | null;
@@ -96,6 +96,19 @@ function availabilityStyle(status: Availability) {
   return 'bg-success-container text-success-dark';
 }
 
+function formatHistoryValue(record: ItemHistoryRecord, value: ItemHistoryRecord['oldValue']): string {
+  if (record.field === 'price') return typeof value === 'number' ? `${formatTnd(value / 1000)} DT` : '—';
+  if (record.field === 'stockTracking') return typeof value === 'number' ? `${value} in stock` : 'Not tracked';
+  if (record.field === 'outOfStock') return value === true ? '86' : 'Available';
+  return value === null ? '—' : String(value);
+}
+
+function historyFieldLabel(field: ItemHistoryRecord['field']): string {
+  if (field === 'stockTracking') return 'Stock tracking';
+  if (field === 'outOfStock') return '86 status';
+  return field[0].toLocaleUpperCase() + field.slice(1);
+}
+
 function OwnerCatalogContent() {
   const user = useAuthStore((state) => state.user);
   const storeId = user?.storeId ?? '';
@@ -107,6 +120,10 @@ function OwnerCatalogContent() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [sheet, setSheet] = useState<CatalogSheet>(null);
   const [editingItem, setEditingItem] = useState<CatalogItemRecord | null>(null);
+  const [historyItem, setHistoryItem] = useState<CatalogItemRecord | null>(null);
+  const [itemHistory, setItemHistory] = useState<ItemHistoryRecord[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<CatalogItemRecord | null>(null);
   const [draft, setDraft] = useState<ProductDraft>(emptyDraft());
   const [categoryName, setCategoryName] = useState('');
@@ -136,6 +153,20 @@ function OwnerCatalogContent() {
     setDraft(draftFromItem(item));
     setEditingItem(item);
     setSheet('item');
+  }
+
+  async function openItemHistory(item: CatalogItemRecord) {
+    setHistoryItem(item);
+    setItemHistory([]);
+    setHistoryError('');
+    setHistoryLoading(true);
+    try {
+      setItemHistory(await catalogService.listItemHistory(item.id));
+    } catch (loadError) {
+      setHistoryError(loadError instanceof Error ? loadError.message : 'Unable to load product history.');
+    } finally {
+      setHistoryLoading(false);
+    }
   }
 
   async function saveItem(event: FormEvent<HTMLFormElement>) {
@@ -335,6 +366,11 @@ function OwnerCatalogContent() {
           <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-surface-container text-primary">
             <MaterialIcon name={draft.icon} className="text-3xl" />
           </div>
+          {editingItem && (
+            <Button variant="secondary" className="self-start" onClick={() => { void openItemHistory(editingItem); }}>
+              <MaterialIcon name="history" />History
+            </Button>
+          )}
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="font-body text-label-md">Product name<input required value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
             <label className="font-body text-label-md">{t('catalog.priceTnd')}<input required inputMode="decimal" value={draft.price} onChange={(event) => setDraft((current) => ({ ...current, price: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
@@ -385,6 +421,26 @@ function OwnerCatalogContent() {
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
           <Button type="submit">{editingItem ? 'Save changes' : t('catalog.save')}</Button>
         </form>
+      </BottomSheet>
+
+      <BottomSheet open={historyItem !== null} onClose={() => setHistoryItem(null)} title={`${historyItem?.name ?? ''} history`}>
+        {historyLoading ? (
+          <p className="font-body text-body-sm text-on-surface-variant">Loading history…</p>
+        ) : historyError ? (
+          <p role="alert" className="font-body text-body-sm text-error-dark">{historyError}</p>
+        ) : itemHistory.length > 0 ? (
+          <ol className="flex flex-col gap-3">
+            {itemHistory.map((record) => (
+              <li key={record.id} className="rounded-lg bg-surface-container-low p-3 font-body text-body-sm">
+                <p className="font-body text-label-md text-on-surface">{historyFieldLabel(record.field)}</p>
+                <p className="mt-1 text-on-surface-variant">{record.changedBy} · {new Date(record.changedAt).toLocaleString()}</p>
+                <p className="mt-2 text-on-surface-variant">From <span className="font-medium text-on-surface">{formatHistoryValue(record, record.oldValue)}</span> to <span className="font-medium text-on-surface">{formatHistoryValue(record, record.newValue)}</span></p>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="font-body text-body-sm text-on-surface-variant">No changes recorded yet.</p>
+        )}
       </BottomSheet>
 
       <BottomSheet open={sheet === 'category'} onClose={() => setSheet(null)} title={t('catalog.addCategory')}>

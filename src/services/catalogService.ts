@@ -1,4 +1,4 @@
-import type { CatalogItemRecord, CatalogModifierRecord, CategoryRecord } from '../types/domain';
+import type { CatalogItemRecord, CatalogModifierRecord, CategoryRecord, ItemHistoryRecord, UserRecord } from '../types/domain';
 import { readData, writeData } from './storage';
 import { seedCatalogItems, seedCategories } from './seedData';
 import { activityService } from './activityService';
@@ -11,7 +11,16 @@ interface CatalogActor {
 
 const getItems = () => readData('catalog-items', seedCatalogItems);
 const getCategories = () => readData('categories', seedCategories);
+const getItemHistory = () => readData<ItemHistoryRecord[]>('item-history', []);
 const makeId = (kind: string) => `${kind}-${crypto.randomUUID()}`;
+
+function getChangedBy(actor?: CatalogActor): string {
+  if (actor?.name) return actor.name;
+  if (actor?.id) return actor.id;
+  const session = readData<{ userId: string } | null>('auth-session', null);
+  const user = session && readData<UserRecord[]>('users', []).find((candidate) => candidate.id === session.userId);
+  return user?.name ?? session?.userId ?? 'System';
+}
 
 async function updateCatalogItem(
   itemId: string,
@@ -43,6 +52,8 @@ async function updateCatalogItem(
   const availabilityChanged = item.outOfStock !== nextOutOfStock;
   const priceChanged = changes.priceMillimes !== undefined && changes.priceMillimes !== item.priceMillimes;
   const stockChanged = changes.stockCount !== undefined && changes.stockCount !== item.stockCount;
+  const nameChanged = changes.name !== undefined && changes.name !== item.name;
+  const categoryChanged = changes.categoryId !== undefined && changes.categoryId !== item.categoryId;
   if ((availabilityChanged || stockReachedZero) && !actor) {
     throw new Error('An acting staff member is required to change catalog availability.');
   }
@@ -60,6 +71,26 @@ async function updateCatalogItem(
   };
   writeData('catalog-items', items.map((candidate) => candidate.id === itemId ? updated : candidate));
 
+  const changedAt = new Date().toISOString();
+  const oldCategoryName = getCategories().find((category) => category.id === item.categoryId)?.name ?? item.categoryId;
+  const newCategoryName = getCategories().find((category) => category.id === updated.categoryId)?.name ?? updated.categoryId;
+  const historyChanges: Omit<ItemHistoryRecord, 'id' | 'itemId' | 'changedBy' | 'changedAt'>[] = [];
+  if (priceChanged) historyChanges.push({ field: 'price', oldValue: item.priceMillimes, newValue: updated.priceMillimes });
+  if (nameChanged) historyChanges.push({ field: 'name', oldValue: item.name, newValue: updated.name });
+  if (categoryChanged) historyChanges.push({ field: 'category', oldValue: oldCategoryName, newValue: newCategoryName });
+  if (stockChanged) historyChanges.push({ field: 'stockTracking', oldValue: item.stockCount, newValue: updated.stockCount });
+  if (availabilityChanged) historyChanges.push({ field: 'outOfStock', oldValue: item.outOfStock, newValue: updated.outOfStock });
+  if (historyChanges.length > 0) {
+    const records: ItemHistoryRecord[] = historyChanges.map((change) => ({
+      ...change,
+      id: makeId('item-history'),
+      itemId: item.id,
+      changedBy: getChangedBy(actor),
+      changedAt,
+    }));
+    writeData('item-history', [...getItemHistory(), ...records]);
+  }
+
   const changesToLog: { action: string; summary: string }[] = [];
   if (availabilityChanged) {
     changesToLog.push({
@@ -71,6 +102,18 @@ async function updateCatalogItem(
     changesToLog.push({
       action: 'price.changed',
       summary: `Changed the price of ${item.name} from ${item.priceMillimes} to ${updated.priceMillimes} millimes.`,
+    });
+  }
+  if (nameChanged) {
+    changesToLog.push({
+      action: 'catalog.item_name_changed',
+      summary: `Changed the name of ${item.name} to ${updated.name}.`,
+    });
+  }
+  if (categoryChanged) {
+    changesToLog.push({
+      action: 'catalog.item_category_changed',
+      summary: `Changed the category of ${item.name} from ${oldCategoryName} to ${newCategoryName}.`,
     });
   }
   if (stockChanged) {
@@ -94,6 +137,7 @@ async function updateCatalogItem(
       meta: {
         before: {
           name: item.name,
+          categoryId: item.categoryId,
           priceMillimes: item.priceMillimes,
           stockCount: item.stockCount,
           outOfStock: item.outOfStock,
@@ -101,6 +145,7 @@ async function updateCatalogItem(
         },
         after: {
           name: updated.name,
+          categoryId: updated.categoryId,
           priceMillimes: updated.priceMillimes,
           stockCount: updated.stockCount,
           outOfStock: updated.outOfStock,
@@ -128,6 +173,12 @@ export const catalogService = {
       (!categoryId || item.categoryId === categoryId) &&
       (!normalizedSearch || item.name.toLocaleLowerCase().includes(normalizedSearch)),
     );
+  },
+
+  async listItemHistory(itemId: string): Promise<ItemHistoryRecord[]> {
+    return getItemHistory()
+      .filter((record) => record.itemId === itemId)
+      .sort((left, right) => right.changedAt.localeCompare(left.changedAt));
   },
 
   async createCategory(input: Omit<CategoryRecord, 'id'>): Promise<CategoryRecord> {

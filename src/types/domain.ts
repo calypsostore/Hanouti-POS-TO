@@ -117,6 +117,16 @@ export interface CatalogModifierRecord {
   priceMillimes: number;
 }
 
+export interface ItemHistoryRecord {
+  id: string;
+  itemId: string;
+  field: 'price' | 'name' | 'category' | 'stockTracking' | 'outOfStock';
+  oldValue: string | number | boolean | null;
+  newValue: string | number | boolean | null;
+  changedBy: string;
+  changedAt: string;
+}
+
 export interface OrderLineRecord {
   itemId: string;
   categoryId?: string;

@@ -14,6 +14,9 @@ export default defineConfig({
     VitePWA({
       registerType: 'prompt',
       includeAssets: ['icon-192.svg', 'icon-512.svg'],
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,txt,webmanifest,woff2}'],
+      },
       manifest: {
         name: '7anouti-POS',
         short_name: '7anouti-POS',

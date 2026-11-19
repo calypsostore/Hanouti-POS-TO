@@ -12,6 +12,7 @@ import { orderService } from '../services/orderService';
 import { useAuthStore } from '../stores/authStore';
 import { userService } from '../services/userService';
 import type { OrderRecord } from '../types/domain';
+import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
 
 function OwnerVoidRequestsContent() {
   const user = useAuthStore((state) => state.user);
@@ -48,6 +49,13 @@ function OwnerVoidRequestsContent() {
       setError(t('common.storeLoadFailed'));
     });
   }, [refreshRequests, storeId, user?.storeId]);
+
+  useEffect(() => subscribeToStoreChanges(storeId, ['orders'], () => {
+    void refreshRequests().catch((loadError: unknown) => {
+      console.error('Unable to refresh void requests after a live update.', loadError);
+      setError(t('common.refreshFailed'));
+    });
+  }), [refreshRequests, storeId]);
 
   async function resolve(order: OrderRecord, decision: 'approve' | 'reject') {
     setError('');

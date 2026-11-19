@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { MaterialIcon } from '../components/MaterialIcon';
+import { ItemLogo } from '../components/ItemLogo';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { adminWorkspaceLinks } from '../app/navigation';
 import { formatTnd } from '../lib/format';
+import { t } from '../i18n/translations';
 import { activityService } from '../services/activityService';
+import { catalogService } from '../services/catalogService';
 import { orderService } from '../services/orderService';
 import { shiftService } from '../services/shiftService';
 import { userService } from '../services/userService';
-import { isSubscriptionExpired, type ActivityRecord, type OrderRecord, type ShiftRecord, type StoreRecord, type UserSummary } from '../types/domain';
+import { isSubscriptionExpired, type ActivityRecord, type CatalogItemRecord, type OrderRecord, type ShiftRecord, type StoreRecord, type UserSummary } from '../types/domain';
 
 type StoreTab = 'sales' | 'staff' | 'shifts' | 'activity';
 
@@ -36,6 +39,7 @@ export function StoreReadOnlyScreen() {
   const [staff, setStaff] = useState<UserSummary[]>([]);
   const [shifts, setShifts] = useState<ShiftRecord[]>([]);
   const [activity, setActivity] = useState<ActivityRecord[]>([]);
+  const [catalogItems, setCatalogItems] = useState<CatalogItemRecord[]>([]);
   const [activeTab, setActiveTab] = useState<StoreTab>('sales');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -54,11 +58,12 @@ export function StoreReadOnlyScreen() {
           }
           return;
         }
-        const [nextOrders, nextStaff, nextShifts, nextActivity] = await Promise.all([
+        const [nextOrders, nextStaff, nextShifts, nextActivity, nextCatalogItems] = await Promise.all([
           orderService.listAll(storeId),
           userService.listUsers(storeId),
           shiftService.listShifts(storeId),
           activityService.list(storeId),
+          catalogService.listItems(storeId),
         ]);
         if (!active) return;
         setStore(nextStore);
@@ -66,6 +71,7 @@ export function StoreReadOnlyScreen() {
         setStaff(nextStaff.filter((user) => user.role === 'staff'));
         setShifts(nextShifts);
         setActivity(nextActivity.slice(0, 100));
+        setCatalogItems(nextCatalogItems);
         setError('');
       } catch (loadError) {
         console.error('Unable to load the store view.', loadError);
@@ -144,6 +150,20 @@ export function StoreReadOnlyScreen() {
                 </article>
               ))}
               {todayOrders.length === 0 && <p className="rounded-lg bg-surface-container-low p-4 font-body text-body-sm text-outline">No orders today.</p>}
+            </div>
+          </ReadOnlyCard>
+          <ReadOnlyCard title={t('catalog.title')}>
+            <div className="flex flex-col gap-2">
+              {catalogItems.map((item) => (
+                <article key={item.id} className="flex items-center gap-3 rounded-lg bg-surface-container-low p-3">
+                  <ItemLogo id={item.icon} size="md" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-body text-label-md text-on-surface">{item.name}</p>
+                    <p className="mt-1 font-body text-body-sm text-outline">{formatTnd(item.priceMillimes / 1000)} DT</p>
+                  </div>
+                </article>
+              ))}
+              {catalogItems.length === 0 && <p className="rounded-lg bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('catalog.noItemsFound')}</p>}
             </div>
           </ReadOnlyCard>
         </section>

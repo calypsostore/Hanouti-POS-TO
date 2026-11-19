@@ -4,7 +4,9 @@ import { BottomNav } from '../components/BottomNav';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
 import { Chip } from '../components/Chip';
+import { FirstRunHint } from '../components/FirstRunHint';
 import { ItemCard, type ItemCardItem } from '../components/ItemCard';
+import { ItemLogo } from '../components/ItemLogo';
 import { Keypad } from '../components/Keypad';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { MaterialIcon } from '../components/MaterialIcon';
@@ -21,6 +23,7 @@ import { OrderNotificationError, OrderServiceError, orderService } from '../serv
 import { shiftService } from '../services/shiftService';
 import { PERMISSIONS_CHANGED_EVENT, userService } from '../services/userService';
 import { updateService } from '../services/updateService';
+import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
 import { useAuthStore } from '../stores/authStore';
 import { useCartStore, type CartLine, type CartSnapshot } from '../stores/cartStore';
 import type { CatalogItemRecord, CatalogModifierRecord, CategoryRecord, CompReason, CustomerRecord, OrderLineRecord, OrderRecord, PaymentMethod, ShiftRecord, StoreRecord } from '../types/domain';
@@ -180,7 +183,9 @@ export function PosScreen() {
     const onFocus = () => { void refresh(); };
     window.addEventListener('focus', onFocus);
     window.addEventListener(PERMISSIONS_CHANGED_EVENT, onFocus);
+    const unsubscribe = subscribeToStoreChanges(storeId, ['orders', 'shifts', 'notifications', 'catalog_items'], onFocus);
     return () => {
+      unsubscribe();
       window.removeEventListener('focus', onFocus);
       window.removeEventListener(PERMISSIONS_CHANGED_EVENT, onFocus);
     };
@@ -684,6 +689,7 @@ export function PosScreen() {
           </Button>
         )}
       </div>
+      <FirstRunHint id={`pos-${user?.id ?? 'guest'}`} title={t('hint.title')} message={t('hint.pos')} />
 
       <main className="grid tablet:grid-cols-[minmax(0,1.5fr)_minmax(300px,0.9fr)]">
         <section className="min-w-0 pb-4">
@@ -700,7 +706,7 @@ export function PosScreen() {
             <div className="scrollbar-hidden -mx-3 flex gap-2 overflow-x-auto px-3 py-0.5">
               {categoryOptions.map((item) => (
                 <Chip key={item.id} selected={category === item.id} onClick={() => setCategory(item.id)}>
-                  <MaterialIcon name={item.icon} className="text-lg" filled={category === item.id} />
+                  {item.id === 'all' ? <MaterialIcon name={item.icon} className="text-lg" filled={category === item.id} /> : <ItemLogo id={item.icon} size="sm" />}
                   {item.name}
                 </Chip>
               ))}
@@ -719,7 +725,7 @@ export function PosScreen() {
               {quickPicks.map((item) => (
                 <button key={item.id} type="button" onClick={() => addItem(item)} className={`flex ${largeButtons ? 'min-h-40 w-40' : 'min-h-32 w-36'} shrink-0 flex-col justify-between rounded-2xl bg-surface-container-lowest p-3 text-left shadow-card active:scale-[0.98]`}>
                   <div className="flex items-start justify-between">
-                    <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-surface-container text-primary"><MaterialIcon name={item.icon} className="text-xl" /></span>
+                    <ItemLogo id={item.icon} size="sm" />
                   </div>
                   <div className="mt-2">
                     <p className="truncate font-body text-label-md text-on-surface">{item.name}</p>

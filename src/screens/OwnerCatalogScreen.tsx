@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
 import { Chip } from '../components/Chip';
+import { ItemLogo } from '../components/ItemLogo';
+import { LogoPicker } from '../components/LogoPicker';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
@@ -12,6 +14,7 @@ import { catalogService } from '../services/catalogService';
 import { useAuthStore } from '../stores/authStore';
 import type { CatalogItemRecord, CatalogModifierRecord, CategoryRecord, ItemHistoryRecord, StoreRecord } from '../types/domain';
 import { userService } from '../services/userService';
+import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
 
 type CatalogSheet = 'item' | 'category' | null;
 type Availability = 'available' | '86' | 'out';
@@ -46,7 +49,7 @@ const emptyDraft = (categoryId = ''): ProductDraft => ({
   sku: '',
   price: '',
   categoryId,
-  icon: 'local_cafe',
+  icon: 'espresso',
   stockCount: '',
   lowStockThreshold: '5',
   availability: 'available',
@@ -121,6 +124,8 @@ function OwnerCatalogContent() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [sheet, setSheet] = useState<CatalogSheet>(null);
+  const [logoPickerOpen, setLogoPickerOpen] = useState(false);
+  const [categoryIcon, setCategoryIcon] = useState('');
   const [editingItem, setEditingItem] = useState<CatalogItemRecord | null>(null);
   const [historyItem, setHistoryItem] = useState<CatalogItemRecord | null>(null);
   const [itemHistory, setItemHistory] = useState<ItemHistoryRecord[]>([]);
@@ -150,11 +155,25 @@ function OwnerCatalogContent() {
     });
   }, [refresh, storeId]);
 
+  useEffect(() => subscribeToStoreChanges(storeId, ['catalog_items'], () => {
+    void refresh().catch((loadError: unknown) => {
+      console.error('Unable to refresh the catalog after a live update.', loadError);
+      setError(t('common.refreshFailed'));
+    });
+  }), [refresh, storeId]);
+
   function openNewItem() {
     setError('');
     setDraft(emptyDraft(categories[0]?.id ?? ''));
     setEditingItem(null);
     setSheet('item');
+  }
+
+  function openNewCategory() {
+    setError('');
+    setCategoryIcon('');
+    setCategoryName('');
+    setSheet('category');
   }
 
   function openEditItem(item: CatalogItemRecord) {
@@ -257,13 +276,14 @@ function OwnerCatalogContent() {
       const category: Omit<CategoryRecord, 'id'> = {
         storeId,
         name: categoryName,
-        icon: 'category',
+        icon: categoryIcon,
         sortOrder: categories.length,
         isActive: true,
       };
       const created = await catalogService.createCategory(category);
       await refresh();
       setCategoryName('');
+      setCategoryIcon('');
       setSheet(null);
       setCategoryId(created.id);
       setNotice('Category added.');
@@ -317,7 +337,7 @@ function OwnerCatalogContent() {
           <p className="mt-1 font-body text-body-md text-on-surface-variant">Manage products, categories, prices, and availability.</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="secondary" onClick={() => { setError(''); setSheet('category'); }}><MaterialIcon name="create_new_folder" className="text-lg" />{t('catalog.addCategory')}</Button>
+          <Button variant="secondary" onClick={openNewCategory}><MaterialIcon name="create_new_folder" className="text-lg" />{t('catalog.addCategory')}</Button>
           <Button onClick={openNewItem}><MaterialIcon name="add" />{t('catalog.addItem')}</Button>
         </div>
       </header>
@@ -329,7 +349,7 @@ function OwnerCatalogContent() {
         </label>
         <div className="scrollbar-hidden flex gap-2 overflow-x-auto py-1">
           <Chip selected={categoryId === 'all'} onClick={() => setCategoryId('all')}>{t('catalog.items')}</Chip>
-          {categories.map((category) => <Chip key={category.id} selected={categoryId === category.id} onClick={() => setCategoryId(category.id)}><MaterialIcon name={category.icon} className="text-lg" />{category.name}</Chip>)}
+          {categories.map((category) => <Chip key={category.id} selected={categoryId === category.id} onClick={() => setCategoryId(category.id)}><ItemLogo id={category.icon} size="sm" />{category.name}</Chip>)}
         </div>
         <div className="scrollbar-hidden flex gap-2 overflow-x-auto py-1">
           {(['all', 'available', '86', 'out'] as const).map((status) => (
@@ -364,7 +384,7 @@ function OwnerCatalogContent() {
             {categories.length === 0 ? 'Create a category first, then add products to organize your menu.' : search || categoryId !== 'all' || statusFilter !== 'all' ? 'Try another search or clear the selected filters.' : 'Add your first product to start building your menu.'}
           </p>
           <div className="mt-4 flex flex-wrap justify-center gap-2">
-            {categories.length === 0 && <Button variant="secondary" onClick={() => setSheet('category')}><MaterialIcon name="create_new_folder" />{t('catalog.addCategory')}</Button>}
+            {categories.length === 0 && <Button variant="secondary" onClick={openNewCategory}><MaterialIcon name="create_new_folder" />{t('catalog.addCategory')}</Button>}
             {categories.length > 0 && !search && categoryId === 'all' && statusFilter === 'all' && <Button onClick={openNewItem}><MaterialIcon name="add" />{t('catalog.addItem')}</Button>}
             {(search || categoryId !== 'all' || statusFilter !== 'all') && <Button variant="secondary" onClick={() => { setSearch(''); setCategoryId('all'); setStatusFilter('all'); }}>Clear filters</Button>}
           </div>
@@ -373,8 +393,11 @@ function OwnerCatalogContent() {
 
       <BottomSheet open={sheet === 'item'} onClose={() => setSheet(null)} title={editingItem ? 'Edit product' : t('catalog.addItem')}>
         <form onSubmit={saveItem} className="flex flex-col gap-4">
-          <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-surface-container text-primary">
-            <MaterialIcon name={draft.icon} className="text-3xl" />
+          <div className="flex items-center gap-3">
+            <ItemLogo id={draft.icon} size="lg" />
+            <Button type="button" variant="secondary" onClick={() => setLogoPickerOpen(true)}>
+              <MaterialIcon name="palette" />{t('logo.chooseProduct')}
+            </Button>
           </div>
           {editingItem && (
             <Button variant="secondary" className="self-start" onClick={() => { void openItemHistory(editingItem); }}>
@@ -386,7 +409,6 @@ function OwnerCatalogContent() {
             <label className="font-body text-label-md">{t('catalog.priceTnd')}<input required inputMode="decimal" value={draft.price} onChange={(event) => setDraft((current) => ({ ...current, price: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
             <label className="font-body text-label-md">SKU / barcode<input value={draft.sku} onChange={(event) => setDraft((current) => ({ ...current, sku: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
             <label className="font-body text-label-md">Category<select required value={draft.categoryId} onChange={(event) => setDraft((current) => ({ ...current, categoryId: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary"><option value="">Select a category</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
-            <label className="font-body text-label-md">Product icon<select value={draft.icon} onChange={(event) => setDraft((current) => ({ ...current, icon: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary">{Array.from(new Set(['local_cafe', 'coffee', 'bakery_dining', 'water_drop', ...categories.map((category) => category.icon), draft.icon])).map((icon) => <option key={icon} value={icon}>{icon}</option>)}</select></label>
             <label className="font-body text-label-md">Stock count <span className="text-outline">(leave blank for untracked)</span><input type="number" min="0" step="1" value={draft.availability === 'out' ? '0' : draft.stockCount} onChange={(event) => setDraft((current) => ({ ...current, stockCount: event.target.value, availability: event.target.value === '0' ? 'out' : current.availability === 'out' ? 'available' : current.availability }))} placeholder="Not tracked" className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
             <label className="font-body text-label-md">{t('catalog.lowStockThreshold')}<input type="number" min="0" step="1" required value={draft.lowStockThreshold} onChange={(event) => setDraft((current) => ({ ...current, lowStockThreshold: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
           </div>
@@ -456,10 +478,27 @@ function OwnerCatalogContent() {
       <BottomSheet open={sheet === 'category'} onClose={() => setSheet(null)} title={t('catalog.addCategory')}>
         <form onSubmit={addCategory} className="flex flex-col gap-3">
           <label className="font-body text-label-md">{t('common.name')}<input required value={categoryName} onChange={(event) => setCategoryName(event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
+          <div className="flex items-center gap-3">
+            <ItemLogo id={categoryIcon} size="md" />
+            <Button type="button" variant="secondary" onClick={() => setLogoPickerOpen(true)}>
+              <MaterialIcon name="palette" />{t('logo.chooseCategory')}
+            </Button>
+            <span className="font-body text-body-sm text-outline">{categoryIcon ? t('logo.selected') : t('logo.noLogo')}</span>
+          </div>
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
           <Button type="submit">{t('common.save')}</Button>
         </form>
       </BottomSheet>
+
+      <LogoPicker
+        open={logoPickerOpen}
+        value={sheet === 'category' ? categoryIcon : draft.icon}
+        onChange={(icon) => {
+          if (sheet === 'category') setCategoryIcon(icon);
+          else setDraft((current) => ({ ...current, icon }));
+        }}
+        onClose={() => setLogoPickerOpen(false)}
+      />
 
       <BottomSheet open={deleteTarget !== null} onClose={() => setDeleteTarget(null)} title="Remove product">
         <div className="flex flex-col gap-3">
@@ -477,9 +516,7 @@ function CatalogItemCard({ item, category, onToggle, onEdit, onDelete }: { item:
   return (
     <article className="flex min-w-0 flex-col gap-3 rounded-xl bg-surface-container-lowest p-4 shadow-card">
       <div className="flex min-w-0 items-start gap-3">
-        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-surface-container text-primary">
-          <MaterialIcon name={item.icon} className="text-2xl" />
-        </span>
+        <ItemLogo id={item.icon} size="lg" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <p className="truncate font-body text-label-lg text-on-surface">{item.name}</p>

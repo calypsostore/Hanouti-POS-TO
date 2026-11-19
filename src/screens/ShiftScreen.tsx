@@ -3,6 +3,7 @@ import { BottomNav } from '../components/BottomNav';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
 import { Chip } from '../components/Chip';
+import { FirstRunHint } from '../components/FirstRunHint';
 import { Keypad } from '../components/Keypad';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { MaterialIcon } from '../components/MaterialIcon';
@@ -19,6 +20,7 @@ import { t } from '../i18n/translations';
 import { ownerWorkspaceLinks } from '../app/navigation';
 import { updateService } from '../services/updateService';
 import type { ShiftSalesBreakdown } from '../services/orderService';
+import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
 
 type ShiftCloseBreakdown = ShiftSalesBreakdown & {
   pendingVoidCount: number;
@@ -119,6 +121,13 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       setError(t('common.loadFailed'));
     }).finally(() => setLoading(false));
   }, [refresh]);
+
+  useEffect(() => subscribeToStoreChanges(storeId, ['orders', 'shifts', 'notifications'], () => {
+    void refresh().catch((loadError: unknown) => {
+      console.error('Unable to refresh shifts after a live update.', loadError);
+      setError(t('common.refreshFailed'));
+    });
+  }), [refresh, storeId]);
 
   async function openShift(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -257,6 +266,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
         </div>
         {ownerMode && <StatusTag status="started">{`${openCount} open`}</StatusTag>}
       </div>
+      <FirstRunHint id={`shift-${user?.id ?? 'guest'}`} title={t('hint.title')} message={t('hint.shift')} />
 
       {closedShiftSummary && (
         <ClosedShiftSummary

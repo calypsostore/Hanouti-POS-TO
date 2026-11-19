@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
 import { Chip } from '../components/Chip';
+import { ItemLogo } from '../components/ItemLogo';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { StatusTag } from '../components/StatusTag';
@@ -173,7 +174,7 @@ function OwnerInventoryContent() {
           <Chip selected={categoryFilter === 'all'} onClick={() => setCategoryFilter('all')}>All categories</Chip>
           {categories.map((category) => (
             <Chip key={category.id} selected={categoryFilter === category.id} onClick={() => setCategoryFilter(category.id)}>
-              <MaterialIcon name={category.icon} className="text-lg" />{category.name}
+              <ItemLogo id={category.icon} size="sm" />{category.name}
             </Chip>
           ))}
         </div>
@@ -199,9 +200,7 @@ function OwnerInventoryContent() {
           return (
             <article key={item.id} className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
               <div className="flex min-w-0 items-start gap-3">
-                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-surface-container text-primary">
-                  <MaterialIcon name={item.icon} className="text-2xl" />
-                </span>
+                <ItemLogo id={item.icon} size="md" />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="font-body text-label-lg text-on-surface">{item.name}</h2>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { formatTnd } from '../lib/format';
 import { t } from '../i18n/translations';
+import { ItemLogo } from './ItemLogo';
 import { MaterialIcon } from './MaterialIcon';
 
 export interface ItemCardItem {
@@ -37,8 +38,8 @@ export function ItemCard({ item, quantity = 0, onAdd, onRemove, canToggleStock =
         className="flex flex-1 flex-col justify-between text-left disabled:cursor-not-allowed"
       >
         <div className="flex items-start justify-between">
-          <span className={`relative flex h-12 w-12 items-center justify-center rounded-xl ${item.outOfStock ? 'bg-surface-container text-outline' : 'bg-surface-container-high text-primary'}`}>
-            <MaterialIcon name={item.icon} className={`text-[28px] ${item.outOfStock ? 'opacity-60' : ''}`} />
+          <span className="relative">
+            <ItemLogo id={item.icon} size="md" className={item.outOfStock ? 'bg-surface-container text-outline opacity-60' : 'bg-surface-container-high text-primary'} />
             {item.outOfStock && (
               <>
                 <span className="absolute inset-0 flex items-center justify-center">

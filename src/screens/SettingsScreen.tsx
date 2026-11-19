@@ -15,7 +15,7 @@ import { updateService } from '../services/updateService';
 import { userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
 import { updateDisplaySettings, useDisplaySettings, type DisplayTheme } from '../lib/displaySettings';
-import { t } from '../i18n/translations';
+import { t, type TranslationKey } from '../i18n/translations';
 import { adminWorkspaceLinks, ownerWorkspaceLinks } from '../app/navigation';
 import { DEFAULT_NOTIFICATION_PREFERENCES, resolveStoreSettings, type CatalogItemRecord, type CategoryRecord, type NotificationRecord, type NotificationType, type PositionRecord, type ScheduleShiftRecord, type SettlementTerms } from '../types/domain';
 
@@ -45,6 +45,28 @@ interface StaffRuleDraft {
   itemIds: string[];
   compItemsEnabled: boolean;
 }
+
+interface HelpStep {
+  icon: string;
+  title: TranslationKey;
+  body: TranslationKey;
+}
+
+const staffHelpSteps: HelpStep[] = [
+  { icon: 'lock_open', title: 'help.openShift.title', body: 'help.openShift.body' },
+  { icon: 'point_of_sale', title: 'help.takeOrder.title', body: 'help.takeOrder.body' },
+  { icon: 'person_add', title: 'help.chargeTab.title', body: 'help.chargeTab.body' },
+  { icon: 'payments', title: 'help.tabPayment.title', body: 'help.tabPayment.body' },
+  { icon: 'lock', title: 'help.closeShift.title', body: 'help.closeShift.body' },
+  { icon: 'undo', title: 'help.voidOrder.title', body: 'help.voidOrder.body' },
+];
+
+const ownerHelpSteps: HelpStep[] = [
+  { icon: 'group_add', title: 'help.addStaff.title', body: 'help.addStaff.body' },
+  { icon: 'inventory_2', title: 'help.addProducts.title', body: 'help.addProducts.body' },
+  { icon: 'analytics', title: 'help.xReport.title', body: 'help.xReport.body' },
+  { icon: 'summarize', title: 'help.zReport.title', body: 'help.zReport.body' },
+];
 
 function localDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -661,6 +683,15 @@ export function SettingsScreen() {
         </>
       )}
 
+      <section aria-labelledby="help-section-heading" className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+        <h2 id="help-section-heading" className="flex items-center gap-2 font-display text-headline-md text-on-surface">
+          <MaterialIcon name="help" className="text-primary" />{t('settings.help')}
+        </h2>
+        <p className="mt-1 font-body text-body-sm text-on-surface-variant">{t('help.intro')}</p>
+        <HelpGuide title={t('help.staff')} steps={staffHelpSteps} />
+        {user?.role === 'owner' && <HelpGuide title={t('help.owner')} steps={ownerHelpSteps} />}
+      </section>
+
       <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
         <h2 className="mb-3 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="language" className="text-primary" />{t('settings.language')}</h2>
         <select value={language} onChange={(event) => { void changeLanguage(event.target.value as 'en'); }} className="h-12 w-full rounded-lg bg-surface-container-low px-3 font-body text-body-md outline-none focus:ring-2 focus:ring-primary">
@@ -693,4 +724,27 @@ export function SettingsScreen() {
   if (user?.role === 'owner') return <WorkspaceLayout title={t('settings.title')} storeName={store?.name} links={ownerWorkspaceLinks}>{content}</WorkspaceLayout>;
   if (user?.role === 'super_admin') return <WorkspaceLayout title={t('settings.title')} links={adminWorkspaceLinks}>{content}</WorkspaceLayout>;
   return <div className="min-h-screen bg-surface px-4 pb-24 pt-5"><div className="mx-auto max-w-3xl">{content}</div><BottomNav /></div>;
+}
+
+function HelpGuide({ title, steps }: { title: string; steps: HelpStep[] }) {
+  return (
+    <section className="mt-4">
+      <h3 className="mb-2 font-body text-label-lg text-on-surface">{title}</h3>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {steps.map((step, index) => (
+          <article key={step.title} className="flex items-start gap-3 rounded-xl bg-surface-container-low p-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-fixed text-primary">
+              <MaterialIcon name={step.icon} className="text-lg" />
+            </span>
+            <div className="min-w-0">
+              <p className="font-body text-label-md text-on-surface">
+                <span className="mr-1 text-outline">{index + 1}.</span>{t(step.title)}
+              </p>
+              <p className="mt-1 font-body text-body-sm text-on-surface-variant">{t(step.body)}</p>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
 }

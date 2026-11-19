@@ -12,6 +12,7 @@ import { notificationService, OWNER_NOTIFICATIONS_CHANGED_EVENT } from '../servi
 import { userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
 import type { NotificationRecord, UserRole } from '../types/domain';
+import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
 
 function notificationPath(notification: NotificationRecord, role: UserRole): string {
   if (notification.entityType === 'customer' && notification.entityId) return `/customers/${notification.entityId}`;
@@ -62,6 +63,13 @@ export function NotificationsScreen() {
       window.removeEventListener(OWNER_NOTIFICATIONS_CHANGED_EVENT, refresh);
     };
   }, [refresh]);
+
+  useEffect(() => {
+    if (!user?.storeId) return;
+    return subscribeToStoreChanges(user.storeId, ['notifications'], () => {
+      void refresh();
+    });
+  }, [refresh, user?.storeId]);
 
   const unreadCount = notifications.filter((notification) => !notification.readAt).length;
   const groups = useMemo(() => {

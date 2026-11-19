@@ -109,7 +109,8 @@ function OwnerDashboardContent() {
         const notifications = await notificationService.listForStaff(storeId, user.id);
         if (active) {
           setOwnerNotifications(notifications.filter((notification) =>
-            notification.type === 'customer_overdue' || notification.type === 'stock_depleted' || notification.type === 'cash_out_alert',
+            notification.type === 'customer_overdue' || notification.type === 'stock_depleted' ||
+            notification.type === 'low_stock' || notification.type === 'cash_out_alert',
           ));
         }
       }
@@ -320,7 +321,7 @@ function OwnerDashboardContent() {
       {ownerNotifications.length > 0 && (
         <section aria-label="Owner notifications" className="mt-4 flex flex-col gap-2">
           {ownerNotifications.slice(0, 5).map((notification) => (
-            <p key={notification.id} role="status" className={`rounded-xl p-3 font-body text-body-sm ${notification.type === 'stock_depleted' || notification.type === 'cash_out_alert' ? 'bg-warning-container text-on-warning-container' : 'bg-error-container text-on-error-container'}`}>
+            <p key={notification.id} role="status" className={`rounded-xl p-3 font-body text-body-sm ${notification.type === 'stock_depleted' || notification.type === 'low_stock' || notification.type === 'cash_out_alert' ? 'bg-warning-container text-on-warning-container' : 'bg-error-container text-on-error-container'}`}>
               <strong>{notification.title}:</strong> {notification.message}
             </p>
           ))}

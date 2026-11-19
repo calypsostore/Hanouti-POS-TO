@@ -59,7 +59,7 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
         return;
       }
       onSetupComplete();
-      navigate(user.role === 'owner' ? '/owner/dashboard' : '/admin/stores');
+      navigate(user.role === 'owner' ? '/owner/dashboard' : '/admin/overview');
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : t('password.unableToUpdate'));
     }

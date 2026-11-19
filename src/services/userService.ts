@@ -1,4 +1,4 @@
-import type { PermissionDefinition, PermissionOverrides, PositionRecord, StoreRecord, UserRecord, UserSummary } from '../types/domain';
+import { resolveStoreSettings, type PermissionDefinition, type PermissionOverrides, type PositionRecord, type StoreRecord, type StoreSettings, type StoreSubscription, type UserRecord, type UserSummary } from '../types/domain';
 import { readData, removeData, writeData } from './storage';
 import { seedPositions, seedStores, seedUsers } from './seedData';
 import { hashSecret, verifySecret } from './secretService';
@@ -105,6 +105,16 @@ function createId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
+function localDateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function assertSuperAdmin(actorId: string): UserRecord {
+  const actor = getUsers().find((candidate) => candidate.id === actorId && candidate.role === 'super_admin' && candidate.isActive);
+  if (!actor) throw new Error('Only an active platform owner can manage stores.');
+  return actor;
+}
+
 function withoutPassword(user: UserRecord): UserSummary {
   const { password: _password, passwordHash: _passwordHash, pinHash: _pinHash, ...safeUser } = user;
   return safeUser;
@@ -147,8 +157,134 @@ export const userService = {
     return getStores().find((store) => store.id === storeId);
   },
 
+  async updateStoreSettings(
+    storeId: string,
+    ownerId: string,
+    changes: {
+      defaultSettlementTerms?: StoreSettings['defaultSettlementTerms'];
+      notificationPreferences?: Partial<StoreSettings['notificationPreferences']>;
+    },
+  ): Promise<StoreRecord> {
+    const stores = getStores();
+    const store = stores.find((candidate) => candidate.id === storeId);
+    const owner = getUsers().find((candidate) => candidate.id === ownerId);
+    if (!store || !owner || owner.role !== 'owner' || store.ownerId !== owner.id || owner.storeId !== store.id) {
+      throw new Error('Only this store owner can change store settings.');
+    }
+    if (changes.defaultSettlementTerms !== undefined &&
+      !['weekly', 'monthly', 'anytime'].includes(changes.defaultSettlementTerms)) {
+      throw new Error('Choose valid default customer settlement terms.');
+    }
+    if (changes.notificationPreferences &&
+      Object.values(changes.notificationPreferences).some((enabled) => typeof enabled !== 'boolean')) {
+      throw new Error('Notification preferences must be enabled or disabled.');
+    }
+    const currentSettings = resolveStoreSettings(store.settings);
+    const settings: StoreSettings = {
+      ...currentSettings,
+      ...changes,
+      notificationPreferences: {
+        ...currentSettings.notificationPreferences,
+        ...changes.notificationPreferences,
+      },
+    };
+    const updated = { ...store, settings };
+    saveStores(stores.map((candidate) => candidate.id === storeId ? updated : candidate));
+    await logUserMutation({
+      storeId,
+      actorId: ownerId,
+      action: 'store.settings_changed',
+      summary: 'Updated store preferences.',
+      entityType: 'store',
+      entityId: store.id,
+      before: store.settings ?? currentSettings,
+      after: settings,
+    });
+    return updated;
+  },
+
   async listStores(): Promise<StoreRecord[]> {
     return getStores();
+  },
+
+  async updateStoreNameAsAdmin(storeId: string, actorId: string, name: string): Promise<StoreRecord> {
+    assertSuperAdmin(actorId);
+    const stores = getStores();
+    const store = stores.find((candidate) => candidate.id === storeId);
+    const cleanedName = name.trim();
+    if (!store) throw new Error('The store could not be found.');
+    if (!cleanedName) throw new Error('Store name is required.');
+    const updated = { ...store, name: cleanedName };
+    saveStores(stores.map((candidate) => candidate.id === storeId ? updated : candidate));
+    await logUserMutation({
+      storeId,
+      actorId,
+      action: 'store.name_changed',
+      summary: `Platform owner changed store name to "${cleanedName}".`,
+      entityType: 'store',
+      entityId: store.id,
+      before: { name: store.name },
+      after: { name: updated.name },
+    });
+    return updated;
+  },
+
+  async updateStoreSubscription(
+    storeId: string,
+    actorId: string,
+    subscription: StoreSubscription,
+  ): Promise<StoreRecord> {
+    assertSuperAdmin(actorId);
+    const stores = getStores();
+    const store = stores.find((candidate) => candidate.id === storeId);
+    if (!store) throw new Error('The store could not be found.');
+    if (!['trial', 'monthly', 'yearly'].includes(subscription.plan)) {
+      throw new Error('Choose a valid subscription plan.');
+    }
+    if (subscription.paidUntil !== null) {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(subscription.paidUntil);
+      if (!match) throw new Error('Subscription end date must use YYYY-MM-DD format.');
+      const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      if (date.getFullYear() !== Number(match[1]) || date.getMonth() !== Number(match[2]) - 1 || date.getDate() !== Number(match[3])) {
+        throw new Error('Enter a valid subscription end date.');
+      }
+    }
+    const notes = subscription.notes.trim();
+    if (notes.length > 1000) throw new Error('Subscription notes must be 1000 characters or fewer.');
+    const updated = { ...store, subscription: { ...subscription, notes } };
+    saveStores(stores.map((candidate) => candidate.id === storeId ? updated : candidate));
+    await logUserMutation({
+      storeId,
+      actorId,
+      action: 'store.subscription_changed',
+      summary: `Updated ${store.name} subscription (${subscription.plan}${subscription.paidUntil ? ` through ${subscription.paidUntil}` : ', no end date'}).`,
+      entityType: 'store',
+      entityId: store.id,
+      before: store.subscription,
+      after: updated.subscription,
+    });
+    return updated;
+  },
+
+  async archiveStore(storeId: string, actorId: string): Promise<StoreRecord> {
+    assertSuperAdmin(actorId);
+    const stores = getStores();
+    const store = stores.find((candidate) => candidate.id === storeId);
+    if (!store) throw new Error('The store could not be found.');
+    if (store.archivedAt) return store;
+    const updated = { ...store, isActive: false, archivedAt: new Date().toISOString() };
+    saveStores(stores.map((candidate) => candidate.id === storeId ? updated : candidate));
+    await logUserMutation({
+      storeId,
+      actorId,
+      action: 'store.archived',
+      summary: `Archived store "${store.name}".`,
+      entityType: 'store',
+      entityId: store.id,
+      before: { isActive: store.isActive, archivedAt: store.archivedAt },
+      after: { isActive: updated.isActive, archivedAt: updated.archivedAt },
+    });
+    return updated;
   },
 
   async clearDayClosed(storeId: string): Promise<void> {
@@ -188,6 +324,16 @@ export const userService = {
       adminPinHash: defaultPinHash,
       pinMustChange: true,
       isActive: true,
+      settings: resolveStoreSettings(),
+      subscription: {
+        plan: 'trial',
+        paidUntil: (() => {
+          const end = new Date();
+          end.setDate(end.getDate() + 14);
+          return localDateKey(end);
+        })(),
+        notes: '',
+      },
       createdAt: new Date().toISOString(),
     };
     const owner: UserRecord = {
@@ -310,6 +456,33 @@ export const userService = {
       entityType: 'staff',
       entityId: staff.id,
       before: { mustChangePassword: staff.mustChangePassword },
+      after: { mustChangePassword: true },
+    });
+    return temporaryPassword;
+  },
+
+  async resetOwnerPassword(ownerId: string, actorId: string): Promise<string> {
+    assertSuperAdmin(actorId);
+    const users = getUsers();
+    const owner = users.find((candidate) => candidate.id === ownerId && candidate.role === 'owner');
+    if (!owner || !owner.storeId) throw new Error('Owner account could not be found.');
+    const temporaryPassword = makeTemporaryPassword();
+    const updated: UserRecord = {
+      ...owner,
+      passwordHash: await hashSecret(temporaryPassword),
+      password: undefined,
+      mustChangePassword: true,
+      sessionVersion: (owner.sessionVersion ?? 0) + 1,
+    };
+    saveUsers(users.map((candidate) => candidate.id === ownerId ? updated : candidate));
+    await logUserMutation({
+      storeId: owner.storeId,
+      actorId,
+      action: 'owner.password_reset',
+      summary: `Platform owner reset the password for "${owner.name}".`,
+      entityType: 'owner',
+      entityId: owner.id,
+      before: { mustChangePassword: owner.mustChangePassword },
       after: { mustChangePassword: true },
     });
     return temporaryPassword;

@@ -1,4 +1,4 @@
-import type { CatalogItemRecord, CatalogModifierRecord, CategoryRecord, ItemHistoryRecord, UserRecord } from '../types/domain';
+import type { CatalogItemRecord, CatalogModifierRecord, CategoryRecord, ItemHistoryRecord, StockAdjustmentReason, UserRecord } from '../types/domain';
 import { readData, writeData } from './storage';
 import { seedCatalogItems, seedCategories } from './seedData';
 import { activityService } from './activityService';
@@ -27,6 +27,7 @@ async function updateCatalogItem(
   changes: Partial<Pick<CatalogItemRecord, 'name' | 'categoryId' | 'icon' | 'priceMillimes' | 'stockCount' | 'lowStockThreshold' | 'description' | 'sku' | 'modifiers' | 'modifierGroupName' | 'modifiersRequired' | 'modifierSelectionMode' | 'outOfStock' | 'isActive'>>,
   actor?: CatalogActor,
   notifyOnStockDepletion = true,
+  adjustmentReason?: StockAdjustmentReason,
 ): Promise<CatalogItemRecord> {
   const items = getItems();
   const item = items.find((candidate) => candidate.id === itemId);
@@ -44,6 +45,11 @@ async function updateCatalogItem(
     throw new Error('Low-stock threshold must be a non-negative whole number.');
   }
   const stockReachedZero = changes.stockCount === 0 && item.stockCount !== 0;
+  const lowStockThreshold = changes.lowStockThreshold ?? item.lowStockThreshold ?? 5;
+  const stockCrossedLowThreshold = item.stockCount !== null &&
+    changes.stockCount !== undefined && changes.stockCount !== null &&
+    changes.stockCount !== item.stockCount &&
+    item.stockCount > lowStockThreshold && changes.stockCount <= lowStockThreshold;
   const resultingStockCount = changes.stockCount !== undefined ? changes.stockCount : item.stockCount;
   if (changes.outOfStock === false && resultingStockCount === 0) {
     throw new Error('Add tracked stock before marking this item available.');
@@ -78,7 +84,12 @@ async function updateCatalogItem(
   if (priceChanged) historyChanges.push({ field: 'price', oldValue: item.priceMillimes, newValue: updated.priceMillimes });
   if (nameChanged) historyChanges.push({ field: 'name', oldValue: item.name, newValue: updated.name });
   if (categoryChanged) historyChanges.push({ field: 'category', oldValue: oldCategoryName, newValue: newCategoryName });
-  if (stockChanged) historyChanges.push({ field: 'stockTracking', oldValue: item.stockCount, newValue: updated.stockCount });
+  if (stockChanged) historyChanges.push({
+    field: 'stockTracking',
+    oldValue: item.stockCount,
+    newValue: updated.stockCount,
+    reason: adjustmentReason,
+  });
   if (availabilityChanged) historyChanges.push({ field: 'outOfStock', oldValue: item.outOfStock, newValue: updated.outOfStock });
   if (historyChanges.length > 0) {
     const records: ItemHistoryRecord[] = historyChanges.map((change) => ({
@@ -119,7 +130,9 @@ async function updateCatalogItem(
   if (stockChanged) {
     changesToLog.push({
       action: 'stock.updated',
-      summary: `Updated ${item.name} stock from ${item.stockCount ?? 'untracked'} to ${updated.stockCount ?? 'untracked'}.`,
+      summary: adjustmentReason
+        ? `${adjustmentReason[0].toLocaleUpperCase()}${adjustmentReason.slice(1)} ${item.name} stock from ${item.stockCount ?? 'untracked'} to ${updated.stockCount ?? 'untracked'}.`
+        : `Updated ${item.name} stock from ${item.stockCount ?? 'untracked'} to ${updated.stockCount ?? 'untracked'}.`,
     });
   }
   if (changesToLog.length === 0 && Object.keys(changes).length > 0) {
@@ -150,12 +163,16 @@ async function updateCatalogItem(
           stockCount: updated.stockCount,
           outOfStock: updated.outOfStock,
           isActive: updated.isActive,
+          reason: adjustmentReason,
         },
       },
     });
   }
   if (stockReachedZero && notifyOnStockDepletion) {
     await notificationService.notifyStockDepleted(item.storeId, item.id, item.name);
+  }
+  if (stockCrossedLowThreshold && changes.stockCount !== undefined && changes.stockCount !== null) {
+    await notificationService.notifyLowStock(item.storeId, item.id, item.name, changes.stockCount, lowStockThreshold);
   }
   return updated;
 }
@@ -246,6 +263,43 @@ export const catalogService = {
 
   async setStockCount(itemId: string, stockCount: number | null, actor: CatalogActor): Promise<CatalogItemRecord> {
     return await updateCatalogItem(itemId, { stockCount, outOfStock: stockCount === 0 }, actor);
+  },
+
+  async setStockTracking(itemId: string, trackStock: boolean, actor: CatalogActor): Promise<CatalogItemRecord> {
+    const item = getItems().find((candidate) => candidate.id === itemId);
+    if (!item) throw new Error('Catalog item could not be found.');
+    if (trackStock === (item.stockCount !== null)) return item;
+    return await updateCatalogItem(
+      itemId,
+      trackStock ? { stockCount: 0, outOfStock: true } : { stockCount: null, outOfStock: false },
+      actor,
+      false,
+    );
+  },
+
+  async adjustStock(
+    itemId: string,
+    amount: number,
+    reason: StockAdjustmentReason,
+    actor: CatalogActor,
+  ): Promise<CatalogItemRecord> {
+    if (!['restock', 'correction', 'waste'].includes(reason)) throw new Error('Choose a valid stock adjustment reason.');
+    if (!Number.isInteger(amount) || amount < (reason === 'correction' ? 0 : 1)) {
+      throw new Error(reason === 'correction'
+        ? 'Corrected stock must be a non-negative whole number.'
+        : 'Adjustment quantity must be a positive whole number.');
+    }
+    const item = getItems().find((candidate) => candidate.id === itemId);
+    if (!item) throw new Error('Catalog item could not be found.');
+    if (item.stockCount === null) throw new Error('Enable stock tracking before adjusting this item.');
+    const stockCount = reason === 'restock'
+      ? item.stockCount + amount
+      : reason === 'waste'
+        ? item.stockCount - amount
+        : amount;
+    if (stockCount < 0) throw new Error('Waste quantity cannot exceed the current stock count.');
+    if (!Number.isSafeInteger(stockCount)) throw new Error('Stock count is too large.');
+    return await updateCatalogItem(itemId, { stockCount, outOfStock: stockCount === 0 }, actor, true, reason);
   },
 
   async decrementStock(itemId: string, quantity: number, actor: CatalogActor): Promise<CatalogItemRecord> {

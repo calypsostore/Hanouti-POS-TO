@@ -35,10 +35,11 @@ const OwnerActivityLogScreen = lazy(() => import('./screens/OwnerUtilityScreens'
 const OwnerNotificationsScreen = lazy(() => import('./screens/OwnerUtilityScreens').then((module) => ({ default: module.OwnerNotificationsScreen })));
 const CustomersScreen = lazy(() => import('./screens/CustomersScreen').then((module) => ({ default: module.CustomersScreen })));
 const SuperAdminStoresScreen = lazy(() => import('./screens/SuperAdminStoresScreen').then((module) => ({ default: module.SuperAdminStoresScreen })));
+const SuperAdminOverviewScreen = lazy(() => import('./screens/SuperAdminStoresScreen').then((module) => ({ default: module.SuperAdminOverviewScreen })));
 
 function homeForRole(role: UserRole): string {
   if (role === 'staff') return '/dashboard';
-  return role === 'owner' ? '/owner/dashboard' : '/admin/stores';
+  return role === 'owner' ? '/owner/dashboard' : '/admin/overview';
 }
 
 function LoadingScreen({ message }: { message: string }) {
@@ -312,7 +313,8 @@ export default function App() {
           <Route path="/owner/notifications" element={<ProtectedRoute roles={['owner']}><OwnerNotificationsScreen /></ProtectedRoute>} />
           <Route path="/owner/settings" element={<ProtectedRoute roles={['owner']}><SettingsScreen /></ProtectedRoute>} />
           <Route path="/owner/*" element={<ProtectedRoute roles={['owner']}><RolePlaceholder title="Owner workspace" /></ProtectedRoute>} />
-          <Route path="/admin" element={<Navigate to="/admin/stores" replace />} />
+          <Route path="/admin" element={<Navigate to="/admin/overview" replace />} />
+          <Route path="/admin/overview" element={<ProtectedRoute roles={['super_admin']}><SuperAdminOverviewScreen /></ProtectedRoute>} />
           <Route path="/admin/stores" element={<ProtectedRoute roles={['super_admin']}><SuperAdminStoresScreen /></ProtectedRoute>} />
           <Route path="/admin/stores/:storeId" element={<ProtectedRoute roles={['super_admin']}><StoreReadOnlyScreen /></ProtectedRoute>} />
           <Route path="/admin/settings" element={<ProtectedRoute roles={['super_admin']}><SettingsScreen /></ProtectedRoute>} />

@@ -62,6 +62,49 @@ export interface UserRecord {
 
 export type UserSummary = Omit<UserRecord, 'password' | 'passwordHash' | 'pinHash'>;
 
+export type SettlementTerms = 'weekly' | 'monthly' | 'anytime';
+export type NotificationType =
+  | 'schedule_published'
+  | 'customer_credit_warning'
+  | 'customer_credit_limit'
+  | 'customer_overdue'
+  | 'stock_depleted'
+  | 'low_stock'
+  | 'cash_out_alert';
+
+export interface StoreSettings {
+  defaultSettlementTerms: SettlementTerms;
+  notificationPreferences: Partial<Record<NotificationType, boolean>>;
+}
+
+export type SubscriptionPlan = 'trial' | 'monthly' | 'yearly';
+
+export interface StoreSubscription {
+  plan: SubscriptionPlan;
+  paidUntil: string | null;
+  notes: string;
+}
+
+export const DEFAULT_NOTIFICATION_PREFERENCES: Record<NotificationType, boolean> = {
+  schedule_published: true,
+  customer_credit_warning: true,
+  customer_credit_limit: true,
+  customer_overdue: true,
+  stock_depleted: true,
+  low_stock: true,
+  cash_out_alert: true,
+};
+
+export function resolveStoreSettings(settings?: Partial<StoreSettings>): StoreSettings {
+  return {
+    defaultSettlementTerms: settings?.defaultSettlementTerms ?? 'monthly',
+    notificationPreferences: {
+      ...DEFAULT_NOTIFICATION_PREFERENCES,
+      ...settings?.notificationPreferences,
+    },
+  };
+}
+
 export interface StoreRecord {
   id: string;
   ownerId: string;
@@ -70,6 +113,9 @@ export interface StoreRecord {
   allowCustomerCreditBalance?: boolean;
   allowCardPayments?: boolean;
   allowOtherPayments?: boolean;
+  settings?: StoreSettings;
+  subscription?: StoreSubscription;
+  archivedAt?: string;
   staffAutoLockMinutes?: number;
   cashOutAlertThresholdMillimes?: number;
   dailySalesTargetMillimes?: number;
@@ -79,6 +125,13 @@ export interface StoreRecord {
   isActive: boolean;
   dayClosedOn?: string;
   createdAt: string;
+}
+
+export function isSubscriptionExpired(store: StoreRecord, now = new Date()): boolean {
+  const paidUntil = store.subscription?.paidUntil;
+  if (!paidUntil) return false;
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  return paidUntil < today;
 }
 
 export interface CategoryRecord {
@@ -125,7 +178,10 @@ export interface ItemHistoryRecord {
   newValue: string | number | boolean | null;
   changedBy: string;
   changedAt: string;
+  reason?: 'restock' | 'correction' | 'waste';
 }
+
+export type StockAdjustmentReason = 'restock' | 'correction' | 'waste';
 
 export interface OrderLineRecord {
   itemId: string;
@@ -245,7 +301,7 @@ export interface NotificationRecord {
   id: string;
   storeId: string;
   staffId: string;
-  type: 'schedule_published' | 'customer_credit_warning' | 'customer_credit_limit' | 'customer_overdue' | 'stock_depleted' | 'cash_out_alert';
+  type: NotificationType;
   title: string;
   message: string;
   createdAt: string;
@@ -376,7 +432,7 @@ export interface CustomerRecord {
   email?: string;
   notes?: string;
   creditLimitMillimes?: number;
-  settlementTerms: 'weekly' | 'monthly' | 'anytime';
+  settlementTerms: SettlementTerms;
   isActive: boolean;
   lastPaymentAt?: string;
   createdAt: string;

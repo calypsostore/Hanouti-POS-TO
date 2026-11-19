@@ -1,4 +1,4 @@
-import type { CashMovementRecord, NotificationRecord } from '../types/domain';
+import { resolveStoreSettings, type CashMovementRecord, type NotificationRecord, type NotificationType, type StoreSettings } from '../types/domain';
 import { readData, writeData } from './storage';
 import { customerService } from './customerService';
 import { userService } from './userService';
@@ -16,11 +16,16 @@ export const OWNER_NOTIFICATIONS_CHANGED_EVENT = 'owner-notifications-changed';
 const getNotifications = () => readData<NotificationRecord[]>('notifications', []);
 const overdueChecks = new Map<string, Promise<number>>();
 
+function notificationsEnabled(store: { settings?: StoreSettings }, type: NotificationType): boolean {
+  return resolveStoreSettings(store.settings).notificationPreferences[type] !== false;
+}
+
 async function createOverdueNotifications(storeId: string, ownerId: string): Promise<number> {
   const store = await userService.getStore(storeId);
   if (!store || store.ownerId !== ownerId) {
     throw new Error('The store owner could not be found for overdue notifications.');
   }
+  if (!notificationsEnabled(store, 'customer_overdue')) return 0;
   const overdueCustomers = await customerService.listOverdueCustomers(storeId);
   const existing = getNotifications();
   const createdAt = new Date().toISOString();
@@ -63,6 +68,9 @@ export const notificationService = {
   },
 
   async publishSchedule(storeId: string, staffIds: string[], weekLabel: string): Promise<void> {
+    const store = await userService.getStore(storeId);
+    if (!store) throw new Error('The store could not be found.');
+    if (!notificationsEnabled(store, 'schedule_published')) return;
     const staffToNotify = [...new Set(staffIds)];
     if (staffToNotify.length === 0) return;
     const createdAt = new Date().toISOString();
@@ -81,6 +89,7 @@ export const notificationService = {
   async notifyStockDepleted(storeId: string, catalogItemId: string, itemName: string): Promise<void> {
     const store = await userService.getStore(storeId);
     if (!store) throw new Error('The store could not be found.');
+    if (!notificationsEnabled(store, 'stock_depleted')) return;
     const owner = await userService.getUser(store.ownerId);
     if (!owner || owner.role !== 'owner' || owner.storeId !== store.id) {
       throw new Error('The store owner could not be found for stock notifications.');
@@ -98,11 +107,33 @@ export const notificationService = {
     writeData('notifications', [...getNotifications(), notification]);
   },
 
+  async notifyLowStock(storeId: string, catalogItemId: string, itemName: string, stockCount: number, threshold: number): Promise<void> {
+    const store = await userService.getStore(storeId);
+    if (!store) throw new Error('The store could not be found.');
+    if (!notificationsEnabled(store, 'low_stock')) return;
+    const owner = await userService.getUser(store.ownerId);
+    if (!owner || owner.role !== 'owner' || owner.storeId !== store.id) {
+      throw new Error('The store owner could not be found for low-stock notifications.');
+    }
+    const notification: NotificationRecord = {
+      id: `notification-${crypto.randomUUID()}`,
+      storeId,
+      staffId: owner.id,
+      type: 'low_stock',
+      title: 'Low stock',
+      message: `${itemName} has ${stockCount} units remaining (low-stock threshold: ${threshold}).`,
+      catalogItemId,
+      createdAt: new Date().toISOString(),
+    };
+    writeData('notifications', [...getNotifications(), notification]);
+  },
+
   async notifyCashOutAboveThreshold(movement: CashMovementRecord, staffName: string): Promise<void> {
     const store = await userService.getStore(movement.storeId);
     if (!store) throw new Error('The store could not be found.');
     const thresholdMillimes = store.cashOutAlertThresholdMillimes ?? 50_000;
-    if (movement.kind !== 'out' || movement.amountMillimes <= thresholdMillimes) return;
+    if (movement.kind !== 'out' || movement.amountMillimes <= thresholdMillimes ||
+      !notificationsEnabled(store, 'cash_out_alert')) return;
     const owner = await userService.getUser(store.ownerId);
     if (!owner || owner.role !== 'owner' || owner.storeId !== store.id) {
       throw new Error('The store owner could not be found for cash movement notifications.');
@@ -128,11 +159,15 @@ export const notificationService = {
     previousPercent: number,
     currentPercent: number,
   ): Promise<void> {
-    const notifyAt80 = previousPercent < 80 && currentPercent >= 80;
-    const notifyAt100 = previousPercent < 100 && currentPercent >= 100;
-    if (!notifyAt80 && !notifyAt100) return;
+    const reached80 = previousPercent < 80 && currentPercent >= 80;
+    const reached100 = previousPercent < 100 && currentPercent >= 100;
+    if (!reached80 && !reached100) return;
     const store = await userService.getStore(storeId);
     if (!store) throw new Error('The store could not be found.');
+    const preferences = resolveStoreSettings(store.settings).notificationPreferences;
+    const notifyAt80 = reached80 && preferences.customer_credit_warning !== false;
+    const notifyAt100 = reached100 && preferences.customer_credit_limit !== false;
+    if (!notifyAt80 && !notifyAt100) return;
     const owner = await userService.getUser(store.ownerId);
     if (!owner || owner.role !== 'owner' || owner.storeId !== store.id) {
       throw new Error('The store owner could not be found for credit notifications.');

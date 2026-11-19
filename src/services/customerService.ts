@@ -1,4 +1,4 @@
-import type { CustomerRecord, OrderRecord, TabRecord } from '../types/domain';
+import { resolveStoreSettings, type CustomerRecord, type OrderRecord, type TabRecord } from '../types/domain';
 import { activityService } from './activityService';
 import { userService } from './userService';
 import { shiftService } from './shiftService';
@@ -219,7 +219,8 @@ export const customerService = {
   }): Promise<CustomerRecord> {
     const trimmedName = input.name.trim();
     if (!trimmedName) throw new Error('Customer name is required.');
-    if (!await userService.getStore(input.storeId)) throw new Error('The store could not be found.');
+    const store = await userService.getStore(input.storeId);
+    if (!store) throw new Error('The store could not be found.');
     await requireCustomerPermission(input.actorId, input.storeId, 'customers_create');
     validateCreditLimit(input.creditLimitMillimes);
     if (input.settlementTerms !== undefined) validateSettlementTerms(input.settlementTerms);
@@ -231,7 +232,7 @@ export const customerService = {
       email: input.email?.trim() || undefined,
       notes: input.notes?.trim() || undefined,
       creditLimitMillimes: input.creditLimitMillimes,
-      settlementTerms: input.settlementTerms ?? 'monthly',
+      settlementTerms: input.settlementTerms ?? resolveStoreSettings(store.settings).defaultSettlementTerms,
       isActive: true,
       createdAt: new Date().toISOString(),
     };

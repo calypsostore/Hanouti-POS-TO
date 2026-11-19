@@ -25,6 +25,7 @@ export const ownerMoreLinks: WorkspaceLink[] = [
 export const ownerWorkspaceLinks: WorkspaceLink[] = [...ownerPrimaryLinks, ...ownerMoreLinks];
 
 export const adminWorkspaceLinks: WorkspaceLink[] = [
+  { to: '/admin/overview', label: 'nav.dashboard', icon: 'space_dashboard' },
   { to: '/admin/stores', label: 'nav.stores', icon: 'storefront' },
   { to: '/admin/settings', label: 'nav.settings', icon: 'tune' },
 ];

@@ -1,4 +1,4 @@
-import type { AuthSession, UserRecord, UserSummary } from '../types/domain';
+import { isSubscriptionExpired, type AuthSession, type UserRecord, type UserSummary } from '../types/domain';
 import { readData, removeData, writeData } from './storage';
 import { seedStores, seedUsers } from './seedData';
 import { hashSecret, verifySecret } from './secretService';
@@ -38,7 +38,9 @@ function saveUsers(users: UserRecord[]): void {
 function isAccountActive(user: UserRecord): boolean {
   if (!user.isActive) return false;
   if (!user.storeId) return true;
-  return readData('stores', seedStores).some((store) => store.id === user.storeId && store.isActive);
+  return readData('stores', seedStores).some((store) =>
+    store.id === user.storeId && store.isActive && !store.archivedAt && !isSubscriptionExpired(store),
+  );
 }
 
 function withoutPassword(user: UserRecord): UserSummary {
@@ -52,7 +54,6 @@ export const authService = {
     const candidates = users.filter((candidate) =>
       (candidate.username?.toLocaleLowerCase() === identifier.toLocaleLowerCase() ||
         candidate.email?.toLocaleLowerCase() === identifier.toLocaleLowerCase()) &&
-      isAccountActive(candidate) &&
       (!acceptedRoles || acceptedRoles.includes(candidate.role)),
     );
     let user: UserRecord | undefined;
@@ -68,6 +69,11 @@ export const authService = {
       break;
     }
     if (!user) throw new Error('The username/email or password is incorrect.');
+    if (user.storeId) {
+      const store = readData('stores', seedStores).find((candidate) => candidate.id === user.storeId);
+      if (store && isSubscriptionExpired(store)) throw new Error('Subscription expired, contact 7anouti');
+    }
+    if (!isAccountActive(user)) throw new Error('The username/email or password is incorrect.');
 
     const session: AuthSession = { userId: user.id, sessionVersion: user.sessionVersion ?? 0 };
     writeData(SESSION_KEY, session);

@@ -29,6 +29,11 @@ import { useCartStore, type CartLine, type CartSnapshot } from '../stores/cartSt
 import type { CatalogItemRecord, CatalogModifierRecord, CategoryRecord, CompReason, CustomerRecord, OrderLineRecord, OrderRecord, PaymentMethod, ShiftRecord, StoreRecord } from '../types/domain';
 import { customerService } from '../services/customerService';
 import type { CustomerCreditStatus } from '../services/customerService';
+import {
+  offlineOrderQueue,
+  OFFLINE_ORDER_SYNCED_EVENT,
+  OFFLINE_QUEUE_CHANGED_EVENT,
+} from '../services/offlineOrderQueue';
 
 interface ProductView extends ItemCardItem {
   priceMillimes: number;
@@ -99,6 +104,7 @@ export function PosScreen() {
   const [categoryRecords, setCategoryRecords] = useState<CategoryRecord[]>([]);
   const [openShift, setOpenShift] = useState<ShiftRecord>();
   const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [needsAttentionOrders, setNeedsAttentionOrders] = useState<Array<{ order: OrderRecord; message: string }>>([]);
   const [selectedItem, setSelectedItem] = useState<ProductView | null>(null);
   const [markedOutOfStockItem, setMarkedOutOfStockItem] = useState<ProductView | null>(null);
   const [selectedModifiers, setSelectedModifiers] = useState<string[]>([]);
@@ -129,6 +135,9 @@ export function PosScreen() {
   const [compError, setCompError] = useState('');
   const [staffDrinkAllowance, setStaffDrinkAllowance] = useState<StaffDrinkAllowance | null>(null);
   const undoTimeoutRef = useRef<number | undefined>(undefined);
+  const orderIdempotencyKeyRef = useRef<string | undefined>(undefined);
+  const pendingOrderSubmissionsRef = useRef(new Set<string>());
+  const syncedOrdersRef = useRef(new Map<string, OrderRecord>());
   const appliedPreselectionRef = useRef('');
   const categoryOptions = [{ id: 'all', name: t('pos.allItems'), icon: 'apps' }, ...categoryRecords];
 
@@ -161,19 +170,74 @@ export function PosScreen() {
         const creditStatusEntries = await Promise.all(customerList.map(async (customer) =>
           [customer.id, await customerService.getCreditStatus(customer.id)] as const,
         ));
+        const creditStatuses = Object.fromEntries(creditStatusEntries);
+        const queuedOrders = await offlineOrderQueue.pendingOrders(storeId);
+        const attentionOrders = await offlineOrderQueue.needsAttention(storeId);
         setCatalogRecords(items);
         setCategoryRecords(categories);
         setOpenShift(shift);
         setStore(currentStore);
-        setOrders(todaysOrders);
+        setOrders([...todaysOrders, ...queuedOrders]);
         setCan86Items(permission);
         setCanCompItems(compPermission);
         setCanUseTabs(user?.role === 'owner' || tabsPermission);
         setCanOverrideCreditLimit(user?.role === 'owner' || overridePermission);
         setCustomers(customerList);
-        setCustomerCreditStatuses(Object.fromEntries(creditStatusEntries));
+        setCustomerCreditStatuses(creditStatuses);
+        setNeedsAttentionOrders(attentionOrders);
+        if (user) {
+          try {
+            await offlineOrderQueue.cacheSnapshot({
+              storeId,
+              userId: user.id,
+              items,
+              categories,
+              customers: customerList,
+              creditStatuses,
+              shift,
+              store: currentStore,
+              orders: todaysOrders,
+              permissions: {
+                can86Items: permission,
+                canCompItems: compPermission,
+                canUseTabs: user.role === 'owner' || tabsPermission,
+                canOverrideCreditLimit: user.role === 'owner' || overridePermission,
+              },
+              cachedAt: new Date().toISOString(),
+            });
+          } catch (cacheError) {
+            console.error('Unable to cache point-of-sale data for offline use.', cacheError);
+          }
+        }
       } catch (error) {
         console.error('Unable to load point-of-sale data.', error);
+        if (user && (!navigator.onLine || offlineOrderQueue.isNetworkFailure(error))) {
+          try {
+            const snapshot = await offlineOrderQueue.getSnapshot(storeId, user.id);
+            if (snapshot) {
+              const [queuedOrders, attentionOrders] = await Promise.all([
+                offlineOrderQueue.pendingOrders(storeId),
+                offlineOrderQueue.needsAttention(storeId),
+              ]);
+              setCatalogRecords(snapshot.items);
+              setCategoryRecords(snapshot.categories);
+              setOpenShift(snapshot.shift);
+              setStore(snapshot.store);
+              setOrders([...snapshot.orders, ...queuedOrders]);
+              setCustomers(snapshot.customers);
+              setCustomerCreditStatuses(snapshot.creditStatuses);
+              setCan86Items(snapshot.permissions.can86Items);
+              setCanCompItems(snapshot.permissions.canCompItems);
+              setCanUseTabs(snapshot.permissions.canUseTabs);
+              setCanOverrideCreditLimit(snapshot.permissions.canOverrideCreditLimit);
+              setNeedsAttentionOrders(attentionOrders);
+              setCatalogError('Offline mode: using the last saved POS data.');
+              return;
+            }
+          } catch (cacheError) {
+            console.error('Unable to load cached point-of-sale data.', cacheError);
+          }
+        }
         setCatalogError(t('common.refreshFailed'));
       } finally {
         setCatalogLoading(false);
@@ -181,12 +245,41 @@ export function PosScreen() {
     };
     void refresh();
     const onFocus = () => { void refresh(); };
+    const onQueueChanged = () => {
+      void Promise.all([
+        offlineOrderQueue.pendingOrders(storeId),
+        offlineOrderQueue.needsAttention(storeId),
+      ]).then(([queuedOrders, attentionOrders]) => {
+        setOrders((current) => [...current.filter((order) => !order.syncStatus), ...queuedOrders]);
+        setCompletedOrder((current) => current
+          ? queuedOrders.find((order) => order.idempotencyKey === current.idempotencyKey) ?? current
+          : current);
+        setNeedsAttentionOrders(attentionOrders);
+      }).catch((error: unknown) => {
+        console.error('Unable to refresh the offline order queue.', error);
+      });
+    };
+    const onOrderSynced = (event: Event) => {
+      const { idempotencyKey, order } = (event as CustomEvent<{ idempotencyKey: string; order: OrderRecord }>).detail;
+      if (pendingOrderSubmissionsRef.current.has(idempotencyKey)) {
+        syncedOrdersRef.current.set(idempotencyKey, order);
+      }
+      setOrders((current) => [...current.filter((candidate) => candidate.idempotencyKey !== idempotencyKey), order]);
+      setCompletedOrder((current) => current?.idempotencyKey === idempotencyKey ? order : current);
+      void refresh();
+    };
     window.addEventListener('focus', onFocus);
+    window.addEventListener('online', onFocus);
+    window.addEventListener(OFFLINE_QUEUE_CHANGED_EVENT, onQueueChanged);
+    window.addEventListener(OFFLINE_ORDER_SYNCED_EVENT, onOrderSynced);
     window.addEventListener(PERMISSIONS_CHANGED_EVENT, onFocus);
     const unsubscribe = subscribeToStoreChanges(storeId, ['orders', 'shifts', 'notifications', 'catalog_items'], onFocus);
     return () => {
       unsubscribe();
       window.removeEventListener('focus', onFocus);
+      window.removeEventListener('online', onFocus);
+      window.removeEventListener(OFFLINE_QUEUE_CHANGED_EVENT, onQueueChanged);
+      window.removeEventListener(OFFLINE_ORDER_SYNCED_EVENT, onOrderSynced);
       window.removeEventListener(PERMISSIONS_CHANGED_EVENT, onFocus);
     };
   }, [storeId, user, location.pathname]);
@@ -459,6 +552,9 @@ export function PosScreen() {
     }
     let order: OrderRecord;
     let orderNotice = '';
+    const idempotencyKey = orderIdempotencyKeyRef.current ?? crypto.randomUUID();
+    orderIdempotencyKeyRef.current = idempotencyKey;
+    pendingOrderSubmissionsRef.current.add(idempotencyKey);
     try {
       const items: OrderLineRecord[] = cart.map((line) => ({
         itemId: line.itemId,
@@ -476,6 +572,7 @@ export function PosScreen() {
         customerId: paymentMethod === 'tab' ? selectedCustomerId : undefined,
         note,
         adminPin,
+        idempotencyKey,
       });
     } catch (error) {
       if (error instanceof OrderNotificationError) {
@@ -483,6 +580,8 @@ export function PosScreen() {
         orderNotice = error.message;
       } else {
         if (error instanceof OrderServiceError && error.code === 'CREDIT_LIMIT') {
+          orderIdempotencyKeyRef.current = undefined;
+          pendingOrderSubmissionsRef.current.delete(idempotencyKey);
           if (canOverrideCreditLimit) {
             setCreditOverrideError('Limit reached. Tell the customer. Enter the Admin PIN to override.');
             setCreditOverrideOpen(true);
@@ -493,6 +592,8 @@ export function PosScreen() {
           return;
         }
         const message = error instanceof Error ? error.message : t('pos.cannotSaveOrder');
+        orderIdempotencyKeyRef.current = undefined;
+        pendingOrderSubmissionsRef.current.delete(idempotencyKey);
         if (creditOverrideOpen) setCreditOverrideError(message);
         else {
           setToast(message);
@@ -502,6 +603,7 @@ export function PosScreen() {
       }
     }
 
+    if (orderIdempotencyKeyRef.current === idempotencyKey) orderIdempotencyKeyRef.current = undefined;
     clearOrder();
     if (undoTimeoutRef.current !== undefined) window.clearTimeout(undoTimeoutRef.current);
     undoTimeoutRef.current = undefined;
@@ -511,20 +613,35 @@ export function PosScreen() {
     setCreditOverrideOpen(false);
     setCreditOverridePin('');
     setCreditOverrideError('');
-    try {
-      setCatalogRecords(await catalogService.listItems(storeId));
-      setOrders(await orderService.listAll(storeId));
-      const customerList = await customerService.listCustomers(storeId);
-      const creditStatusEntries = await Promise.all(customerList.map(async (customer) =>
-        [customer.id, await customerService.getCreditStatus(customer.id)] as const,
-      ));
-      setCustomers(customerList);
-      setCustomerCreditStatuses(Object.fromEntries(creditStatusEntries));
-    } catch (refreshError) {
-      orderNotice ||= `Order created, but the POS could not refresh: ${refreshError instanceof Error ? refreshError.message : 'Please reload the page.'}`;
+    if (order.syncStatus === 'queued') {
+      setOrders((current) => [...current.filter((candidate) => candidate.id !== order.id), order]);
+      orderNotice = paymentMethod === 'tab'
+        ? 'Queued for sync. Customer credit will be verified when the connection returns.'
+        : 'Queued for sync. The server will assign the final order number when the connection returns.';
+    } else {
+      try {
+        setCatalogRecords(await catalogService.listItems(storeId));
+        setOrders(await orderService.listAll(storeId));
+        const customerList = await customerService.listCustomers(storeId);
+        const creditStatusEntries = await Promise.all(customerList.map(async (customer) =>
+          [customer.id, await customerService.getCreditStatus(customer.id)] as const,
+        ));
+        setCustomers(customerList);
+        setCustomerCreditStatuses(Object.fromEntries(creditStatusEntries));
+      } catch (refreshError) {
+        orderNotice ||= `Order created, but the POS could not refresh: ${refreshError instanceof Error ? refreshError.message : 'Please reload the page.'}`;
+      }
+    }
+    const syncedOrder = syncedOrdersRef.current.get(idempotencyKey);
+    syncedOrdersRef.current.delete(idempotencyKey);
+    if (syncedOrder) {
+      order = syncedOrder;
+      orderNotice = '';
+      setOrders((current) => [...current.filter((candidate) => candidate.idempotencyKey !== idempotencyKey), order]);
     }
     setCompletedOrderNotice(orderNotice);
     setCompletedOrder(order);
+    pendingOrderSubmissionsRef.current.delete(idempotencyKey);
     setPaymentMethod('cash');
     setSelectedCustomerId('');
   }
@@ -670,7 +787,7 @@ export function PosScreen() {
 
   return (
     <div className="min-h-screen bg-surface pb-36 tablet:pb-20">
-      <TopBar title={t('pos.terminal')} storeName={store?.name} onLockClick={user?.role === 'staff' ? () => { void lockTerminal(); } : undefined} />
+      <TopBar title={t('pos.terminal')} storeName={store?.name} showConnectionStatus onLockClick={user?.role === 'staff' ? () => { void lockTerminal(); } : undefined} />
       <div className="flex items-center justify-between gap-2 bg-surface-container-low px-3 py-2.5">
         <div className="min-w-0">
           <h2 className="flex items-center gap-1 truncate font-display text-headline-sm text-primary">
@@ -690,6 +807,19 @@ export function PosScreen() {
         )}
       </div>
       <FirstRunHint id={`pos-${user?.id ?? 'guest'}`} title={t('hint.title')} message={t('hint.pos')} />
+      {user?.role === 'owner' && needsAttentionOrders.length > 0 && (
+        <section aria-label="Needs attention" className="mx-3 mt-3 rounded-xl border border-error/30 bg-error-container p-3 text-on-error-container">
+          <h2 className="font-display text-headline-sm">Needs attention ({needsAttentionOrders.length})</h2>
+          <ul className="mt-2 flex flex-col gap-2">
+            {needsAttentionOrders.map(({ order, message }) => (
+              <li key={order.idempotencyKey ?? order.id} className="rounded-lg bg-surface-container-lowest/70 p-3">
+                <p className="font-body text-label-md">Local order {Math.abs(order.number)} · {formatTnd(order.totalMillimes / 1000)} DT</p>
+                <p className="mt-1 font-body text-body-sm">{message}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <main className="grid tablet:grid-cols-[minmax(0,1.5fr)_minmax(300px,0.9fr)]">
         <section className="min-w-0 pb-4">
@@ -817,9 +947,14 @@ export function PosScreen() {
             <div className="flex items-center gap-3 rounded-xl bg-success-container p-4 text-on-success-container">
               <MaterialIcon name="check_circle" className="text-3xl" />
               <div>
-                <p className="font-display text-headline-sm">Order #{completedOrder.number}</p>
+                <p className="font-display text-headline-sm">
+                  {completedOrder.syncStatus ? `Local order ${Math.abs(completedOrder.number)}` : `Order #${completedOrder.number}`}
+                </p>
                 <p className="font-body text-body-md">Total: {formatTnd(completedOrder.totalMillimes / 1000)} DT</p>
               </div>
+              {completedOrder.syncStatus === 'queued' && <span className="rounded-full bg-warning px-2 py-1 font-body text-label-sm text-on-warning">Queued</span>}
+              {completedOrder.syncStatus === 'needs_attention' && <span className="rounded-full bg-error px-2 py-1 font-body text-label-sm text-white">Needs attention</span>}
+              {completedOrder.verificationStatus === 'to_verify' && <span className="rounded-full bg-warning-container px-2 py-1 font-body text-label-sm text-on-warning-container">To verify</span>}
             </div>
             {completedOrderNotice && <p role="alert" className="rounded-lg bg-warning-container p-3 font-body text-body-sm text-on-warning-container">{completedOrderNotice}</p>}
             <Button

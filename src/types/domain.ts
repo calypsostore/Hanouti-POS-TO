@@ -217,6 +217,9 @@ export interface OrderLineRecord {
 export interface OrderRecord {
   id: string;
   number: number;
+  idempotencyKey?: string;
+  syncStatus?: 'queued' | 'needs_attention';
+  verificationStatus?: 'to_verify';
   storeId: string;
   storeName?: string;
   staffId: string;
@@ -499,4 +502,5 @@ export interface AuthSession {
   userId: string;
   sessionVersion?: number;
   locked?: boolean;
+  expiresAt?: number;
 }

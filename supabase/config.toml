@@ -1,2 +1,8 @@
 [functions.provision-account]
 verify_jwt = true
+
+[functions.login]
+verify_jwt = false
+
+[functions.verify-password]
+verify_jwt = true

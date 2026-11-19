@@ -8,6 +8,8 @@ import { activityService } from './activityService';
 import { readData, writeData } from './storage';
 import { seedOrders } from './seedData';
 import { isSupabaseDriver } from '../data/driver';
+import { offlineOrderQueue } from './offlineOrderQueue';
+import { requireOnlineForAction } from './offlineAvailability';
 import {
   countPendingVoids,
   createOrder as createRemoteOrder,
@@ -29,12 +31,6 @@ const todayStart = () => {
   date.setHours(0, 0, 0, 0);
   return date.getTime();
 };
-
-export interface OfflineOrderQueue {
-  enqueue(order: OrderRecord): Promise<void>;
-  flush(): Promise<void>;
-  pendingCount(): Promise<number>;
-}
 
 export class OrderServiceError extends Error {
   readonly code = 'CREDIT_LIMIT';
@@ -87,13 +83,124 @@ async function authorizeCreditOverride(input: {
   writeData('credit-override-pin-attempts', { ...attempts, [input.storeId]: { count: 0, lockedUntil: 0 } });
 }
 
-export const offlineOrderQueue: OfflineOrderQueue = {
-  async enqueue() {},
-  async flush() {},
-  async pendingCount() {
-    return 0;
-  },
-};
+export { offlineOrderQueue };
+
+async function createQueuedOrder(input: {
+  storeId: string;
+  staffId: string;
+  items: OrderLineRecord[];
+  paymentMethod?: PaymentMethod;
+  customerId?: string;
+  location?: string;
+  adminPin?: string;
+  note?: string;
+}, idempotencyKey: string): Promise<OrderRecord> {
+  if (input.adminPin) {
+    throw new Error('Credit-limit overrides require an internet connection. No order was queued.');
+  }
+  const snapshot = await offlineOrderQueue.getSnapshot(input.storeId, input.staffId);
+  if (!snapshot?.shift || snapshot.shift.status !== 'open') {
+    throw new Error('No cached open shift is available. Connect to the internet before taking orders.');
+  }
+  if (!input.items.length) throw new Error('Add at least one item before completing an order.');
+
+  const requestedQuantities = new Map<string, number>();
+  const items = input.items.map((line) => {
+    if (!Number.isInteger(line.quantity) || line.quantity < 1) {
+      throw new Error('Order contains an invalid quantity.');
+    }
+    const item = snapshot.items.find((candidate) => candidate.id === line.itemId && candidate.isActive);
+    if (!item) throw new Error('This item is not in the last cached catalog. Reconnect before placing this order.');
+    if (item.outOfStock || item.stockCount === 0) throw new Error(`${item.name} is out of stock in the last cached catalog.`);
+    const modifiers = line.modifiers ?? [];
+    if (new Set(modifiers).size !== modifiers.length) throw new Error('Order contains a duplicate item modifier.');
+    if (item.modifiersRequired && modifiers.length === 0) throw new Error(`Choose a modifier for ${item.name}.`);
+    if (item.modifierSelectionMode === 'single' && modifiers.length > 1) throw new Error(`Choose only one modifier for ${item.name}.`);
+    const selected = modifiers.map((name) => {
+      const modifier = item.modifiers?.find((candidate) => candidate.name === name);
+      if (!modifier) throw new Error(`${name} is not a valid modifier for ${item.name}.`);
+      return modifier;
+    });
+    const unitPriceMillimes = item.priceMillimes + selected.reduce((sum, modifier) => sum + modifier.priceMillimes, 0);
+    if (line.unitPriceMillimes !== unitPriceMillimes) {
+      throw new Error(`The price for ${item.name} does not match the last cached catalog.`);
+    }
+    requestedQuantities.set(item.id, (requestedQuantities.get(item.id) ?? 0) + line.quantity);
+    return {
+      ...line,
+      categoryId: item.categoryId,
+      categoryName: snapshot.categories.find((category) => category.id === item.categoryId)?.name,
+      unitPriceMillimes,
+      lineTotalMillimes: unitPriceMillimes * line.quantity,
+    };
+  });
+
+  const queuedOrders = await offlineOrderQueue.pendingOrders(input.storeId);
+  for (const [itemId, quantity] of requestedQuantities) {
+    const item = snapshot.items.find((candidate) => candidate.id === itemId);
+    if (item?.stockCount !== null && item) {
+      const alreadyQueued = queuedOrders
+        .filter((order) => order.syncStatus === 'queued')
+        .flatMap((order) => order.items)
+        .filter((line) => line.itemId === itemId)
+        .reduce((sum, line) => sum + line.quantity, 0);
+      if (quantity + alreadyQueued > item.stockCount) {
+        throw new Error(`${item.name} has only ${Math.max(0, item.stockCount - alreadyQueued)} remaining in the last cached stock count.`);
+      }
+    }
+  }
+
+  const paymentMethod = input.paymentMethod ?? 'cash';
+  const totalMillimes = items.reduce((sum, line) => sum + line.lineTotalMillimes, 0);
+  if (paymentMethod === 'tab') {
+    if (!input.customerId) throw new Error('Select a customer before charging this order to a tab.');
+    const customer = snapshot.customers.find((candidate) => candidate.id === input.customerId && candidate.isActive);
+    const status = snapshot.creditStatuses[input.customerId];
+    if (!customer || !status) {
+      throw new Error('The customer credit status is not cached. Reconnect before charging this order to a tab.');
+    }
+    const alreadyQueued = queuedOrders
+      .filter((order) => order.syncStatus === 'queued' && order.paymentMethod === 'tab' && order.customerId === customer.id)
+      .reduce((sum, order) => sum + order.totalMillimes, 0);
+    if (status.limit !== undefined && status.balance + alreadyQueued + totalMillimes > status.limit) {
+      throw new OrderServiceError('The last known credit limit would be exceeded. Reconnect before overriding it.');
+    }
+  }
+
+  const order: OrderRecord = {
+    id: idempotencyKey,
+    idempotencyKey,
+    number: -1,
+    storeId: input.storeId,
+    storeName: snapshot.store?.name,
+    staffId: input.staffId,
+    shiftId: snapshot.shift.id,
+    location: input.location,
+    status: 'done',
+    syncStatus: 'queued',
+    verificationStatus: paymentMethod === 'tab' ? 'to_verify' : undefined,
+    paymentMethod,
+    customerId: input.customerId,
+    note: input.note?.trim() || undefined,
+    items,
+    totalMillimes,
+    createdAt: new Date().toISOString(),
+  };
+  return await offlineOrderQueue.enqueue({
+    idempotencyKey,
+    order,
+    shift: snapshot.shift,
+    input: {
+      storeId: input.storeId,
+      staffId: input.staffId,
+      items,
+      paymentMethod,
+      customerId: input.customerId,
+      location: input.location,
+      note: input.note,
+    },
+  });
+}
 
 export interface ShiftSalesBreakdown {
   orderCount: number;
@@ -117,24 +224,33 @@ export const orderService = {
     return getOrders().filter((order) => order.storeId === storeId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },
 
-  async createOrder(input: { storeId: string; staffId: string; items: OrderLineRecord[]; paymentMethod?: PaymentMethod; customerId?: string; location?: string; adminPin?: string; note?: string }): Promise<OrderRecord> {
+  async createOrder(input: { storeId: string; staffId: string; items: OrderLineRecord[]; paymentMethod?: PaymentMethod; customerId?: string; location?: string; adminPin?: string; note?: string; idempotencyKey?: string }): Promise<OrderRecord> {
     if (isSupabaseDriver()) {
       if (input.items.length === 0) throw new Error('Add at least one item before completing an order.');
-      const shift = await shiftService.getOpenShiftForUser(input.storeId, input.staffId);
-      if (!shift) throw new Error('Open a shift before taking orders.');
+      const idempotencyKey = input.idempotencyKey ?? crypto.randomUUID();
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        return createQueuedOrder(input, idempotencyKey);
+      }
       try {
-        return await createRemoteOrder({
+        const shift = await shiftService.getOpenShiftForUser(input.storeId, input.staffId);
+        if (!shift) throw new Error('Open a shift before taking orders.');
+        const order = await createRemoteOrder({
           shift,
           items: input.items,
+          idempotencyKey,
           paymentMethod: input.paymentMethod,
           customerId: input.customerId,
           location: input.location,
           adminPin: input.adminPin,
           note: input.note,
         });
+        return { ...order, idempotencyKey };
       } catch (error) {
         if (error instanceof Error && error.message.includes('Limit reached')) {
           throw new OrderServiceError('Limit reached. Tell the customer.');
+        }
+        if (offlineOrderQueue.isNetworkFailure(error) || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+          return createQueuedOrder(input, idempotencyKey);
         }
         throw error;
       }
@@ -293,6 +409,7 @@ export const orderService = {
   },
 
   async requestVoid(orderId: string, staffId: string, reason: string): Promise<OrderRecord> {
+    requireOnlineForAction('Voiding orders');
     if (isSupabaseDriver()) {
       if (!reason.trim()) throw new Error('A reason is required to request an order void.');
       return requestRemoteVoid(orderId, reason);
@@ -323,6 +440,7 @@ export const orderService = {
   },
 
   async voidWithPin(orderId: string, pin: string, actorId: string, reason: string): Promise<OrderRecord> {
+    requireOnlineForAction('Voiding orders');
     if (isSupabaseDriver()) {
       if (!reason.trim()) throw new Error('A reason is required to void an order.');
       const order = await getRemoteOrder(orderId);
@@ -387,6 +505,7 @@ export const orderService = {
   },
 
   async resolveVoidRequest(orderId: string, ownerId: string, decision: 'approve' | 'reject', reason?: string): Promise<OrderRecord> {
+    requireOnlineForAction('Resolving void requests');
     if (isSupabaseDriver()) {
       const order = await getRemoteOrder(orderId);
       if (!order) throw new Error('Pending void request could not be found.');

@@ -1,9 +1,9 @@
 export type DataDriver = 'local' | 'supabase';
 
-const configuredDriver = import.meta.env.VITE_DATA_DRIVER ?? 'local';
+const configuredDriver = import.meta.env.VITE_DATA_DRIVER ?? (import.meta.env.DEV ? 'local' : '');
 
 if (configuredDriver !== 'local' && configuredDriver !== 'supabase') {
-  throw new Error('VITE_DATA_DRIVER must be either "local" or "supabase".');
+  throw new Error('Set VITE_DATA_DRIVER to "local" for demos or "supabase" for production.');
 }
 
 export const dataDriver: DataDriver = configuredDriver;

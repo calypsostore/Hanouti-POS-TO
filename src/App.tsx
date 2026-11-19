@@ -185,6 +185,27 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!ready) return;
+    let checking = false;
+    const revalidateSession = () => {
+      if (checking) return;
+      checking = true;
+      void useAuthStore.getState().refreshCurrentUser().finally(() => {
+        checking = false;
+      });
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') revalidateSession();
+    };
+    window.addEventListener('focus', revalidateSession);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('focus', revalidateSession);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [ready]);
+
+  useEffect(() => {
     if (!ready || user?.role !== 'owner' || !user.storeId) return;
     void notificationService.checkOverdueCustomers(user.storeId, user.id).catch((error: unknown) => {
       console.error('[customers] Overdue check on owner sign-in failed.', error);

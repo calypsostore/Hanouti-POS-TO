@@ -12,7 +12,7 @@ npm install
 npm run dev
 ```
 
-The local mock accounts are:
+Local demo accounts are available only with `VITE_DATA_DRIVER=local`:
 
 | Role | Username / email | Initial password |
 | --- | --- | --- |
@@ -20,13 +20,15 @@ The local mock accounts are:
 | Owner | `owner@cafelamarsa.tn` | `owner123` |
 | Super admin | `admin@7anouti.tn` | `admin123` |
 
-These mock accounts are seeded in the browser's local storage. All three are
-configured to require a password change at their first login.
+These accounts are seeded in browser storage and are not production
+credentials. All three require a password change at first login. Production
+builds require `VITE_DATA_DRIVER=supabase` and replace demo seed data with empty
+fixtures; a local-driver production build is rejected.
 
 ## Supabase backend
 
-The app uses local storage by default for offline demos. To use the shared
-Supabase backend, copy `.env.example` to `.env.local`, set
+For local demos, set `VITE_DATA_DRIVER=local`. To use the shared Supabase
+backend, copy `.env.example` to `.env.local`, set
 `VITE_DATA_DRIVER=supabase`, and provide the project URL and anon/publishable
 key. Never put a Supabase service-role key in a `VITE_` variable or in the
 client app.
@@ -37,9 +39,17 @@ Apply the database migrations and deploy the account-provisioning Edge Function:
 npx supabase login
 npx supabase link --project-ref YOUR_PROJECT_REF
 npx supabase db push
-npx supabase secrets set SUPABASE_URL=YOUR_PROJECT_URL SUPABASE_ANON_KEY=YOUR_ANON_KEY SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY
+npx supabase secrets set SUPABASE_URL=YOUR_PROJECT_URL SUPABASE_ANON_KEY=YOUR_ANON_KEY SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY LOGIN_RATE_LIMIT_PEPPER=YOUR_RANDOM_32_BYTE_SECRET
 npx supabase functions deploy provision-account
+npx supabase functions deploy login
+npx supabase functions deploy verify-password
 ```
+
+The login Edge Function applies server-side limits of five attempts per
+username and 20 per source IP in a 15-minute window. Supabase Auth also
+enforces its project-level rate limits. Password hashes are managed by
+Supabase Auth; store and staff PIN hashes are generated and verified in
+PostgreSQL and are never hashed in the browser.
 
 Create the first platform administrator through the Supabase Auth dashboard,
 then add its profile once in the SQL editor (replace the email and display name):
@@ -58,6 +68,10 @@ with their username; their Auth email is generated internally. RLS isolates
 store data, and protected order, shift, tab, PIN, and void operations execute
 through database functions. Realtime updates are enabled for orders, shifts,
 notifications, and catalog availability.
+Server-registered sessions expire after 12 hours, are revoked by staff
+force-logout, and are revalidated when the app regains focus. Store inactivity,
+archival, subscription expiry, or an inactive owner blocks authenticated API
+requests.
 
 ## Build and preview
 
@@ -67,6 +81,44 @@ npm run lint
 npm run build
 npm run preview
 ```
+
+Production builds must be made with `VITE_DATA_DRIVER=supabase` and valid
+Supabase URL/anon-key build variables. For example, configure those variables
+in the deployment environment before running `npm run build`.
+
+## Daily backups and restore
+
+The GitHub Actions workflow `.github/workflows/supabase-daily-backup.yml`
+creates an encrypted PostgreSQL custom-format dump every day at 02:17 UTC and
+retains the encrypted artifact for 30 days. In repository **Settings >
+Secrets and variables > Actions**, add:
+
+- `SUPABASE_DB_URL`: the database connection string from the Supabase project
+  database settings. Use the direct connection or a session-mode pooler
+  reachable from GitHub Actions, not transaction mode.
+- `BACKUP_ENCRYPTION_KEY`: a long, randomly generated passphrase. Store it
+  separately from downloaded backups and restrict repository artifact access.
+
+Run the workflow manually after setting the secrets and confirm that the
+encrypted artifact is uploaded. For provider-managed point-in-time recovery,
+also enable Supabase scheduled backups/PITR in the project dashboard where the
+plan supports it.
+
+To restore a workflow artifact, download it from the Actions run, then decrypt
+and restore it into a **separate recovery project** first. Use a PostgreSQL
+client matching the database major version:
+
+```sh
+gpg --decrypt --output hanouti.dump --passphrase-file /secure/path/backup-key.txt supabase-backup.dump.gpg
+pg_restore --clean --if-exists --no-owner --no-acl --dbname="$RESTORE_DB_URL" hanouti.dump
+```
+
+Verify the restored profiles, stores, catalog, orders, shifts, financial
+records, and RLS policies before directing application traffic to the recovery
+project. Preserve the original project until validation is complete. A restore
+overwrites matching database objects; never test these commands against the
+production database. Keep the encryption key separately—without it the
+artifact cannot be restored.
 
 ## Deploy to Vercel
 

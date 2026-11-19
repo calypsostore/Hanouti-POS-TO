@@ -78,7 +78,11 @@ export const authService = {
     }
     if (!isAccountActive(user)) throw new Error('The username/email or password is incorrect.');
 
-    const session: AuthSession = { userId: user.id, sessionVersion: user.sessionVersion ?? 0 };
+    const session: AuthSession = {
+      userId: user.id,
+      sessionVersion: user.sessionVersion ?? 0,
+      expiresAt: Date.now() + 8 * 60 * 60_000,
+    };
     writeData(SESSION_KEY, session);
     clearSessionStorageLock();
     removeData(PIN_ATTEMPTS_PREFIX + user.id);
@@ -99,6 +103,11 @@ export const authService = {
     if (isSupabaseDriver()) return authRepository.currentUser();
     const session = readData<AuthSession | null>(SESSION_KEY, null);
     if (!session) return null;
+    if (session.expiresAt === undefined || session.expiresAt <= Date.now()) {
+      writeData<AuthSession | null>(SESSION_KEY, null);
+      clearSessionStorageLock();
+      return null;
+    }
     const user = getUsers().find((candidate) => candidate.id === session.userId);
     if (!user || !isAccountActive(user) || (session.sessionVersion ?? 0) !== (user.sessionVersion ?? 0)) {
       writeData<AuthSession | null>(SESSION_KEY, null);

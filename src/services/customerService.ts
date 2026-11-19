@@ -4,6 +4,8 @@ import { userService } from './userService';
 import { shiftService } from './shiftService';
 import { readData, writeData } from './storage';
 import { isSupabaseDriver } from '../data/driver';
+import { requireOnlineForAction } from './offlineAvailability';
+import { offlineOrderQueue } from './offlineOrderQueue';
 import {
   createCustomer as createRemoteCustomer,
   getBalance as getRemoteBalance,
@@ -216,6 +218,21 @@ function dueDateFor(issueAt: string, terms: CustomerRecord['settlementTerms']): 
   return due;
 }
 
+async function getCachedCreditStatus(customerId: string, additionalMillimes: number): Promise<CustomerCreditStatus> {
+  const cached = await offlineOrderQueue.getCustomerCredit(customerId);
+  if (!cached) throw new Error('The customer credit status is not cached. Reconnect before using this tab.');
+  const balance = cached.status.balance + additionalMillimes;
+  if (cached.status.limit === undefined) return { ...cached.status, balance };
+  const percentUsed = cached.status.limit === 0 ? (balance > 0 ? 100 : 0) : Math.max(0, balance / cached.status.limit * 100);
+  return {
+    ...cached.status,
+    balance,
+    remaining: Math.max(0, cached.status.limit - Math.max(0, balance)),
+    percentUsed,
+    state: balance > cached.status.limit ? 'over' : cached.status.limit > 0 && percentUsed >= 80 ? 'near' : 'ok',
+  };
+}
+
 export const customerService = {
   async listCustomers(storeId: string): Promise<CustomerRecord[]> {
     if (isSupabaseDriver()) return listRemoteCustomers(storeId);
@@ -394,10 +411,33 @@ export const customerService = {
     if (!Number.isInteger(additionalMillimes) || additionalMillimes < 0) {
       throw new Error('Additional credit must be a non-negative amount in millimes.');
     }
+    if (isSupabaseDriver()) {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return getCachedCreditStatus(customerId, additionalMillimes);
+      try {
+        const customer = await this.getCustomer(customerId);
+        if (!customer) throw new Error('Customer could not be found.');
+        validateCreditLimit(customer.creditLimitMillimes);
+        const balance = (await getRemoteBalance(customerId)) + additionalMillimes;
+        if (customer.creditLimitMillimes === undefined) return { balance, state: 'no_limit' };
+        const limit = customer.creditLimitMillimes;
+        const percentUsed = limit === 0 ? (balance > 0 ? 100 : 0) : Math.max(0, balance / limit * 100);
+        const state = balance > limit ? 'over' : limit > 0 && percentUsed >= 80 ? 'near' : 'ok';
+        return {
+          balance,
+          limit,
+          remaining: Math.max(0, limit - Math.max(0, balance)),
+          percentUsed,
+          state,
+        };
+      } catch (error) {
+        if (offlineOrderQueue.isNetworkFailure(error)) return getCachedCreditStatus(customerId, additionalMillimes);
+        throw error;
+      }
+    }
     const customer = await this.getCustomer(customerId);
     if (!customer) throw new Error('Customer could not be found.');
     validateCreditLimit(customer.creditLimitMillimes);
-    const balance = (isSupabaseDriver() ? await getRemoteBalance(customerId) : ledgerBalance(customerId)) + additionalMillimes;
+    const balance = ledgerBalance(customerId) + additionalMillimes;
     if (customer.creditLimitMillimes === undefined) return { balance, state: 'no_limit' };
     const limit = customer.creditLimitMillimes;
     const percentUsed = limit === 0 ? (balance > 0 ? 100 : 0) : Math.max(0, balance / limit * 100);
@@ -499,6 +539,7 @@ export const customerService = {
   },
 
   async settleTab(input: { storeId: string; customerId: string; staffId: string; amountMillimes: number; note?: string }): Promise<TabRecord> {
+    requireOnlineForAction('Tab payments');
     if (!Number.isInteger(input.amountMillimes) || input.amountMillimes <= 0) throw new Error('Enter a payment greater than zero.');
     if (isSupabaseDriver()) {
       const customer = await getRemoteCustomer(input.customerId, input.storeId);
@@ -557,6 +598,7 @@ export const customerService = {
   },
 
   async reversePayment(input: { storeId: string; customerId: string; paymentId: string; ownerId: string; pin: string; reason: string }): Promise<TabRecord> {
+    requireOnlineForAction('Reversing tab payments');
     if (isSupabaseDriver()) {
       const customer = await getRemoteCustomer(input.customerId, input.storeId);
       if (!customer) throw new Error('Customer could not be found in this store.');

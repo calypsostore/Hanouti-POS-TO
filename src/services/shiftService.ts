@@ -6,6 +6,7 @@ import { orderService } from './orderService';
 import { notificationService } from './notificationService';
 import { activityService } from './activityService';
 import { isSupabaseDriver } from '../data/driver';
+import { requireOnlineForAction } from './offlineAvailability';
 import {
   closeShift as closeRemoteShift,
   forceCloseShift as forceCloseRemoteShift,
@@ -83,6 +84,7 @@ export const shiftService = {
     reason: CashMovementReason;
     note?: string;
   }): Promise<CashMovementRecord> {
+    requireOnlineForAction('Cash movements');
     if (!Number.isSafeInteger(input.amountMillimes) || input.amountMillimes <= 0) {
       throw new Error('Cash movement amount must be a positive whole number of millimes.');
     }
@@ -146,6 +148,7 @@ export const shiftService = {
   },
 
   async openShift(storeId: string, staffId: string, startingCashMillimes: number): Promise<ShiftRecord> {
+    requireOnlineForAction('Opening a shift');
     if (!Number.isInteger(startingCashMillimes) || startingCashMillimes < 0) throw new Error('Starting cash must be a non-negative amount in millimes.');
     if (isSupabaseDriver()) return openRemoteShift(startingCashMillimes);
     const store = await userService.getStore(storeId);
@@ -177,6 +180,7 @@ export const shiftService = {
   },
 
   async closeShift(shiftId: string, countedCashMillimes: number, differenceNote?: string): Promise<ShiftRecord> {
+    requireOnlineForAction('Closing a shift');
     if (!Number.isInteger(countedCashMillimes) || countedCashMillimes < 0) throw new Error('Counted cash must be a non-negative amount in millimes.');
     if (isSupabaseDriver()) return closeRemoteShift(shiftId, countedCashMillimes, validateDifferenceNote(0, differenceNote));
     const shifts = getShifts();
@@ -211,6 +215,7 @@ export const shiftService = {
   },
 
   async forceCloseShift(shiftId: string, ownerId: string, countedCashMillimes: number, differenceNote?: string): Promise<ShiftRecord> {
+    requireOnlineForAction('Closing a shift');
     if (!Number.isInteger(countedCashMillimes) || countedCashMillimes < 0) throw new Error('Counted cash must be a non-negative amount in millimes.');
     if (isSupabaseDriver()) return forceCloseRemoteShift(shiftId, countedCashMillimes, differenceNote?.trim());
     const shifts = getShifts();

@@ -108,13 +108,15 @@ export async function getOrder(orderId: string): Promise<OrderRecord | undefined
 export async function createOrder(input: {
   shift: ShiftRecord;
   items: OrderLineRecord[];
+  idempotencyKey: string;
   paymentMethod?: PaymentMethod;
   customerId?: string;
   location?: string;
   adminPin?: string;
   note?: string;
 }): Promise<OrderRecord> {
-  const { data, error } = await getSupabaseClient().rpc('create_order', {
+  const { data, error } = await getSupabaseClient().rpc('create_order_idempotent', {
+    p_idempotency_key: input.idempotencyKey,
     p_shift_id: input.shift.id,
     p_items: input.items.map((item) => ({
       itemId: item.itemId,

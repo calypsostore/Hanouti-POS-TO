@@ -20,6 +20,7 @@ interface CallerProfile {
   store_id: string | null;
   name: string;
   is_active: boolean;
+  session_version: number;
 }
 
 interface ProvisionRequest {
@@ -64,6 +65,30 @@ function slug(value: string): string {
   return value.trim().toLocaleLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.+|\.+$/g, '');
 }
 
+function sessionIdFromAuthorization(authorization: string): string {
+  const token = authorization.slice('Bearer '.length);
+  const payload = token.split('.')[1];
+  if (!payload) throw new Error('The signed-in session could not be verified.');
+  const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
+  const claims = JSON.parse(atob(padded)) as { session_id?: unknown };
+  if (typeof claims.session_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(claims.session_id)) {
+    throw new Error('The signed-in session could not be verified.');
+  }
+  return claims.session_id;
+}
+
+function tunisianDate(): string {
+  const parts = new Intl.DateTimeFormat('en', {
+    timeZone: 'Africa/Tunis',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
 function validateOverrides(value: ProvisionRequest['permissionOverrides']): { granted: string[]; revoked: string[] } {
   const granted = [...new Set(value?.granted ?? [])];
   const revoked = [...new Set(value?.revoked ?? [])];
@@ -89,10 +114,40 @@ async function authorizeCaller(
   if (authError || !authData.user) throw new Error('The signed-in session could not be verified.');
   const { data: profile, error } = await admin
     .from('profiles')
-    .select('id, role, store_id, name, is_active')
+    .select('id, role, store_id, name, is_active, session_version')
     .eq('id', authData.user.id)
     .maybeSingle();
   if (error || !profile?.is_active) throw new Error('An active account is required.');
+
+  const sessionId = sessionIdFromAuthorization(authorization);
+  const { data: session, error: sessionError } = await admin
+    .from('auth_sessions')
+    .select('session_version, expires_at')
+    .eq('session_id', sessionId)
+    .eq('user_id', profile.id)
+    .maybeSingle();
+  if (sessionError || !session || session.session_version !== profile.session_version ||
+    Date.parse(session.expires_at) <= Date.now()) {
+    throw new Error('The signed-in session has expired or is no longer active.');
+  }
+
+  if (profile.store_id) {
+    const { data: store, error: storeError } = await admin
+      .from('stores')
+      .select('owner_id, is_active, archived_at, subscription_paid_until')
+      .eq('store_id', profile.store_id)
+      .maybeSingle();
+    if (storeError || !store?.is_active || store.archived_at ||
+      (store.subscription_paid_until && store.subscription_paid_until < tunisianDate())) {
+      throw new Error('The store is not active.');
+    }
+    const { data: owner, error: ownerError } = store.owner_id
+      ? await admin.from('profiles').select('role, is_active, store_id').eq('id', store.owner_id).maybeSingle()
+      : { data: null, error: null };
+    if (ownerError || owner?.role !== 'owner' || !owner.is_active || owner.store_id !== profile.store_id) {
+      throw new Error('The store owner is not active.');
+    }
+  }
   return profile as CallerProfile;
 }
 

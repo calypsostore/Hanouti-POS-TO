@@ -15,9 +15,13 @@ export function TicketView({ order, storeName, staffName, onClose }: {
   const voided = order.status === 'voided';
   const ticketStoreName = order.storeName ?? storeName;
   const ticketStaffName = order.staffName ?? staffName;
+  const ticketNumber = order.syncStatus ? `LOCAL-${Math.abs(order.number)}` : String(order.number);
   const text = [
     ticketStoreName,
-    `Ticket #${order.number}`,
+    `Ticket #${ticketNumber}`,
+    ...(order.syncStatus === 'queued' ? ['QUEUED - awaiting sync'] : []),
+    ...(order.syncStatus === 'needs_attention' ? ['NEEDS ATTENTION - order was not synced'] : []),
+    ...(order.verificationStatus === 'to_verify' ? ['Customer credit to verify'] : []),
     new Date(order.createdAt).toLocaleString(),
     `Staff: ${ticketStaffName}`,
     ...order.items.map((item) => `${item.quantity} x ${item.name} = ${formatTnd(item.lineTotalMillimes / 1000)} DT${item.modifiers.length ? ` (${item.modifiers.join(', ')})` : ''}`),
@@ -30,7 +34,7 @@ export function TicketView({ order, storeName, staffName, onClose }: {
   async function share() {
     setShareError('');
     try {
-      if (navigator.share) await navigator.share({ title: `Ticket #${order.number}`, text });
+      if (navigator.share) await navigator.share({ title: `Ticket #${ticketNumber}`, text });
       else if (navigator.clipboard) await navigator.clipboard.writeText(text);
       else throw new Error('Sharing is not available in this browser.');
     } catch (error) {
@@ -42,7 +46,7 @@ export function TicketView({ order, storeName, staffName, onClose }: {
   async function printTicket() {
     setShareError('');
     try {
-      await printOrSharePdf(printTarget.current, `ticket-${order.number}`, `Ticket #${order.number}`);
+      await printOrSharePdf(printTarget.current, `ticket-${ticketNumber}`, `Ticket #${ticketNumber}`);
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return;
       setShareError(error instanceof Error ? error.message : 'Unable to create or share this ticket.');
@@ -51,7 +55,7 @@ export function TicketView({ order, storeName, staffName, onClose }: {
 
   return (
     <div className="receipt-overlay" onMouseDown={onClose}>
-      <section role="dialog" aria-modal="true" aria-label={`Ticket ${order.number}`} className="receipt-dialog" onMouseDown={(event) => event.stopPropagation()}>
+      <section role="dialog" aria-modal="true" aria-label={`Ticket ${ticketNumber}`} className="receipt-dialog" onMouseDown={(event) => event.stopPropagation()}>
         <div className="receipt-actions no-print">
           <Button variant="secondary" onClick={() => { void printTicket(); }}>Print</Button>
           <Button variant="secondary" onClick={() => { void share(); }}>Share text</Button>
@@ -61,9 +65,12 @@ export function TicketView({ order, storeName, staffName, onClose }: {
         <article ref={printTarget} className="receipt-print-target thermal-receipt">
           <header className="receipt-center">
             <strong>{ticketStoreName}</strong>
-            <div>Ticket #{order.number}</div>
+            <div>Ticket #{ticketNumber}</div>
             <div>{new Date(order.createdAt).toLocaleString()}</div>
             <div>Staff: {ticketStaffName}</div>
+            {order.syncStatus === 'queued' && <div>QUEUED - awaiting sync</div>}
+            {order.syncStatus === 'needs_attention' && <div>NEEDS ATTENTION - order was not synced</div>}
+            {order.verificationStatus === 'to_verify' && <div>Customer credit to verify</div>}
           </header>
           <ReceiptRule />
           {voided && <div className="void-stamp">VOIDED</div>}

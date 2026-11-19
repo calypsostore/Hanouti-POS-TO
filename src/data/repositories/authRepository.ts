@@ -11,13 +11,28 @@ function clearSessionLock(): void {
   if (typeof window !== 'undefined') window.sessionStorage.removeItem(SESSION_LOCK_KEY);
 }
 
-function staffEmail(identifier: string): string {
-  const value = identifier.trim().toLocaleLowerCase();
-  return value.includes('@') ? value : `${value}@staff.7anouti.app`;
-}
-
 function throwSupabaseError(error: { message: string; code?: string }, context: string): never {
   throw new Error(`${context}: ${error.message}`, { cause: error });
+}
+
+async function throwFunctionError(error: { message: string }, context: string): Promise<never> {
+  const responseContext = 'context' in error ? error.context : undefined;
+  if (responseContext instanceof Response) {
+    const responseBody: unknown = await responseContext.json();
+    if (typeof responseBody === 'object' && responseBody !== null &&
+      'error' in responseBody && typeof responseBody.error === 'string') {
+      throw new Error(responseBody.error);
+    }
+  }
+  return throwSupabaseError(error, context);
+}
+
+async function verifyCurrentPassword(password: string): Promise<void> {
+  const { data, error } = await getSupabaseClient().functions.invoke<{ verified: boolean }>('verify-password', {
+    body: { password },
+  });
+  if (error) await throwFunctionError(error, 'Could not verify the current password');
+  if (data?.verified !== true) throw new Error('The current password could not be verified.');
 }
 
 async function writeActivity(user: UserSummary, action: string, summary: string): Promise<void> {
@@ -37,7 +52,18 @@ async function currentUser(): Promise<UserSummary | null> {
   const { data: authData, error: authError } = await client.auth.getUser();
   if (authError && authError.name !== 'AuthSessionMissingError') throwSupabaseError(authError, 'Could not restore the sign-in session');
   if (!authData.user) return null;
-  const profile = await getProfile(authData.user.id);
+  let profile: UserSummary | undefined;
+  try {
+    profile = await getProfile(authData.user.id);
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('The sign-in session has expired or is no longer active.')) {
+      throw error;
+    }
+    const { error: signOutError } = await client.auth.signOut();
+    if (signOutError) throwSupabaseError(signOutError, 'Could not clear the expired sign-in session');
+    clearSessionLock();
+    return null;
+  }
   if (!profile || !profile.isActive) {
     await client.auth.signOut();
     return null;
@@ -63,15 +89,17 @@ async function currentUser(): Promise<UserSummary | null> {
 export const authRepository = {
   async login(identifier: string, password: string, acceptedRoles?: UserSummary['role'][]): Promise<UserSummary> {
     const client = getSupabaseClient();
-    const email = staffEmail(identifier);
     if (typeof window !== 'undefined') window.localStorage.removeItem(SESSION_VERSION_KEY);
-    const { error } = await client.auth.signInWithPassword({ email, password });
-    if (error) {
-      if (error.message.includes('Invalid login credentials')) {
-        throw new Error('The username/email or password is incorrect.');
-      }
-      throwSupabaseError(error, 'Could not sign in');
-    }
+    const { data, error } = await client.functions.invoke<{ access_token: string; refresh_token: string }>('login', {
+      body: { identifier, password, acceptedRoles },
+    });
+    if (error) await throwFunctionError(error, 'Could not sign in');
+    if (!data?.access_token || !data.refresh_token) throw new Error('The sign-in service returned an invalid session.');
+    const { error: sessionError } = await client.auth.setSession({
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+    });
+    if (sessionError) throwSupabaseError(sessionError, 'Could not establish the sign-in session');
     const user = await currentUser();
     if (!user || (acceptedRoles && !acceptedRoles.includes(user.role))) {
       await client.auth.signOut();
@@ -144,11 +172,7 @@ export const authRepository = {
   async unlockWithPassword(password: string): Promise<UserSummary> {
     const user = await currentUser();
     if (!user || user.role !== 'staff' || !user.storeId) throw new Error('The staff account could not be found.');
-    const client = getSupabaseClient();
-    const { data: authData, error: authError } = await client.auth.getUser();
-    if (authError || !authData.user?.email) throw new Error('The staff sign-in could not be verified.');
-    const { error } = await client.auth.signInWithPassword({ email: authData.user.email, password });
-    if (error) throw new Error('Password is incorrect.');
+    await verifyCurrentPassword(password);
     clearSessionLock();
     await writeActivity(user, 'lock.unlocked', `${user.name}'s session was unlocked.`);
     return user;
@@ -175,10 +199,7 @@ export const authRepository = {
     const user = await currentUser();
     if (!user || user.id !== userId) throw new Error('The signed-in account could not be found.');
     const client = getSupabaseClient();
-    const { data: authData, error: authError } = await client.auth.getUser();
-    if (authError || !authData.user?.email) throw new Error('The signed-in account could not be verified.');
-    const { error: verifyError } = await client.auth.signInWithPassword({ email: authData.user.email, password: currentPassword });
-    if (verifyError) throw new Error('Current password is incorrect.');
+    await verifyCurrentPassword(currentPassword);
     const { error } = await client.auth.updateUser({ password: newPassword });
     if (error) throwSupabaseError(error, 'Could not update the password');
     await writeActivity(user, 'staff.password_changed', `${user.name} changed their password.`);
@@ -187,13 +208,20 @@ export const authRepository = {
   async logout(): Promise<void> {
     const user = await currentUser();
     if (user?.storeId) await writeActivity(user, 'logout', `${user.name} signed out.`);
-    const { error } = await getSupabaseClient().auth.signOut();
+    const client = getSupabaseClient();
+    let revokeError: { message: string; code?: string } | null = null;
+    if (user) {
+      const { error } = await client.rpc('revoke_current_auth_session');
+      revokeError = error;
+    }
+    const { error } = await client.auth.signOut();
     if (error) throwSupabaseError(error, 'Could not sign out');
     clearSessionLock();
     if (typeof window !== 'undefined') {
       window.localStorage.removeItem(SESSION_VERSION_KEY);
       window.sessionStorage.removeItem(PIN_LOCK_KEY);
     }
+    if (revokeError) throwSupabaseError(revokeError, 'Could not revoke the sign-in session');
   },
 
   async unlockSession(session: AuthSession, user: UserSummary): Promise<void> {

@@ -3,6 +3,8 @@ import { readData, removeData, writeData } from './storage';
 import { seedStores, seedUsers } from './seedData';
 import { hashSecret, verifySecret } from './secretService';
 import { activityService } from './activityService';
+import { authRepository } from '../data/repositories/authRepository';
+import { isSupabaseDriver } from '../data/driver';
 
 const USERS_KEY = 'users';
 const SESSION_KEY = 'auth-session';
@@ -50,6 +52,7 @@ function withoutPassword(user: UserRecord): UserSummary {
 
 export const authService = {
   async login(identifier: string, password: string, acceptedRoles?: UserRecord['role'][]): Promise<UserSummary> {
+    if (isSupabaseDriver()) return authRepository.login(identifier, password, acceptedRoles);
     const users = getUsers();
     const candidates = users.filter((candidate) =>
       (candidate.username?.toLocaleLowerCase() === identifier.toLocaleLowerCase() ||
@@ -93,6 +96,7 @@ export const authService = {
   },
 
   async getCurrentUser(): Promise<UserSummary | null> {
+    if (isSupabaseDriver()) return authRepository.currentUser();
     const session = readData<AuthSession | null>(SESSION_KEY, null);
     if (!session) return null;
     const user = getUsers().find((candidate) => candidate.id === session.userId);
@@ -104,15 +108,18 @@ export const authService = {
   },
 
   async isSessionLocked(): Promise<boolean> {
+    if (isSupabaseDriver()) return authRepository.isSessionLocked();
     const session = readData<AuthSession | null>(SESSION_KEY, null);
     return session ? session.locked === true || getSessionStorageLock(session.userId) : false;
   },
 
   async hasPersonalPin(userId: string): Promise<boolean> {
+    if (isSupabaseDriver()) return authRepository.hasPersonalPin(userId);
     return Boolean(getUsers().find((candidate) => candidate.id === userId && candidate.role === 'staff')?.pinHash);
   },
 
   async lockCurrentSession(): Promise<void> {
+    if (isSupabaseDriver()) return authRepository.lockCurrentSession();
     const session = readData<AuthSession | null>(SESSION_KEY, null);
     if (!session) throw new Error('You must sign in before locking the terminal.');
     const user = getUsers().find((candidate) => candidate.id === session.userId);
@@ -132,11 +139,13 @@ export const authService = {
   },
 
   getPinLockRemainingMs(userId: string): number {
+    if (isSupabaseDriver()) return authRepository.pinLockRemainingMs();
     const attempts = getPinAttempts(userId);
     return Math.max(0, (attempts.lockedUntil ?? 0) - Date.now());
   },
 
   async setPersonalPin(userId: string, pin: string): Promise<void> {
+    if (isSupabaseDriver()) return authRepository.setPersonalPin(userId, pin);
     if (!/^\d{4}$/.test(pin)) throw new Error('PIN must contain exactly 4 digits.');
     const session = readData<AuthSession | null>(SESSION_KEY, null);
     if (!session || session.userId !== userId) throw new Error('You must sign in as this staff member to set a PIN.');
@@ -160,6 +169,7 @@ export const authService = {
   },
 
   async unlockCurrentSessionWithPin(pin: string): Promise<UserSummary> {
+    if (isSupabaseDriver()) return authRepository.unlockWithPin(pin);
     if (!/^\d{4}$/.test(pin)) throw new Error('Enter your 4-digit PIN.');
     const session = readData<AuthSession | null>(SESSION_KEY, null);
     if (!session) throw new Error('The staff session could not be found.');
@@ -183,6 +193,7 @@ export const authService = {
   },
 
   async unlockCurrentSessionWithPassword(password: string): Promise<UserSummary> {
+    if (isSupabaseDriver()) return authRepository.unlockWithPassword(password);
     const session = readData<AuthSession | null>(SESSION_KEY, null);
     if (!session) throw new Error('The staff session could not be found.');
     const user = getUsers().find((candidate) => candidate.id === session.userId);
@@ -196,6 +207,7 @@ export const authService = {
   },
 
   async setInitialPassword(userId: string, newPassword: string): Promise<UserSummary> {
+    if (isSupabaseDriver()) return authRepository.setInitialPassword(userId, newPassword);
     if (newPassword.length < 6) throw new Error('Password must contain at least 6 characters.');
     const users = getUsers();
     const user = users.find((candidate) => candidate.id === userId);
@@ -218,6 +230,7 @@ export const authService = {
   },
 
   async changePassword(userId: string, currentPassword: string, newPassword: string): Promise<void> {
+    if (isSupabaseDriver()) return authRepository.changePassword(userId, currentPassword, newPassword);
     if (newPassword.length < 6) throw new Error('Password must contain at least 6 characters.');
     const users = getUsers();
     const user = users.find((candidate) => candidate.id === userId);
@@ -237,6 +250,7 @@ export const authService = {
   },
 
   async logout(): Promise<void> {
+    if (isSupabaseDriver()) return authRepository.logout();
     const session = readData<AuthSession | null>(SESSION_KEY, null);
     const user = session ? getUsers().find((candidate) => candidate.id === session.userId) : undefined;
     if (user?.storeId) {
@@ -254,6 +268,7 @@ export const authService = {
   },
 
   async unlockSession(session: AuthSession, user: UserRecord): Promise<void> {
+    if (isSupabaseDriver()) return authRepository.unlockSession(session, user);
     clearSessionStorageLock();
     writeData(SESSION_KEY, { ...session, locked: false });
     if (user.storeId) {

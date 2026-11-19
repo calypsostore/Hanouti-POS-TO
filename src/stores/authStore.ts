@@ -3,6 +3,10 @@ import type { UserRole, UserSummary } from '../types/domain';
 import { authService } from '../services/authService';
 import { initializeMockData } from '../services/mockDataService';
 import { useCartStore } from './cartStore';
+import { getSupabaseClient } from '../data/supabaseClient';
+import { isSupabaseDriver } from '../data/driver';
+
+let authStateSubscription: { unsubscribe: () => void } | undefined;
 
 interface AuthState {
   user: UserSummary | null;
@@ -35,6 +39,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const user = await authService.getCurrentUser();
       const locked = user ? await authService.isSessionLocked() : false;
       set({ user, locked, ready: true, initializationError: null });
+      if (isSupabaseDriver() && !authStateSubscription) {
+        const { data } = getSupabaseClient().auth.onAuthStateChange((_event, session) => {
+          window.setTimeout(() => {
+            if (!session) {
+              useCartStore.getState().clearOrder();
+              set({ user: null, locked: false });
+              return;
+            }
+            void get().refreshCurrentUser();
+          }, 0);
+        });
+        authStateSubscription = data.subscription;
+      }
     } catch (error) {
       set({ ready: true, initializationError: errorMessage(error) });
     }

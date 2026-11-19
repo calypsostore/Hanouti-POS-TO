@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { MaterialIcon } from '../components/MaterialIcon';
+import { ListSkeleton } from '../components/ListSkeleton';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
 import { formatTnd } from '../lib/format';
@@ -32,10 +33,12 @@ export function OwnerWasteScreen() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
     const refresh = async () => {
+      setLoading(true);
       try {
         const [nextComps, users, store] = await Promise.all([
           compService.listComps(storeId),
@@ -48,7 +51,10 @@ export function OwnerWasteScreen() {
         setStoreName(store?.name);
         setError('');
       } catch (loadError) {
-        if (active) setError(loadError instanceof Error ? loadError.message : 'Unable to load the waste log.');
+        console.error('Unable to load the waste log.', loadError);
+        if (active) setError('Unable to load the waste log. Please try again.');
+      } finally {
+        if (active) setLoading(false);
       }
     };
     void refresh();
@@ -105,7 +111,7 @@ export function OwnerWasteScreen() {
 
       {error && <p role="alert" className="mb-4 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       <section aria-label="Comp and waste records" className="flex flex-col gap-2">
-        {filteredComps.map((comp) => (
+        {loading ? <ListSkeleton label="Loading waste records" /> : filteredComps.map((comp) => (
           <article key={comp.id} className="flex flex-col gap-3 rounded-xl bg-surface-container-lowest p-4 shadow-card sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-start gap-3">
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-warning-container text-on-warning-container"><MaterialIcon name="delete_sweep" /></span>
@@ -120,7 +126,7 @@ export function OwnerWasteScreen() {
             <strong className="shrink-0 font-display text-headline-sm tabular-nums text-primary">{formatTnd(comp.valueMillimes / 1000)} DT</strong>
           </article>
         ))}
-        {filteredComps.length === 0 && (
+        {!loading && !error && filteredComps.length === 0 && (
           <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">No comps match these filters.</p>
         )}
       </section>

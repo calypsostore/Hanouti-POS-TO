@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { MaterialIcon } from '../components/MaterialIcon';
+import { ListSkeleton } from '../components/ListSkeleton';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { adminWorkspaceLinks } from '../app/navigation';
@@ -67,7 +68,8 @@ export function StoreReadOnlyScreen() {
         setActivity(nextActivity.slice(0, 100));
         setError('');
       } catch (loadError) {
-        if (active) setError(loadError instanceof Error ? loadError.message : 'Unable to load the store view.');
+        console.error('Unable to load the store view.', loadError);
+        if (active) setError('Unable to load this store. Please try again.');
       } finally {
         if (active) setLoading(false);
       }
@@ -90,7 +92,7 @@ export function StoreReadOnlyScreen() {
   }).sort((left, right) => right.sales - left.sales), [orders, shifts, staff]);
 
   if (loading) {
-    return <main className="flex min-h-screen items-center justify-center bg-surface p-6 font-body text-body-md text-on-surface-variant">Loading read-only store view…</main>;
+    return <main className="mx-auto min-h-screen w-full max-w-3xl bg-surface p-4 pt-8"><ListSkeleton rows={5} label="Loading store view" /></main>;
   }
   if (!store) {
     return (

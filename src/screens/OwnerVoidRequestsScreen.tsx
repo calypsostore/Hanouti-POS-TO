@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
+import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
 import { MaterialIcon } from '../components/MaterialIcon';
+import { ListSkeleton } from '../components/ListSkeleton';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
@@ -20,18 +22,31 @@ function OwnerVoidRequestsContent() {
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [loading, setLoading] = useState(true);
   const [voidReasons, setVoidReasons] = useState<Record<string, string>>({});
+  const [activeRequest, setActiveRequest] = useState<OrderRecord | null>(null);
 
   const refreshRequests = useCallback(async () => {
-    const orders = (await orderService.listAll(storeId)).filter((order) => order.status === 'pending_void');
-    const staff = await Promise.all(orders.map((order) => userService.getUser(order.staffId)));
-    setRequests(orders);
-    setStaffNames(Object.fromEntries(orders.map((order, index) => [order.staffId, staff[index]?.name ?? 'Staff'])));
+    setLoading(true);
+    try {
+      const orders = (await orderService.listAll(storeId)).filter((order) => order.status === 'pending_void');
+      const staff = await Promise.all(orders.map((order) => userService.getUser(order.staffId)));
+      setRequests(orders);
+      setStaffNames(Object.fromEntries(orders.map((order, index) => [order.staffId, staff[index]?.name ?? 'Staff'])));
+    } finally {
+      setLoading(false);
+    }
   }, [storeId]);
 
   useEffect(() => {
-    void refreshRequests().catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : t('common.loadFailed')));
-    if (user?.storeId) void userService.getStore(user.storeId).then((store) => setStoreName(store?.name)).catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : t('common.storeLoadFailed')));
+    void refreshRequests().catch((loadError: unknown) => {
+      console.error('Unable to load void requests.', loadError);
+      setError(t('common.loadFailed'));
+    });
+    if (user?.storeId) void userService.getStore(user.storeId).then((store) => setStoreName(store?.name)).catch((loadError: unknown) => {
+      console.error('Unable to load store information for void requests.', loadError);
+      setError(t('common.storeLoadFailed'));
+    });
   }, [refreshRequests, storeId, user?.storeId]);
 
   async function resolve(order: OrderRecord, decision: 'approve' | 'reject') {
@@ -40,6 +55,7 @@ function OwnerVoidRequestsContent() {
     try {
       await orderService.resolveVoidRequest(order.id, ownerId, decision, voidReasons[order.id]);
       await refreshRequests();
+      setActiveRequest(null);
       setNotice(decision === 'approve' ? `Order #${order.number} voided.` : `Void request for #${order.number} rejected.`);
     } catch (resolveError) {
       setError(resolveError instanceof Error ? resolveError.message : 'Unable to resolve this request.');
@@ -55,7 +71,7 @@ function OwnerVoidRequestsContent() {
       {error && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       {notice && <p role="status" className="mb-3 rounded-lg bg-success-container p-3 font-body text-body-sm text-on-success-container">{notice}</p>}
       <section className="flex flex-col gap-3">
-        {requests.map((order) => {
+        {loading ? <ListSkeleton label="Loading void requests" /> : requests.map((order) => {
           return (
             <article key={order.id} className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
               <div className="flex flex-wrap items-start justify-between gap-2">
@@ -76,18 +92,41 @@ function OwnerVoidRequestsContent() {
                   <span>Total</span><span className="tabular-nums">{formatTnd(order.totalMillimes / 1000)} DT</span>
                 </div>
               </div>
-              <label className="font-body text-label-sm">Reason required to approve void
-                <textarea value={voidReasons[order.id] ?? order.voidReason ?? ''} onChange={(event) => setVoidReasons((current) => ({ ...current, [order.id]: event.target.value }))} className="mt-1 min-h-16 w-full rounded-lg bg-surface-container-low p-3" />
-              </label>
-              <div className="flex justify-end gap-2">
-                <Button variant="danger" onClick={() => { void resolve(order, 'reject'); }}><MaterialIcon name="close" />{t('voids.reject')}</Button>
-                <Button disabled={!(voidReasons[order.id] ?? order.voidReason ?? '').trim()} onClick={() => { void resolve(order, 'approve'); }}><MaterialIcon name="check" />{t('voids.approve')}</Button>
-              </div>
+              <Button className="w-full" variant="secondary" onClick={() => setActiveRequest(order)}>
+                <MaterialIcon name="edit_note" />Review request
+              </Button>
             </article>
           );
         })}
-        {requests.length === 0 && <div className="rounded-2xl bg-surface-container-lowest p-8 text-center shadow-card"><MaterialIcon name="task_alt" className="text-4xl text-success-dark" /><p className="mt-2 font-body text-body-md text-on-surface-variant">{t('voids.none')}</p></div>}
+        {!loading && !error && requests.length === 0 && <div className="rounded-2xl bg-surface-container-lowest p-8 text-center shadow-card"><MaterialIcon name="task_alt" className="text-4xl text-success-dark" /><p className="mt-2 font-body text-body-md text-on-surface-variant">{t('voids.none')}</p></div>}
       </section>
+      <BottomSheet
+        open={activeRequest !== null}
+        onClose={() => setActiveRequest(null)}
+        title={`Review order #${activeRequest?.number ?? ''}`}
+      >
+        {activeRequest && (
+          <div className="flex flex-col gap-3">
+            <label className="font-body text-label-md text-on-surface">
+              Reason required to approve void
+              <textarea
+                autoFocus
+                value={voidReasons[activeRequest.id] ?? activeRequest.voidReason ?? ''}
+                onChange={(event) => setVoidReasons((current) => ({ ...current, [activeRequest.id]: event.target.value }))}
+                className="mt-1 min-h-24 w-full rounded-lg bg-surface-container-low p-3"
+              />
+            </label>
+            <div className="sheet-action-bar grid grid-cols-2 gap-2">
+              <Button variant="danger" onClick={() => { void resolve(activeRequest, 'reject'); }}>
+                <MaterialIcon name="close" />{t('voids.reject')}
+              </Button>
+              <Button disabled={!(voidReasons[activeRequest.id] ?? activeRequest.voidReason ?? '').trim()} onClick={() => { void resolve(activeRequest, 'approve'); }}>
+                <MaterialIcon name="check" />{t('voids.approve')}
+              </Button>
+            </div>
+          </div>
+        )}
+      </BottomSheet>
     </WorkspaceLayout>
   );
 }

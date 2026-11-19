@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Button } from '../components/Button';
+import { Keypad } from '../components/Keypad';
 import { MaterialIcon } from '../components/MaterialIcon';
+import { ListSkeleton } from '../components/ListSkeleton';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
@@ -63,6 +65,7 @@ function OwnerReportsContent() {
   const storeId = user?.storeId ?? '';
   const [store, setStore] = useState<StoreRecord>();
   const [reports, setReports] = useState<ReportRecord[]>([]);
+  const [loading, setLoading] = useState(true);
   const [openShifts, setOpenShifts] = useState<ShiftRecord[]>([]);
   const [liveSummary, setLiveSummary] = useState<DashboardSummary>(emptySummary);
   const [reportingSummary, setReportingSummary] = useState<DashboardSummary>(emptySummary);
@@ -87,6 +90,7 @@ function OwnerReportsContent() {
 
   useEffect(() => {
     let active = true;
+    setLoading(true);
     if (insightFrom === undefined || insightTo === undefined) {
       setInsights(null);
       setInsightsError('Choose an end date on or after the start date.');
@@ -111,7 +115,10 @@ function OwnerReportsContent() {
       setStore(nextStore);
       setInsights(nextInsights);
     }).catch((loadError: unknown) => {
-      if (active) setError(loadError instanceof Error ? loadError.message : t('common.loadFailed'));
+      console.error('Unable to load reports.', loadError);
+      if (active) setError(t('common.loadFailed'));
+    }).finally(() => {
+      if (active) setLoading(false);
     });
     return () => { active = false; };
   }, [customFrom, customTo, insightFrom, insightTo, insightRangeType, period, storeId]);
@@ -264,10 +271,10 @@ function OwnerReportsContent() {
             <article className="rounded-xl bg-surface-container-low p-3">
               <h3 className="mb-3 font-display text-title-md text-on-surface">Staff performance</h3>
               <div className="flex flex-col gap-2 sm:hidden">
-                {insights.staffPerformance.map((member) => (
+                {loading ? <ListSkeleton rows={2} label="Loading staff performance" /> : insights.staffPerformance.map((member) => (
                   <StaffPerformanceCard key={member.staffId} member={member} />
                 ))}
-                {insights.staffPerformance.length === 0 && <p className="rounded-lg bg-surface-container-lowest p-3 font-body text-body-sm text-outline">{t('common.noData')}</p>}
+                {!loading && !error && insights.staffPerformance.length === 0 && <p className="rounded-lg bg-surface-container-lowest p-3 font-body text-body-sm text-outline">{t('common.noData')}</p>}
               </div>
               <div className="hidden overflow-x-auto sm:block">
                 <table className="w-full min-w-[680px] text-left font-body text-body-sm">
@@ -323,9 +330,14 @@ function OwnerReportsContent() {
                 pattern="[0-9]{4}"
                 maxLength={4}
                 value={ownerPin}
-                onChange={(event) => setOwnerPin(event.target.value)}
+                onChange={(event) => setOwnerPin(event.target.value.replace(/\D/g, '').slice(0, 4))}
                 placeholder="••••"
                 className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 tracking-[0.5em] outline-none focus:ring-2 focus:ring-primary"
+              />
+              <Keypad
+                onPress={(digit) => setOwnerPin((current) => current.length < 4 ? `${current}${digit}` : current)}
+                onClear={() => setOwnerPin('')}
+                onBackspace={() => setOwnerPin((current) => current.slice(0, -1))}
               />
             </label>
           )}
@@ -344,13 +356,13 @@ function OwnerReportsContent() {
       <section className="mt-6">
         <h2 className="mb-3 font-display text-headline-md text-on-surface">Report history</h2>
         <div className="flex flex-col gap-2">
-          {reports.map((report) => (
+          {loading ? <ListSkeleton label="Loading report history" /> : reports.map((report) => (
             <button type="button" key={report.id} onClick={() => setSelectedReport(report)} className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-lowest p-4 text-left shadow-card">
               <div><p className="font-body text-label-md text-on-surface">{report.type} report • {report.businessDate}</p><p className="mt-1 font-body text-body-sm text-outline">{new Date(report.createdAt).toLocaleString()} • {report.orderCount} orders • Sales {formatTnd((report.salesCollectedMillimes ?? report.salesMillimes) / 1000)} DT • Expenses {formatTnd((report.expensesMillimes ?? 0) / 1000)} DT • Net {formatTnd((report.netProfitMillimes ?? 0) / 1000)} DT</p></div>
               <span className="flex items-center gap-2"><StatusTag status={report.type === 'Z' ? 'closed' : 'open'}>{report.type}</StatusTag><MaterialIcon name="open_in_new" /></span>
             </button>
           ))}
-          {reports.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">{t('common.noData')}</p>}
+          {!loading && !error && reports.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">{t('common.noData')}</p>}
         </div>
       </section>
       {selectedReport && <ReportView report={selectedReport} storeName={store?.name ?? ''} onClose={() => setSelectedReport(null)} />}

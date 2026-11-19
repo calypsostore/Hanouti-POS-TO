@@ -32,7 +32,7 @@ const OwnerWasteScreen = lazy(() => import('./screens/OwnerWasteScreen').then((m
 const OwnerExpensesScreen = lazy(() => import('./screens/OwnerFinancialScreens').then((module) => ({ default: module.OwnerExpensesScreen })));
 const OwnerSuppliersScreen = lazy(() => import('./screens/OwnerFinancialScreens').then((module) => ({ default: module.OwnerSuppliersScreen })));
 const OwnerActivityLogScreen = lazy(() => import('./screens/OwnerUtilityScreens').then((module) => ({ default: module.OwnerActivityLogScreen })));
-const OwnerNotificationsScreen = lazy(() => import('./screens/OwnerUtilityScreens').then((module) => ({ default: module.OwnerNotificationsScreen })));
+const NotificationsScreen = lazy(() => import('./screens/NotificationsScreen').then((module) => ({ default: module.NotificationsScreen })));
 const CustomersScreen = lazy(() => import('./screens/CustomersScreen').then((module) => ({ default: module.CustomersScreen })));
 const SuperAdminStoresScreen = lazy(() => import('./screens/SuperAdminStoresScreen').then((module) => ({ default: module.SuperAdminStoresScreen })));
 const SuperAdminOverviewScreen = lazy(() => import('./screens/SuperAdminStoresScreen').then((module) => ({ default: module.SuperAdminOverviewScreen })));
@@ -189,6 +189,9 @@ export default function App() {
     void notificationService.checkOverdueCustomers(user.storeId, user.id).catch((error: unknown) => {
       console.error('[customers] Overdue check on owner sign-in failed.', error);
     });
+    void notificationService.checkSubscriptionExpiring(user.storeId).catch((error: unknown) => {
+      console.error('[subscription] Expiry notification check failed.', error);
+    });
   }, [ready, user?.id, user?.role, user?.storeId]);
 
   useEffect(() => {
@@ -262,7 +265,10 @@ export default function App() {
     const checkOverdueCustomers = async () => {
       const currentUser = useAuthStore.getState().user;
       if (currentUser?.role === 'owner' && currentUser.storeId) {
-        await notificationService.checkOverdueCustomers(currentUser.storeId, currentUser.id);
+        await Promise.all([
+          notificationService.checkOverdueCustomers(currentUser.storeId, currentUser.id),
+          notificationService.checkSubscriptionExpiring(currentUser.storeId),
+        ]);
       }
     };
     void updateService.register().then(() => {
@@ -296,6 +302,7 @@ export default function App() {
           <Route path="/customers/:id" element={<ProtectedRoute roles={['staff', 'owner']} permission={['customers_view', 'use_tabs', 'settle_tabs']}><CustomersScreen /></ProtectedRoute>} />
           <Route path="/shift" element={<ProtectedRoute roles={['staff']} permission="open_close_shift"><ShiftScreen /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute roles={['staff', 'owner', 'super_admin']}><SettingsScreen /></ProtectedRoute>} />
+          <Route path="/notifications" element={<ProtectedRoute roles={['staff', 'owner', 'super_admin']}><NotificationsScreen /></ProtectedRoute>} />
           <Route path="/owner" element={<Navigate to="/owner/dashboard" replace />} />
           <Route path="/owner/dashboard" element={<ProtectedRoute roles={['owner']}><OwnerDashboardScreen /></ProtectedRoute>} />
           <Route path="/owner/catalog" element={<ProtectedRoute roles={['owner']}><OwnerCatalogScreen /></ProtectedRoute>} />
@@ -310,7 +317,7 @@ export default function App() {
           <Route path="/owner/expenses" element={<ProtectedRoute roles={['owner']}><OwnerExpensesScreen /></ProtectedRoute>} />
           <Route path="/owner/suppliers" element={<ProtectedRoute roles={['owner']}><OwnerSuppliersScreen /></ProtectedRoute>} />
           <Route path="/owner/activity" element={<ProtectedRoute roles={['owner']}><OwnerActivityLogScreen /></ProtectedRoute>} />
-          <Route path="/owner/notifications" element={<ProtectedRoute roles={['owner']}><OwnerNotificationsScreen /></ProtectedRoute>} />
+          <Route path="/owner/notifications" element={<Navigate to="/notifications" replace />} />
           <Route path="/owner/settings" element={<ProtectedRoute roles={['owner']}><SettingsScreen /></ProtectedRoute>} />
           <Route path="/owner/*" element={<ProtectedRoute roles={['owner']}><RolePlaceholder title="Owner workspace" /></ProtectedRoute>} />
           <Route path="/admin" element={<Navigate to="/admin/overview" replace />} />

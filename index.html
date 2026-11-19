@@ -3,7 +3,25 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#f4f8f9" />
+    <meta name="theme-color" content="#F4F8F9" />
+    <script>
+      (() => {
+        let theme = 'system';
+        try {
+          const settings = JSON.parse(localStorage.getItem('hanouti.display-settings.v1') || 'null');
+          if (settings?.theme === 'light' || settings?.theme === 'dark' || settings?.theme === 'system') {
+            theme = settings.theme;
+          }
+        } catch {
+          theme = 'system';
+        }
+        const dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.classList.toggle('dark', dark);
+        document.documentElement.classList.toggle('light', !dark);
+        const themeColor = document.querySelector('meta[name="theme-color"]');
+        if (themeColor) themeColor.setAttribute('content', dark ? '#101719' : '#F4F8F9');
+      })();
+    </script>
     <meta name="description" content="Fast orders. Clear shifts. 7anouti-POS tracks café orders and shifts." />
     <link rel="icon" type="image/png" href="/logo1.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />

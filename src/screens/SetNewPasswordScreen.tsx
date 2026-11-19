@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/Button';
+import { Keypad } from '../components/Keypad';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { useAuthStore } from '../stores/authStore';
 import { userService } from '../services/userService';
@@ -129,6 +130,11 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
                 onChange={(event) => setPin(event.target.value.replace(/\D/g, '').slice(0, 4))}
                 placeholder="••••"
                 className="h-14 w-full rounded-xl bg-surface-container-lowest px-4 text-center font-display text-headline-md tracking-[0.5em] shadow-card outline-none focus:ring-2 focus:ring-primary"
+              />
+              <Keypad
+                onPress={(digit) => setPin((current) => current.length < 4 ? `${current}${digit}` : current)}
+                onClear={() => setPin('')}
+                onBackspace={() => setPin((current) => current.slice(0, -1))}
               />
             </div>
           ) : (

@@ -170,6 +170,8 @@ async function updateCatalogItem(
   }
   if (stockReachedZero && notifyOnStockDepletion) {
     await notificationService.notifyStockDepleted(item.storeId, item.id, item.name);
+  } else if (availabilityChanged && nextOutOfStock && resultingStockCount !== 0) {
+    await notificationService.notifyItemMarked86(item.storeId, item.id, item.name);
   }
   if (stockCrossedLowThreshold && changes.stockCount !== undefined && changes.stockCount !== null) {
     await notificationService.notifyLowStock(item.storeId, item.id, item.name, changes.stockCount, lowStockThreshold);

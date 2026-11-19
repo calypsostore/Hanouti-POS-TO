@@ -278,6 +278,7 @@ export const orderService = {
       entityId: order.id,
       meta: { before: { status: order.status }, after: { status: updated.status, voidReason: cleanedReason } },
     });
+    await notificationService.notifyVoidRequested(updated);
     return updated;
   },
 
@@ -361,6 +362,7 @@ export const orderService = {
       entityId: order.id,
       meta: { before: { status: order.status, voidReason: order.voidReason }, after: { status: updated.status, voidReason: updated.voidReason } },
     });
+    await notificationService.notifyVoidResolved(updated, decision === 'approve');
     if (decision === 'approve') {
       if (order.paymentMethod === 'cash') {
         await shiftService.recordClosedShiftVoidAdjustment({

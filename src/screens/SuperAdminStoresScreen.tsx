@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
 import { MaterialIcon } from '../components/MaterialIcon';
+import { ListSkeleton } from '../components/ListSkeleton';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { adminWorkspaceLinks } from '../app/navigation';
@@ -47,6 +48,7 @@ function ExpiryTag({ store }: { store: StoreRecord }) {
 
 export function SuperAdminOverviewScreen() {
   const [stores, setStores] = useState<StoreRecord[]>([]);
+  const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ totalOrders: 0, totalSales: 0, noOpenShifts: 0 });
   const [error, setError] = useState('');
   const today = localDateKey(new Date());
@@ -78,7 +80,10 @@ export function SuperAdminOverviewScreen() {
         });
         setError('');
       } catch (loadError) {
-        if (active) setError(loadError instanceof Error ? loadError.message : 'Unable to load platform overview.');
+        console.error('Unable to load platform overview.', loadError);
+        if (active) setError('Unable to load the platform overview. Please try again.');
+      } finally {
+        if (active) setLoading(false);
       }
     }
     void load();
@@ -119,7 +124,7 @@ export function SuperAdminOverviewScreen() {
           <Link to="/admin/stores" className="font-body text-label-md text-primary underline">View all</Link>
         </div>
         <div className="flex flex-col gap-2">
-          {newestStores.map((store) => (
+          {loading ? <ListSkeleton rows={2} label="Loading newest stores" /> : newestStores.map((store) => (
             <Link key={store.id} to={`/admin/stores/${store.id}`} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-surface-container-low p-3">
               <span className="min-w-0">
                 <span className="block truncate font-body text-label-md text-on-surface">{store.name}</span>
@@ -131,7 +136,7 @@ export function SuperAdminOverviewScreen() {
               </span>
             </Link>
           ))}
-          {newestStores.length === 0 && <p className="font-body text-body-sm text-outline">{t('common.noData')}</p>}
+          {!loading && !error && newestStores.length === 0 && <p className="font-body text-body-sm text-outline">{t('common.noData')}</p>}
         </div>
       </section>
     </WorkspaceLayout>
@@ -150,6 +155,8 @@ function OverviewMetric({ label, value }: { label: string; value: string }) {
 function SuperAdminStoresContent() {
   const admin = useAuthStore((state) => state.user);
   const [stores, setStores] = useState<StoreRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
   const [owners, setOwners] = useState<Record<string, UserSummary | undefined>>({});
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -177,7 +184,10 @@ function SuperAdminStoresContent() {
   useEffect(() => {
     let active = true;
     void refresh().catch((loadError: unknown) => {
-      if (active) setError(loadError instanceof Error ? loadError.message : t('common.loadFailed'));
+      console.error('Unable to load stores.', loadError);
+      if (active) setError(t('common.loadFailed'));
+    }).finally(() => {
+      if (active) setLoading(false);
     });
     return () => { active = false; };
   }, []);
@@ -193,6 +203,7 @@ function SuperAdminStoresContent() {
       setEmail('');
       setStoreName('');
       setStoreCode('');
+      setCreateOpen(false);
       await refresh();
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : 'Unable to create the owner account.');
@@ -342,14 +353,7 @@ function SuperAdminStoresContent() {
         <p className="mt-1 font-body text-body-md text-on-surface-variant">Manage stores, subscriptions, and owner accounts.</p>
       </header>
 
-      <form onSubmit={(event) => { void createOwner(event); }} className="mb-5 grid gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card sm:grid-cols-2">
-        <h2 className="font-display text-headline-md text-on-surface sm:col-span-2">{t('admin.createOwner')}</h2>
-        <label className="font-body text-label-md">{t('common.name')}<input required value={name} onChange={(event) => setName(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
-        <label className="font-body text-label-md">{t('admin.ownerEmail')}<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
-        <label className="font-body text-label-md">{t('admin.storeName')}<input required value={storeName} onChange={(event) => setStoreName(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
-        <label className="font-body text-label-md">{t('admin.storeCode')}<input required pattern="[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*" value={storeCode} onChange={(event) => setStoreCode(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
-        <Button type="submit" className="min-h-12 sm:col-span-2">{t('admin.createAccount')}</Button>
-      </form>
+      <Button className="mb-5 w-full sm:w-auto" onClick={() => setCreateOpen(true)}><MaterialIcon name="add" />{t('admin.createOwner')}</Button>
 
       <section aria-label="Store filters" className="mb-4 flex flex-col gap-3">
         <label className="relative block">
@@ -369,7 +373,7 @@ function SuperAdminStoresContent() {
       {(error || notice) && <p role={error ? 'alert' : 'status'} className={`mb-3 rounded-lg p-3 font-body text-body-sm ${error ? 'bg-error-container text-on-error-container' : 'bg-success-container text-success-dark'}`}>{error || notice}</p>}
 
       <section className="flex flex-col gap-3">
-        {visibleStores.map((store) => {
+        {loading ? <ListSkeleton label="Loading stores" /> : visibleStores.map((store) => {
           const owner = owners[store.ownerId];
           const suspended = storeIsSuspended(store);
           return (
@@ -420,7 +424,7 @@ function SuperAdminStoresContent() {
             </article>
           );
         })}
-        {visibleStores.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">{stores.length === 0 ? t('common.noData') : 'No stores match these filters.'}</p>}
+        {!loading && !error && visibleStores.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">{stores.length === 0 ? t('common.noData') : 'No stores match these filters.'}</p>}
       </section>
 
       <BottomSheet open={Boolean(credentials)} onClose={() => setCredentials(null)} title={credentials?.title}>
@@ -488,6 +492,19 @@ function SuperAdminStoresContent() {
             <Button type="button" variant="danger" className="min-h-12" onClick={() => { void archiveStore(); }}>Archive store</Button>
           </div>
         </div>
+      </BottomSheet>
+      <BottomSheet open={createOpen} onClose={() => setCreateOpen(false)} title={t('admin.createOwner')}>
+        <form onSubmit={(event) => { void createOwner(event); }} className="flex flex-col gap-3">
+          <label className="font-body text-label-md">{t('common.name')}<input required value={name} onChange={(event) => setName(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
+          <label className="font-body text-label-md">{t('admin.ownerEmail')}<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
+          <label className="font-body text-label-md">{t('admin.storeName')}<input required value={storeName} onChange={(event) => setStoreName(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
+          <label className="font-body text-label-md">{t('admin.storeCode')}<input required pattern="[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*" value={storeCode} onChange={(event) => setStoreCode(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
+          {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
+          <div className="sheet-action-bar grid grid-cols-2 gap-2">
+            <Button type="button" variant="ghost" onClick={() => setCreateOpen(false)}>{t('common.cancel')}</Button>
+            <Button type="submit">{t('admin.createAccount')}</Button>
+          </div>
+        </form>
       </BottomSheet>
     </WorkspaceLayout>
   );

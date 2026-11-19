@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '../components/BottomNav';
 import { Button } from '../components/Button';
 import { MaterialIcon } from '../components/MaterialIcon';
+import { ListSkeleton } from '../components/ListSkeleton';
 import { StatusTag } from '../components/StatusTag';
 import { TopBar } from '../components/TopBar';
 import { formatTnd } from '../lib/format';
@@ -22,6 +23,7 @@ export function StaffDashboardScreen() {
   const [cashSales, setCashSales] = useState(0);
   const [expectedCash, setExpectedCash] = useState(0);
   const [todayOrders, setTodayOrders] = useState<OrderRecord[]>([]);
+  const [loading, setLoading] = useState(true);
   const [personalSales, setPersonalSales] = useState(0);
   const [canTakeOrders, setCanTakeOrders] = useState(false);
   const [canManageShift, setCanManageShift] = useState(false);
@@ -31,6 +33,7 @@ export function StaffDashboardScreen() {
 
   const refresh = useCallback(async () => {
     if (!user) return;
+    setLoading(true);
     try {
       const [nextStore, nextOpenShift, shifts, orders, sales, permissions] = await Promise.all([
         userService.getStore(storeId),
@@ -67,7 +70,10 @@ export function StaffDashboardScreen() {
         setExpectedCash(0);
       }
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Unable to load dashboard.');
+      console.error('Unable to load staff dashboard.', loadError);
+      setError('Unable to load your dashboard. Please try again.');
+    } finally {
+      setLoading(false);
     }
   }, [storeId, user]);
 
@@ -213,7 +219,7 @@ export function StaffDashboardScreen() {
                 <MaterialIcon name="arrow_forward" className="text-lg" />
               </Button>
             </div>
-            {recentOrders.length > 0 ? (
+            {loading ? <ListSkeleton rows={2} label="Loading recent orders" /> : recentOrders.length > 0 ? (
               <div className="grid gap-2">
                 {recentOrders.map((order) => (
                   <button key={order.id} type="button" onClick={() => navigate('/orders')} className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-lowest p-4 text-left shadow-card">

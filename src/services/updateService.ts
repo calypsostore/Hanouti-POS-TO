@@ -1,5 +1,6 @@
-declare const __APP_VERSION__: string;
+import { notificationService } from './notificationService';
 
+declare const __APP_VERSION__: string;
 const LAST_CHECK_KEY = '7anouti-pos:last-update-check';
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
@@ -46,6 +47,9 @@ function setUpdateAvailable() {
   if (hasUpdate) return;
   hasUpdate = true;
   notifyListeners();
+  void notificationService.notifyAppUpdate(__APP_VERSION__).catch((error: unknown) => {
+    console.error('[updates] Could not create in-app update notifications.', error);
+  });
   if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
     new Notification('7anouti-POS', { body: 'New version available, tap to refresh' });
   }

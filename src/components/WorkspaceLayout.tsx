@@ -34,14 +34,14 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
 
   useEffect(() => {
     const storeId = user?.storeId;
-    if (!isOwnerWorkspace || !storeId) return;
+    if (!isOwnerWorkspace || !user || !storeId) return;
     let active = true;
     let requestId = 0;
     const refreshBadges = () => {
       const currentRequestId = ++requestId;
       void Promise.all([
         orderService.listAll(storeId),
-        notificationService.listForStaff(storeId, user.id),
+        notificationService.listFor(user),
       ]).then(([orders, notifications]) => {
         if (!active || currentRequestId !== requestId) return;
         setPendingVoidCount(orders.filter((order) => order.status === 'pending_void').length);
@@ -60,11 +60,11 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
       window.removeEventListener('storage', refreshBadges);
       window.removeEventListener(OWNER_NOTIFICATIONS_CHANGED_EVENT, refreshBadges);
     };
-  }, [isOwnerWorkspace, user?.id, user?.storeId]);
+  }, [isOwnerWorkspace, user]);
 
   const badgeCountFor = (link: WorkspaceLink) => {
     if (link.to === '/owner/voids') return pendingVoidCount;
-    if (link.to === '/owner/notifications') return unreadNotificationCount;
+    if (link.to === '/notifications') return unreadNotificationCount;
     return 0;
   };
   const totalBadgeCount = pendingVoidCount + unreadNotificationCount;

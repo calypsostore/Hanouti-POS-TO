@@ -145,6 +145,7 @@ export const shiftService = {
       entityId: shift.id,
       meta: { after: shift },
     });
+    await notificationService.notifyShiftOpened(shift.id, storeId, actor?.name ?? 'A staff member');
     if (store.dayClosedOn === todayKey()) await userService.clearDayClosed(storeId);
     return shift;
   },
@@ -178,6 +179,7 @@ export const shiftService = {
       entityId: shift.id,
       meta: { before: shift, after: updated },
     });
+    await notificationService.notifyShiftClosed(shift.id, shift.storeId, actor?.name ?? 'A staff member', differenceMillimes);
     return updated;
   },
 
@@ -212,6 +214,8 @@ export const shiftService = {
       entityId: shift.id,
       meta: { before: shift, after: updated },
     });
+    const staff = await userService.getUser(shift.staffId);
+    await notificationService.notifyShiftClosed(shift.id, shift.storeId, staff?.name ?? 'A staff member', differenceMillimes);
     return updated;
   },
 

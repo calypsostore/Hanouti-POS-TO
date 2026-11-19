@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { Link, useParams } from 'react-router-dom';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
+import { Keypad } from '../components/Keypad';
+import { ListSkeleton } from '../components/ListSkeleton';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
@@ -149,7 +151,8 @@ function ProfileContent() {
     let active = true;
     const load = () => {
       void refresh().catch((loadError: unknown) => {
-        if (active) setError(loadError instanceof Error ? loadError.message : 'Unable to load the staff profile.');
+        console.error('Unable to load the staff profile.', loadError);
+        if (active) setError('Unable to load this staff profile. Please try again.');
       }).finally(() => {
         if (active) setLoading(false);
       });
@@ -416,7 +419,7 @@ function ProfileContent() {
       </Link>
 
       {loading ? (
-        <p className="rounded-xl bg-surface-container-lowest p-5 font-body text-body-md text-outline">Loading staff profile...</p>
+        <ListSkeleton rows={3} label="Loading staff profile" />
       ) : staff ? (
         <>
           <section className="mb-5 rounded-2xl bg-surface-container-lowest p-4 shadow-card sm:p-6">
@@ -532,7 +535,7 @@ function ProfileContent() {
                     <p className="px-4 pb-4 font-body text-body-sm text-outline">No shifts recorded yet.</p>
                   ) : (
                     <div className="overflow-x-auto">
-                      <table className="w-full min-w-[640px] border-collapse text-left">
+                      <table className="mobile-card-table w-full min-w-[640px] border-collapse text-left">
                         <thead className="bg-surface-container-low font-body text-label-sm text-outline">
                           <tr>
                             <th className="px-4 py-3">Date</th>
@@ -549,12 +552,12 @@ function ProfileContent() {
                             const closedAt = shift.closedAt ? new Date(shift.closedAt) : new Date(now);
                             return (
                               <tr key={shift.id} className="border-t border-outline-variant font-body text-body-sm text-on-surface">
-                                <td className="whitespace-nowrap px-4 py-3">{openedAt.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}</td>
-                                <td className="whitespace-nowrap px-4 py-3">{formatShiftTime(shift.openedAt)}</td>
-                                <td className="whitespace-nowrap px-4 py-3">{shift.closedAt ? formatShiftTime(shift.closedAt) : 'Open'}</td>
-                                <td className="whitespace-nowrap px-4 py-3">{formatHours(closedAt.getTime() - openedAt.getTime())}</td>
-                                <td className="whitespace-nowrap px-4 py-3">{lateMinutesFor(shift, plannedShifts) > 0 ? `Late ${lateMinutesFor(shift, plannedShifts)} min` : '—'}</td>
-                                <td className="whitespace-nowrap px-4 py-3">{shift.differenceMillimes === undefined ? '—' : `${formatTnd(shift.differenceMillimes / 1000)} DT`}</td>
+                                <td data-label="Date">{openedAt.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                                <td data-label="Opened">{formatShiftTime(shift.openedAt)}</td>
+                                <td data-label="Closed">{shift.closedAt ? formatShiftTime(shift.closedAt) : 'Open'}</td>
+                                <td data-label="Total hours">{formatHours(closedAt.getTime() - openedAt.getTime())}</td>
+                                <td data-label="Punctuality">{lateMinutesFor(shift, plannedShifts) > 0 ? `Late ${lateMinutesFor(shift, plannedShifts)} min` : '—'}</td>
+                                <td data-label="Cash difference">{shift.differenceMillimes === undefined ? '—' : `${formatTnd(shift.differenceMillimes / 1000)} DT`}</td>
                               </tr>
                             );
                           })}
@@ -663,6 +666,12 @@ function ProfileContent() {
             onChange={(event) => setStaffPin(event.target.value.replace(/\D/g, '').slice(0, 4))}
             placeholder="••••"
             className="h-12 rounded-lg bg-surface-container-low px-3 text-center tracking-[0.5em] outline-none focus:ring-2 focus:ring-primary"
+          />
+          <Keypad
+            onPress={(digit) => setStaffPin((current) => current.length < 4 ? `${current}${digit}` : current)}
+            onClear={() => setStaffPin('')}
+            onBackspace={() => setStaffPin((current) => current.slice(0, -1))}
+            disabled={busy}
           />
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
           <div className="grid grid-cols-2 gap-2">

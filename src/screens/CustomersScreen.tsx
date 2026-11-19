@@ -5,6 +5,7 @@ import { BottomNav } from '../components/BottomNav';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
 import { Keypad } from '../components/Keypad';
+import { ListSkeleton } from '../components/ListSkeleton';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { OverdueCustomerRow } from '../components/OverdueCustomerRow';
 import { TabStatementView } from '../components/TabStatementView';
@@ -166,7 +167,7 @@ export function CustomersScreen() {
       customerService.getAccountsSummary(storeId),
       notificationService.listCustomerCreditAlerts(storeId),
       user?.role === 'owner'
-        ? notificationService.listForStaff(storeId, user.id).then((entries) => entries.filter((entry) => entry.type.startsWith('customer_credit_') || entry.type === 'customer_overdue'))
+        ? notificationService.listFor(user).then((entries) => entries.filter((entry) => entry.type.startsWith('customer_credit_') || entry.type === 'customer_overdue'))
         : Promise.resolve([]),
     ]);
     setCustomers(records);
@@ -230,14 +231,16 @@ export function CustomersScreen() {
     setLoading(true);
     void refresh()
       .catch((loadError: unknown) => {
-        if (active) setError(loadError instanceof Error ? loadError.message : 'Unable to load customers.');
+        console.error('Unable to load customers.', loadError);
+        if (active) setError('Unable to load customers. Please try again.');
       })
       .finally(() => {
         if (active) setLoading(false);
       });
     const refreshOnFocus = () => {
       void refresh().catch((loadError: unknown) => {
-        if (active) setError(loadError instanceof Error ? loadError.message : 'Unable to load customers.');
+        console.error('Unable to refresh customers.', loadError);
+        if (active) setError('Unable to load customers. Please try again.');
       });
     };
     window.addEventListener('focus', refreshOnFocus);
@@ -283,7 +286,8 @@ export function CustomersScreen() {
     try {
       setOverdueStatement(await customerService.getStatementData(customer.id, storeId));
     } catch (statementError) {
-      setOverdueActionError(statementError instanceof Error ? statementError.message : 'Unable to load the customer statement.');
+      console.error('Unable to load the customer statement.', statementError);
+      setOverdueActionError('Unable to load the customer statement. Please try again.');
     } finally {
       setOverdueAction(null);
     }
@@ -547,7 +551,7 @@ export function CustomersScreen() {
         <section aria-label="Recent customer credit notifications" className="mb-4 flex flex-col gap-2">
           {creditNotifications.slice(0, 3).map((notification) => (
             <p key={notification.id} role="status" className={`rounded-xl p-3 font-body text-body-sm ${notification.type === 'customer_credit_limit' || notification.type === 'customer_overdue' ? 'bg-error-container text-on-error-container' : 'bg-warning-container text-on-warning-container'}`}>
-              <strong>{notification.title}:</strong> {notification.message}
+              <strong>{notification.title}:</strong> {notification.body}
             </p>
           ))}
         </section>
@@ -593,7 +597,7 @@ export function CustomersScreen() {
       {overdueActionError && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{overdueActionError}</p>}
       {notice && <p role="status" className="mb-3 rounded-lg bg-success-container p-3 font-body text-body-sm text-on-success-container">{notice}</p>}
       {loading ? (
-        <p role="status" className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">Loading customers…</p>
+        <ListSkeleton label="Loading customers" />
       ) : filteredCustomers.length > 0 ? (
         <div className="flex flex-col gap-3">
           {filteredCustomers.map((customer) => {

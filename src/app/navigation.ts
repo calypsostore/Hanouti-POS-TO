@@ -18,7 +18,7 @@ export const ownerMoreLinks: WorkspaceLink[] = [
   { to: '/owner/expenses', label: 'nav.expenses', icon: 'request_quote' },
   { to: '/owner/suppliers', label: 'nav.suppliers', icon: 'local_shipping' },
   { to: '/owner/activity', label: 'nav.activityLog', icon: 'history' },
-  { to: '/owner/notifications', label: 'nav.notifications', icon: 'notifications' },
+  { to: '/notifications', label: 'nav.notifications', icon: 'notifications' },
   { to: '/owner/settings', label: 'nav.settings', icon: 'tune' },
 ];
 

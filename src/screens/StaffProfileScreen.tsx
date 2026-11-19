@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { BottomNav } from '../components/BottomNav';
 import { Button } from '../components/Button';
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
+import { ListSkeleton } from '../components/ListSkeleton';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { PERMISSIONS_CHANGED_EVENT, userService } from '../services/userService';
 import { scheduleService } from '../services/scheduleService';
@@ -54,32 +55,38 @@ export function StaffProfileScreen() {
   const [effectivePermissions, setEffectivePermissions] = useState<string[]>([]);
   const [schedule, setSchedule] = useState<ScheduleShiftRecord[]>([]);
   const [shifts, setShifts] = useState<ShiftRecord[]>([]);
+  const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(0);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
   const refresh = useCallback(async () => {
     if (!user || user.role !== 'staff' || !user.storeId) return;
-    const [nextStore, positions, definitions, permissionIds] = await Promise.all([
-      userService.getStore(user.storeId),
-      userService.listPositions(user.storeId),
-      userService.listPermissionDefinitions(),
-      userService.getEffectivePermissions(user.id),
-    ]);
-    const hasSchedulePermission = permissionIds.includes('view_schedule');
-    const hasHoursPermission = permissionIds.includes('view_own_hours');
-    const [nextSchedule, allShifts] = await Promise.all([
-      hasSchedulePermission ? scheduleService.listForStaff(user.storeId, user.id) : Promise.resolve([]),
-      hasHoursPermission ? shiftService.listShifts(user.storeId) : Promise.resolve([]),
-    ]);
-    setStore(nextStore);
-    setPositionName(positions.find((position) => position.id === user.positionId)?.name ?? 'Unassigned');
-    setPermissionDefinitions(definitions);
-    setEffectivePermissions(permissionIds);
-    setSchedule(nextSchedule.filter((shift) => Boolean(shift.publishedAt)));
-    setShifts(allShifts.filter((shift) => shift.staffId === user.id));
-    setNow(Date.now());
-    setError('');
+    setLoading(true);
+    try {
+      const [nextStore, positions, definitions, permissionIds] = await Promise.all([
+        userService.getStore(user.storeId),
+        userService.listPositions(user.storeId),
+        userService.listPermissionDefinitions(),
+        userService.getEffectivePermissions(user.id),
+      ]);
+      const hasSchedulePermission = permissionIds.includes('view_schedule');
+      const hasHoursPermission = permissionIds.includes('view_own_hours');
+      const [nextSchedule, allShifts] = await Promise.all([
+        hasSchedulePermission ? scheduleService.listForStaff(user.storeId, user.id) : Promise.resolve([]),
+        hasHoursPermission ? shiftService.listShifts(user.storeId) : Promise.resolve([]),
+      ]);
+      setStore(nextStore);
+      setPositionName(positions.find((position) => position.id === user.positionId)?.name ?? 'Unassigned');
+      setPermissionDefinitions(definitions);
+      setEffectivePermissions(permissionIds);
+      setSchedule(nextSchedule.filter((shift) => Boolean(shift.publishedAt)));
+      setShifts(allShifts.filter((shift) => shift.staffId === user.id));
+      setNow(Date.now());
+      setError('');
+    } finally {
+      setLoading(false);
+    }
   }, [user]);
 
   useEffect(() => {
@@ -89,7 +96,8 @@ export function StaffProfileScreen() {
       const currentRequestId = ++requestId;
       void refresh().catch((loadError: unknown) => {
         if (active && currentRequestId === requestId) {
-          setError(loadError instanceof Error ? loadError.message : 'Unable to load your profile.');
+          console.error('Unable to load the staff profile.', loadError);
+          setError('Unable to load your profile. Please try again.');
         }
       });
     };
@@ -177,7 +185,7 @@ export function StaffProfileScreen() {
           <>
             <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
               <h2 className="mb-3 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="event" className="text-primary" />Next shift</h2>
-              {nextShift ? (
+              {loading ? <ListSkeleton rows={1} label="Loading your next shift" /> : nextShift ? (
                 <ScheduleCard shift={nextShift} />
               ) : (
                 <p className="font-body text-body-sm text-outline">No upcoming published shifts.</p>
@@ -185,7 +193,7 @@ export function StaffProfileScreen() {
             </section>
             <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
               <h2 className="mb-3 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="calendar_month" className="text-primary" />This week’s schedule</h2>
-              {weekSchedule.length > 0 ? (
+              {loading ? <ListSkeleton rows={2} label="Loading this week’s schedule" /> : weekSchedule.length > 0 ? (
                 <div className="flex flex-col gap-2">
                   {weekSchedule.map((shift) => <ScheduleCard key={shift.id} shift={shift} />)}
                 </div>
@@ -204,7 +212,7 @@ export function StaffProfileScreen() {
               <HourMetric label="This month" value={formatHours(monthHours)} />
             </div>
             <h3 className="mb-2 font-body text-label-md text-on-surface">Last 5 shifts</h3>
-            {recentShifts.length > 0 ? (
+            {loading ? <ListSkeleton rows={2} label="Loading recent shifts" /> : recentShifts.length > 0 ? (
               <div className="flex flex-col gap-2">
                 {recentShifts.map((shift) => (
                   <article key={shift.id} className="rounded-xl bg-surface-container-low p-3">
@@ -225,7 +233,7 @@ export function StaffProfileScreen() {
           <h2 className="mb-1 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="verified_user" className="text-primary" />My permissions</h2>
           <p className="mb-4 font-body text-body-sm text-on-surface-variant">These permissions determine which actions and buttons are available to you.</p>
           <div className="flex flex-col gap-4">
-            {groupedPermissions.map(([group, permissions]) => (
+            {loading ? <ListSkeleton rows={2} label="Loading your permissions" /> : groupedPermissions.map(([group, permissions]) => (
               <div key={group}>
                 <h3 className="mb-2 font-body text-label-md text-on-surface">{group}</h3>
                 <ul className="flex flex-col gap-2">

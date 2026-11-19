@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '../components/BottomNav';
 import { Button } from '../components/Button';
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
+import { Keypad } from '../components/Keypad';
+import { ListSkeleton } from '../components/ListSkeleton';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { catalogService } from '../services/catalogService';
@@ -12,18 +14,29 @@ import { settingsService } from '../services/settingsService';
 import { updateService } from '../services/updateService';
 import { userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
+import { updateDisplaySettings, useDisplaySettings, type DisplayTheme } from '../lib/displaySettings';
 import { t } from '../i18n/translations';
 import { adminWorkspaceLinks, ownerWorkspaceLinks } from '../app/navigation';
 import { DEFAULT_NOTIFICATION_PREFERENCES, resolveStoreSettings, type CatalogItemRecord, type CategoryRecord, type NotificationRecord, type NotificationType, type PositionRecord, type ScheduleShiftRecord, type SettlementTerms } from '../types/domain';
 
 const notificationOptions: { type: NotificationType; label: string; description: string }[] = [
+  { type: 'void_requested', label: 'Void request received', description: 'Notify the owner when staff request an order void.' },
+  { type: 'void_approved', label: 'Void request approved', description: 'Notify staff when their void request is approved.' },
+  { type: 'void_rejected', label: 'Void request rejected', description: 'Notify staff when their void request is rejected.' },
   { type: 'schedule_published', label: 'Schedule published', description: 'Notify staff when a schedule is published.' },
   { type: 'customer_credit_warning', label: 'Customer nearing credit limit', description: 'Alert when a customer reaches 80% of their credit limit.' },
   { type: 'customer_credit_limit', label: 'Customer credit limit reached', description: 'Alert when a customer reaches their credit limit.' },
   { type: 'customer_overdue', label: 'Customer tab overdue', description: 'Alert when a customer tab passes its settlement date.' },
   { type: 'stock_depleted', label: 'Stock depleted', description: 'Alert when tracked stock reaches zero.' },
+  { type: 'item_86', label: 'Item marked 86', description: 'Alert when an item is manually marked out of stock.' },
   { type: 'low_stock', label: 'Low stock', description: 'Alert when tracked stock crosses its low-stock threshold.' },
+  { type: 'shift_opened', label: 'Shift opened', description: 'Notify the owner when a staff shift opens.' },
+  { type: 'shift_closed', label: 'Shift closed', description: 'Notify the owner when a staff shift closes.' },
+  { type: 'cash_difference', label: 'Cash difference', description: 'Alert the owner when shift close has a cash difference.' },
   { type: 'cash_out_alert', label: 'Large cash withdrawal', description: 'Alert when a cash-out exceeds the configured threshold.' },
+  { type: 'z_report_closed', label: 'Z report closed', description: 'Notify the owner when a Z report closes the business day.' },
+  { type: 'app_update', label: 'New app version', description: 'Notify when a new app version is available.' },
+  { type: 'subscription_expiring', label: 'Subscription expiring', description: 'Notify the owner seven days before subscription expiry.' },
 ];
 
 interface StaffRuleDraft {
@@ -49,6 +62,7 @@ function parseTndAmount(value: string): number {
 export function SettingsScreen() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
+  const displaySettings = useDisplaySettings();
   const storeId = user?.storeId;
   const userRole = user?.role;
   const logout = useAuthStore((state) => state.logout);
@@ -60,6 +74,7 @@ export function SettingsScreen() {
   const [cashOutAlertThreshold, setCashOutAlertThreshold] = useState('50.000');
   const [defaultSettlementTerms, setDefaultSettlementTerms] = useState<SettlementTerms>('monthly');
   const [notificationPreferences, setNotificationPreferences] = useState<Partial<Record<NotificationType, boolean>>>(DEFAULT_NOTIFICATION_PREFERENCES);
+  const [userNotificationPreferences, setUserNotificationPreferences] = useState<Partial<Record<NotificationType, boolean>>>({});
   const [positions, setPositions] = useState<PositionRecord[]>([]);
   const [catalogItems, setCatalogItems] = useState<CatalogItemRecord[]>([]);
   const [categories, setCategories] = useState<CategoryRecord[]>([]);
@@ -76,9 +91,21 @@ export function SettingsScreen() {
   const [updateResult, setUpdateResult] = useState('');
   const [mySchedule, setMySchedule] = useState<ScheduleShiftRecord[]>([]);
   const [scheduleNotifications, setScheduleNotifications] = useState<NotificationRecord[]>([]);
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [preferencesLoading, setPreferencesLoading] = useState(false);
   const [scheduleDate, setScheduleDate] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+
+  function saveDisplayPreference(changes: { theme?: DisplayTheme; largeButtons?: boolean }) {
+    setError('');
+    try {
+      updateDisplaySettings(changes);
+    } catch (displayError) {
+      console.error('Unable to save display settings.', displayError);
+      setError('Unable to save display settings. Please try again.');
+    }
+  }
 
   useEffect(() => {
     if (storeId) {
@@ -106,10 +133,14 @@ export function SettingsScreen() {
           itemIds: [...(position.selfServiceItemIds ?? [])],
           compItemsEnabled: position.permissionIds.includes('comp_items'),
         }])));
-      }).catch((storeError: unknown) => setError(storeError instanceof Error ? storeError.message : t('common.storeLoadFailed')));
+      }).catch((storeError: unknown) => {
+        console.error('Unable to load settings data.', storeError);
+        setError(t('common.storeLoadFailed'));
+      });
     }
     void settingsService.getLanguage().then(setLanguage).catch((languageError: unknown) => {
-      setError(languageError instanceof Error ? languageError.message : t('settings.languageFailed'));
+      console.error('Unable to load the language preference.', languageError);
+      setError(t('settings.languageFailed'));
     });
   }, [storeId, userRole]);
 
@@ -119,16 +150,20 @@ export function SettingsScreen() {
     const staffStoreId = user.storeId;
     const staffId = user.id;
     const loadSchedule = () => {
+      setScheduleLoading(true);
       setScheduleDate(localDateKey(new Date()));
       void Promise.all([
         scheduleService.listForStaff(staffStoreId, staffId),
-        notificationService.listForStaff(staffStoreId, staffId),
+        user ? notificationService.listFor(user) : Promise.resolve([]),
       ]).then(([shifts, notifications]) => {
         if (!active) return;
         setMySchedule(shifts);
         setScheduleNotifications(notifications);
       }).catch((scheduleError: unknown) => {
-        if (active) setError(scheduleError instanceof Error ? scheduleError.message : 'Unable to load your schedule.');
+        console.error('Unable to load your schedule.', scheduleError);
+        if (active) setError('Unable to load your schedule. Please try again.');
+      }).finally(() => {
+        if (active) setScheduleLoading(false);
       });
     };
     loadSchedule();
@@ -137,7 +172,24 @@ export function SettingsScreen() {
       active = false;
       window.removeEventListener('focus', loadSchedule);
     };
-  }, [user?.id, user?.role, user?.storeId]);
+  }, [user]);
+
+  useEffect(() => {
+    if (user?.role !== 'staff') return;
+    let active = true;
+    setPreferencesLoading(true);
+    void Promise.all(notificationOptions.map(async ({ type }) =>
+      [type, await notificationService.getPreference(user.id, type)] as const,
+    )).then((entries) => {
+      if (active) setUserNotificationPreferences(Object.fromEntries(entries));
+    }).catch((preferenceError: unknown) => {
+      console.error('Unable to load notification preferences.', preferenceError);
+      if (active) setError('Unable to load notification preferences. Please try again.');
+    }).finally(() => {
+      if (active) setPreferencesLoading(false);
+    });
+    return () => { active = false; };
+  }, [user]);
 
   async function saveStoreInfo(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -272,6 +324,22 @@ export function SettingsScreen() {
     }
   }
 
+  async function changeUserNotificationPreference(type: NotificationType, enabled: boolean) {
+    if (!user || user.role !== 'staff') return;
+    setError('');
+    setNotice('');
+    setSavingNotifications(true);
+    try {
+      await notificationService.setPreference(user.id, type, enabled);
+      setUserNotificationPreferences((current) => ({ ...current, [type]: enabled }));
+      setNotice('Notification preferences saved on this device.');
+    } catch (settingsError) {
+      setError(settingsError instanceof Error ? settingsError.message : 'Unable to save notification preferences.');
+    } finally {
+      setSavingNotifications(false);
+    }
+  }
+
   function updateStaffRule(
     positionId: string,
     change: Partial<StaffRuleDraft>,
@@ -345,11 +413,69 @@ export function SettingsScreen() {
         <p className="mt-1 font-body text-body-md text-on-surface-variant">{user?.name}</p>
       </header>
 
+      <section aria-labelledby="display-settings-heading" className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+        <div>
+          <h2 id="display-settings-heading" className="font-display text-headline-md text-on-surface">Display</h2>
+          <p className="mt-1 font-body text-body-sm text-on-surface-variant">Choose how 7anouti-POS looks on this device.</p>
+        </div>
+        <label htmlFor="display-theme" className="font-body text-label-md text-on-surface">Theme</label>
+        <select
+          id="display-theme"
+          value={displaySettings.theme}
+          onChange={(event) => {
+            const theme = event.currentTarget.value;
+            if (theme === 'light' || theme === 'dark' || theme === 'system') {
+              saveDisplayPreference({ theme });
+            }
+          }}
+          className="h-12 w-full rounded-lg bg-surface-container-low px-3 font-body text-body-md text-on-surface outline-none focus:ring-2 focus:ring-primary"
+        >
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+          <option value="system">System</option>
+        </select>
+        <label className="flex min-h-12 items-center gap-3 rounded-xl bg-surface-container-low p-3 font-body text-label-md text-on-surface">
+          <input
+            type="checkbox"
+            checked={displaySettings.largeButtons}
+            onChange={(event) => saveDisplayPreference({ largeButtons: event.currentTarget.checked })}
+            className="h-5 w-5 accent-primary"
+          />
+          <span>
+            <span className="block">Large buttons</span>
+            <span className="mt-1 block font-body text-body-sm text-on-surface-variant">Use larger product cards, quantity controls and action buttons in the POS.</span>
+          </span>
+        </label>
+      </section>
+
       {user?.role === 'staff' && (
         <>
+          <section aria-labelledby="staff-notification-settings-heading" className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+            <div>
+              <h2 id="staff-notification-settings-heading" className="font-display text-headline-md text-on-surface">Notifications</h2>
+              <p className="mt-1 font-body text-body-sm text-on-surface-variant">These preferences are saved on this device.</p>
+            </div>
+            {preferencesLoading ? <ListSkeleton rows={3} label="Loading notification preferences" /> : notificationOptions.filter(({ type }) => [
+              'void_approved', 'void_rejected', 'schedule_published', 'stock_depleted', 'item_86', 'app_update',
+            ].includes(type)).map((option) => (
+              <label key={option.type} className="flex min-h-14 items-start gap-3 rounded-xl bg-surface-container-low p-3">
+                <input
+                  type="checkbox"
+                  checked={userNotificationPreferences[option.type] ?? true}
+                  disabled={savingNotifications}
+                  onChange={(event) => { void changeUserNotificationPreference(option.type, event.target.checked); }}
+                  className="mt-1 h-5 w-5 shrink-0 accent-primary"
+                />
+                <span>
+                  <span className="block font-body text-label-md text-on-surface">{option.label}</span>
+                  <span className="mt-1 block font-body text-body-sm text-on-surface-variant">{option.description}</span>
+                </span>
+              </label>
+            ))}
+          </section>
           <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
             <h2 className="mb-3 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="calendar_month" className="text-primary" />My schedule</h2>
-            {upcomingSchedule.length > 0 ? (
+            {scheduleLoading ? <ListSkeleton rows={2} label="Loading your schedule" /> : upcomingSchedule.length > 0 ? (
               <div className="flex flex-col gap-2">
                 {upcomingSchedule.map((shift) => (
                   <article key={shift.id} className="flex items-center justify-between gap-3 rounded-lg bg-surface-container-low p-3">
@@ -371,7 +497,7 @@ export function SettingsScreen() {
                 {scheduleNotifications.slice(0, 3).map((notification) => (
                   <article key={notification.id}>
                     <p className="font-body text-label-md text-on-warning-container">{notification.title}</p>
-                    <p className="font-body text-body-sm text-on-warning-container">{notification.message}</p>
+                    <p className="font-body text-body-sm text-on-warning-container">{notification.body}</p>
                   </article>
                 ))}
               </div>
@@ -399,7 +525,8 @@ export function SettingsScreen() {
             <h2 id="security-settings-heading" className="font-display text-headline-md text-on-surface">Security</h2>
             {store.pinMustChange && <p role="alert" className="flex items-center gap-2 rounded-xl bg-warning-container p-3 font-body text-body-md text-on-warning-container"><MaterialIcon name="warning" />Set your admin PIN</p>}
             <form onSubmit={(event) => { void savePin(event); }} className="flex flex-col gap-3">
-              <label className="font-body text-label-md">{t('settings.adminPin')}<input aria-label={t('settings.adminPin')} required pattern="[0-9]{4}" maxLength={4} inputMode="numeric" value={adminPin} onChange={(event) => setAdminPin(event.target.value)} placeholder="••••" className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 tracking-[0.5em] outline-none focus:ring-2 focus:ring-primary" /></label>
+              <label className="font-body text-label-md">{t('settings.adminPin')}<input aria-label={t('settings.adminPin')} required pattern="[0-9]{4}" maxLength={4} inputMode="numeric" value={adminPin} onChange={(event) => setAdminPin(event.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="••••" className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 tracking-[0.5em] outline-none focus:ring-2 focus:ring-primary" /></label>
+              <Keypad onPress={(digit) => setAdminPin((current) => current.length < 4 ? `${current}${digit}` : current)} onClear={() => setAdminPin('')} onBackspace={() => setAdminPin((current) => current.slice(0, -1))} />
               <Button type="submit" variant="secondary">{t('common.save')}</Button>
             </form>
             <form onSubmit={(event) => { void saveAutoLockTimeout(event); }} className="flex flex-col gap-3 rounded-xl bg-surface-container-low p-3">

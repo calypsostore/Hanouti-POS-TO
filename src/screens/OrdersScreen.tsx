@@ -4,6 +4,7 @@ import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
 import { Chip } from '../components/Chip';
 import { Keypad } from '../components/Keypad';
+import { ListSkeleton } from '../components/ListSkeleton';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { StatusTag } from '../components/StatusTag';
 import { TopBar } from '../components/TopBar';
@@ -77,6 +78,8 @@ export function OrdersScreen() {
   const staffFilter = user?.role === 'staff' ? user.id : undefined;
   const [canRequestVoid, setCanRequestVoid] = useState(false);
   const [orders, setOrders] = useState<OrderView[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [filter, setFilter] = useState<OrderFilter>('all');
   const [activeOrder, setActiveOrder] = useState<OrderView | null>(null);
   const [pin, setPin] = useState('');
@@ -96,13 +99,19 @@ export function OrdersScreen() {
   const voidedCount = orders.filter((order) => order.status === 'voided').length;
 
   const refreshOrders = useCallback(async () => {
-    const records = await orderService.listToday(storeId, staffFilter);
-    setOrders(await Promise.all(records.map(toOrderView)));
+    setLoading(true);
+    setLoadError('');
+    try {
+      const records = await orderService.listToday(storeId, staffFilter);
+      setOrders(await Promise.all(records.map(toOrderView)));
+    } finally {
+      setLoading(false);
+    }
   }, [storeId, staffFilter]);
 
   useEffect(() => {
-    void refreshOrders().catch((loadError: unknown) => setFeedback(loadError instanceof Error ? loadError.message : t('common.loadFailed')));
-    void userService.getStore(storeId).then(setStore).catch((loadError: unknown) => setFeedback(loadError instanceof Error ? loadError.message : t('common.storeLoadFailed')));
+    void refreshOrders().catch(() => setLoadError(t('common.loadFailed')));
+    void userService.getStore(storeId).then(setStore).catch(() => setLoadError(t('common.storeLoadFailed')));
   }, [refreshOrders, storeId, user]);
 
   useEffect(() => {
@@ -235,8 +244,10 @@ export function OrdersScreen() {
             </h2>
             <span className="font-body text-label-sm text-outline">{t('orders.sortedNewest')}</span>
           </div>
-          {visibleOrders.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">{t('orders.emptyFilter')}</p>}
-          {visibleOrders.map((order) => (
+          {loadError && <p role="alert" className="rounded-xl bg-error-container p-3 font-body text-body-sm text-on-error-container">{loadError}</p>}
+          {loading ? <ListSkeleton label="Loading orders" /> : visibleOrders.length === 0 ? (
+            <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">{t('orders.emptyFilter')}</p>
+          ) : visibleOrders.map((order) => (
             <article key={order.id} className={`flex flex-col gap-3 rounded-xl bg-surface-container-lowest p-4 shadow-card ${order.status === 'voided' ? 'opacity-90' : ''}`}>
               <div className="flex items-start justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">

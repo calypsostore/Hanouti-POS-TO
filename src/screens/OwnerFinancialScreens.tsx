@@ -3,6 +3,7 @@ import { useAuthStore } from '../stores/authStore';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
 import { Keypad } from '../components/Keypad';
+import { ListSkeleton } from '../components/ListSkeleton';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
@@ -55,6 +56,7 @@ export function OwnerExpensesScreen() {
   const user = useAuthStore((state) => state.user);
   const storeId = user?.storeId ?? '';
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
+  const [loading, setLoading] = useState(true);
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
   const [storeName, setStoreName] = useState('');
   const [category, setCategory] = useState<ExpenseCategory | ''>('');
@@ -72,6 +74,7 @@ export function OwnerExpensesScreen() {
   useEffect(() => {
     let active = true;
     const refresh = async () => {
+      setLoading(true);
       try {
         const [nextExpenses, nextSuppliers, store] = await Promise.all([
           expenseService.list(storeId, { category: category || undefined, month: month || undefined }),
@@ -84,7 +87,10 @@ export function OwnerExpensesScreen() {
         setStoreName(store?.name ?? '');
         setError('');
       } catch (loadError) {
-        if (active) setError(loadError instanceof Error ? loadError.message : t('common.loadFailed'));
+        console.error('Unable to load expenses.', loadError);
+        if (active) setError(t('common.loadFailed'));
+      } finally {
+        if (active) setLoading(false);
       }
     };
     void refresh();
@@ -171,7 +177,7 @@ export function OwnerExpensesScreen() {
         </label>
       </section>
       <section aria-label="Expenses" className="flex flex-col gap-2">
-        {expenses.map((expense) => (
+        {loading ? <ListSkeleton label="Loading expenses" /> : expenses.map((expense) => (
           <article key={expense.id} className="rounded-xl bg-surface-container-lowest p-4 shadow-card">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -188,7 +194,7 @@ export function OwnerExpensesScreen() {
             </div>
           </article>
         ))}
-        {expenses.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">{t('common.noData')}</p>}
+        {!loading && !error && expenses.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">{t('common.noData')}</p>}
       </section>
 
       <BottomSheet open={sheetOpen} onClose={() => setSheetOpen(false)} title="Add expense">
@@ -237,6 +243,7 @@ export function OwnerSuppliersScreen() {
   const user = useAuthStore((state) => state.user);
   const storeId = user?.storeId ?? '';
   const [suppliers, setSuppliers] = useState<SupplierBalanceRecord[]>([]);
+  const [suppliersLoading, setSuppliersLoading] = useState(true);
   const [storeName, setStoreName] = useState('');
   const [selectedId, setSelectedId] = useState('');
   const [details, setDetails] = useState<SupplierDetails | null>(null);
@@ -255,6 +262,7 @@ export function OwnerSuppliersScreen() {
   useEffect(() => {
     let active = true;
     const refresh = async () => {
+      setSuppliersLoading(true);
       try {
         const [nextSuppliers, store] = await Promise.all([
           supplierService.list(storeId),
@@ -265,7 +273,10 @@ export function OwnerSuppliersScreen() {
         setStoreName(store?.name ?? '');
         setError('');
       } catch (loadError) {
-        if (active) setError(loadError instanceof Error ? loadError.message : t('common.loadFailed'));
+        console.error('Unable to load suppliers.', loadError);
+        if (active) setError(t('common.loadFailed'));
+      } finally {
+        if (active) setSuppliersLoading(false);
       }
     };
     void refresh();
@@ -284,7 +295,10 @@ export function OwnerSuppliersScreen() {
     let active = true;
     void supplierService.getDetails(storeId, selectedId)
       .then((nextDetails) => { if (active) setDetails(nextDetails); })
-      .catch((loadError: unknown) => { if (active) setError(loadError instanceof Error ? loadError.message : t('common.loadFailed')); });
+      .catch((loadError: unknown) => {
+        console.error('Unable to load supplier details.', loadError);
+        if (active) setError(t('common.loadFailed'));
+      });
     return () => { active = false; };
   }, [storeId, selectedId]);
 
@@ -377,7 +391,7 @@ export function OwnerSuppliersScreen() {
       {error && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       {notice && <p role="status" className="mb-3 rounded-lg bg-success-container p-3 font-body text-body-sm text-success-dark">{notice}</p>}
       <section aria-label="Suppliers" className="flex flex-col gap-2">
-        {suppliers.map((supplier) => (
+        {suppliersLoading ? <ListSkeleton label="Loading suppliers" /> : suppliers.map((supplier) => (
           <button key={supplier.id} type="button" onClick={() => { setError(''); setNotice(''); setSelectedId(supplier.id); }} className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-lowest p-4 text-left shadow-card hover:bg-surface-container-low">
             <span className="min-w-0">
               <span className="block truncate font-body text-label-lg text-on-surface">{supplier.name}</span>
@@ -390,7 +404,7 @@ export function OwnerSuppliersScreen() {
             <MaterialIcon name="chevron_right" className="text-outline" />
           </button>
         ))}
-        {suppliers.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">{t('common.noData')}</p>}
+        {!suppliersLoading && !error && suppliers.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">{t('common.noData')}</p>}
       </section>
 
       <BottomSheet open={createOpen} onClose={() => setCreateOpen(false)} title="Add supplier">

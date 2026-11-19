@@ -64,13 +64,23 @@ export type UserSummary = Omit<UserRecord, 'password' | 'passwordHash' | 'pinHas
 
 export type SettlementTerms = 'weekly' | 'monthly' | 'anytime';
 export type NotificationType =
+  | 'void_requested'
+  | 'void_approved'
+  | 'void_rejected'
   | 'schedule_published'
   | 'customer_credit_warning'
   | 'customer_credit_limit'
   | 'customer_overdue'
   | 'stock_depleted'
+  | 'item_86'
   | 'low_stock'
-  | 'cash_out_alert';
+  | 'shift_opened'
+  | 'shift_closed'
+  | 'cash_difference'
+  | 'cash_out_alert'
+  | 'z_report_closed'
+  | 'app_update'
+  | 'subscription_expiring';
 
 export interface StoreSettings {
   defaultSettlementTerms: SettlementTerms;
@@ -86,13 +96,23 @@ export interface StoreSubscription {
 }
 
 export const DEFAULT_NOTIFICATION_PREFERENCES: Record<NotificationType, boolean> = {
+  void_requested: true,
+  void_approved: true,
+  void_rejected: true,
   schedule_published: true,
   customer_credit_warning: true,
   customer_credit_limit: true,
   customer_overdue: true,
   stock_depleted: true,
+  item_86: true,
   low_stock: true,
+  shift_opened: true,
+  shift_closed: true,
+  cash_difference: true,
   cash_out_alert: true,
+  z_report_closed: true,
+  app_update: true,
+  subscription_expiring: true,
 };
 
 export function resolveStoreSettings(settings?: Partial<StoreSettings>): StoreSettings {
@@ -299,18 +319,23 @@ export interface ScheduleTemplateRecord {
 
 export interface NotificationRecord {
   id: string;
-  storeId: string;
-  staffId: string;
+  storeId?: string;
+  userId?: string;
+  targetRole?: UserRole;
   type: NotificationType;
   title: string;
-  message: string;
+  body: string;
   createdAt: string;
+  entityType?: string;
+  entityId?: string;
+  readAt?: string;
+  staffId?: string;
+  message?: string;
   customerId?: string;
   catalogItemId?: string;
   shiftId?: string;
   cashMovementId?: string;
   dueAt?: string;
-  readAt?: string;
 }
 
 export interface ShiftVoidAdjustment {

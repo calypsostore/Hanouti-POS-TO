@@ -3,6 +3,7 @@ import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
 import { Chip } from '../components/Chip';
 import { MaterialIcon } from '../components/MaterialIcon';
+import { ListSkeleton } from '../components/ListSkeleton';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
 import { t } from '../i18n/translations';
@@ -115,6 +116,7 @@ function OwnerCatalogContent() {
   const [store, setStore] = useState<StoreRecord>();
   const [categories, setCategories] = useState<CategoryRecord[]>([]);
   const [items, setItems] = useState<CatalogItemRecord[]>([]);
+  const [loading, setLoading] = useState(true);
   const [categoryId, setCategoryId] = useState('all');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -137,8 +139,15 @@ function OwnerCatalogContent() {
   }, [storeId]);
 
   useEffect(() => {
-    void refresh().catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : t('common.loadFailed')));
-    void userService.getStore(storeId).then(setStore).catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : t('common.storeLoadFailed')));
+    setLoading(true);
+    void refresh().catch((loadError: unknown) => {
+      console.error('Unable to load the catalog.', loadError);
+      setError(t('common.loadFailed'));
+    }).finally(() => setLoading(false));
+    void userService.getStore(storeId).then(setStore).catch((loadError: unknown) => {
+      console.error('Unable to load store information for the catalog.', loadError);
+      setError(t('common.storeLoadFailed'));
+    });
   }, [refresh, storeId]);
 
   function openNewItem() {
@@ -163,7 +172,8 @@ function OwnerCatalogContent() {
     try {
       setItemHistory(await catalogService.listItemHistory(item.id));
     } catch (loadError) {
-      setHistoryError(loadError instanceof Error ? loadError.message : 'Unable to load product history.');
+      console.error('Unable to load product history.', loadError);
+      setHistoryError('Unable to load product history. Please try again.');
     } finally {
       setHistoryLoading(false);
     }
@@ -333,7 +343,7 @@ function OwnerCatalogContent() {
 
       {(error || notice) && <p role={error ? 'alert' : 'status'} className={`mb-4 rounded-lg p-3 font-body text-body-sm ${error ? 'bg-error-container text-on-error-container' : 'bg-success-container text-on-success-container'}`}>{error || notice}</p>}
 
-      {visibleItems.length > 0 ? (
+      {loading ? <ListSkeleton label="Loading catalog" /> : visibleItems.length > 0 ? (
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {visibleItems.map((item) => (
             <CatalogItemCard

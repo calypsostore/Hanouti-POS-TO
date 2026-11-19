@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { MaterialIcon } from '../components/MaterialIcon';
+import { ListSkeleton } from '../components/ListSkeleton';
 import { Button } from '../components/Button';
 import { OverdueCustomerRow } from '../components/OverdueCustomerRow';
 import { StatusTag } from '../components/StatusTag';
@@ -77,6 +78,8 @@ function OwnerDashboardContent() {
   const [pendingVoidOrders, setPendingVoidOrders] = useState<OrderRecord[]>([]);
   const [overdueCustomers, setOverdueCustomers] = useState<OverdueCustomerRecord[]>([]);
   const [ownerNotifications, setOwnerNotifications] = useState<NotificationRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [overdueStatement, setOverdueStatement] = useState<CustomerStatementData | null>(null);
   const [overdueAction, setOverdueAction] = useState<{ customerId: string; action: 'statement' | 'share' } | null>(null);
   const [overdueActionError, setOverdueActionError] = useState('');
@@ -84,45 +87,53 @@ function OwnerDashboardContent() {
   useEffect(() => {
     let active = true;
     async function loadDashboard() {
-      const [nextSummary, allOrders, allUsers, nextStore, nextOverdueCustomers, nextCatalogItems] = await Promise.all([
+      setLoading(true);
+      setLoadError('');
+      try {
+        const [nextSummary, allOrders, allUsers, nextStore, nextOverdueCustomers, nextCatalogItems] = await Promise.all([
         reportService.getDashboard(storeId, 'day'),
         orderService.listAll(storeId),
         userService.listUsers(storeId),
         userService.getStore(storeId),
         customerService.listOverdueCustomers(storeId),
         catalogService.listItems(storeId),
-      ]);
-      if (!active) return;
-      setSummary(nextSummary);
-      setPeriodOrders(filterOrdersForPeriod(allOrders, 'day'));
-      const salesComparison = getTodaySalesComparison(allOrders);
-      setTodaySalesMillimes(salesComparison.today);
-      setLastWeekSalesMillimes(salesComparison.lastWeek);
-      setStaff(allUsers.filter((member) => member.role === 'staff'));
-      setCatalogItems(nextCatalogItems);
-      setPendingVoidOrders(allOrders.filter((order) => order.status === 'pending_void'));
-      setStore(nextStore);
-      setOverdueCustomers(nextOverdueCustomers);
+        ]);
+        if (!active) return;
+        setSummary(nextSummary);
+        setPeriodOrders(filterOrdersForPeriod(allOrders, 'day'));
+        const salesComparison = getTodaySalesComparison(allOrders);
+        setTodaySalesMillimes(salesComparison.today);
+        setLastWeekSalesMillimes(salesComparison.lastWeek);
+        setStaff(allUsers.filter((member) => member.role === 'staff'));
+        setCatalogItems(nextCatalogItems);
+        setPendingVoidOrders(allOrders.filter((order) => order.status === 'pending_void'));
+        setStore(nextStore);
+        setOverdueCustomers(nextOverdueCustomers);
 
-      if (user?.role === 'owner') {
-        await notificationService.checkOverdueCustomers(storeId, user.id);
-        const notifications = await notificationService.listForStaff(storeId, user.id);
-        if (active) {
-          setOwnerNotifications(notifications.filter((notification) =>
-            notification.type === 'customer_overdue' || notification.type === 'stock_depleted' ||
-            notification.type === 'low_stock' || notification.type === 'cash_out_alert',
-          ));
+        if (user?.role === 'owner') {
+          await notificationService.checkOverdueCustomers(storeId, user.id);
+          const notifications = await notificationService.listFor(user);
+          if (active) {
+            setOwnerNotifications(notifications.filter((notification) =>
+              notification.type === 'customer_overdue' || notification.type === 'stock_depleted' ||
+              notification.type === 'item_86' || notification.type === 'low_stock' ||
+              notification.type === 'cash_out_alert' || notification.type === 'cash_difference' ||
+              notification.type === 'void_requested' || notification.type === 'subscription_expiring',
+            ));
+          }
         }
+      } finally {
+        if (active) setLoading(false);
       }
     }
     void loadDashboard().catch((loadError: unknown) => {
       console.error('Unable to load owner dashboard.', loadError);
-      if (active) setOverdueActionError('Unable to load overdue customer information.');
+      if (active) setLoadError('Unable to load dashboard information. Please try again.');
     });
     return () => {
       active = false;
     };
-  }, [storeId, user?.id, user?.role]);
+  }, [storeId, user]);
 
   async function openOverdueStatement(customer: OverdueCustomerRecord['customer']) {
     setOverdueAction({ customerId: customer.id, action: 'statement' });
@@ -130,7 +141,8 @@ function OwnerDashboardContent() {
     try {
       setOverdueStatement(await customerService.getStatementData(customer.id, storeId));
     } catch (statementError) {
-      setOverdueActionError(statementError instanceof Error ? statementError.message : 'Unable to load the customer statement.');
+      console.error('Unable to load the customer statement.', statementError);
+      setOverdueActionError('Unable to load the customer statement. Please try again.');
     } finally {
       setOverdueAction(null);
     }
@@ -163,7 +175,7 @@ function OwnerDashboardContent() {
       setOverdueActionError('');
     } catch (loadError) {
       console.error('Unable to load the selected dashboard period.', loadError);
-      setOverdueActionError(loadError instanceof Error ? loadError.message : 'Unable to load the selected period.');
+      setOverdueActionError('Unable to load the selected period. Please try again.');
     }
   }
 
@@ -322,7 +334,7 @@ function OwnerDashboardContent() {
         <section aria-label="Owner notifications" className="mt-4 flex flex-col gap-2">
           {ownerNotifications.slice(0, 5).map((notification) => (
             <p key={notification.id} role="status" className={`rounded-xl p-3 font-body text-body-sm ${notification.type === 'stock_depleted' || notification.type === 'low_stock' || notification.type === 'cash_out_alert' ? 'bg-warning-container text-on-warning-container' : 'bg-error-container text-on-error-container'}`}>
-              <strong>{notification.title}:</strong> {notification.message}
+              <strong>{notification.title}:</strong> {notification.body}
             </p>
           ))}
         </section>
@@ -342,7 +354,9 @@ function OwnerDashboardContent() {
             View all
           </Button>
         </div>
-        {overdueActionError && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{overdueActionError}</p>}
+          {loadError && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{loadError}</p>}
+          {overdueActionError && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{overdueActionError}</p>}
+          {loading && <ListSkeleton rows={3} label="Loading dashboard lists" />}
         <div className="flex flex-col gap-2">
           {overdueCustomers.map((entry) => (
             <OverdueCustomerRow

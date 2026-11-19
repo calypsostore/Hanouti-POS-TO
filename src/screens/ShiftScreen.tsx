@@ -4,6 +4,7 @@ import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
 import { Chip } from '../components/Chip';
 import { Keypad } from '../components/Keypad';
+import { ListSkeleton } from '../components/ListSkeleton';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
@@ -52,6 +53,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const user = useAuthStore((state) => state.user);
   const storeId = user?.storeId ?? '';
   const [shifts, setShifts] = useState<ShiftRecord[]>([]);
+  const [loading, setLoading] = useState(true);
   const [ownOpenShift, setOwnOpenShift] = useState<ShiftRecord>();
   const [startingCash, setStartingCash] = useState('50.000');
   const [startingCashEdited, setStartingCashEdited] = useState(false);
@@ -74,6 +76,9 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const [movementReason, setMovementReason] = useState<CashMovementReason>('supplier');
   const [movementNote, setMovementNote] = useState('');
   const [movementBusy, setMovementBusy] = useState(false);
+  const [openShiftSheetOpen, setOpenShiftSheetOpen] = useState(false);
+  const [closeShiftSheetOpen, setCloseShiftSheetOpen] = useState(false);
+  const [forceCloseShiftTarget, setForceCloseShiftTarget] = useState<ShiftRecord | null>(null);
 
   useEffect(() => updateService.registerUnsavedState(() => startingCashEdited || countedCash.length > 0), [startingCashEdited, countedCash.length]);
 
@@ -108,7 +113,11 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   }, [storeId, user]);
 
   useEffect(() => {
-    void refresh().catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : t('common.loadFailed')));
+    setLoading(true);
+    void refresh().catch((loadError: unknown) => {
+      console.error('Unable to load shifts.', loadError);
+      setError(t('common.loadFailed'));
+    }).finally(() => setLoading(false));
   }, [refresh]);
 
   async function openShift(event: FormEvent<HTMLFormElement>) {
@@ -120,6 +129,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       await shiftService.openShift(storeId, user.id, parseTnd(startingCash));
       setStartingCashEdited(false);
       await refresh();
+      setOpenShiftSheetOpen(false);
       setNotice('Shift opened.');
     } catch (openError) {
       setError(openError instanceof Error ? openError.message : 'Unable to open the shift.');
@@ -141,6 +151,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       setCountedCash('');
       setDifferenceNote('');
       await refresh();
+      setCloseShiftSheetOpen(false);
       setNotice(shift.differenceMillimes === 0 ? t('shift.zeroDifference') : t('shift.cashDifferenceRecorded'));
     } catch (closeError) {
       setError(closeError instanceof Error ? closeError.message : 'Unable to close the shift.');
@@ -163,6 +174,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       setForceCountedCash((current) => ({ ...current, [shift.id]: '' }));
       setForceDifferenceNotes((current) => ({ ...current, [shift.id]: '' }));
       await refresh();
+      setForceCloseShiftTarget(null);
       setNotice(`${staffNames[shift.staffId] ?? 'Staff'}'s shift was force-closed by the owner.`);
     } catch (closeError) {
       setError(closeError instanceof Error ? closeError.message : 'Unable to force-close this shift.');
@@ -278,33 +290,14 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             )}
             <CashMovementList movements={movementsForShift(ownOpenShift.id)} staffNames={staffNames} />
           </section>
-          <ShiftCloseForm
-            shift={ownOpenShift}
-            breakdown={ownBreakdown}
-            movements={cashMovements}
-            countedCash={countedCash}
-            differenceNote={differenceNote}
-            onCountPress={pressCountedCash}
-            onCountClear={() => setCountedCash('')}
-            onCountBackspace={() => setCountedCash((value) => value.slice(0, -1))}
-            onNoteChange={setDifferenceNote}
-            onSubmit={(event) => { void closeShift(event); }}
-            submitLabel={t('shift.closeShift')}
-          />
+          <Button className="w-full" onClick={() => setCloseShiftSheetOpen(true)}>
+            <MaterialIcon name="lock" />{t('shift.closeShift')}
+          </Button>
         </div>
       ) : !closedShiftSummary ? (
-        <form onSubmit={(event) => { void openShift(event); }} className="max-w-xl rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-          <div className="mb-4 flex items-center gap-3">
-            <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-fixed text-primary"><MaterialIcon name="payments" /></span>
-            <div>
-              <h2 className="font-display text-headline-md text-on-surface">{t('shift.openShift')}</h2>
-              <p className="font-body text-body-sm text-on-surface-variant">Count the cash drawer before taking orders.</p>
-            </div>
-          </div>
-          <label htmlFor="starting-cash" className="mb-1.5 block font-body text-label-md">{t('shift.startingCash')} (TND)</label>
-          <input id="starting-cash" inputMode="decimal" required value={startingCash} onChange={(event) => { setStartingCash(event.target.value); setStartingCashEdited(true); }} className="mb-4 h-14 w-full rounded-xl bg-surface-container-low px-4 font-body text-title-md tabular-nums outline-none focus:ring-2 focus:ring-primary" />
-          <Button type="submit" className="w-full"><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
-        </form>
+        <Button className="w-full max-w-xl" onClick={() => setOpenShiftSheetOpen(true)}>
+          <MaterialIcon name="lock_open" />{t('shift.openShift')}
+        </Button>
       ) : null}
 
       {(error || notice) && <p role={error ? 'alert' : 'status'} className={`mt-4 rounded-lg p-3 font-body text-body-sm ${error ? 'bg-error-container text-on-error-container' : 'bg-success-container text-on-success-container'}`}>{error || notice}</p>}
@@ -312,7 +305,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       <section className="mt-6">
         <h2 className="mb-3 font-display text-headline-md text-on-surface">{t('shift.history')}</h2>
         <div className="flex flex-col gap-2">
-          {shifts.map((shift) => (
+          {loading ? <ListSkeleton label="Loading shifts" /> : shifts.map((shift) => (
             <article key={shift.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-surface-container-lowest p-4 shadow-card">
               <div>
                 <p className="font-body text-label-lg text-on-surface">{staffNames[shift.staffId] ?? 'Staff'}</p>
@@ -333,27 +326,59 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
               )}
               <CashMovementList movements={movementsForShift(shift.id)} staffNames={staffNames} />
               {ownerMode && shift.status === 'open' && user?.role === 'owner' && (
-                <ShiftCloseForm
-                  key={shift.id}
-                  shift={shift}
-                  breakdown={breakdownsByShift[shift.id] ?? emptyShiftBreakdown}
-                  movements={cashMovements}
-                  countedCash={forceCountedCash[shift.id] ?? ''}
-                  differenceNote={forceDifferenceNotes[shift.id] ?? ''}
-                  onCountPress={(value) => pressForceCountedCash(shift.id, value)}
-                  onCountClear={() => setForceCountedCash((current) => ({ ...current, [shift.id]: '' }))}
-                  onCountBackspace={() => setForceCountedCash((current) => ({ ...current, [shift.id]: (current[shift.id] ?? '').slice(0, -1) }))}
-                  onNoteChange={(value) => setForceDifferenceNotes((current) => ({ ...current, [shift.id]: value }))}
-                  onSubmit={(event) => { void forceCloseShift(event, shift); }}
-                  submitLabel="Force close"
-                  ownerMode
-                />
+                <Button variant="danger" className="w-full" onClick={() => setForceCloseShiftTarget(shift)}>
+                  <MaterialIcon name="lock" />Force close shift
+                </Button>
               )}
             </article>
           ))}
-          {shifts.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">{t('common.noData')}</p>}
+          {!loading && !error && shifts.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">{t('common.noData')}</p>}
         </div>
       </section>
+      <BottomSheet open={openShiftSheetOpen} onClose={() => setOpenShiftSheetOpen(false)} title={t('shift.openShift')}>
+        <form onSubmit={(event) => { void openShift(event); }} className="flex flex-col gap-3">
+          <p className="font-body text-body-sm text-on-surface-variant">Count the cash drawer before taking orders.</p>
+          <label htmlFor="starting-cash" className="block font-body text-label-md">{t('shift.startingCash')} (TND)</label>
+          <input id="starting-cash" inputMode="decimal" required value={startingCash} onChange={(event) => { setStartingCash(event.target.value); setStartingCashEdited(true); }} className="h-14 w-full rounded-xl bg-surface-container-low px-4 font-body text-title-md tabular-nums outline-none focus:ring-2 focus:ring-primary" />
+          <Keypad decimal onPress={(value) => { setStartingCash((current) => appendDecimalAmount(current, value)); setStartingCashEdited(true); }} onClear={() => { setStartingCash(''); setStartingCashEdited(true); }} onBackspace={() => { setStartingCash((current) => current.slice(0, -1)); setStartingCashEdited(true); }} />
+          <div className="sheet-action-bar grid grid-cols-2 gap-2">
+            <Button type="button" variant="ghost" onClick={() => setOpenShiftSheetOpen(false)}>{t('common.cancel')}</Button>
+            <Button type="submit"><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
+          </div>
+        </form>
+      </BottomSheet>
+      <BottomSheet open={closeShiftSheetOpen && Boolean(ownOpenShift)} onClose={() => setCloseShiftSheetOpen(false)} title={t('shift.closeShift')}>
+        {ownOpenShift && <ShiftCloseForm
+          shift={ownOpenShift}
+          breakdown={ownBreakdown}
+          movements={cashMovements}
+          countedCash={countedCash}
+          differenceNote={differenceNote}
+          onCountPress={pressCountedCash}
+          onCountClear={() => setCountedCash('')}
+          onCountBackspace={() => setCountedCash((value) => value.slice(0, -1))}
+          onNoteChange={setDifferenceNote}
+          onSubmit={(event) => { void closeShift(event); }}
+          submitLabel={t('shift.closeShift')}
+        />}
+      </BottomSheet>
+      <BottomSheet open={forceCloseShiftTarget !== null} onClose={() => setForceCloseShiftTarget(null)} title="Force close shift">
+        {forceCloseShiftTarget && <ShiftCloseForm
+          key={forceCloseShiftTarget.id}
+          shift={forceCloseShiftTarget}
+          breakdown={breakdownsByShift[forceCloseShiftTarget.id] ?? emptyShiftBreakdown}
+          movements={cashMovements}
+          countedCash={forceCountedCash[forceCloseShiftTarget.id] ?? ''}
+          differenceNote={forceDifferenceNotes[forceCloseShiftTarget.id] ?? ''}
+          onCountPress={(value) => pressForceCountedCash(forceCloseShiftTarget.id, value)}
+          onCountClear={() => setForceCountedCash((current) => ({ ...current, [forceCloseShiftTarget.id]: '' }))}
+          onCountBackspace={() => setForceCountedCash((current) => ({ ...current, [forceCloseShiftTarget.id]: (current[forceCloseShiftTarget.id] ?? '').slice(0, -1) }))}
+          onNoteChange={(value) => setForceDifferenceNotes((current) => ({ ...current, [forceCloseShiftTarget.id]: value }))}
+          onSubmit={(event) => { void forceCloseShift(event, forceCloseShiftTarget); }}
+          submitLabel="Force close"
+          ownerMode
+        />}
+      </BottomSheet>
       <BottomSheet
         open={movementSheetOpen}
         onClose={() => setMovementSheetOpen(false)}
@@ -387,7 +412,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           <label className="font-body text-label-md text-on-surface">Note (optional)
             <textarea maxLength={500} rows={2} value={movementNote} onChange={(event) => setMovementNote(event.target.value)} className="mt-1.5 w-full rounded-lg bg-surface-container-low p-3" />
           </label>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="sheet-action-bar grid grid-cols-2 gap-2">
             <Button type="button" variant="ghost" onClick={() => setMovementSheetOpen(false)}>Cancel</Button>
             <Button type="submit" disabled={movementBusy || !movementShiftId || !Number.isSafeInteger(enteredMovementMillimes) || enteredMovementMillimes <= 0}>
               <MaterialIcon name={movementKind === 'in' ? 'add' : 'remove'} />Record {movementKind === 'in' ? 'cash in' : 'cash out'}
@@ -532,9 +557,11 @@ function ShiftCloseForm({
           />
         </label>
       )}
-      <Button type="submit" variant="danger" className="w-full" disabled={countedCashMillimes === undefined}>
-        <MaterialIcon name="lock" />{submitLabel}
-      </Button>
+      <div className="sheet-action-bar">
+        <Button type="submit" variant="danger" className="w-full" disabled={countedCashMillimes === undefined}>
+          <MaterialIcon name="lock" />{submitLabel}
+        </Button>
+      </div>
     </form>
   );
 }

@@ -15,6 +15,7 @@ import { readData, writeData } from './storage';
 import { seedReports } from './seedData';
 import { activityService } from './activityService';
 import { expenseService } from './expenseService';
+import { notificationService } from './notificationService';
 
 const getReports = () => readData('reports', seedReports);
 const todayKey = () => {
@@ -474,6 +475,7 @@ export const reportService = {
     }
     const report = await createReport(storeId, 'Z', generatedBy);
     writeData('stores', (await userService.listStores()).map((candidate) => candidate.id === storeId ? { ...candidate, dayClosedOn: todayKey() } : candidate));
+    await notificationService.notifyZReportClosed(storeId, report.id, report.zNumber);
     return report;
   },
 };

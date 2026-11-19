@@ -16,9 +16,10 @@ interface TicketRowProps {
   onIncrement: () => void;
   onDecrement: () => void;
   onRemove: () => void;
+  largeButtons?: boolean;
 }
 
-export function TicketRow({ item, onIncrement, onDecrement, onRemove }: TicketRowProps) {
+export function TicketRow({ item, onIncrement, onDecrement, onRemove, largeButtons = false }: TicketRowProps) {
   const touchStartX = useRef<number | null>(null);
 
   function handleTouchStart(event: TouchEvent<HTMLDivElement>) {
@@ -40,11 +41,11 @@ export function TicketRow({ item, onIncrement, onDecrement, onRemove }: TicketRo
       onTouchEnd={handleTouchEnd}
     >
       <div className="flex shrink-0 items-center gap-1 rounded-lg bg-surface-container-low p-1">
-        <button type="button" aria-label={t('pos.decreaseItem', { item: item.name })} onClick={onDecrement} className="flex h-9 w-9 items-center justify-center rounded-md bg-surface-container-lowest text-primary">
+        <button type="button" aria-label={t('pos.decreaseItem', { item: item.name })} onClick={onDecrement} className={`flex ${largeButtons ? 'h-14 w-14' : 'h-9 w-9'} items-center justify-center rounded-md bg-surface-container-lowest text-primary`}>
           <MaterialIcon name={item.quantity === 1 ? 'delete' : 'remove'} className="text-lg" />
         </button>
         <span className="min-w-6 text-center font-body text-label-lg tabular-nums">{item.quantity}</span>
-        <button type="button" aria-label={t('pos.increaseItem', { item: item.name })} onClick={onIncrement} className="flex h-9 w-9 items-center justify-center rounded-md bg-primary text-on-primary">
+        <button type="button" aria-label={t('pos.increaseItem', { item: item.name })} onClick={onIncrement} className={`flex ${largeButtons ? 'h-14 w-14' : 'h-9 w-9'} items-center justify-center rounded-md bg-primary text-on-primary`}>
           <MaterialIcon name="add" className="text-lg" />
         </button>
       </div>
@@ -55,7 +56,7 @@ export function TicketRow({ item, onIncrement, onDecrement, onRemove }: TicketRo
         )}
       </div>
       <span className="shrink-0 font-body text-label-lg tabular-nums text-on-surface">
-        {formatTnd(item.quantity * item.unitPrice)}
+        {formatTnd(item.quantity * item.unitPrice)} DT
       </span>
     </div>
   );

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
 import { MaterialIcon } from '../components/MaterialIcon';
+import { ListSkeleton } from '../components/ListSkeleton';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
@@ -99,7 +100,8 @@ function OwnerScheduleContent() {
     let active = true;
     const load = () => {
       void refresh().catch((loadError: unknown) => {
-        if (active) setError(loadError instanceof Error ? loadError.message : 'Unable to load the schedule.');
+        console.error('Unable to load the schedule.', loadError);
+        if (active) setError('Unable to load the schedule. Please try again.');
       }).finally(() => {
         if (active) setLoading(false);
       });
@@ -346,7 +348,7 @@ function OwnerScheduleContent() {
       )}
 
       {loading ? (
-        <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">Loading schedule...</p>
+        <ListSkeleton label="Loading schedule" />
       ) : (
         <section aria-label={`Staff schedule for ${displayDate(dayKey, { weekday: 'long', day: 'numeric', month: 'long' })}`} className="flex flex-col gap-2">
           {staff.map((staffMember) => {

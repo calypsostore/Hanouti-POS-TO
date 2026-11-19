@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
 import { MaterialIcon } from '../components/MaterialIcon';
+import { ListSkeleton } from '../components/ListSkeleton';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
@@ -34,6 +35,7 @@ function OwnerStaffContent() {
   const user = useAuthStore((state) => state.user);
   const storeId = user?.storeId ?? '';
   const [staff, setStaff] = useState<UserSummary[]>([]);
+  const [loading, setLoading] = useState(true);
   const [positions, setPositions] = useState<PositionRecord[]>([]);
   const [permissions, setPermissions] = useState<PermissionDefinition[]>([]);
   const [categories, setCategories] = useState<CategoryRecord[]>([]);
@@ -91,7 +93,11 @@ function OwnerStaffContent() {
 
   useEffect(() => {
     const load = () => {
-      void refresh().catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : t('common.loadFailed')));
+      setLoading(true);
+      void refresh().catch((loadError: unknown) => {
+        console.error('Unable to load staff.', loadError);
+        setError(t('common.loadFailed'));
+      }).finally(() => setLoading(false));
     };
     load();
     window.addEventListener('focus', load);
@@ -102,7 +108,10 @@ function OwnerStaffContent() {
     if (user?.storeId) void userService.getStore(user.storeId).then((store) => {
       setStoreName(store?.name);
       setStoreCode(store?.code ?? '');
-    }).catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : t('common.storeLoadFailed')));
+    }).catch((loadError: unknown) => {
+      console.error('Unable to load store information for staff.', loadError);
+      setError(t('common.storeLoadFailed'));
+    });
   }, [user?.storeId]);
 
   function openNewStaff() {
@@ -568,7 +577,7 @@ function OwnerStaffContent() {
       </div>
 
       <section aria-label="Staff list" className="flex flex-col gap-3">
-        {visibleStaff.map((staffMember) => {
+        {loading ? <ListSkeleton label="Loading staff" /> : visibleStaff.map((staffMember) => {
           const currentShift = openShiftFor(staffMember);
           const lastShift = lastShiftFor(staffMember);
           const initials = staffMember.name.trim().split(/\s+/).slice(0, 2).map((part) => Array.from(part)[0] ?? '').join('').toLocaleUpperCase();
@@ -626,7 +635,7 @@ function OwnerStaffContent() {
             </article>
           );
         })}
-        {visibleStaff.length === 0 && (
+        {!loading && !error && visibleStaff.length === 0 && (
           <div className="rounded-xl bg-surface-container-lowest px-5 py-8 text-center shadow-card">
             <MaterialIcon name="person_search" className="text-3xl text-outline" />
             <p className="mt-2 font-body text-label-lg text-on-surface">No staff found</p>

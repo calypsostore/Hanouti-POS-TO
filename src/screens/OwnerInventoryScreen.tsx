@@ -3,6 +3,7 @@ import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
 import { Chip } from '../components/Chip';
 import { MaterialIcon } from '../components/MaterialIcon';
+import { ListSkeleton } from '../components/ListSkeleton';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
@@ -26,6 +27,7 @@ function OwnerInventoryContent() {
   const user = useAuthStore((state) => state.user);
   const storeId = user?.storeId ?? '';
   const [items, setItems] = useState<CatalogItemRecord[]>([]);
+  const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<CategoryRecord[]>([]);
   const [storeName, setStoreName] = useState<string>();
   const [search, setSearch] = useState('');
@@ -44,6 +46,7 @@ function OwnerInventoryContent() {
 
   useEffect(() => {
     let active = true;
+    setLoading(true);
     void Promise.all([
       catalogService.listItems(storeId),
       catalogService.listCategories(storeId),
@@ -54,7 +57,10 @@ function OwnerInventoryContent() {
       setCategories(nextCategories);
       setStoreName(store?.name);
     }).catch((loadError: unknown) => {
-      if (active) setError(loadError instanceof Error ? loadError.message : t('common.loadFailed'));
+      console.error('Unable to load inventory.', loadError);
+      if (active) setError(t('common.loadFailed'));
+    }).finally(() => {
+      if (active) setLoading(false);
     });
     return () => { active = false; };
   }, [storeId]);
@@ -127,7 +133,8 @@ function OwnerInventoryContent() {
     try {
       setItemHistory((await catalogService.listItemHistory(item.id)).filter((record) => record.field === 'stockTracking'));
     } catch (loadError) {
-      setHistoryError(loadError instanceof Error ? loadError.message : 'Unable to load stock history.');
+      console.error('Unable to load stock history.', loadError);
+      setHistoryError('Unable to load stock history. Please try again.');
     } finally {
       setHistoryLoading(false);
     }
@@ -185,7 +192,7 @@ function OwnerInventoryContent() {
       )}
 
       <section className="flex flex-col gap-3">
-        {visibleItems.map((item) => {
+        {loading ? <ListSkeleton label="Loading inventory" /> : visibleItems.map((item) => {
           const tracked = item.stockCount !== null;
           const threshold = item.lowStockThreshold ?? 5;
           const isLow = tracked && (item.stockCount ?? 0) <= threshold;
@@ -252,7 +259,7 @@ function OwnerInventoryContent() {
             </article>
           );
         })}
-        {visibleItems.length === 0 && (
+        {!loading && !error && visibleItems.length === 0 && (
           <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">
             {items.length === 0 ? t('common.noData') : 'No items match these filters.'}
           </p>

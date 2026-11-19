@@ -6,12 +6,14 @@ import { Button } from '../components/Button';
 import { Chip } from '../components/Chip';
 import { ItemCard, type ItemCardItem } from '../components/ItemCard';
 import { Keypad } from '../components/Keypad';
+import { ListSkeleton } from '../components/ListSkeleton';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { TicketRow } from '../components/TicketRow';
 import { TopBar } from '../components/TopBar';
 import { TicketView } from '../components/TicketView';
 import { formatTnd } from '../lib/format';
 import { getCustomerCreditTone } from '../lib/customerCredit';
+import { useDisplaySettings } from '../lib/displaySettings';
 import { t } from '../i18n/translations';
 import { catalogService } from '../services/catalogService';
 import { compService, type StaffDrinkAllowance } from '../services/compService';
@@ -69,6 +71,7 @@ export function PosScreen() {
   const location = useLocation();
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
+  const { largeButtons } = useDisplaySettings();
   const lock = useAuthStore((state) => state.lock);
   const storeId = user?.storeId ?? '';
   const preselectedCustomerId = new URLSearchParams(location.search).get('customer')?.trim() || customerIdFromState(location.state);
@@ -88,6 +91,8 @@ export function PosScreen() {
   const [clearConfirmationOpen, setClearConfirmationOpen] = useState(false);
   const [timerNow, setTimerNow] = useState(Date.now());
   const [catalogRecords, setCatalogRecords] = useState<CatalogItemRecord[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState('');
   const [categoryRecords, setCategoryRecords] = useState<CategoryRecord[]>([]);
   const [openShift, setOpenShift] = useState<ShiftRecord>();
   const [orders, setOrders] = useState<OrderRecord[]>([]);
@@ -135,6 +140,8 @@ export function PosScreen() {
 
   useEffect(() => {
     const refresh = async () => {
+      setCatalogLoading(true);
+      setCatalogError('');
       try {
         const [items, categories, shift, currentStore, todaysOrders, permission, compPermission, tabsPermission, overridePermission, customerList] = await Promise.all([
           catalogService.listItems(storeId),
@@ -163,7 +170,10 @@ export function PosScreen() {
         setCustomers(customerList);
         setCustomerCreditStatuses(Object.fromEntries(creditStatusEntries));
       } catch (error) {
-        setToast(error instanceof Error ? error.message : t('common.refreshFailed'));
+        console.error('Unable to load point-of-sale data.', error);
+        setCatalogError(t('common.refreshFailed'));
+      } finally {
+        setCatalogLoading(false);
       }
     };
     void refresh();
@@ -185,7 +195,8 @@ export function PosScreen() {
     void compService.getStaffDrinkAllowance(storeId, user.id, openShift.id, compItemId).then((allowance) => {
       if (active) setStaffDrinkAllowance(allowance);
     }).catch((error: unknown) => {
-      if (active) setCompError(error instanceof Error ? error.message : 'Unable to load the staff drink allowance.');
+      console.error('Unable to load the staff drink allowance.', error);
+      if (active) setCompError('Unable to load the staff drink allowance. Please try again.');
     });
     return () => { active = false; };
   }, [compItemId, compOpen, compReason, openShift, storeId, user?.id]);
@@ -267,7 +278,8 @@ export function PosScreen() {
       setCreditStatus(status);
       setCreditStatusCustomerId(selectedCustomerId);
     }).catch((error: unknown) => {
-      if (active) setToast(error instanceof Error ? error.message : 'Unable to load customer credit status.');
+      console.error('Unable to load customer credit status.', error);
+      if (active) setToast('Unable to load customer credit status. Please try again.');
     });
     return () => { active = false; };
   }, [paymentMethod, selectedCustomerId, totalMillimes]);
@@ -550,6 +562,7 @@ export function PosScreen() {
             onIncrement={() => incrementCartLine(line)}
             onDecrement={() => changeQuantity(line.id, -1)}
             onRemove={() => setCart((lines) => lines.filter((item) => item.id !== line.id))}
+            largeButtons={largeButtons}
           />
         ))}
       </div>
@@ -659,7 +672,7 @@ export function PosScreen() {
             <MaterialIcon name="storefront" className="text-lg" filled />
             {store?.name ?? t('pos.cafe')}
           </h2>
-          <span className={`mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-body text-label-sm ${openShift ? 'bg-success text-on-surface' : 'bg-error-container text-on-error-container'}`}>
+          <span className={`mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-body text-label-sm ${openShift ? 'bg-success text-on-success' : 'bg-error-container text-on-error-container'}`}>
             <span className={`h-1.5 w-1.5 rounded-full ${openShift ? 'bg-success-dark' : 'bg-error-dark'}`} />
             {openShift ? t('pos.shiftOpenSince', { time: new Date(openShift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }) : t('pos.shiftRequired')}
           </span>
@@ -704,7 +717,7 @@ export function PosScreen() {
             </div>
             <div className="scrollbar-hidden flex gap-2.5 overflow-x-auto px-3 pb-1">
               {quickPicks.map((item) => (
-                <button key={item.id} type="button" onClick={() => addItem(item)} className="flex min-h-32 w-36 shrink-0 flex-col justify-between rounded-2xl bg-surface-container-lowest p-3 text-left shadow-card active:scale-[0.98]">
+                <button key={item.id} type="button" onClick={() => addItem(item)} className={`flex ${largeButtons ? 'min-h-40 w-40' : 'min-h-32 w-36'} shrink-0 flex-col justify-between rounded-2xl bg-surface-container-lowest p-3 text-left shadow-card active:scale-[0.98]`}>
                   <div className="flex items-start justify-between">
                     <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-surface-container text-primary"><MaterialIcon name={item.icon} className="text-xl" /></span>
                   </div>
@@ -722,7 +735,12 @@ export function PosScreen() {
               <h2 className="font-display text-headline-sm text-on-surface">{t('pos.catalogueItems')}</h2>
               <span className="font-body text-label-sm text-outline">{t('pos.touchToAdd')}</span>
             </div>
-            <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
+            {catalogError && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{catalogError}</p>}
+            {catalogLoading ? <ListSkeleton rows={4} label="Loading products" /> : filteredItems.length === 0 ? (
+              <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">
+                {search ? 'No products match your search.' : 'No products are available yet.'}
+              </p>
+            ) : <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
               {filteredItems.map((item) => (
                 <ItemCard
                   key={item.id}
@@ -733,9 +751,10 @@ export function PosScreen() {
                   canToggleStock={user?.role === 'owner' || can86Items}
                   onToggleStock={() => { void toggleStock(item); }}
                   onOpenOutOfStock={() => setMarkedOutOfStockItem(item)}
+                  largeButtons={largeButtons}
                 />
               ))}
-            </div>
+            </div>}
           </section>
         </section>
 
@@ -744,7 +763,7 @@ export function PosScreen() {
         </aside>
       </main>
 
-      <div className="pos-mobile-action-bar fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-3 bg-surface-container-lowest/95 px-3 py-2.5 shadow-sheet backdrop-blur-xl tablet:hidden">
+      <div className={`pos-mobile-action-bar fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-3 bg-surface-container-lowest/95 px-3 py-2.5 shadow-sheet backdrop-blur-xl tablet:hidden ${largeButtons ? 'pos-mobile-action-bar--large' : ''}`}>
         <button type="button" onClick={() => setDrawerOpen(true)} className="min-w-0 text-left">
           <span className="block">
             <span className="flex items-center gap-1.5 font-body text-label-sm uppercase text-outline">

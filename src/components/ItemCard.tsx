@@ -21,13 +21,14 @@ interface ItemCardProps {
   canToggleStock?: boolean;
   onToggleStock?: () => void;
   onOpenOutOfStock?: () => void;
+  largeButtons?: boolean;
 }
 
-export function ItemCard({ item, quantity = 0, onAdd, onRemove, canToggleStock = false, onToggleStock, onOpenOutOfStock }: ItemCardProps) {
+export function ItemCard({ item, quantity = 0, onAdd, onRemove, canToggleStock = false, onToggleStock, onOpenOutOfStock, largeButtons = false }: ItemCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   return (
     <article
-      className={`relative flex min-h-36 flex-col justify-between overflow-hidden rounded-xl border border-outline-variant p-3.5 shadow-card ${item.outOfStock ? 'bg-surface-container-low' : 'bg-surface-container-lowest'}`}
+      className={`relative flex ${largeButtons ? 'min-h-44' : 'min-h-36'} flex-col justify-between overflow-hidden rounded-xl border border-outline-variant p-3.5 shadow-card ${item.outOfStock ? 'bg-surface-container-low' : 'bg-surface-container-lowest'}`}
     >
       <button
         type="button"
@@ -93,11 +94,11 @@ export function ItemCard({ item, quantity = 0, onAdd, onRemove, canToggleStock =
       )}
       {quantity > 0 && onRemove && !item.outOfStock && (
         <div className="mt-1 flex items-center justify-between rounded-lg bg-surface-container-low p-0.5">
-          <button type="button" aria-label={t('pos.removeItem', { item: item.name })} onClick={onRemove} className="flex h-8 w-8 items-center justify-center rounded-lg bg-surface-container-lowest text-primary">
+          <button type="button" aria-label={t('pos.removeItem', { item: item.name })} onClick={onRemove} className={`flex ${largeButtons ? 'h-14 w-14' : 'h-8 w-8'} items-center justify-center rounded-lg bg-surface-container-lowest text-primary`}>
             <MaterialIcon name={quantity === 1 ? 'delete' : 'remove'} className="text-sm" />
           </button>
           <span className="font-display text-label-lg text-primary">{quantity}</span>
-          <button type="button" aria-label={t('pos.addItem', { item: item.name })} onClick={onAdd} className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-on-primary">
+          <button type="button" aria-label={t('pos.addItem', { item: item.name })} onClick={onAdd} className={`flex ${largeButtons ? 'h-14 w-14' : 'h-8 w-8'} items-center justify-center rounded-lg bg-primary text-on-primary`}>
             <MaterialIcon name="add" className="text-sm" />
           </button>
         </div>

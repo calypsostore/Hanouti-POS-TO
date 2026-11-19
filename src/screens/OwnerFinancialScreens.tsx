@@ -7,6 +7,7 @@ import { ListSkeleton } from '../components/ListSkeleton';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
+import { CardGrid, PageHeader } from '../components/layout';
 import { t } from '../i18n/translations';
 import { formatTnd } from '../lib/format';
 import { expenseService } from '../services/expenseService';
@@ -140,11 +141,7 @@ export function OwnerExpensesScreen() {
 
   return (
     <WorkspaceLayout title={t('nav.expenses')} storeName={storeName} links={ownerWorkspaceLinks}>
-      <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="font-display text-headline-lg text-on-surface">{t('nav.expenses')}</h1>
-          <p className="mt-1 font-body text-body-md text-on-surface-variant">Track operating costs and supplier purchases.</p>
-        </div>
+      <PageHeader title={t('nav.expenses')} subtitle="Track operating costs and supplier purchases." actions={
         <Button onClick={() => {
           setError('');
           setNotice('');
@@ -157,7 +154,7 @@ export function OwnerExpensesScreen() {
         }}>
           <MaterialIcon name="add" />Add expense
         </Button>
-      </header>
+      } />
       {error && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       {notice && <p role="status" className="mb-3 rounded-lg bg-success-container p-3 font-body text-body-sm text-success-dark">{notice}</p>}
       <section aria-label="Expense filters" className="mb-4 grid gap-3 rounded-xl bg-surface-container-lowest p-4 shadow-card sm:grid-cols-2">
@@ -176,7 +173,7 @@ export function OwnerExpensesScreen() {
           </span>
         </label>
       </section>
-      <section aria-label="Expenses" className="flex flex-col gap-2">
+      <CardGrid className="mobile-card-list mobile-gap-2">
         {loading ? <ListSkeleton label="Loading expenses" /> : expenses.map((expense) => (
           <article key={expense.id} className="rounded-xl bg-surface-container-lowest p-4 shadow-card">
             <div className="flex items-start justify-between gap-3">
@@ -195,7 +192,7 @@ export function OwnerExpensesScreen() {
           </article>
         ))}
         {!loading && !error && expenses.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">{t('common.noData')}</p>}
-      </section>
+      </CardGrid>
 
       <BottomSheet open={sheetOpen} onClose={() => setSheetOpen(false)} title="Add expense">
         <form onSubmit={(event) => { void createExpense(event); }} className="flex flex-col gap-4">
@@ -374,11 +371,7 @@ export function OwnerSuppliersScreen() {
 
   return (
     <WorkspaceLayout title={t('nav.suppliers')} storeName={storeName} links={ownerWorkspaceLinks}>
-      <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="font-display text-headline-lg text-on-surface">{t('nav.suppliers')}</h1>
-          <p className="mt-1 font-body text-body-md text-on-surface-variant">Supplier purchases, payments and outstanding balances.</p>
-        </div>
+      <PageHeader title={t('nav.suppliers')} subtitle="Supplier purchases, payments and outstanding balances." actions={
         <Button onClick={() => {
           setError('');
           setNotice('');
@@ -387,10 +380,10 @@ export function OwnerSuppliersScreen() {
           setSupplierNotes('');
           setCreateOpen(true);
         }}><MaterialIcon name="add" />Add supplier</Button>
-      </header>
+      } />
       {error && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       {notice && <p role="status" className="mb-3 rounded-lg bg-success-container p-3 font-body text-body-sm text-success-dark">{notice}</p>}
-      <section aria-label="Suppliers" className="flex flex-col gap-2">
+      <CardGrid className="mobile-card-list mobile-gap-2 supplier-card-grid">
         {suppliersLoading ? <ListSkeleton label="Loading suppliers" /> : suppliers.map((supplier) => (
           <button key={supplier.id} type="button" onClick={() => { setError(''); setNotice(''); setSelectedId(supplier.id); }} className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-lowest p-4 text-left shadow-card hover:bg-surface-container-low">
             <span className="min-w-0">
@@ -405,7 +398,7 @@ export function OwnerSuppliersScreen() {
           </button>
         ))}
         {!suppliersLoading && !error && suppliers.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">{t('common.noData')}</p>}
-      </section>
+      </CardGrid>
 
       <BottomSheet open={createOpen} onClose={() => setCreateOpen(false)} title="Add supplier">
         <form onSubmit={(event) => { void createSupplier(event); }} className="flex flex-col gap-3">

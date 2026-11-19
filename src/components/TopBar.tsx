@@ -82,7 +82,7 @@ export function TopBar({ title, storeName, onProfileClick, onLockClick, showConn
 
   return (
     <header className="safe-top sticky top-0 z-30 border-b border-outline-variant bg-surface/90 backdrop-blur-xl">
-      <div className="flex h-16 items-center justify-between gap-3 px-4">
+      <div className="top-bar-content flex h-16 items-center justify-between gap-3 px-4">
         <div className="flex min-w-0 items-center gap-3">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-fixed text-primary">
             <MaterialIcon name="local_cafe" className="text-2xl" />

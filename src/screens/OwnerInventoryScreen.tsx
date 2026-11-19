@@ -8,6 +8,7 @@ import { ListSkeleton } from '../components/ListSkeleton';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
+import { DataTable, PageHeader, type DataTableColumn } from '../components/layout';
 import { t } from '../i18n/translations';
 import { catalogService } from '../services/catalogService';
 import { useAuthStore } from '../stores/authStore';
@@ -153,10 +154,7 @@ function OwnerInventoryContent() {
 
   return (
     <WorkspaceLayout title={t('inventory.title')} storeName={storeName} links={ownerWorkspaceLinks}>
-      <header className="mb-4">
-        <h1 className="font-display text-headline-lg text-on-surface">{t('inventory.title')}</h1>
-        <p className="mt-1 font-body text-body-md text-on-surface-variant">Manage stock tracking, counts, and adjustments.</p>
-      </header>
+      <PageHeader title={t('inventory.title')} subtitle="Manage stock tracking, counts, and adjustments." />
 
       <section aria-label="Inventory filters" className="mb-4 flex flex-col gap-3">
         <label className="relative block">
@@ -192,7 +190,36 @@ function OwnerInventoryContent() {
         </p>
       )}
 
-      <section className="flex flex-col gap-3">
+      <div className="hidden lg:block">
+        {loading ? <ListSkeleton label="Loading inventory" /> : <DataTable<CatalogItemRecord>
+          rows={visibleItems}
+          getRowKey={(item) => item.id}
+          columns={[
+            { key: 'name', label: 'Item', sortValue: (item) => item.name, render: (item) => <span className="flex min-w-0 items-center gap-2"><ItemLogo id={item.icon} size="sm" /><span className="truncate">{item.name}</span></span> },
+            { key: 'category', label: 'Category', sortValue: (item) => categories.find((category) => category.id === item.categoryId)?.name ?? '', render: (item) => categories.find((category) => category.id === item.categoryId)?.name ?? 'Uncategorized' },
+            { key: 'tracked', label: 'Tracked', render: (item) => (
+              <input type="checkbox" role="switch" aria-label={`Track stock for ${item.name}`} checked={item.stockCount !== null} onChange={(event) => { void updateTracking(item, event.target.checked); }} className="h-5 w-5 accent-primary" />
+            ) },
+            { key: 'stock', label: 'Stock', sortValue: (item) => item.stockCount ?? -1, render: (item) => item.stockCount === null ? 'Not tracked' : item.outOfStock ? 'Out of stock' : `${item.stockCount} in stock` },
+            { key: 'threshold', label: 'Low-stock threshold', sortValue: (item) => item.lowStockThreshold ?? 5, render: (item) => (
+              <div className="flex items-center gap-2">
+                <input type="number" min="0" step="1" aria-label={`Threshold for ${item.name}`} value={thresholds[item.id] ?? String(item.lowStockThreshold ?? 5)} onChange={(event) => setThresholds((current) => ({ ...current, [item.id]: event.target.value }))} className="h-9 w-20 rounded-md bg-surface-container-low px-2" />
+                <Button variant="secondary" className="min-h-9 min-w-0 px-2 text-label-sm" onClick={() => { void saveThreshold(item); }}>Save</Button>
+              </div>
+            ) },
+            { key: 'actions', label: 'Actions', render: (item) => (
+              <div className="flex gap-1">
+                <Button variant="secondary" disabled={item.stockCount === null} className="min-h-9 min-w-0 px-2 text-label-sm" onClick={() => openAdjustment(item)}>Adjust</Button>
+                <Button variant="ghost" className="min-h-9 min-w-0 px-2 text-label-sm" onClick={() => { void openHistory(item); }}>History</Button>
+              </div>
+            ) },
+          ] satisfies DataTableColumn<CatalogItemRecord>[]}
+          mobileCards={() => null}
+          empty={<p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">{items.length === 0 ? t('common.noData') : 'No items match these filters.'}</p>}
+        />}
+      </div>
+
+      <section className="flex flex-col gap-3 lg:hidden">
         {loading ? <ListSkeleton label="Loading inventory" /> : visibleItems.map((item) => {
           const tracked = item.stockCount !== null;
           const threshold = item.lowStockThreshold ?? 5;

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '../components/BottomNav';
+import { CardGrid, PageContainer } from '../components/layout';
 import { Button } from '../components/Button';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { ListSkeleton } from '../components/ListSkeleton';
@@ -98,7 +99,8 @@ export function StaffDashboardScreen() {
   return (
     <div className="min-h-screen bg-surface pb-24">
       <TopBar title="Staff dashboard" storeName={store?.name} onProfileClick={() => navigate('/profile')} />
-      <main className="mx-auto w-full max-w-5xl px-4 py-5">
+      <main className="mx-auto w-full p-0">
+        <PageContainer className="staff-dashboard-container">
         <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="font-body text-label-md text-primary">Welcome back</p>
@@ -111,7 +113,7 @@ export function StaffDashboardScreen() {
         {error && <p role="alert" className="mb-4 rounded-xl bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
 
         {canManageShift && (
-          <section className="mb-4 grid gap-3 sm:grid-cols-2">
+          <CardGrid className="mb-4 mobile-gap-3">
             {openShift ? (
               <button type="button" onClick={() => navigate('/shift')} className="flex min-h-24 items-center gap-3 rounded-2xl bg-surface-container-lowest p-4 text-left shadow-card transition active:scale-[0.99]">
                 <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-error-container text-error-dark"><MaterialIcon name="lock" /></span>
@@ -138,7 +140,7 @@ export function StaffDashboardScreen() {
                 </div>
               </button>
             )}
-          </section>
+          </CardGrid>
         )}
 
         {canTakeOrders && !canManageShift && (
@@ -154,7 +156,7 @@ export function StaffDashboardScreen() {
         )}
 
         {displayedSales !== null && (
-          <section className="mb-4 grid gap-3 sm:grid-cols-2">
+          <CardGrid className="mb-4 mobile-gap-3">
             <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
               <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-fixed/40 text-primary"><MaterialIcon name="payments" /></span>
               <p className="mt-3 font-body text-body-sm text-on-surface-variant">Today's personal sales</p>
@@ -165,7 +167,7 @@ export function StaffDashboardScreen() {
               <p className="mt-3 font-body text-body-sm text-on-surface-variant">Completed orders today</p>
               <p className="mt-1 font-display text-headline-md tabular-nums text-on-surface">{completedOrders.length}</p>
             </article>
-          </section>
+          </CardGrid>
         )}
 
         {canManageShift && shiftSummary && (
@@ -220,7 +222,7 @@ export function StaffDashboardScreen() {
               </Button>
             </div>
             {loading ? <ListSkeleton rows={2} label="Loading recent orders" /> : recentOrders.length > 0 ? (
-              <div className="grid gap-2">
+              <CardGrid className="mobile-gap-2">
                 {recentOrders.map((order) => (
                   <button key={order.id} type="button" onClick={() => navigate('/orders')} className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-lowest p-4 text-left shadow-card">
                     <div className="min-w-0">
@@ -232,12 +234,13 @@ export function StaffDashboardScreen() {
                     <p className="shrink-0 font-display text-title-md tabular-nums text-primary">{formatTnd(order.totalMillimes / 1000)} DT</p>
                   </button>
                 ))}
-              </div>
+              </CardGrid>
             ) : (
               <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">No completed orders today.</p>
             )}
           </section>
         )}
+        </PageContainer>
       </main>
       <BottomNav />
     </div>

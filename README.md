@@ -25,25 +25,64 @@ credentials. All three require a password change at first login. Production
 builds require `VITE_DATA_DRIVER=supabase` and replace demo seed data with empty
 fixtures; a local-driver production build is rejected.
 
-## Supabase backend
+## First-time Supabase setup
 
-For local demos, set `VITE_DATA_DRIVER=local`. To use the shared Supabase
-backend, copy `.env.example` to `.env.local`, set
-`VITE_DATA_DRIVER=supabase`, and provide the project URL and anon/publishable
-key. Never put a Supabase service-role key in a `VITE_` variable or in the
-client app.
+Complete this checklist once for each environment:
 
-Apply the database migrations and deploy the account-provisioning Edge Function:
+1. **Create the project.** Create a Supabase project in the Supabase dashboard
+   and wait for its database to finish provisioning.
+2. **Apply migrations.** From the repository root, link the Supabase CLI to the
+   project and push the migrations:
 
-```sh
-npx supabase login
-npx supabase link --project-ref YOUR_PROJECT_REF
-npx supabase db push
-npx supabase secrets set SUPABASE_URL=YOUR_PROJECT_URL SUPABASE_ANON_KEY=YOUR_ANON_KEY SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY LOGIN_RATE_LIMIT_PEPPER=YOUR_RANDOM_32_BYTE_SECRET
-npx supabase functions deploy provision-account
-npx supabase functions deploy login
-npx supabase functions deploy verify-password
-```
+   ```sh
+   npx supabase login
+   npx supabase link --project-ref YOUR_PROJECT_REF
+   npx supabase db push
+   ```
+
+3. **Set Edge Function secrets.** Use the project URL and keys from the
+   Supabase project settings. Generate a separate random pepper for login
+   rate-limiting:
+
+   ```sh
+   npx supabase secrets set SUPABASE_URL=YOUR_PROJECT_URL SUPABASE_ANON_KEY=YOUR_ANON_KEY SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY LOGIN_RATE_LIMIT_PEPPER=YOUR_RANDOM_32_BYTE_SECRET
+   ```
+
+   Never put the service-role key in a `VITE_` variable or the client app.
+4. **Deploy all required Edge Functions:**
+
+   ```sh
+   npx supabase functions deploy provision-account
+   npx supabase functions deploy login
+   npx supabase functions deploy verify-password
+   ```
+
+5. **Create the first super admin.** Create the administrator user through
+   Supabase Authentication, then run this once in the SQL editor. Replace the
+   email and display name with the administrator account you just created:
+
+   ```sql
+   insert into public.profiles (id, store_id, role, name, email)
+   select id, null, 'super_admin', 'Platform administrator', email
+   from auth.users
+   where lower(email) = lower('admin@example.com')
+   on conflict (id) do nothing;
+   ```
+
+6. **Configure Vercel.** In the Vercel project settings, add these environment
+   variables for each environment you deploy (Production, Preview, and
+   Development as needed), then redeploy:
+
+   - `VITE_DATA_DRIVER=supabase`
+   - `VITE_SUPABASE_URL=YOUR_PROJECT_URL`
+   - `VITE_SUPABASE_ANON_KEY=YOUR_ANON_KEY`
+
+   For local development, copy `.env.example` to `.env.local` and set the same
+   values. Local demos use `VITE_DATA_DRIVER=local`.
+7. **Confirm the end-to-end setup.** Sign in as the super admin and create an
+   owner account. Sign in as that owner, create a staff member, then sign in on
+   two devices and take an order on one. Confirm the new order appears live on
+   the other device.
 
 The login Edge Function applies server-side limits of five attempts per
 username and 20 per source IP in a 15-minute window. Supabase Auth also
@@ -51,33 +90,27 @@ enforces its project-level rate limits. Password hashes are managed by
 Supabase Auth; store and staff PIN hashes are generated and verified in
 PostgreSQL and are never hashed in the browser.
 
-Create the first platform administrator through the Supabase Auth dashboard,
-then add its profile once in the SQL editor (replace the email and display name):
+Staff accounts are provisioned by an owner and sign in with their username;
+their Auth email is generated internally. RLS isolates store data, and
+protected order, shift, tab, PIN, and void operations execute through database
+functions. Realtime updates are enabled for orders, shifts, notifications, and
+catalog availability. Server-registered sessions expire after 12 hours, are
+revoked by staff force-logout, and are revalidated when the app regains focus.
+Store inactivity, archival, subscription expiry, or an inactive owner blocks
+authenticated API requests.
 
-```sql
-insert into public.profiles (id, store_id, role, name, email)
-select id, null, 'super_admin', 'Platform administrator', email
-from auth.users
-where lower(email) = lower('admin@example.com')
-on conflict (id) do nothing;
-```
+## Known limits
 
-Sign in as that administrator and create store-owner accounts from the
-super-admin workflow. Staff accounts are provisioned by an owner and sign in
-with their username; their Auth email is generated internally. RLS isolates
-store data, and protected order, shift, tab, PIN, and void operations execute
-through database functions. Realtime updates are enabled for orders, shifts,
-notifications, and catalog availability.
-Server-registered sessions expire after 12 hours, are revoked by staff
-force-logout, and are revalidated when the app regains focus. Store inactivity,
-archival, subscription expiry, or an inactive owner blocks authenticated API
-requests.
+- Native push notifications are not implemented yet.
+- Offline mode only queues new orders. Shifts, voids, and tab payments require
+  an internet connection.
 
 ## Build and preview
 
 ```sh
 npm run typecheck
 npm run lint
+npm test
 npm run build
 npm run preview
 ```

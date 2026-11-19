@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ownerWorkspaceLinks } from '../app/navigation';
+import { CardGrid, PageContainer, PageHeader, SplitView } from '../components/layout';
 import { BottomNav } from '../components/BottomNav';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
@@ -527,10 +528,7 @@ export function CustomersScreen() {
 
   const listContent = (
     <div className="pb-24">
-      <header className="mb-4">
-        <h1 className="font-display text-headline-lg text-on-surface">Customers & tabs</h1>
-        <p className="mt-1 font-body text-body-md text-on-surface-variant">Accounts, balances, and recent payments</p>
-      </header>
+      <PageHeader title="Customers & tabs" subtitle="Accounts, balances, and recent payments" />
 
       <section aria-label="Accounts summary" className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
         <SummaryCard className="col-span-2 sm:col-span-1" icon="account_balance_wallet" label="Total outstanding" value={`${formatTnd(summary.totalOutstandingMillimes / 1000)} DT`} tone="primary" />
@@ -599,7 +597,7 @@ export function CustomersScreen() {
       {loading ? (
         <ListSkeleton label="Loading customers" />
       ) : filteredCustomers.length > 0 ? (
-        <div className="flex flex-col gap-3">
+        <CardGrid className="mobile-card-list customer-card-list">
           {filteredCustomers.map((customer) => {
             const dueInfo = dueInfos[customer.id];
             if (isOwner && filter === 'overdue' && dueInfo?.overdue) {
@@ -623,7 +621,7 @@ export function CustomersScreen() {
               />
             );
           })}
-        </div>
+        </CardGrid>
       ) : (
         <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">
           {customers.length ? 'No customers match these filters.' : 'No customers yet.'}
@@ -642,7 +640,7 @@ export function CustomersScreen() {
   );
 
   const detailContent = (
-    <div className="pb-6">
+    <div className="customer-detail-content pb-6">
       <Button variant="ghost" onClick={() => navigate('/customers')} className="mb-3 min-h-10 px-2">
         <MaterialIcon name="arrow_back" />Customers
       </Button>
@@ -768,11 +766,17 @@ export function CustomersScreen() {
   return (
     <>
       {isOwner ? (
-        <WorkspaceLayout title="Customers" storeName={store?.name} links={ownerWorkspaceLinks}>{page}</WorkspaceLayout>
+        <WorkspaceLayout title="Customers" storeName={store?.name} links={ownerWorkspaceLinks}>
+          {isDetail ? (
+            <div className="customer-split-view">
+              <SplitView list={<div className="customer-split-list">{listContent}</div>} detail={detailContent} />
+            </div>
+          ) : page}
+        </WorkspaceLayout>
       ) : (
         <div className="min-h-screen bg-surface">
           <TopBar title="Customers & tabs" storeName={store?.name} />
-          <main className="mx-auto w-full max-w-5xl px-4 py-5">{page}</main>
+          <main className="mx-auto w-full p-0"><PageContainer>{page}</PageContainer></main>
           <BottomNav />
         </div>
       )}

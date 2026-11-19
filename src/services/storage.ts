@@ -1,6 +1,15 @@
+import { isSupabaseDriver } from '../data/driver';
+
 const STORAGE_PREFIX = '7anouti-pos:';
 
+function assertLocalDataDriver(operation: string): void {
+  if (isSupabaseDriver()) {
+    throw new Error(`Browser data storage cannot ${operation} while the Supabase data driver is active.`);
+  }
+}
+
 export function readData<T>(key: string, initialValue: T): T {
+  assertLocalDataDriver('read');
   const storageKey = `${STORAGE_PREFIX}${key}`;
   const storedValue = localStorage.getItem(storageKey);
   if (storedValue === null) {
@@ -29,6 +38,7 @@ export function readData<T>(key: string, initialValue: T): T {
 }
 
 export function writeData<T>(key: string, value: T): void {
+  assertLocalDataDriver('write');
   try {
     localStorage.setItem(`${STORAGE_PREFIX}${key}`, JSON.stringify(value));
   } catch (error) {
@@ -37,6 +47,7 @@ export function writeData<T>(key: string, value: T): void {
 }
 
 export function removeData(key: string): void {
+  assertLocalDataDriver('remove');
   try {
     localStorage.removeItem(`${STORAGE_PREFIX}${key}`);
   } catch (error) {

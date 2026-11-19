@@ -11,6 +11,7 @@ import { compService } from './compService';
 import { orderService } from './orderService';
 import { shiftService } from './shiftService';
 import { userService } from './userService';
+import { customerService } from './customerService';
 import { readData, writeData } from './storage';
 import { seedReports } from './seedData';
 import { activityService } from './activityService';
@@ -132,19 +133,23 @@ async function summarize(storeId: string, from: number, to: number) {
   }
   const paymentSplit: Record<PaymentMethod, number> = { cash: 0, card: 0, other: 0, tab: 0 };
   for (const order of orders) paymentSplit[order.paymentMethod] += order.totalMillimes;
-  const settlements = readData<TabRecord[]>('tabs', []).filter((tab) =>
+  const customers = isSupabaseDriver()
+    ? await customerService.listCustomers(storeId)
+    : readData<import('../types/domain').CustomerRecord[]>('customers', []).filter((customer) => customer.storeId === storeId);
+  const allCustomerTransactions = isSupabaseDriver()
+    ? (await Promise.all(customers.map((customer) => customerService.listTransactions(customer.id)))).flat()
+    : readData<TabRecord[]>('tabs', []).filter((tab) => tab.storeId === storeId);
+  const settlements = allCustomerTransactions.filter((tab) =>
     tab.storeId === storeId && tab.kind === 'settled' &&
     new Date(tab.createdAt).getTime() >= from && new Date(tab.createdAt).getTime() <= to,
   );
-  const reversals = readData<TabRecord[]>('tabs', []).filter((tab) =>
+  const reversals = allCustomerTransactions.filter((tab) =>
     tab.storeId === storeId && tab.kind === 'reversal' &&
     new Date(tab.createdAt).getTime() >= from && new Date(tab.createdAt).getTime() <= to,
   );
   const tabsIssuedMillimes = orders.filter((order) => order.paymentMethod === 'tab').reduce((sum, order) => sum + order.totalMillimes, 0);
   const tabsSettledMillimes = settlements.reduce((sum, tab) => sum + tab.amountMillimes, 0) -
     reversals.reduce((sum, tab) => sum + tab.amountMillimes, 0);
-  const customers = readData<import('../types/domain').CustomerRecord[]>('customers', []).filter((customer) => customer.storeId === storeId);
-  const allCustomerTransactions = readData<TabRecord[]>('tabs', []).filter((tab) => tab.storeId === storeId);
   const customerTabs: ReportCustomerTabLine[] = customers.map((customer) => {
     const customerOrders = allOrders.filter((order) => order.customerId === customer.id && order.paymentMethod === 'tab');
     const transactions = allCustomerTransactions.filter((tab) => tab.customerId === customer.id);

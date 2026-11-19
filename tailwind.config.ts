@@ -7,9 +7,13 @@ const config: Config = {
   darkMode: 'class',
   theme: {
     screens: {
+      md: '768px',
       tablet: '600px',
+      desktop: '1024px',
       lg: '1024px',
       xl: '1280px',
+      wide: '1440px',
+      '2xl': '1536px',
     },
     extend: {
       colors: {

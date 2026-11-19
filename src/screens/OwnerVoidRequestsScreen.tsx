@@ -6,6 +6,7 @@ import { ListSkeleton } from '../components/ListSkeleton';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
+import { CardGrid, PageHeader } from '../components/layout';
 import { t } from '../i18n/translations';
 import { formatTnd } from '../lib/format';
 import { orderService } from '../services/orderService';
@@ -72,13 +73,10 @@ function OwnerVoidRequestsContent() {
 
   return (
     <WorkspaceLayout title={t('voids.title')} storeName={storeName} links={ownerWorkspaceLinks}>
-      <header className="mb-4">
-        <h1 className="font-display text-headline-lg text-on-surface">{t('voids.title')}</h1>
-        <p className="mt-1 font-body text-body-md text-on-surface-variant">Approve or reject staff requests to void completed orders.</p>
-      </header>
+      <PageHeader title={t('voids.title')} subtitle="Approve or reject staff requests to void completed orders." />
       {error && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       {notice && <p role="status" className="mb-3 rounded-lg bg-success-container p-3 font-body text-body-sm text-on-success-container">{notice}</p>}
-      <section className="flex flex-col gap-3">
+      <CardGrid className="mobile-card-list mobile-gap-3">
         {loading ? <ListSkeleton label="Loading void requests" /> : requests.map((order) => {
           return (
             <article key={order.id} className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
@@ -107,7 +105,7 @@ function OwnerVoidRequestsContent() {
           );
         })}
         {!loading && !error && requests.length === 0 && <div className="rounded-2xl bg-surface-container-lowest p-8 text-center shadow-card"><MaterialIcon name="task_alt" className="text-4xl text-success-dark" /><p className="mt-2 font-body text-body-md text-on-surface-variant">{t('voids.none')}</p></div>}
-      </section>
+      </CardGrid>
       <BottomSheet
         open={activeRequest !== null}
         onClose={() => setActiveRequest(null)}

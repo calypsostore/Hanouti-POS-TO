@@ -12,7 +12,7 @@ const differenceText = (amount: number | undefined) => {
   return `${amount > 0 ? '+' : amount < 0 ? '−' : ''}${money(Math.abs(amount))}`;
 };
 
-export function ReportView({ report, storeName, onClose }: { report: ReportRecord; storeName: string; onClose: () => void }) {
+export function ReportView({ report, storeName, onClose, inline = false }: { report: ReportRecord; storeName: string; onClose: () => void; inline?: boolean }) {
   const [shareError, setShareError] = useState('');
   const printTarget = useRef<HTMLElement>(null);
   const reportStoreName = report.storeName ?? storeName;
@@ -104,8 +104,8 @@ export function ReportView({ report, storeName, onClose }: { report: ReportRecor
   }
 
   return (
-    <div className="receipt-overlay" onMouseDown={onClose}>
-      <section role="dialog" aria-modal="true" aria-label={`${report.type} report`} className="receipt-dialog report-dialog" onMouseDown={(event) => event.stopPropagation()}>
+    <div className={`receipt-overlay${inline ? ' report-inline' : ''}`} onMouseDown={inline ? undefined : onClose}>
+      <section role={inline ? 'region' : 'dialog'} aria-modal={inline ? undefined : true} aria-label={`${report.type} report`} className={`receipt-dialog report-dialog${inline ? ' report-inline__panel' : ''}`} onMouseDown={(event) => event.stopPropagation()}>
         <div className="receipt-actions no-print">
           <Button variant="secondary" onClick={() => { void exportPdf(); }}>Share / Download PDF</Button>
           <Button variant="secondary" onClick={() => { void shareImage(); }}>Share image</Button>

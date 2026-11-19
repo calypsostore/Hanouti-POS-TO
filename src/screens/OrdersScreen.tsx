@@ -17,6 +17,7 @@ import type { OrderRecord, StoreRecord } from '../types/domain';
 import { t, type TranslationKey } from '../i18n/translations';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
+import { DataTable, type DataTableColumn } from '../components/layout';
 
 type OrderStatus = 'done' | 'pending' | 'voided';
 type OrderFilter = 'all' | 'done' | 'pending' | 'voided';
@@ -199,8 +200,8 @@ export function OrdersScreen() {
   const content = (
     <div className="min-h-screen bg-surface pb-20">
       {user?.role === 'staff' && <TopBar title={t('orders.title')} storeName={store?.name} />}
-      <main className="mx-auto flex w-full max-w-3xl flex-col">
-        <section className="flex flex-col gap-3 px-4 pb-2 pt-4">
+      <main className="orders-page-content mx-auto flex w-full max-w-none flex-col">
+        <section className="orders-toolbar flex flex-col gap-3 px-4 pb-2 pt-4">
           <div className="flex items-center justify-between gap-2">
             <span className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-surface-container-high px-3 font-body text-label-sm text-primary">
               <MaterialIcon name="badge" className="text-base" filled />
@@ -247,7 +248,26 @@ export function OrdersScreen() {
           {loadError && <p role="alert" className="rounded-xl bg-error-container p-3 font-body text-body-sm text-on-error-container">{loadError}</p>}
           {loading ? <ListSkeleton label="Loading orders" /> : visibleOrders.length === 0 ? (
             <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">{t('orders.emptyFilter')}</p>
-          ) : visibleOrders.map((order) => (
+          ) : <DataTable<OrderView>
+            rows={visibleOrders}
+            getRowKey={(order) => order.id}
+            rowClassName={(order) => order.status === 'voided' ? 'bg-error-container/40 text-error-dark' : ''}
+            columns={[
+              { key: 'time', label: 'Time', sortValue: (order) => order.record.createdAt, render: (order) => order.time },
+              { key: 'number', label: 'Order #', sortValue: (order) => order.number, render: (order) => `#${order.number}` },
+              { key: 'staff', label: 'Staff', sortValue: (order) => order.staff, render: (order) => order.staff },
+              { key: 'items', label: 'Items', sortValue: (order) => order.items.reduce((sum, item) => sum + item.quantity, 0), render: (order) => `${order.items.reduce((sum, item) => sum + item.quantity, 0)} · ${order.items.map((item) => item.name).join(', ')}` },
+              { key: 'payment', label: 'Payment', render: (order) => order.record.paymentMethod },
+              { key: 'total', label: 'Total', sortValue: (order) => order.total, render: (order) => `${formatTnd(order.status === 'voided' ? 0 : order.total)} DT` },
+              { key: 'status', label: 'Status', render: (order) => statusLabel(order.status) },
+              { key: 'actions', label: 'Actions', render: (order) => (
+                <div className="flex gap-2">
+                  {order.status !== 'pending' && <Button variant="secondary" className="min-h-9 px-2 text-label-sm" onClick={() => setTicketOrder(order)}>{t('orders.ticket')}</Button>}
+                  {order.status === 'done' && order.staffId === user?.id && <Button variant="danger" className="min-h-9 px-2 text-label-sm" onClick={() => openVoidSheet(order)}>{t('orders.void')}</Button>}
+                </div>
+              ) },
+            ] satisfies DataTableColumn<OrderView>[]}
+            mobileCards={(order) => (
             <article key={order.id} className={`flex flex-col gap-3 rounded-xl bg-surface-container-lowest p-4 shadow-card ${order.status === 'voided' ? 'opacity-90' : ''}`}>
               <div className="flex items-start justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
@@ -305,7 +325,9 @@ export function OrdersScreen() {
                 )}
               </div>
             </article>
-          ))}
+            )}
+            empty={<p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">{t('orders.emptyFilter')}</p>}
+          />}
         </section>
       </main>
 

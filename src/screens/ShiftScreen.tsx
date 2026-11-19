@@ -18,6 +18,8 @@ import { useAuthStore } from '../stores/authStore';
 import type { CashMovementReason, CashMovementRecord, ShiftRecord } from '../types/domain';
 import { t } from '../i18n/translations';
 import { ownerWorkspaceLinks } from '../app/navigation';
+import { DataTable, PageHeader, type DataTableColumn } from '../components/layout';
+import { PageContainer } from '../components/layout';
 import { updateService } from '../services/updateService';
 import type { ShiftSalesBreakdown } from '../services/orderService';
 import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
@@ -259,13 +261,20 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const movementsForShift = (shiftId: string) => cashMovements.filter((movement) => movement.shiftId === shiftId);
   return (
     <>
-      <div className="mb-4 flex items-center justify-between gap-3">
+      <div className="mb-4 flex items-center justify-between gap-3 lg:hidden">
         <div>
           <h1 className="font-display text-headline-lg text-on-surface">{pageTitle}</h1>
           <p className="mt-1 font-body text-body-md text-on-surface-variant">{store?.name}</p>
         </div>
         {ownerMode && <StatusTag status="started">{`${openCount} open`}</StatusTag>}
       </div>
+      <PageHeader className="hidden lg:flex" title={pageTitle} subtitle={store?.name} actions={
+        ownerMode
+          ? <StatusTag status="started">{`${openCount} open`}</StatusTag>
+          : !ownOpenShift && !closedShiftSummary
+            ? <Button className="w-full lg:w-auto lg:min-w-[160px]" onClick={() => setOpenShiftSheetOpen(true)}><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
+            : undefined
+      } />
       <FirstRunHint id={`shift-${user?.id ?? 'guest'}`} title={t('hint.title')} message={t('hint.shift')} />
 
       {closedShiftSummary && (
@@ -300,12 +309,12 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             )}
             <CashMovementList movements={movementsForShift(ownOpenShift.id)} staffNames={staffNames} />
           </section>
-          <Button className="w-full" onClick={() => setCloseShiftSheetOpen(true)}>
+          <Button className="w-full lg:w-auto" onClick={() => setCloseShiftSheetOpen(true)}>
             <MaterialIcon name="lock" />{t('shift.closeShift')}
           </Button>
         </div>
       ) : !closedShiftSummary ? (
-        <Button className="w-full max-w-xl" onClick={() => setOpenShiftSheetOpen(true)}>
+        <Button className="w-full max-w-xl lg:hidden" onClick={() => setOpenShiftSheetOpen(true)}>
           <MaterialIcon name="lock_open" />{t('shift.openShift')}
         </Button>
       ) : null}
@@ -314,8 +323,23 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
 
       <section className="mt-6">
         <h2 className="mb-3 font-display text-headline-md text-on-surface">{t('shift.history')}</h2>
-        <div className="flex flex-col gap-2">
-          {loading ? <ListSkeleton label="Loading shifts" /> : shifts.map((shift) => (
+        {loading ? <ListSkeleton label="Loading shifts" /> : <DataTable<ShiftRecord>
+          rows={shifts}
+          getRowKey={(shift) => shift.id}
+          columns={[
+            { key: 'staff', label: 'Staff', sortValue: (shift) => staffNames[shift.staffId] ?? 'Staff', render: (shift) => staffNames[shift.staffId] ?? 'Staff' },
+            { key: 'opened', label: 'Opened', sortValue: (shift) => shift.openedAt, render: (shift) => new Date(shift.openedAt).toLocaleString() },
+            { key: 'closed', label: 'Closed', sortValue: (shift) => shift.closedAt ?? '', render: (shift) => shift.closedAt ? new Date(shift.closedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—' },
+            { key: 'status', label: 'Status', render: (shift) => shift.status === 'open' ? 'Open' : 'Closed' },
+            { key: 'difference', label: 'Difference', sortValue: (shift) => shift.differenceMillimes ?? 0, render: (shift) => shift.differenceMillimes === undefined ? '—' : `${formatTnd(shift.differenceMillimes / 1000)} DT` },
+            { key: 'actions', label: 'Actions', render: (shift) => (
+              <details className="shift-movements-disclosure">
+                <summary className="cursor-pointer text-primary">Cash movements</summary>
+                <CashMovementList movements={movementsForShift(shift.id)} staffNames={staffNames} />
+              </details>
+            ) },
+          ] satisfies DataTableColumn<ShiftRecord>[]}
+          mobileCards={(shift) => (
             <article key={shift.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-surface-container-lowest p-4 shadow-card">
               <div>
                 <p className="font-body text-label-lg text-on-surface">{staffNames[shift.staffId] ?? 'Staff'}</p>
@@ -341,9 +365,9 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
                 </Button>
               )}
             </article>
-          ))}
-          {!loading && !error && shifts.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">{t('common.noData')}</p>}
-        </div>
+          )}
+          empty={!loading && !error ? <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">{t('common.noData')}</p> : undefined}
+        />}
       </section>
       <BottomSheet open={openShiftSheetOpen} onClose={() => setOpenShiftSheetOpen(false)} title={t('shift.openShift')}>
         <form onSubmit={(event) => { void openShift(event); }} className="flex flex-col gap-3">
@@ -676,5 +700,5 @@ export function ShiftScreen({ ownerMode = false }: { ownerMode?: boolean }) {
   }, [storeId]);
   const content = <ShiftContent ownerMode={ownerMode} />;
   if (ownerMode) return <WorkspaceLayout title={t('shift.title')} storeName={storeName} links={ownerWorkspaceLinks}>{content}</WorkspaceLayout>;
-  return <div className="min-h-screen bg-surface px-4 pb-24 pt-5"><div className="mx-auto max-w-3xl">{content}</div><BottomNav /></div>;
+  return <div className="min-h-screen bg-surface pb-24"><main className="p-0"><PageContainer>{content}</PageContainer></main><BottomNav /></div>;
 }

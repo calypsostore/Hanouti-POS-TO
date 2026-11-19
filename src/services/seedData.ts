@@ -168,7 +168,7 @@ export const seedOrders: OrderRecord[] = [
     storeId,
     staffId: abdullahId,
     shiftId: seedShifts[1].id,
-    location: 'Comptoir • Takeaway',
+    location: '',
     status: 'pending_void',
     paymentMethod: 'cash',
     items: [makeLine('item-lemonade', 'Citronnade Pressée', 1, 3500), makeLine('item-baguette', 'Sandwich Thon Spécial', 1, 5500)],

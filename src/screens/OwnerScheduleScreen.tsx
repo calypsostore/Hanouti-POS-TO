@@ -6,6 +6,7 @@ import { ListSkeleton } from '../components/ListSkeleton';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
+import { PageHeader } from '../components/layout';
 import { notificationService } from '../services/notificationService';
 import { scheduleService } from '../services/scheduleService';
 import { userService } from '../services/userService';
@@ -300,10 +301,7 @@ function OwnerScheduleContent() {
 
   return (
     <WorkspaceLayout title="Schedule" storeName={storeName} links={ownerWorkspaceLinks}>
-      <header className="mb-5">
-        <h1 className="font-display text-headline-lg text-on-surface">Weekly schedule</h1>
-        <p className="mt-1 font-body text-body-md text-on-surface-variant">Plan staff shifts, review conflicts, and publish changes.</p>
-      </header>
+      <PageHeader title="Weekly schedule" subtitle="Plan staff shifts, review conflicts, and publish changes." />
 
       <section className="mb-4 rounded-2xl bg-surface-container-lowest p-3 shadow-card sm:p-4">
         <div className="mb-3 flex items-center justify-between gap-2">
@@ -315,7 +313,7 @@ function OwnerScheduleContent() {
             <MaterialIcon name="chevron_right" />
           </button>
         </div>
-        <div className="scrollbar-hidden flex gap-2 overflow-x-auto pb-1">
+        <div className="schedule-day-selector scrollbar-hidden flex gap-2 overflow-x-auto pb-1">
           {weekdays.map((day, index) => (
             <button
               key={day.date}
@@ -350,7 +348,8 @@ function OwnerScheduleContent() {
       {loading ? (
         <ListSkeleton label="Loading schedule" />
       ) : (
-        <section aria-label={`Staff schedule for ${displayDate(dayKey, { weekday: 'long', day: 'numeric', month: 'long' })}`} className="flex flex-col gap-2">
+        <>
+        <section aria-label={`Staff schedule for ${displayDate(dayKey, { weekday: 'long', day: 'numeric', month: 'long' })}`} className="schedule-day-view flex flex-col gap-2">
           {staff.map((staffMember) => {
             const staffShifts = selectedDayShifts.filter((shift) => shift.staffId === staffMember.id);
             return (
@@ -382,6 +381,41 @@ function OwnerScheduleContent() {
           })}
           {staff.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">No staff accounts are available for this store.</p>}
         </section>
+        <div className="schedule-week-view hidden overflow-auto rounded-xl border border-outline-variant bg-surface-container-lowest lg:block">
+          <table className="w-full min-w-[980px] border-collapse text-left font-body text-body-sm">
+            <thead className="sticky top-0 z-10 bg-surface-container-high">
+              <tr>
+                <th scope="col" className="sticky left-0 z-20 min-w-48 bg-surface-container-high px-3 py-3">Staff</th>
+                {weekdays.map((day) => <th key={day.date} scope="col" className="min-w-32 px-3 py-3 text-center">{day.label} {day.day}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {staff.map((staffMember) => (
+                <tr key={staffMember.id} className="border-t border-outline-variant hover:bg-surface-container-low">
+                  <th scope="row" className="sticky left-0 z-[1] bg-surface-container-lowest px-3 py-3 font-semibold">{staffMember.name}</th>
+                  {weekdays.map((day) => {
+                    const dayShifts = schedule.filter((shift) => shift.staffId === staffMember.id && shift.date === day.date);
+                    return (
+                      <td key={day.date} className="border-l border-outline-variant p-2 align-top">
+                        <div className="flex min-h-12 flex-col gap-1">
+                          {dayShifts.map((shift) => (
+                            <button key={shift.id} type="button" onClick={() => openShiftEditor(staffMember, shift)} className="min-h-9 rounded-md bg-primary-fixed/60 px-2 text-left text-label-sm text-primary hover:bg-primary-fixed">
+                              {shiftLabel(shift)}
+                            </button>
+                          ))}
+                          <button type="button" aria-label={`Add shift for ${staffMember.name} on ${day.label}`} onClick={() => { setSelectedDayOffset(weekdays.findIndex((entry) => entry.date === day.date)); openShiftEditor(staffMember); }} className="schedule-add-shift min-h-8 rounded-md text-primary hover:bg-surface-container-high">
+                            <MaterialIcon name="add" className="text-base" />
+                          </button>
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        </>
       )}
 
       <BottomSheet open={editorOpen} onClose={() => setEditorOpen(false)} title={`${editingShift ? 'Edit' : 'Set'} shift${editorStaff ? ` · ${editorStaff.name}` : ''}`}>

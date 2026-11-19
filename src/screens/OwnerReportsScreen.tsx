@@ -7,6 +7,7 @@ import { ListSkeleton } from '../components/ListSkeleton';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
+import { PageHeader, SplitView } from '../components/layout';
 import { t, type TranslationKey } from '../i18n/translations';
 import { formatTnd } from '../lib/format';
 import { reportService } from '../services/reportService';
@@ -166,10 +167,7 @@ function OwnerReportsContent() {
 
   return (
     <WorkspaceLayout title={t('reports.title')} storeName={store?.name} links={ownerWorkspaceLinks}>
-      <header className="mb-4">
-        <h1 className="font-display text-headline-lg text-on-surface">{t('reports.title')}</h1>
-        <p className="mt-1 font-body text-body-md text-on-surface-variant">X reports are live snapshots. Z reports close the current reporting period.</p>
-      </header>
+      <PageHeader title={t('reports.title')} subtitle="X reports are live snapshots. Z reports close the current reporting period." />
 
       <section className="mb-4 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -353,19 +351,25 @@ function OwnerReportsContent() {
       )}
       {(error || notice) && <p role={error ? 'alert' : 'status'} className={`mt-4 rounded-lg p-3 font-body text-body-sm ${error ? 'bg-error-container text-on-error-container' : 'bg-success-container text-on-success-container'}`}>{error || notice}</p>}
 
-      <section className="mt-6">
-        <h2 className="mb-3 font-display text-headline-md text-on-surface">Report history</h2>
-        <div className="flex flex-col gap-2">
-          {loading ? <ListSkeleton label="Loading report history" /> : reports.map((report) => (
-            <button type="button" key={report.id} onClick={() => setSelectedReport(report)} className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-lowest p-4 text-left shadow-card">
-              <div><p className="font-body text-label-md text-on-surface">{report.type} report • {report.businessDate}</p><p className="mt-1 font-body text-body-sm text-outline">{new Date(report.createdAt).toLocaleString()} • {report.orderCount} orders • Sales {formatTnd((report.salesCollectedMillimes ?? report.salesMillimes) / 1000)} DT • Expenses {formatTnd((report.expensesMillimes ?? 0) / 1000)} DT • Net {formatTnd((report.netProfitMillimes ?? 0) / 1000)} DT</p></div>
-              <span className="flex items-center gap-2"><StatusTag status={report.type === 'Z' ? 'closed' : 'open'}>{report.type}</StatusTag><MaterialIcon name="open_in_new" /></span>
-            </button>
-          ))}
-          {!loading && !error && reports.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">{t('common.noData')}</p>}
-        </div>
-      </section>
-      {selectedReport && <ReportView report={selectedReport} storeName={store?.name ?? ''} onClose={() => setSelectedReport(null)} />}
+      <SplitView className="reports-split-view mt-6" list={
+        <section>
+          <h2 className="mb-3 font-display text-headline-md text-on-surface">Report history</h2>
+          <div className="flex flex-col gap-2">
+            {loading ? <ListSkeleton label="Loading report history" /> : reports.map((report) => (
+              <button type="button" key={report.id} aria-pressed={selectedReport?.id === report.id} onClick={() => setSelectedReport(report)} className={`flex items-center justify-between gap-3 rounded-xl p-4 text-left shadow-card ${selectedReport?.id === report.id ? 'bg-primary-fixed/50' : 'bg-surface-container-lowest'}`}>
+                <div><p className="font-body text-label-md text-on-surface">{report.type} report • {report.businessDate}</p><p className="mt-1 font-body text-body-sm text-outline">{new Date(report.createdAt).toLocaleString()} • {report.orderCount} orders • Sales {formatTnd((report.salesCollectedMillimes ?? report.salesMillimes) / 1000)} DT • Expenses {formatTnd((report.expensesMillimes ?? 0) / 1000)} DT • Net {formatTnd((report.netProfitMillimes ?? 0) / 1000)} DT</p></div>
+                <span className="flex items-center gap-2"><StatusTag status={report.type === 'Z' ? 'closed' : 'open'}>{report.type}</StatusTag><MaterialIcon name="open_in_new" /></span>
+              </button>
+            ))}
+            {!loading && !error && reports.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">{t('common.noData')}</p>}
+          </div>
+        </section>
+      } detail={
+        selectedReport
+          ? <ReportView inline report={selectedReport} storeName={store?.name ?? ''} onClose={() => setSelectedReport(null)} />
+          : <p className="rounded-xl bg-surface-container-lowest p-6 font-body text-body-sm text-on-surface-variant">Select a report to preview it here.</p>
+      } />
+      {selectedReport && <div className="reports-mobile-preview"><ReportView report={selectedReport} storeName={store?.name ?? ''} onClose={() => setSelectedReport(null)} /></div>}
     </WorkspaceLayout>
   );
 }

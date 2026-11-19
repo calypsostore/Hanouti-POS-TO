@@ -4,6 +4,7 @@ import { MaterialIcon } from '../components/MaterialIcon';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
+import { CardGrid, PageHeader } from '../components/layout';
 import { t } from '../i18n/translations';
 import { activityService, type ActivityFilters } from '../services/activityService';
 import { useAuthStore } from '../stores/authStore';
@@ -53,9 +54,7 @@ export function OwnerActivityLogScreen() {
 
   return (
     <WorkspaceLayout title={t('nav.activityLog')} storeName={storeName} links={ownerWorkspaceLinks}>
-      <header className="mb-4">
-        <h1 className="font-display text-headline-lg text-on-surface">{t('nav.activityLog')}</h1>
-      </header>
+      <PageHeader title={t('nav.activityLog')} />
       {error && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       <section aria-label={t('activity.filters')} className="mb-4 grid gap-3 rounded-xl bg-surface-container-lowest p-4 shadow-card sm:grid-cols-2">
         <label className="flex flex-col gap-1 font-body text-label-sm text-on-surface">
@@ -112,12 +111,12 @@ export function OwnerActivityLogScreen() {
           </label>
         </div>
       </section>
-      <section aria-label={t('nav.activityLog')} className="flex min-w-0 flex-col gap-2">
+      <CardGrid className="mobile-card-list mobile-gap-2">
         {loading ? <ListSkeleton label="Loading activity" /> : entries.map((entry) => (
           <ActivityEntry key={entry.id} entry={entry} onSelect={() => setSelectedEntry(entry)} />
         ))}
         {!loading && !error && entries.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">{t('common.noData')}</p>}
-      </section>
+      </CardGrid>
       <BottomSheet open={selectedEntry !== null} onClose={() => setSelectedEntry(null)} title={t('activity.details')}>
         {selectedEntry && (
           <div className="flex flex-col gap-4">

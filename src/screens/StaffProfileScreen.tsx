@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { BottomNav } from '../components/BottomNav';
+import { PageContainer } from '../components/layout';
 import { Button } from '../components/Button';
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
 import { ListSkeleton } from '../components/ListSkeleton';
@@ -164,7 +165,8 @@ export function StaffProfileScreen() {
 
   return (
     <div className="min-h-screen bg-surface px-4 pb-24 pt-5">
-      <main className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+      <main className="mx-auto w-full p-0">
+      <PageContainer className="mx-auto flex flex-col gap-4">
         <header className="rounded-2xl bg-surface-container-lowest p-5 shadow-card">
           <div className="flex items-center gap-4">
             <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-primary-fixed font-display text-headline-md text-primary">{initials}</span>
@@ -256,9 +258,12 @@ export function StaffProfileScreen() {
         <ChangePasswordForm onError={setError} onNotice={setNotice} />
         {notice && <p role="status" className="rounded-lg bg-success-container p-3 font-body text-body-sm text-on-success-container">{notice}</p>}
 
-        <Button variant="secondary" onClick={() => navigate('/settings')} className="w-full"><MaterialIcon name="settings" />Settings</Button>
-        <Button variant="danger" onClick={() => { void lockNow(); }} className="w-full"><MaterialIcon name="lock" />Lock now</Button>
-        <Button variant="ghost" onClick={() => { void endSession(); }} className="w-full"><MaterialIcon name="logout" />Log out</Button>
+        <div className="staff-profile-actions flex flex-col gap-4">
+          <Button variant="secondary" onClick={() => navigate('/settings')} className="w-full"><MaterialIcon name="settings" />Settings</Button>
+          <Button variant="danger" onClick={() => { void lockNow(); }} className="w-full"><MaterialIcon name="lock" />Lock now</Button>
+          <Button variant="ghost" onClick={() => { void endSession(); }} className="w-full"><MaterialIcon name="logout" />Log out</Button>
+        </div>
+      </PageContainer>
       </main>
       <BottomNav />
     </div>

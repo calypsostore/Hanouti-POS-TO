@@ -7,6 +7,7 @@ import { LogoPicker } from '../components/LogoPicker';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
+import { CardGrid, PageHeader } from '../components/layout';
 import { ownerWorkspaceLinks } from '../app/navigation';
 import { t } from '../i18n/translations';
 import { formatTnd } from '../lib/format';
@@ -331,16 +332,12 @@ function OwnerCatalogContent() {
 
   return (
     <WorkspaceLayout title={t('catalog.title')} storeName={store?.name} links={ownerWorkspaceLinks}>
-      <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="font-display text-headline-lg text-on-surface">{t('catalog.title')}</h1>
-          <p className="mt-1 font-body text-body-md text-on-surface-variant">Manage products, categories, prices, and availability.</p>
-        </div>
-        <div className="flex gap-2">
+      <PageHeader title={t('catalog.title')} subtitle="Manage products, categories, prices, and availability." actions={
+        <>
           <Button variant="secondary" onClick={openNewCategory}><MaterialIcon name="create_new_folder" className="text-lg" />{t('catalog.addCategory')}</Button>
           <Button onClick={openNewItem}><MaterialIcon name="add" />{t('catalog.addItem')}</Button>
-        </div>
-      </header>
+        </>
+      } />
 
       <div className="mb-4 flex flex-col gap-3">
         <label className="relative block">
@@ -364,7 +361,7 @@ function OwnerCatalogContent() {
       {(error || notice) && <p role={error ? 'alert' : 'status'} className={`mb-4 rounded-lg p-3 font-body text-body-sm ${error ? 'bg-error-container text-on-error-container' : 'bg-success-container text-on-success-container'}`}>{error || notice}</p>}
 
       {loading ? <ListSkeleton label="Loading catalog" /> : visibleItems.length > 0 ? (
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <CardGrid className="mobile-gap-3">
           {visibleItems.map((item) => (
             <CatalogItemCard
               key={item.id}
@@ -375,7 +372,7 @@ function OwnerCatalogContent() {
               onDelete={() => setDeleteTarget(item)}
             />
           ))}
-        </section>
+        </CardGrid>
       ) : (
         <section className="flex min-h-64 flex-col items-center justify-center rounded-2xl border border-dashed border-outline-variant bg-surface-container-lowest p-8 text-center">
           <span className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-surface-container text-primary"><MaterialIcon name={search || categoryId !== 'all' || statusFilter !== 'all' ? 'search_off' : 'inventory_2'} className="text-2xl" /></span>

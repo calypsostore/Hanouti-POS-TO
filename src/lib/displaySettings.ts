@@ -5,10 +5,11 @@ export type DisplayTheme = 'light' | 'dark' | 'system';
 export interface DisplaySettings {
   theme: DisplayTheme;
   largeButtons: boolean;
+  compactDensity: boolean;
 }
 
 const STORAGE_KEY = 'hanouti.display-settings.v1';
-const DEFAULT_SETTINGS: DisplaySettings = { theme: 'system', largeButtons: false };
+const DEFAULT_SETTINGS: DisplaySettings = { theme: 'system', largeButtons: false, compactDensity: false };
 const listeners = new Set<() => void>();
 
 function isTheme(value: unknown): value is DisplayTheme {
@@ -23,6 +24,7 @@ function readStoredSettings(): DisplaySettings {
     return {
       theme: isTheme(value.theme) ? value.theme : DEFAULT_SETTINGS.theme,
       largeButtons: typeof value.largeButtons === 'boolean' ? value.largeButtons : DEFAULT_SETTINGS.largeButtons,
+      compactDensity: typeof value.compactDensity === 'boolean' ? value.compactDensity : DEFAULT_SETTINGS.compactDensity,
     };
   } catch {
     return DEFAULT_SETTINGS;
@@ -38,6 +40,7 @@ function applyDisplaySettings(settings: DisplaySettings) {
   const root = document.documentElement;
   root.classList.toggle('dark', isDark);
   root.classList.toggle('light', !isDark);
+  root.classList.toggle('compact-density', settings.compactDensity);
   const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
   if (themeColor) themeColor.content = isDark ? '#101719' : '#F4F8F9';
 }

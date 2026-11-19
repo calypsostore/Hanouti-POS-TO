@@ -8,6 +8,7 @@ import { t, type TranslationKey } from '../i18n/translations';
 import { notificationService, OWNER_NOTIFICATIONS_CHANGED_EVENT } from '../services/notificationService';
 import { orderService } from '../services/orderService';
 import { useAuthStore } from '../stores/authStore';
+import { PageContainer } from './layout/PageContainer';
 
 export interface WorkspaceLink {
   to: string;
@@ -31,6 +32,7 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
   const [moreOpen, setMoreOpen] = useState(false);
   const [pendingVoidCount, setPendingVoidCount] = useState(0);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('hanouti.sidebar-collapsed.v1') === 'true');
 
   useEffect(() => {
     const storeId = user?.storeId;
@@ -69,10 +71,58 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
   };
   const totalBadgeCount = pendingVoidCount + unreadNotificationCount;
   const isMoreActive = ownerMoreLinks.some((link) => location.pathname === link.to);
+  const toggleSidebar = () => {
+    setSidebarCollapsed((current) => {
+      const next = !current;
+      window.localStorage.setItem('hanouti.sidebar-collapsed.v1', String(next));
+      return next;
+    });
+  };
+  const sidebarGroups: Array<{ title: string; links: WorkspaceLink[] }> = isOwnerWorkspace
+    ? [
+        { title: 'Operations', links: links.filter((link) => ['/owner/dashboard', '/orders', '/owner/shifts', '/owner/voids'].includes(link.to)) },
+        { title: 'People', links: links.filter((link) => ['/owner/staff', '/owner/schedule', '/customers'].includes(link.to)) },
+        { title: 'Catalog', links: links.filter((link) => ['/owner/catalog', '/owner/inventory', '/owner/waste'].includes(link.to)) },
+        { title: 'Money', links: links.filter((link) => ['/owner/reports', '/owner/expenses', '/owner/suppliers'].includes(link.to)) },
+        { title: 'System', links: links.filter((link) => ['/owner/activity', '/notifications', '/owner/settings'].includes(link.to)) },
+      ]
+    : [{ title: 'System', links }];
 
   return (
-    <div className={`workspace-layout min-h-screen bg-surface pb-6${isOwnerWorkspace ? ' owner-workspace' : ''}`}>
+    <div className={`workspace-layout min-h-screen bg-surface pb-6${isOwnerWorkspace ? ' owner-workspace' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
       <TopBar title={title} storeName={storeName} onProfileClick={() => navigate('/settings')} />
+      <aside className="desktop-sidebar" aria-label={t('common.workspaceNavigation')}>
+        <div className="desktop-sidebar__brand">
+          <span className="desktop-sidebar__logo"><MaterialIcon name="local_cafe" /></span>
+          {!sidebarCollapsed && <span className="desktop-sidebar__app-name">{t('common.appName')}</span>}
+        </div>
+        <nav className="desktop-sidebar__nav">
+          {sidebarGroups.map((group) => (
+            <div className="desktop-sidebar__group" key={group.title}>
+              {!sidebarCollapsed && <p className="desktop-sidebar__group-title">{group.title}</p>}
+              {group.links.map((link) => (
+                <NavLink
+                  key={link.id ?? link.to}
+                  to={link.to}
+                  title={sidebarCollapsed ? t(link.label) : undefined}
+                  className={({ isActive }) => `desktop-sidebar__link${isActive ? ' is-active' : ''}`}
+                >
+                  <MaterialIcon name={link.icon} className="desktop-sidebar__icon" />
+                  {!sidebarCollapsed && <span className="desktop-sidebar__label">{t(link.label)}</span>}
+                  {badgeCountFor(link) > 0 && (
+                    <span className={`workspace-nav-badge${sidebarCollapsed ? ' workspace-nav-badge--collapsed' : ''}`}>
+                      {badgeCountFor(link) > 99 ? '99+' : badgeCountFor(link)}
+                    </span>
+                  )}
+                </NavLink>
+              ))}
+            </div>
+          ))}
+        </nav>
+        <button type="button" className="desktop-sidebar__collapse" onClick={toggleSidebar} aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+          <MaterialIcon name={sidebarCollapsed ? 'chevron_right' : 'chevron_left'} />
+        </button>
+      </aside>
       <nav aria-label={t('common.workspaceNavigation')} className={`workspace-desktop-nav scrollbar-hidden sticky top-16 z-20 flex gap-2 overflow-x-auto border-b border-outline-variant bg-surface/95 px-3 py-2 backdrop-blur-xl${isOwnerWorkspace ? ' owner-desktop-nav' : ''}`}>
         {links.map((link) => (
           <NavLink
@@ -92,7 +142,9 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
           </NavLink>
         ))}
       </nav>
-      <main className="mx-auto w-full max-w-5xl px-4 py-5">{children}</main>
+      <main className="workspace-main mx-auto w-full p-0">
+        <PageContainer>{children}</PageContainer>
+      </main>
       {isOwnerWorkspace && (
         <>
           <nav aria-label={t('nav.ownerNavigation')} className="owner-mobile-nav">

@@ -6,6 +6,7 @@ import { MaterialIcon } from '../components/MaterialIcon';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { TopBar } from '../components/TopBar';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
+import { CardGrid, PageContainer, PageHeader } from '../components/layout';
 import { adminWorkspaceLinks, ownerWorkspaceLinks } from '../app/navigation';
 import { t } from '../i18n/translations';
 import { notificationService, OWNER_NOTIFICATIONS_CHANGED_EVENT } from '../services/notificationService';
@@ -105,22 +106,17 @@ export function NotificationsScreen() {
 
   const content = (
     <div className="flex flex-col gap-4">
-      <header className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="font-display text-headline-lg text-on-surface">{t('nav.notifications')}</h1>
-          {unreadCount > 0 && <p className="mt-1 font-body text-body-sm text-on-surface-variant">{unreadCount} unread</p>}
-        </div>
-        {unreadCount > 0 && (
+      <PageHeader title={t('nav.notifications')} subtitle={unreadCount > 0 ? `${unreadCount} unread` : undefined} actions={unreadCount > 0 ? (
           <Button variant="secondary" className="min-h-11 shrink-0 px-3" onClick={() => { void markAllRead(); }}>
             <MaterialIcon name="done_all" className="text-lg" />
             Mark all read
           </Button>
-        )}
-      </header>
+        ) : undefined} />
       {error && <p role="alert" className="rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       {loading ? <ListSkeleton label="Loading notifications" /> : groups.map((group) => (
         <section key={group.title} aria-label={group.title} className="flex flex-col gap-2">
           <h2 className="px-1 font-body text-label-lg text-on-surface-variant">{group.title}</h2>
+          <CardGrid className="mobile-card-list mobile-gap-2">
           {group.entries.map((notification) => (
             <button
               key={notification.id}
@@ -146,6 +142,7 @@ export function NotificationsScreen() {
               <MaterialIcon name="chevron_right" className="mt-1 shrink-0 text-outline" />
             </button>
           ))}
+          </CardGrid>
         </section>
       ))}
       {!loading && !error && notifications.length === 0 && (
@@ -163,7 +160,7 @@ export function NotificationsScreen() {
   return (
     <div className="min-h-screen bg-surface pb-24">
       <TopBar title={t('nav.notifications')} storeName={storeName} onProfileClick={() => navigate('/settings')} />
-      <main className="mx-auto w-full max-w-3xl px-4 py-5">{content}</main>
+      <main className="mx-auto w-full p-0"><PageContainer>{content}</PageContainer></main>
       <BottomNav />
     </div>
   );

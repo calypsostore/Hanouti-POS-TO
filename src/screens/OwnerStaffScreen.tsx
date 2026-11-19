@@ -7,6 +7,7 @@ import { ListSkeleton } from '../components/ListSkeleton';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
+import { CardGrid, PageHeader, StatGrid } from '../components/layout';
 import { t } from '../i18n/translations';
 import { catalogService } from '../services/catalogService';
 import { shiftService } from '../services/shiftService';
@@ -484,18 +485,14 @@ function OwnerStaffContent() {
 
   return (
     <WorkspaceLayout title={t('staff.title')} storeName={storeName} links={ownerWorkspaceLinks}>
-      <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="font-display text-headline-lg text-on-surface">{t('staff.title')}</h1>
-          <p className="mt-1 font-body text-body-md text-on-surface-variant">Manage staff accounts and permission-based positions.</p>
-        </div>
-        <div className="flex gap-2">
+      <PageHeader title={t('staff.title')} subtitle="Manage staff accounts and permission-based positions." actions={
+        <>
           <Button variant="secondary" onClick={openNewPosition}><MaterialIcon name="badge" />{t('staff.newPosition')}</Button>
           <Button onClick={openNewStaff}><MaterialIcon name="person_add" />{t('staff.addStaff')}</Button>
-        </div>
-      </header>
+        </>
+      } />
 
-      <section className="mb-5 grid gap-3 sm:grid-cols-2">
+      <CardGrid className="mb-5 mobile-gap-3">
         {positions.map((position) => (
           <PositionCard
             key={position.id}
@@ -505,13 +502,13 @@ function OwnerStaffContent() {
             onClick={() => openEditPosition(position)}
           />
         ))}
-      </section>
-      <section aria-label="Staff summary" className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      </CardGrid>
+      <StatGrid className="mb-5">
         <StaffSummaryCard label="Total staff" value={staff.length} />
         <StaffSummaryCard label="Active" value={staff.filter((staffMember) => staffMember.isActive).length} />
         <StaffSummaryCard label="Suspended" value={staff.filter((staffMember) => !staffMember.isActive).length} />
         <StaffSummaryCard label="Currently on shift" value={onShiftCount} />
-      </section>
+      </StatGrid>
 
       <div className="sticky top-[7.5rem] z-10 -mx-4 bg-surface/95 px-4 py-2 backdrop-blur-xl">
         <label className="relative block">
@@ -576,7 +573,7 @@ function OwnerStaffContent() {
         </label>
       </div>
 
-      <section aria-label="Staff list" className="flex flex-col gap-3">
+      <CardGrid className="mobile-card-list mobile-gap-3">
         {loading ? <ListSkeleton label="Loading staff" /> : visibleStaff.map((staffMember) => {
           const currentShift = openShiftFor(staffMember);
           const lastShift = lastShiftFor(staffMember);
@@ -642,7 +639,7 @@ function OwnerStaffContent() {
             <p className="mt-1 font-body text-body-sm text-outline">Try a different search or filter.</p>
           </div>
         )}
-      </section>
+      </CardGrid>
 
       {(error || notice) && <p role={error ? 'alert' : 'status'} className={`mt-4 rounded-lg p-3 font-body text-body-sm ${error ? 'bg-error-container text-on-error-container' : 'bg-success-container text-on-success-container'}`}>{error || notice}</p>}
 

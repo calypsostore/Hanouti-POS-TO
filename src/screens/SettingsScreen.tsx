@@ -7,6 +7,7 @@ import { Keypad } from '../components/Keypad';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
+import { PageContainer } from '../components/layout';
 import { catalogService } from '../services/catalogService';
 import { notificationService } from '../services/notificationService';
 import { scheduleService } from '../services/scheduleService';
@@ -119,7 +120,7 @@ export function SettingsScreen() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
-  function saveDisplayPreference(changes: { theme?: DisplayTheme; largeButtons?: boolean }) {
+  function saveDisplayPreference(changes: { theme?: DisplayTheme; largeButtons?: boolean; compactDensity?: boolean }) {
     setError('');
     try {
       updateDisplaySettings(changes);
@@ -429,12 +430,22 @@ export function SettingsScreen() {
 
   const upcomingSchedule = mySchedule.filter((shift) => shift.publishedAt && scheduleDate && shift.date >= scheduleDate);
   const content = (
-    <div className="flex flex-col gap-4">
+    <div className="settings-content flex flex-col gap-4">
       <header className="mb-1">
         <h1 className="font-display text-headline-lg text-on-surface">{t('settings.title')}</h1>
         <p className="mt-1 font-body text-body-md text-on-surface-variant">{user?.name}</p>
       </header>
 
+      <nav className="settings-section-nav" aria-label="Settings sections">
+        <a href="#display-settings-heading">Display</a>
+        <a href="#store-settings-heading">Store</a>
+        <a href="#security-settings-heading">Security</a>
+        <a href="#customer-settings-heading">Customers</a>
+        <a href="#staff-rules-heading">Staff rules</a>
+        <a href="#notification-settings-heading">Notifications</a>
+        <a href="#help-section-heading">Help</a>
+      </nav>
+      <div className="settings-section-content">
       <section aria-labelledby="display-settings-heading" className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
         <div>
           <h2 id="display-settings-heading" className="font-display text-headline-md text-on-surface">Display</h2>
@@ -466,6 +477,18 @@ export function SettingsScreen() {
           <span>
             <span className="block">Large buttons</span>
             <span className="mt-1 block font-body text-body-sm text-on-surface-variant">Use larger product cards, quantity controls and action buttons in the POS.</span>
+          </span>
+        </label>
+        <label className="desktop-density-option flex min-h-12 items-center gap-3 rounded-xl bg-surface-container-low p-3 font-body text-label-md text-on-surface">
+          <input
+            type="checkbox"
+            checked={displaySettings.compactDensity}
+            onChange={(event) => saveDisplayPreference({ compactDensity: event.currentTarget.checked })}
+            className="h-5 w-5 accent-primary"
+          />
+          <span>
+            <span className="block">Compact density</span>
+            <span className="mt-1 block font-body text-body-sm text-on-surface-variant">Reduce desktop card spacing and type size to show more information.</span>
           </span>
         </label>
       </section>
@@ -718,12 +741,13 @@ export function SettingsScreen() {
 
       {(error || notice) && <p role={error ? 'alert' : 'status'} className={`rounded-lg p-3 font-body text-body-sm ${error ? 'bg-error-container text-on-error-container' : 'bg-success-container text-on-success-container'}`}>{error || notice}</p>}
       <Button variant="danger" onClick={() => { void handleLogout(); }} className="w-full"><MaterialIcon name="logout" />{t('app.logOut')}</Button>
+      </div>
     </div>
   );
 
   if (user?.role === 'owner') return <WorkspaceLayout title={t('settings.title')} storeName={store?.name} links={ownerWorkspaceLinks}>{content}</WorkspaceLayout>;
   if (user?.role === 'super_admin') return <WorkspaceLayout title={t('settings.title')} links={adminWorkspaceLinks}>{content}</WorkspaceLayout>;
-  return <div className="min-h-screen bg-surface px-4 pb-24 pt-5"><div className="mx-auto max-w-3xl">{content}</div><BottomNav /></div>;
+  return <div className="min-h-screen bg-surface pb-24"><main className="p-0"><PageContainer>{content}</PageContainer></main><BottomNav /></div>;
 }
 
 function HelpGuide({ title, steps }: { title: string; steps: HelpStep[] }) {

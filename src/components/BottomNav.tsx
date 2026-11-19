@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { MaterialIcon } from './MaterialIcon';
 import { t } from '../i18n/translations';
@@ -10,12 +11,33 @@ const staffNavigation = [
 ] as const;
 
 export function BottomNav() {
+  const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem('hanouti.sidebar-collapsed.v1') === 'true');
+
+  useEffect(() => {
+    document.documentElement.classList.add('staff-sidebar-layout');
+    document.documentElement.classList.toggle('staff-sidebar-collapsed', collapsed);
+    return () => {
+      document.documentElement.classList.remove('staff-sidebar-layout', 'staff-sidebar-collapsed');
+    };
+  }, [collapsed]);
+
+  const toggleCollapsed = () => {
+    setCollapsed((current) => {
+      const next = !current;
+      window.localStorage.setItem('hanouti.sidebar-collapsed.v1', String(next));
+      return next;
+    });
+  };
+
   return (
     <nav
       aria-label={t('nav.staffNavigation')}
-      className="fixed inset-x-0 bottom-0 z-40 bg-surface-container-lowest/95 shadow-sheet backdrop-blur-xl safe-bottom"
+      className="staff-bottom-nav fixed inset-x-0 bottom-0 z-40 bg-surface-container-lowest/95 shadow-sheet backdrop-blur-xl safe-bottom"
     >
-      <div className="flex h-16 items-stretch justify-around px-1">
+      <button type="button" className="staff-sidebar-collapse" onClick={toggleCollapsed} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+        <MaterialIcon name={collapsed ? 'chevron_right' : 'chevron_left'} />
+      </button>
+      <div className="staff-bottom-nav__items flex h-16 items-stretch justify-around px-1">
         {staffNavigation.map((item) => (
           <NavLink
             key={item.to}

@@ -136,17 +136,13 @@ export const scheduleService = {
     if (!store || !staff || staff.role !== 'staff' || staff.storeId !== input.storeId) {
       throw new Error('Select a staff member from this store.');
     }
-    const shifts = getSchedule();
-    const existing = shiftId ? shifts.find((shift) => shift.id === shiftId) : undefined;
-    if (shiftId && (!existing || existing.storeId !== input.storeId || existing.staffId !== input.staffId)) {
-      throw new Error('The planned shift could not be found.');
-    }
-    const updated: ScheduleShiftRecord = {
-      ...input,
-      id: existing?.id ?? createId('schedule'),
-      publishedAt: undefined,
-    };
     if (isSupabaseDriver()) {
+      const existing = shiftId
+        ? (await listSchedule(input.storeId)).find((shift) => shift.id === shiftId)
+        : undefined;
+      if (shiftId && (!existing || existing.staffId !== input.staffId)) {
+        throw new Error('The planned shift could not be found.');
+      }
       const saved = await saveRemoteSchedule(input, existing?.id);
       await activityService.log({
         storeId: saved.storeId,
@@ -158,6 +154,16 @@ export const scheduleService = {
       });
       return saved;
     }
+    const shifts = getSchedule();
+    const existing = shiftId ? shifts.find((shift) => shift.id === shiftId) : undefined;
+    if (shiftId && (!existing || existing.storeId !== input.storeId || existing.staffId !== input.staffId)) {
+      throw new Error('The planned shift could not be found.');
+    }
+    const updated: ScheduleShiftRecord = {
+      ...input,
+      id: existing?.id ?? createId('schedule'),
+      publishedAt: undefined,
+    };
     saveSchedule(existing
       ? shifts.map((shift) => shift.id === existing.id ? updated : shift)
       : [...shifts, updated]);

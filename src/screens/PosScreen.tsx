@@ -141,6 +141,21 @@ export function PosScreen() {
   const appliedPreselectionRef = useRef('');
   const categoryOptions = [{ id: 'all', name: t('pos.allItems'), icon: 'apps' }, ...categoryRecords];
 
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (event.key !== '/' || event.ctrlKey || event.metaKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.matches('input, textarea, select, [contenteditable="true"]')) return;
+      const searchInput = document.getElementById('pos-product-search');
+      if (searchInput) {
+        event.preventDefault();
+        searchInput.focus();
+      }
+    };
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, []);
+
   async function lockTerminal() {
     try {
       await lock();
@@ -691,6 +706,7 @@ export function PosScreen() {
       <label className="mt-2 block font-body text-label-sm text-on-surface-variant">
         Order note (optional)
         <input
+          id="pos-product-search"
           value={note}
           onChange={(event) => setOrderNote(event.target.value)}
           maxLength={200}
@@ -821,7 +837,7 @@ export function PosScreen() {
         </section>
       )}
 
-      <main className="grid tablet:grid-cols-[minmax(0,1.5fr)_minmax(300px,0.9fr)]">
+      <main className="pos-terminal-layout grid">
         <section className="min-w-0 pb-4">
           <div className="flex flex-col gap-3 px-3 pt-3">
             <label className="relative block">
@@ -833,7 +849,7 @@ export function PosScreen() {
                 className="h-12 w-full rounded-xl bg-surface-container-lowest pl-11 pr-4 font-body text-body-md shadow-card outline-none focus:ring-2 focus:ring-primary"
               />
             </label>
-            <div className="scrollbar-hidden -mx-3 flex gap-2 overflow-x-auto px-3 py-0.5">
+            <div className="pos-category-list scrollbar-hidden -mx-3 flex gap-2 overflow-x-auto px-3 py-0.5">
               {categoryOptions.map((item) => (
                 <Chip key={item.id} selected={category === item.id} onClick={() => setCategory(item.id)}>
                   {item.id === 'all' ? <MaterialIcon name={item.icon} className="text-lg" filled={category === item.id} /> : <ItemLogo id={item.icon} size="sm" />}
@@ -876,7 +892,7 @@ export function PosScreen() {
               <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">
                 {search ? 'No products match your search.' : 'No products are available yet.'}
               </p>
-            ) : <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
+            ) : <div className="pos-catalog-grid grid grid-cols-2 gap-3 xl:grid-cols-3">
               {filteredItems.map((item) => (
                 <ItemCard
                   key={item.id}

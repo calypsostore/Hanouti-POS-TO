@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
+import { CardGrid, PageHeader, StatGrid } from '../components/layout';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { Button } from '../components/Button';
@@ -221,6 +222,20 @@ function OwnerDashboardContent() {
     }
     return [...totals.values()].sort((a, b) => b.sales - a.sales);
   }, [periodOrders, staff]);
+  const salesByDate = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const order of periodOrders) {
+      if (order.status !== 'done') continue;
+      const date = new Date(order.createdAt);
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      totals.set(key, (totals.get(key) ?? 0) + order.totalMillimes / 1000);
+    }
+    return [...totals].sort(([left], [right]) => left.localeCompare(right)).map(([date, sales]) => ({
+      date,
+      label: new Date(`${date}T00:00:00`).toLocaleDateString([], { month: 'short', day: 'numeric' }),
+      sales,
+    }));
+  }, [periodOrders]);
   const recentOrders = periodOrders.slice(0, 6);
   const peakHours = useMemo(() => getOrdersPerHour(periodOrders), [periodOrders]);
   const targetMillimes = store?.dailySalesTargetMillimes ?? 0;
@@ -233,15 +248,45 @@ function OwnerDashboardContent() {
   const salesComparisonLabel = salesDifferencePercent === undefined
     ? (todaySalesMillimes > 0 ? t('owner.newSalesLastWeek') : t('owner.noSalesLastWeek'))
     : `${salesDifference >= 0 ? '+' : '-'}${formatTnd(Math.abs(salesDifference) / 1000)} DT (${salesDifferencePercent > 0 ? '+' : ''}${salesDifferencePercent}%) ${t('owner.vsLastWeek')}`;
+  const renderTargetCard = (className: string) => (
+    <article className={`dashboard-target-card rounded-2xl bg-surface-container-lowest p-5 shadow-card ${className}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="font-display text-headline-md text-on-surface">{t('owner.salesTarget')}</h2>
+          <p className="mt-1 font-body text-body-sm text-on-surface-variant">
+            Today · {formatTnd(todaySalesMillimes / 1000)} DT
+            {targetMillimes > 0 && ` / ${formatTnd(targetMillimes / 1000)} DT`}
+          </p>
+        </div>
+        <MaterialIcon name="flag" className="shrink-0 text-2xl text-primary" />
+      </div>
+      {targetMillimes > 0 ? (
+        <>
+          <div
+            role="progressbar"
+            aria-label={t('owner.salesTarget')}
+            aria-valuemin={0}
+            aria-valuemax={targetMillimes}
+            aria-valuenow={Math.min(todaySalesMillimes, targetMillimes)}
+            className="mt-4 h-3 overflow-hidden rounded-full bg-surface-container"
+          >
+            <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${targetProgressWidth}%` }} />
+          </div>
+          <p className="mt-2 font-body text-label-md text-on-surface">{t('owner.salesProgress', { progress: targetProgress })}</p>
+        </>
+      ) : (
+        <button type="button" onClick={() => navigate('/owner/settings')} className="mt-3 min-h-12 text-left font-body text-label-md text-primary underline">
+          {t('owner.targetNotSet')}
+        </button>
+      )}
+      <p className="mt-2 font-body text-body-sm text-on-surface-variant">{salesComparisonLabel}</p>
+    </article>
+  );
 
   return (
     <>
     <WorkspaceLayout title={t('owner.dashboard')} storeName={store?.name} links={ownerWorkspaceLinks}>
-      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="font-display text-headline-lg text-on-surface">{t('owner.dashboard')}</h1>
-          <p className="mt-1 font-body text-body-md text-on-surface-variant">{store?.name}</p>
-        </div>
+      <PageHeader title={t('owner.dashboard')} subtitle={store?.name} actions={
         <div className="flex gap-1 rounded-xl bg-surface-container-high p-1">
           {(Object.keys(periodLabels) as Period[]).map((value) => (
             <button key={value} type="button" onClick={() => selectPeriod(value)} className={`min-h-10 rounded-lg px-3 font-body text-label-sm ${period === value ? 'bg-primary text-on-primary shadow-card' : 'text-on-surface-variant'}`}>
@@ -249,52 +294,20 @@ function OwnerDashboardContent() {
             </button>
           ))}
         </div>
-      </div>
+      } />
 
-      <article className="rounded-2xl bg-surface-container-lowest p-5 shadow-card">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h2 className="font-display text-headline-md text-on-surface">{t('owner.salesTarget')}</h2>
-            <p className="mt-1 font-body text-body-sm text-on-surface-variant">
-              Today · {formatTnd(todaySalesMillimes / 1000)} DT
-              {targetMillimes > 0 && ` / ${formatTnd(targetMillimes / 1000)} DT`}
-            </p>
-          </div>
-          <MaterialIcon name="flag" className="shrink-0 text-2xl text-primary" />
-        </div>
-        {targetMillimes > 0 ? (
-          <>
-            <div
-              role="progressbar"
-              aria-label={t('owner.salesTarget')}
-              aria-valuemin={0}
-              aria-valuemax={targetMillimes}
-              aria-valuenow={Math.min(todaySalesMillimes, targetMillimes)}
-              className="mt-4 h-3 overflow-hidden rounded-full bg-surface-container"
-            >
-              <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${targetProgressWidth}%` }} />
-            </div>
-            <p className="mt-2 font-body text-label-md text-on-surface">{t('owner.salesProgress', { progress: targetProgress })}</p>
-          </>
-        ) : (
-          <button type="button" onClick={() => navigate('/owner/settings')} className="mt-3 min-h-12 text-left font-body text-label-md text-primary underline">
-            {t('owner.targetNotSet')}
-          </button>
-        )}
-        <p className="mt-2 font-body text-body-sm text-on-surface-variant">{salesComparisonLabel}</p>
-      </article>
+      {renderTargetCard('lg:hidden')}
 
-      <section aria-label="Period summary" className="mt-4 flex flex-col gap-3">
+      <StatGrid className="owner-kpi-grid mt-4">
         <SummaryCard icon="payments" label={`${t('finance.sales')} · ${t(periodLabels[period])}`} value={`${formatTnd(summary.salesCollectedMillimes / 1000)} DT`} tone="primary" />
-        <p className="-mt-2 px-1 font-body text-body-xs text-on-surface-variant">{t('finance.salesHelp')} {t('finance.receivableHelp')}</p>
         <SummaryCard icon="request_quote" label={`${t('finance.expenses')} · ${t(periodLabels[period])}`} value={`${formatTnd(summary.expensesMillimes / 1000)} DT`} tone="warning" />
         <SummaryCard icon="account_balance" label={`${t('finance.netProfit')} · ${t(periodLabels[period])}`} value={`${formatTnd(summary.netProfitMillimes / 1000)} DT`} tone={summary.netProfitMillimes < 0 ? 'error' : 'success'} />
         <SummaryCard icon="account_balance_wallet" label={t('finance.receivable')} value={`${formatTnd(summary.receivableMillimes / 1000)} DT`} tone="warning" />
         <SummaryCard icon="receipt_long" label={`Orders · ${t(periodLabels[period])}`} value={String(summary.orderCount)} tone="success" />
         <SummaryCard icon="price_change" label={`${t('owner.cashDifferences')} · ${t(periodLabels[period])}`} value={formatSignedAmount(summary.cashDifferenceMillimes)} tone={summary.cashDifferenceMillimes === 0 ? 'success' : 'warning'} />
-      </section>
+      </StatGrid>
 
-      <section aria-label="Owner alerts" className="mt-4 flex flex-col gap-3">
+      <CardGrid className="owner-alert-grid mobile-card-list mobile-gap-3 mt-4">
         <button type="button" onClick={() => navigate('/owner/voids')} className="w-full rounded-2xl bg-surface-container-lowest p-5 text-left shadow-card">
           <div className="flex items-center justify-between gap-3">
             <h2 className="font-display text-headline-md text-on-surface">{t('owner.pendingVoidRequests')}</h2>
@@ -339,7 +352,7 @@ function OwnerDashboardContent() {
             {currentlyWorking.length === 0 && <p className="font-body text-body-sm text-on-surface-variant">{t('owner.noStaffOnShift')}</p>}
           </div>
         </article>
-      </section>
+      </CardGrid>
 
       {ownerNotifications.length > 0 && (
         <section aria-label="Owner notifications" className="mt-4 flex flex-col gap-2">
@@ -368,7 +381,7 @@ function OwnerDashboardContent() {
           {loadError && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{loadError}</p>}
           {overdueActionError && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{overdueActionError}</p>}
           {loading && <ListSkeleton rows={3} label="Loading dashboard lists" />}
-        <div className="flex flex-col gap-2">
+        <CardGrid className="mobile-gap-2 overdue-tabs-grid">
           {overdueCustomers.map((entry) => (
             <OverdueCustomerRow
               key={entry.customer.id}
@@ -379,12 +392,14 @@ function OwnerDashboardContent() {
             />
           ))}
           {overdueCustomers.length === 0 && <p className="rounded-xl bg-surface-container-low p-4 font-body text-body-sm text-outline">No overdue customer accounts.</p>}
-        </div>
+        </CardGrid>
         <p className="mt-3 font-body text-body-xs text-on-surface-variant">Share opens your device or browser share sheet. No message is sent automatically.</p>
       </section>
 
-      <section className="mt-4 flex flex-col gap-3">
-        <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+      <section className="owner-chart-grid mobile-gap-3 mt-4 grid grid-cols-1 gap-4 lg:grid-cols-12">
+        {renderTargetCard('hidden lg:block dashboard-target-card--desktop')}
+
+        <article className="dashboard-peak-chart rounded-2xl bg-surface-container-lowest p-4 shadow-card">
           <h2 className="font-display text-headline-md text-on-surface">{t('owner.peakHours')} · {t(periodLabels[period])}</h2>
           <p className="mt-1 font-body text-body-sm text-on-surface-variant">Completed orders by hour of day.</p>
           <div className="mt-3 h-64 min-w-0">
@@ -400,7 +415,25 @@ function OwnerDashboardContent() {
           </div>
         </article>
 
-        <article className="rounded-2xl bg-surface-container-lowest p-5 shadow-card">
+        <article className="dashboard-sales-chart rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+          <h2 className="font-display text-headline-md text-on-surface">Sales over time · {t(periodLabels[period])}</h2>
+          <p className="mt-1 font-body text-body-sm text-on-surface-variant">Completed order sales by day.</p>
+          {salesByDate.length ? (
+            <div className="mt-3 h-64 min-w-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={salesByDate} margin={{ left: 0, right: 12, top: 8, bottom: 8 }}>
+                  <CartesianGrid stroke="#E1ECEE" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 10 }} minTickGap={20} />
+                  <YAxis width={48} tick={{ fontSize: 10 }} />
+                  <Tooltip formatter={(value) => [`${formatTnd(Number(value))} DT`, 'Sales']} />
+                  <Bar dataKey="sales" name="Sales" fill="#0F5F6E" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : <p className="mt-3 rounded-xl bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('common.noData')}</p>}
+        </article>
+
+        <article className="dashboard-list-card rounded-2xl bg-surface-container-lowest p-5 shadow-card">
           <h2 className="font-display text-headline-md text-on-surface">{t('owner.bestSellers')} · {t(periodLabels[period])}</h2>
           <p className="mt-1 font-body text-body-sm text-on-surface-variant">Completed product sales for the selected period.</p>
           {bestSellers.length ? (
@@ -408,7 +441,7 @@ function OwnerDashboardContent() {
           ) : <p className="mt-3 rounded-xl bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('owner.noItemsSold')}</p>}
         </article>
 
-        <article className="rounded-2xl bg-surface-container-lowest p-5 shadow-card">
+        <article className="dashboard-list-card rounded-2xl bg-surface-container-lowest p-5 shadow-card">
           <h2 className="font-display text-headline-md text-on-surface">{t('owner.slowSellers')} · {t(periodLabels[period])}</h2>
           <p className="mt-1 font-body text-body-sm text-on-surface-variant">Products with the fewest completed sales, including unsold items.</p>
           {slowSellers.length ? (
@@ -416,7 +449,7 @@ function OwnerDashboardContent() {
           ) : <p className="mt-3 rounded-xl bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('owner.noItemsSold')}</p>}
         </article>
 
-        <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+        <article className="dashboard-staff-chart rounded-2xl bg-surface-container-lowest p-4 shadow-card">
           <h2 className="mb-3 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="group" className="text-primary" />Sales by staff member · {t(periodLabels[period])}</h2>
           {salesByStaff.length ? (
             <div className="h-64">
@@ -434,7 +467,7 @@ function OwnerDashboardContent() {
         </article>
       </section>
 
-      <section className="mt-4 flex flex-col gap-3">
+      <CardGrid className="mobile-gap-3 mt-4">
         <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
           <h2 className="mb-4 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="receipt_long" className="text-primary" />Recent orders</h2>
           <div className="flex flex-col gap-2">
@@ -464,11 +497,11 @@ function OwnerDashboardContent() {
             {summary.shifts.length === 0 && <p className="rounded-xl bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('common.noData')}</p>}
           </div>
         </article>
-      </section>
+      </CardGrid>
 
       <section className="mt-4">
         <h2 className="mb-3 font-display text-headline-md text-on-surface">Quick access</h2>
-        <div className="flex flex-col gap-3">
+        <CardGrid columns={4} className="mobile-gap-3">
           {[
             { label: 'Orders', icon: 'receipt_long', to: '/orders' },
             { label: 'Staff', icon: 'groups', to: '/owner/staff' },
@@ -481,7 +514,7 @@ function OwnerDashboardContent() {
               <span className="font-body text-label-lg text-on-surface">{item.label}</span>
             </button>
           ))}
-        </div>
+        </CardGrid>
       </section>
     </WorkspaceLayout>
     {overdueStatement && (
@@ -506,9 +539,17 @@ function SummaryCard({ icon, label, value, tone }: { icon: string; label: string
     error: 'bg-error-container text-on-error-container',
   };
   return (
-    <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-      <span className={`flex h-10 w-10 items-center justify-center rounded-xl ${tones[tone]}`}><MaterialIcon name={icon} /></span>
-      <p className="mt-3 font-body text-body-sm text-on-surface-variant">{label}</p>
+    <article className="stat-card relative flex h-full min-w-0 flex-col rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+      <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${tones[tone]}`}><MaterialIcon name={icon} className="text-lg" /></span>
+      <p className="mt-3 flex items-center gap-1 font-body text-body-sm text-on-surface-variant">
+        {label}
+        {label.startsWith('Sales') && <span className="sales-help-tooltip">
+          <button type="button" aria-label={`${t('finance.salesHelp')} ${t('finance.receivableHelp')}`} className="flex h-6 w-6 items-center justify-center rounded-full text-outline focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+            <MaterialIcon name="info" className="text-base" />
+          </button>
+          <span role="tooltip">{t('finance.salesHelp')} {t('finance.receivableHelp')}</span>
+        </span>}
+      </p>
       <p className="mt-1 font-display text-headline-md tabular-nums text-on-surface">{value}</p>
     </article>
   );

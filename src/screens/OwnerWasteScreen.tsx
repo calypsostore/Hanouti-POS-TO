@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
+import { CardGrid, PageHeader } from '../components/layout';
 import { ownerWorkspaceLinks } from '../app/navigation';
 import { formatTnd } from '../lib/format';
 import { compService } from '../services/compService';
@@ -77,10 +78,7 @@ export function OwnerWasteScreen() {
 
   return (
     <WorkspaceLayout title="Waste log" storeName={storeName} links={ownerWorkspaceLinks}>
-      <header className="mb-5">
-        <h1 className="font-display text-headline-lg text-on-surface">Waste log</h1>
-        <p className="mt-1 font-body text-body-md text-on-surface-variant">Review comps and waste recorded during staff shifts.</p>
-      </header>
+      <PageHeader title="Waste log" subtitle="Review comps and waste recorded during staff shifts." />
 
       <section aria-label="Waste log filters" className="mb-4 grid gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card sm:grid-cols-2 lg:grid-cols-4">
         <label className="font-body text-label-md text-on-surface">Staff
@@ -110,7 +108,7 @@ export function OwnerWasteScreen() {
       </section>
 
       {error && <p role="alert" className="mb-4 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
-      <section aria-label="Comp and waste records" className="flex flex-col gap-2">
+      <CardGrid className="mobile-card-list mobile-gap-2">
         {loading ? <ListSkeleton label="Loading waste records" /> : filteredComps.map((comp) => (
           <article key={comp.id} className="flex flex-col gap-3 rounded-xl bg-surface-container-lowest p-4 shadow-card sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-start gap-3">
@@ -129,7 +127,7 @@ export function OwnerWasteScreen() {
         {!loading && !error && filteredComps.length === 0 && (
           <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">No comps match these filters.</p>
         )}
-      </section>
+      </CardGrid>
     </WorkspaceLayout>
   );
 }

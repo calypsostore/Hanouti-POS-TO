@@ -286,7 +286,7 @@ jobs:
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
           RELEASE_VERSION_CODE: ${{ steps.version.outputs.version_code }}
-          RELEASE_NOTES: ${{ inputs.notes || 'Add notification permissions and mandatory updates; improve update diagnostics and desktop layout.' }}
+          RELEASE_NOTES: ${{ inputs.notes || 'Isolate Z reports by shift and hide archived-period orders from Active Orders.' }}
         run: |
           export RELEASE_VERSION RELEASE_VERSION_CODE RELEASE_NOTES
           python3 -c 'import json, os; repo=os.environ["GITHUB_REPOSITORY"]; version=os.environ["RELEASE_VERSION"]; print(json.dumps({"versionCode": int(os.environ["RELEASE_VERSION_CODE"]), "versionName": version, "apkUrl": f"https://github.com/{repo}/releases/download/v{version}/7anouti-POS-v{version}.apk", "notes": os.environ.get("RELEASE_NOTES", "")}))' > version.json
@@ -296,7 +296,7 @@ jobs:
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: 7anouti-POS v${{ steps.version.outputs.version }}
-          body: ${{ inputs.notes || 'Add notification permissions and mandatory updates; improve update diagnostics and desktop layout.' }}
+          body: ${{ inputs.notes || 'Isolate Z reports by shift and hide archived-period orders from Active Orders.' }}
           files: |
             ${{ steps.apk.outputs.path }}
             version.json

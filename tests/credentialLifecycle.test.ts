@@ -28,6 +28,36 @@ describe('credential lifecycle', () => {
     expect(duplicate.store.code).toBe('orbt1');
   });
 
+  it('requires new owners to set a password and personal PIN, and lets them update their profile', async () => {
+    const { owner, temporaryPassword, store } = await userService.createOwnerAccount({
+      name: 'New Owner',
+      email: 'new-owner@example.com',
+      storeName: 'New Store',
+    });
+
+    const signedIn = await authService.login(owner.email ?? '', temporaryPassword, ['owner']);
+    expect(signedIn.mustChangePassword).toBe(true);
+    expect(signedIn.mustSetPin).toBe(true);
+
+    const passwordUpdated = await authService.setInitialPassword(owner.id, 'OwnerPassword1');
+    expect(passwordUpdated.mustChangePassword).toBe(false);
+    expect(passwordUpdated.mustSetPin).toBe(true);
+    const pinUpdated = await authService.setPersonalPin(owner.id, '1234');
+    expect(pinUpdated.mustSetPin).toBe(false);
+
+    await authService.changePersonalPin(owner.id, '1234', '5678');
+    await userService.updateOwnerProfile(owner.id, { name: 'Updated Owner', phone: '55512345' });
+    const updatedOwner = await userService.getUser(owner.id);
+    expect(updatedOwner?.name).toBe('Updated Owner');
+    expect(updatedOwner?.phone).toBe('55512345');
+    expect(updatedOwner?.email).toBe('new-owner@example.com');
+
+    await expect(userService.updateStoreInfo(store.id, owner.id, { name: 'Updated Store' })).resolves.toMatchObject({
+      id: store.id,
+      name: 'Updated Store',
+    });
+  });
+
   it('migrates the local demo store and its staff usernames', async () => {
     localStorage.setItem('7anouti-pos:stores', JSON.stringify(seedStores.map((store) => ({ ...store, code: 'cafe12' }))));
     localStorage.setItem('7anouti-pos:users', JSON.stringify(seedUsers.map((member) => (
@@ -104,9 +134,10 @@ describe('credential lifecycle', () => {
     const owner = await authService.login('owner@cafelamarsa.tn', temporaryPassword, ['owner']);
 
     expect(owner.mustChangePassword).toBe(true);
-    expect(owner.mustSetPin).toBe(false);
+    expect(owner.mustSetPin).toBe(true);
     const updatedOwner = await authService.setInitialPassword(owner.id, 'OwnerPassword1');
     expect(updatedOwner.mustChangePassword).toBe(false);
-    expect(updatedOwner.mustSetPin).toBe(false);
+    expect(updatedOwner.mustSetPin).toBe(true);
+    await expect(authService.setPersonalPin(owner.id, '1234')).resolves.toMatchObject({ mustSetPin: false });
   });
 });

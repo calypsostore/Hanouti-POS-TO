@@ -108,10 +108,13 @@ authenticated API requests.
 
 ## Known limits
 
-- Native local notifications are supported; remote push delivery (FCM/APNs) is
-  not implemented yet.
+- Native foreground/background delivery uses Supabase Realtime. Production
+  killed-app delivery requires FCM setup and a new Android APK; see
+  `RELEASING.md`.
 - The offline queue only covers new orders. Shifts, voids, and tab payments
   require an internet connection.
+- Killed-app FCM delivery depends on completing the Firebase/APK and Supabase
+  push setup in `RELEASING.md`; foreground delivery is handled by Realtime.
 
 ## Build and preview
 

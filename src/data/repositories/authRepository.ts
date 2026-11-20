@@ -142,7 +142,7 @@ export const authRepository = {
   async setPersonalPin(userId: string, pin: string): Promise<UserSummary> {
     if (!/^\d{4}$/.test(pin)) throw new Error('PIN must contain exactly 4 digits.');
     const user = await currentUser();
-    if (!user || user.id !== userId) throw new Error('You must sign in as this staff member to set a PIN.');
+    if (!user || user.id !== userId || (user.role !== 'staff' && user.role !== 'owner')) throw new Error('You must sign in as this account to set a PIN.');
     const { error } = await getSupabaseClient().rpc('set_personal_pin', { p_pin: pin });
     if (error) throwSupabaseError(error, 'Could not set the personal PIN');
     if (typeof window !== 'undefined') window.sessionStorage.removeItem(PIN_LOCK_KEY);
@@ -154,7 +154,7 @@ export const authRepository = {
   async changePersonalPin(userId: string, currentPin: string, newPin: string): Promise<void> {
     if (!/^\d{4}$/.test(currentPin) || !/^\d{4}$/.test(newPin)) throw new Error('PIN must contain exactly 4 digits.');
     const user = await currentUser();
-    if (!user || user.id !== userId || user.role !== 'staff') throw new Error('You must sign in as this staff member to change a PIN.');
+    if (!user || user.id !== userId || (user.role !== 'staff' && user.role !== 'owner')) throw new Error('You must sign in as this account to change a PIN.');
     if (user.mustChangePassword || user.mustSetPin) throw new Error('Complete the initial password and PIN setup first.');
     const { error } = await getSupabaseClient().rpc('change_personal_pin', {
       p_current_pin: currentPin,
@@ -203,7 +203,7 @@ export const authRepository = {
     if (passwordError) throwSupabaseError(passwordError, 'Could not update the password');
     const { error } = await client.rpc('complete_initial_password');
     if (error) throwSupabaseError(error, 'Could not complete the initial password setup');
-    await writeActivity(user, 'staff.password_changed', `${user.name} set an initial password.`);
+    await writeActivity(user, `${user.role}.password_changed`, `${user.name} set an initial password.`);
     const updatedUser = await currentUser();
     if (!updatedUser) throw new Error('The account could not be loaded after changing the password.');
     return updatedUser;
@@ -217,7 +217,7 @@ export const authRepository = {
     await verifyCurrentPassword(currentPassword);
     const { error } = await client.auth.updateUser({ password: newPassword });
     if (error) throwSupabaseError(error, 'Could not update the password');
-    await writeActivity(user, 'staff.password_changed', `${user.name} changed their password.`);
+    await writeActivity(user, `${user.role}.password_changed`, `${user.name} changed their password.`);
   },
 
   async logout(): Promise<void> {

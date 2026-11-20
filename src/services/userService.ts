@@ -3,6 +3,8 @@ import { readData, removeData, writeData } from './storage';
 import { seedPositions, seedStores, seedUsers } from './seedData';
 import { hashSecret, verifySecret } from './secretService';
 import { activityService } from './activityService';
+import { getLogoDefinition } from '../data/logoCatalog';
+import { authService } from './authService';
 import { getSupabaseClient } from '../data/supabaseClient';
 import { isSupabaseDriver } from '../data/driver';
 import { createOwnerAccount, createStaff, resetPassword } from '../data/repositories/accountRepository';
@@ -136,7 +138,9 @@ function withoutPassword(user: UserRecord): UserSummary {
   const { password: _password, passwordHash: _passwordHash, pinHash: _pinHash, ...safeUser } = user;
   return {
     ...safeUser,
-    mustSetPin: user.role === 'staff' && (user.mustSetPin ?? (user.mustChangePassword || !user.pinHash)),
+    mustSetPin: user.role === 'staff'
+      ? user.mustSetPin ?? (user.mustChangePassword || !user.pinHash)
+      : user.role === 'owner' && (user.mustSetPin ?? false),
   };
 }
 
@@ -204,6 +208,16 @@ export const userService = {
     changes: {
       defaultSettlementTerms?: StoreSettings['defaultSettlementTerms'];
       notificationPreferences?: Partial<StoreSettings['notificationPreferences']>;
+      ticketHeaderText?: string[];
+      ticketFooterText?: string[];
+      reportFooterText?: string[];
+      storeLogoId?: string;
+      showLogo?: boolean;
+      showAddress?: boolean;
+      showPhone?: boolean;
+      showStaffName?: boolean;
+      showDateTime?: boolean;
+      paperWidth?: 58 | 80;
     },
   ): Promise<StoreRecord> {
     if (isSupabaseDriver()) {
@@ -214,6 +228,9 @@ export const userService = {
       if (changes.notificationPreferences &&
         Object.values(changes.notificationPreferences).some((enabled) => typeof enabled !== 'boolean')) {
         throw new Error('Notification preferences must be enabled or disabled.');
+      }
+      if (changes.storeLogoId !== undefined && changes.storeLogoId !== '' && !getLogoDefinition(changes.storeLogoId)) {
+        throw new Error('Choose a logo from the platform logo catalog.');
       }
       const store = await getRemoteStore(storeId);
       if (!store || store.ownerId !== ownerId) throw new Error('Only this store owner can change store settings.');
@@ -250,6 +267,9 @@ export const userService = {
     if (changes.notificationPreferences &&
       Object.values(changes.notificationPreferences).some((enabled) => typeof enabled !== 'boolean')) {
       throw new Error('Notification preferences must be enabled or disabled.');
+    }
+    if (changes.storeLogoId !== undefined && changes.storeLogoId !== '' && !getLogoDefinition(changes.storeLogoId)) {
+      throw new Error('Choose a logo from the platform logo catalog.');
     }
     const currentSettings = resolveStoreSettings(store.settings);
     const settings: StoreSettings = {
@@ -487,6 +507,7 @@ export const userService = {
       email: input.email.trim(),
       passwordHash: await hashSecret(temporaryPassword),
       mustChangePassword: true,
+      mustSetPin: true,
       isActive: true,
       storeId: store.id,
       createdAt: new Date().toISOString(),
@@ -637,6 +658,8 @@ export const userService = {
       passwordHash: await hashSecret(temporaryPassword),
       password: undefined,
       mustChangePassword: true,
+      pinHash: undefined,
+      mustSetPin: true,
       sessionVersion: (owner.sessionVersion ?? 0) + 1,
     };
     saveUsers(users.map((candidate) => candidate.id === ownerId ? updated : candidate));
@@ -648,7 +671,7 @@ export const userService = {
       entityType: 'owner',
       entityId: owner.id,
       before: { mustChangePassword: owner.mustChangePassword },
-      after: { mustChangePassword: true },
+      after: { mustChangePassword: true, mustSetPin: true, hasPin: false },
     });
     return temporaryPassword;
   },
@@ -1135,10 +1158,56 @@ export const userService = {
     return result.valid;
   },
 
+  async updateOwnerProfile(ownerId: string, changes: { name: string; phone: string }): Promise<UserSummary> {
+    const name = changes.name.trim();
+    const phone = changes.phone.trim();
+    if (!name || name.length > 200) throw new Error('Owner name is required and must be 200 characters or fewer.');
+    if (phone.length > 100) throw new Error('Phone must be 100 characters or fewer.');
+    if (isSupabaseDriver()) {
+      const client = getSupabaseClient();
+      const { data: authData, error: authError } = await client.auth.getUser();
+      if (authError || authData.user?.id !== ownerId) {
+        throw new Error('Only the signed-in store owner can update this profile.', { cause: authError });
+      }
+      const { error } = await client.rpc('update_owner_profile', {
+        p_name: name,
+        p_phone: phone || null,
+      });
+      if (error) throw new Error(`Could not update owner profile: ${error.message}`, { cause: error });
+      const updatedOwner = await getProfile(ownerId);
+      if (!updatedOwner || updatedOwner.role !== 'owner') throw new Error('The updated owner profile could not be loaded.');
+      return updatedOwner;
+    }
+    const currentUser = await authService.getCurrentUser();
+    if (!currentUser || currentUser.id !== ownerId || currentUser.role !== 'owner') {
+      throw new Error('Only the signed-in store owner can update this profile.');
+    }
+    const users = getUsers();
+    const owner = users.find((candidate) =>
+      candidate.id === ownerId && candidate.role === 'owner' && candidate.storeId === currentUser.storeId,
+    );
+    if (!owner) throw new Error('The owner profile could not be found.');
+    const updatedOwner = { ...owner, name, phone: phone || undefined };
+    saveUsers(users.map((candidate) => candidate.id === ownerId ? updatedOwner : candidate));
+    if (owner.storeId) {
+      await logUserMutation({
+        storeId: owner.storeId,
+        actorId: owner.id,
+        action: 'owner.profile_changed',
+        summary: 'Updated owner profile details.',
+        entityType: 'owner',
+        entityId: owner.id,
+        before: { name: owner.name, phone: owner.phone },
+        after: { name, phone: phone || undefined },
+      });
+    }
+    return withoutPassword(updatedOwner);
+  },
+
   async updateStoreInfo(
     storeId: string,
     ownerId: string,
-    changes: { name?: string; dailySalesTargetMillimes?: number },
+    changes: { name?: string; dailySalesTargetMillimes?: number; address?: string; phone?: string; taxId?: string },
   ): Promise<StoreRecord> {
     if (isSupabaseDriver()) {
       if (changes.name !== undefined && !changes.name.trim()) throw new Error('Store name is required.');
@@ -1151,6 +1220,9 @@ export const userService = {
       const { error } = await getSupabaseClient().from('stores').update({
         ...(changes.name !== undefined ? { name: changes.name.trim() } : {}),
         ...(changes.dailySalesTargetMillimes !== undefined ? { daily_sales_target_millimes: changes.dailySalesTargetMillimes } : {}),
+        ...(changes.address !== undefined ? { address: changes.address.trim() || null } : {}),
+        ...(changes.phone !== undefined ? { phone: changes.phone.trim() || null } : {}),
+        ...(changes.taxId !== undefined ? { tax_id: changes.taxId.trim() || null } : {}),
       }).eq('store_id', storeId);
       if (error) throw new Error(`Could not update store information: ${error.message}`, { cause: error });
       const updated = { ...store, ...changes, name: changes.name?.trim() ?? store.name };

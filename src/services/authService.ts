@@ -51,11 +51,13 @@ function withoutPassword(user: UserRecord): UserSummary {
   const { password: _password, passwordHash: _passwordHash, pinHash: _pinHash, ...safeUser } = user;
   return {
     ...safeUser,
-    mustSetPin: user.role === 'staff' && (user.mustSetPin ?? (user.mustChangePassword || !user.pinHash)),
+    mustSetPin: user.role === 'staff'
+      ? user.mustSetPin ?? (user.mustChangePassword || !user.pinHash)
+      : user.role === 'owner' && (user.mustSetPin ?? false),
   };
 }
 
-async function verifyStaffPin(user: UserRecord, pin: string): Promise<void> {
+async function verifyPersonalPin(user: UserRecord, pin: string): Promise<void> {
   const attempts = getPinAttempts(user.id);
   const remaining = Math.max(0, (attempts.lockedUntil ?? 0) - Date.now());
   if (remaining > 0) throw new Error(`PIN locked. Try again in ${Math.ceil(remaining / 1000)} seconds.`);
@@ -145,7 +147,9 @@ export const authService = {
 
   async hasPersonalPin(userId: string): Promise<boolean> {
     if (isSupabaseDriver()) return authRepository.hasPersonalPin(userId);
-    return Boolean(getUsers().find((candidate) => candidate.id === userId && candidate.role === 'staff')?.pinHash);
+    return Boolean(getUsers().find((candidate) =>
+      candidate.id === userId && (candidate.role === 'staff' || candidate.role === 'owner'),
+    )?.pinHash);
   },
 
   async lockCurrentSession(): Promise<void> {
@@ -178,10 +182,10 @@ export const authService = {
     if (isSupabaseDriver()) return authRepository.setPersonalPin(userId, pin);
     if (!/^\d{4}$/.test(pin)) throw new Error('PIN must contain exactly 4 digits.');
     const session = readData<AuthSession | null>(SESSION_KEY, null);
-    if (!session || session.userId !== userId) throw new Error('You must sign in as this staff member to set a PIN.');
+    if (!session || session.userId !== userId) throw new Error('You must sign in as this account to set a PIN.');
     const users = getUsers();
     const user = users.find((candidate) => candidate.id === userId);
-    if (!user || user.role !== 'staff' || user.mustChangePassword) throw new Error('The staff account is not ready to set a PIN.');
+    if (!user || (user.role !== 'staff' && user.role !== 'owner') || user.mustChangePassword) throw new Error('The account is not ready to set a PIN.');
     if (user.pinHash || user.mustSetPin === false) throw new Error('A personal PIN is already set for this account.');
     const pinHash = await hashSecret(pin);
     const updatedUser = { ...user, pinHash, mustSetPin: false };
@@ -191,9 +195,9 @@ export const authService = {
       await activityService.log({
         storeId: user.storeId,
         actorId: user.id,
-        action: 'staff.pin_set',
+        action: `${user.role}.pin_set`,
         summary: `${user.name} set a personal PIN.`,
-        entityType: 'staff',
+        entityType: user.role,
         entityId: user.id,
         meta: { before: { hasPin: Boolean(user.pinHash) }, after: { hasPin: true } },
       });
@@ -205,21 +209,21 @@ export const authService = {
     if (isSupabaseDriver()) return authRepository.changePersonalPin(userId, currentPin, newPin);
     if (!/^\d{4}$/.test(currentPin) || !/^\d{4}$/.test(newPin)) throw new Error('PIN must contain exactly 4 digits.');
     const session = readData<AuthSession | null>(SESSION_KEY, null);
-    if (!session || session.userId !== userId) throw new Error('You must sign in as this staff member to change a PIN.');
+    if (!session || session.userId !== userId) throw new Error('You must sign in as this account to change a PIN.');
     const users = getUsers();
     const user = users.find((candidate) => candidate.id === userId);
-    if (!user || user.role !== 'staff' || !user.storeId || user.mustChangePassword || !user.pinHash) {
-      throw new Error('The staff account is not ready to change a PIN.');
+    if (!user || (user.role !== 'staff' && user.role !== 'owner') || !user.storeId || user.mustChangePassword || !user.pinHash) {
+      throw new Error('The account is not ready to change a PIN.');
     }
-    await verifyStaffPin(user, currentPin);
+    await verifyPersonalPin(user, currentPin);
     const pinHash = await hashSecret(newPin);
     saveUsers(users.map((candidate) => candidate.id === userId ? { ...candidate, pinHash, mustSetPin: false } : candidate));
     await activityService.log({
       storeId: user.storeId,
       actorId: user.id,
-      action: 'staff.pin_changed',
+      action: `${user.role}.pin_changed`,
       summary: `${user.name} changed their personal PIN.`,
-      entityType: 'staff',
+      entityType: user.role,
       entityId: user.id,
     });
   },
@@ -231,7 +235,7 @@ export const authService = {
     if (!session) throw new Error('The staff session could not be found.');
     const user = getUsers().find((candidate) => candidate.id === session.userId);
     if (!user || user.role !== 'staff' || !user.storeId) throw new Error('The staff account could not be found.');
-    await verifyStaffPin(user, pin);
+    await verifyPersonalPin(user, pin);
     await this.unlockSession(session, user);
     return withoutPassword(user);
   },
@@ -270,7 +274,7 @@ export const authService = {
       await activityService.log({
         storeId: user.storeId,
         actorId: user.id,
-        action: 'staff.password_changed',
+        action: `${user.role}.password_changed`,
         summary: `${user.name} set an initial password.`,
         entityType: 'staff',
         entityId: user.id,
@@ -292,7 +296,7 @@ export const authService = {
       await activityService.log({
         storeId: user.storeId,
         actorId: user.id,
-        action: 'staff.password_changed',
+        action: `${user.role}.password_changed`,
         summary: `${user.name} changed their password.`,
         entityType: user.role,
         entityId: user.id,

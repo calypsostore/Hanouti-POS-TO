@@ -1,179 +1,102 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Button } from './Button';
-import { formatTnd } from '../lib/format';
-import type { ReportRecord } from '../types/domain';
-import { downloadOrSharePdf } from '../services/receiptExport';
+import { ReceiptDocumentView } from './ReceiptDocumentView';
+import { downloadOrSharePdf, downloadThermalPdf, printOrSharePdf } from '../services/receiptExport';
+import { buildReportDocument } from '../services/reportDocument';
+import type { ReportRecord, StoreRecord, StoreSettings } from '../types/domain';
 
-const money = (amount: number | undefined) => `${formatTnd((amount ?? 0) / 1000)} DT`;
-const compReasonLabel = (reason: string) => reason.replaceAll('_', ' ');
-const reportLabel = (type: ReportRecord['type']) => type === 'X' ? 'X report (live)' : 'Z report — day closed';
-const differenceText = (amount: number | undefined) => {
-  if (amount === undefined) return '—';
-  return `${amount > 0 ? '+' : amount < 0 ? '−' : ''}${money(Math.abs(amount))}`;
-};
+type ReportStore = Pick<StoreRecord, 'name' | 'address' | 'phone' | 'taxId'>;
 
-export function ReportView({ report, storeName, onClose, inline = false }: { report: ReportRecord; storeName: string; onClose: () => void; inline?: boolean }) {
+export function ReportView({
+  report,
+  storeName,
+  store,
+  settings,
+  onClose,
+  inline = false,
+}: {
+  report: ReportRecord;
+  storeName: string;
+  store?: ReportStore;
+  settings?: Partial<StoreSettings>;
+  onClose: () => void;
+  inline?: boolean;
+}) {
   const [shareError, setShareError] = useState('');
   const printTarget = useRef<HTMLElement>(null);
-  const reportStoreName = report.storeName ?? storeName;
-  const topItems = [...(report.itemsSold ?? [])]
-    .sort((left, right) => right.quantity - left.quantity || right.totalMillimes - left.totalMillimes)
-    .slice(0, 10);
-  const cashSales = report.cashSalesMillimes ?? report.paymentSplit?.cash ?? 0;
-  const tabSales = report.tabSalesMillimes ?? report.paymentSplit?.tab ?? 0;
-  const tabPayments = report.tabPaymentsReceivedMillimes ?? report.tabsSettledMillimes ?? 0;
-  const cashFloat = report.cashFloatMillimes ??
-    (report.shifts ?? []).reduce((total, shift) => total + shift.startingCashMillimes, 0);
-  const totalDifference = report.totalDifferenceMillimes ?? report.cashDifferenceMillimes;
-  async function exportPdf() {
+  const reportStore: ReportStore = {
+    name: report.frozenStoreName ?? report.storeName ?? store?.name ?? storeName,
+    address: report.frozenStoreAddress ?? store?.address,
+    phone: report.frozenStorePhone ?? store?.phone,
+    taxId: report.frozenStoreTaxId ?? store?.taxId,
+  };
+  const reportSettings = useMemo(() => ({
+    ...settings,
+    ...(report.frozenReportFooterText ? { reportFooterText: report.frozenReportFooterText } : {}),
+    ...(report.frozenPaperWidth ? { paperWidth: report.frozenPaperWidth } : {}),
+  }), [report.frozenPaperWidth, report.frozenReportFooterText, settings]);
+  const document = buildReportDocument(report, reportStore, reportSettings);
+
+  async function exportPdf(format: 'thermal' | 'a4') {
     setShareError('');
     try {
-      await downloadOrSharePdf(printTarget.current, `${report.type.toLowerCase()}-report-${report.businessDate}`, reportLabel(report.type));
+      if (format === 'thermal') {
+        await downloadThermalPdf(
+          printTarget.current,
+          `${report.type.toLowerCase()}-report-${report.businessDate}`,
+          document.title,
+          document.width,
+        );
+      } else {
+        await downloadOrSharePdf(
+          printTarget.current,
+          `${report.type.toLowerCase()}-report-${report.businessDate}-a4`,
+          `${document.title} A4`,
+        );
+      }
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return;
       setShareError(error instanceof Error ? error.message : 'Unable to create or share this report PDF.');
     }
   }
 
+  async function printReport() {
+    setShareError('');
+    try {
+      await printOrSharePdf(
+        printTarget.current,
+        `${report.type.toLowerCase()}-report-${report.businessDate}`,
+        document.title,
+        document.width,
+      );
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return;
+      setShareError(error instanceof Error ? error.message : 'Unable to print this report.');
+    }
+  }
+
+  const content = (
+    <>
+      <div className="receipt-actions no-print">
+        <Button variant="secondary" onClick={() => { void printReport(); }}>Print</Button>
+        <Button variant="secondary" onClick={() => { void exportPdf('thermal'); }}>Thermal PDF</Button>
+        <Button variant="secondary" onClick={() => { void exportPdf('a4'); }}>A4 PDF</Button>
+        <Button variant="ghost" onClick={onClose}>Close</Button>
+      </div>
+      {shareError && <p role="alert" className="no-print receipt-error">{shareError}</p>}
+      <ReceiptDocumentView ref={printTarget} document={document} />
+    </>
+  );
+
+  if (inline) {
+    return <section className="receipt-inline-report" aria-label={`${document.title} preview`}>{content}</section>;
+  }
+
   return (
-    <div className={`receipt-overlay${inline ? ' report-inline' : ''}`} onMouseDown={inline ? undefined : onClose}>
-      <section role={inline ? 'region' : 'dialog'} aria-modal={inline ? undefined : true} aria-label={`${report.type} report`} className={`receipt-dialog report-dialog${inline ? ' report-inline__panel' : ''}`} onMouseDown={(event) => event.stopPropagation()}>
-        <div className="receipt-actions no-print">
-          <Button variant="secondary" onClick={() => { void exportPdf(); }}>Share / Download PDF</Button>
-          <Button variant="ghost" onClick={onClose}>Close</Button>
-        </div>
-        {shareError && <p role="alert" className="no-print receipt-error">{shareError}</p>}
-        <article ref={printTarget} className="receipt-print-target report-document">
-          <header className="receipt-center">
-            <strong>{reportStoreName}</strong>
-            <strong>{reportLabel(report.type)}</strong>
-            <div>Business date: {report.businessDate}</div>
-            <div>From: {report.periodFrom ? new Date(report.periodFrom).toLocaleString() : '—'}</div>
-            <div>To: {report.periodTo ? new Date(report.periodTo).toLocaleString() : new Date(report.createdAt).toLocaleString()}</div>
-            <div>Generated by: {report.generatedBy ?? 'Owner'}</div>
-          </header>
-
-          <section className="report-section">
-            <h2>Cash and sales totals</h2>
-            <ReportRow label="Sales collected" amount={money(report.salesCollectedMillimes ?? report.salesMillimes)} />
-            <ReportRow label="Expenses" amount={money(report.expensesMillimes)} />
-            <ReportRow label="Net profit" amount={money(report.netProfitMillimes)} />
-            <ReportRow label="Receivable (uncollected tabs)" amount={money(report.receivableMillimes ?? report.tabsOutstandingMillimes)} />
-            <ReportRow label="Gross order sales (including tabs)" amount={money(report.salesMillimes)} />
-            <ReportRow label="Orders" amount={String(report.orderCount)} />
-            <ReportRow label="Cash sales" amount={money(cashSales)} />
-            <ReportRow label="Tab sales (charged to customers)" amount={money(tabSales)} />
-            <ReportRow label="Tab payments received" amount={money(tabPayments)} />
-            <ReportRow label="Cash float (separate from sales)" amount={money(cashFloat)} />
-            <ReportRow label="Total cash expected in cashier" amount={money(report.totalExpectedCashMillimes)} />
-            <ReportRow label="Counted total" amount={money(report.totalCountedMillimes)} />
-            <ReportRow
-              label="Difference"
-              amount={differenceText(totalDifference)}
-              className={totalDifference === 0 ? 'report-balanced' : 'report-short'}
-            />
-          </section>
-
-          <section className="report-section">
-            <h2>Shifts</h2>
-            {(report.shifts ?? []).map((shift) => (
-              <article className="report-shift-card" key={shift.shiftId}>
-                <strong>{shift.staffName}{shift.forceClosedByOwner ? ' (owner force-closed)' : ''}</strong>
-                <div className="report-shift-grid">
-                  <ReportRow label="Opened" amount={new Date(shift.openedAt).toLocaleString()} />
-                  <ReportRow label="Closed" amount={shift.closedAt ? new Date(shift.closedAt).toLocaleString() : 'In progress'} />
-                  <ReportRow label="Float" amount={money(shift.startingCashMillimes)} />
-                  <ReportRow label="Cash sales" amount={money(shift.cashSalesMillimes)} />
-                  <ReportRow label="Tab payments" amount={money(shift.tabPaymentsMillimes)} />
-                  <ReportRow label="Cash in" amount={money(shift.cashInMillimes)} />
-                  <ReportRow label="Cash out" amount={money(shift.cashOutMillimes)} />
-                  <ReportRow label="Expected" amount={money(shift.expectedCashMillimes)} />
-                  <ReportRow label="Counted" amount={shift.countedCashMillimes === undefined ? '—' : money(shift.countedCashMillimes)} />
-                  <ReportRow
-                    label="Difference"
-                    amount={differenceText(shift.differenceMillimes)}
-                    className={shift.differenceMillimes === undefined ? '' : shift.differenceMillimes === 0 ? 'report-balanced' : 'report-short'}
-                  />
-                </div>
-              </article>
-            ))}
-            {(report.shifts ?? []).length === 0 && <p>No shifts in this report period.</p>}
-          </section>
-
-          <section className="report-section">
-            <h2>Customer tabs</h2>
-            {(report.customerTabs ?? []).map((customer) => (
-              <article className="report-customer-card" key={customer.customerId}>
-                <strong>{customer.customerName}</strong>
-                <ReportRow label="Issued in period" amount={money(customer.issuedMillimes)} />
-                <ReportRow label="Payments in period" amount={money(customer.paymentsMillimes)} />
-                <ReportRow label="Outstanding" amount={money(customer.outstandingMillimes)} />
-              </article>
-            ))}
-            {(report.customerTabs ?? []).length === 0 && <p>No customer tab activity or balance.</p>}
-          </section>
-
-          <section className="report-section">
-            <h2>Voids ({report.voids?.count ?? 0}) · {money(report.voids?.totalMillimes)}</h2>
-            {(report.voids?.orders ?? []).map((item, index) => (
-              <div className="report-list-row" key={`${item.ticketNumber}-${index}`}>
-                <span>Ticket #{item.ticketNumber} · {item.reason || 'No reason recorded'} · Approved by {item.approvedBy ?? 'Unknown'}</span>
-                <strong>{money(item.totalMillimes)}</strong>
-              </div>
-            ))}
-            {(report.voids?.orders ?? []).length === 0 && <p>No voids in this report period.</p>}
-          </section>
-
-          <section className="report-section">
-            <h2>Comps and waste ({report.comps?.count ?? 0}) · {money(report.comps?.totalMillimes)}</h2>
-            {(report.comps?.records ?? []).map((item, index) => (
-              <div className="report-list-row" key={`${item.staffName}-${item.itemName}-${index}`}>
-                <span>{item.quantity} × {item.itemName} · {item.staffName} · {compReasonLabel(item.reason)}{item.note ? ` · ${item.note}` : ''}</span>
-                <strong>{money(item.valueMillimes)}</strong>
-              </div>
-            ))}
-            {(report.comps?.records ?? []).length === 0 && <p>No comps or waste in this report period.</p>}
-          </section>
-
-          <section className="report-section">
-            <h2>Expenses paid from drawer (cash out)</h2>
-            {(report.cashOuts ?? []).map((item, index) => (
-              <div className="report-list-row" key={`${item.shiftId}-${item.createdAt}-${index}`}>
-                <span>{item.reason} · {item.staffName} · {new Date(item.createdAt).toLocaleString()}{item.note ? ` · ${item.note}` : ''}</span>
-                <strong>{money(item.amountMillimes)}</strong>
-              </div>
-            ))}
-            {(report.cashOuts ?? []).length === 0 && <p>No cash-out expenses in this report period.</p>}
-          </section>
-
-          <section className="report-section">
-            <h2>Sales by category</h2>
-            {[...(report.salesByCategory ?? [])]
-              .sort((left, right) => right.totalMillimes - left.totalMillimes)
-              .map((item) => (
-                <ReportRow key={item.categoryId} label={`${item.name} (${item.quantity} units)`} amount={money(item.totalMillimes)} />
-              ))}
-            {(report.salesByCategory ?? []).length === 0 && <p>No category sales.</p>}
-          </section>
-
-          <section className="report-section">
-            <h2>Top items</h2>
-            {topItems.map((item) => (
-              <ReportRow key={item.itemId} label={`${item.name} (${item.quantity} sold)`} amount={money(item.totalMillimes)} />
-            ))}
-            {topItems.length === 0 && <p>No items sold.</p>}
-          </section>
-
-          <footer className="report-footer">
-            {report.type === 'Z' ? `Z number ${report.zNumber ?? '—'}` : 'X report (live) — the day remains open'}
-            <div>{new Date(report.createdAt).toLocaleString()}</div>
-          </footer>
-        </article>
+    <div className="receipt-overlay" onMouseDown={onClose}>
+      <section role="dialog" aria-modal="true" aria-label={`${document.title} report`} className="receipt-dialog report-dialog" onMouseDown={(event) => event.stopPropagation()}>
+        {content}
       </section>
     </div>
   );
-}
-
-function ReportRow({ label, amount, className = '' }: { label: string; amount: string; className?: string }) {
-  return <div className={`receipt-row ${className}`}><span>{label}</span><strong>{amount}</strong></div>;
 }

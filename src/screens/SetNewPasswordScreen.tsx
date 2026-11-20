@@ -18,7 +18,9 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
   const setInitialPin = useAuthStore((state) => state.setInitialPin);
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
-  const [pinStep, setPinStep] = useState(Boolean(user?.role === 'staff' && user.mustSetPin && !user.mustChangePassword));
+  const [pinStep, setPinStep] = useState(Boolean(
+    (user?.role === 'staff' || user?.role === 'owner') && user.mustSetPin && !user.mustChangePassword,
+  ));
   const [pin, setPin] = useState('');
   const [visible, setVisible] = useState(false);
   const [error, setError] = useState('');
@@ -37,7 +39,7 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
       try {
         await setInitialPin(pin);
         onSetupComplete();
-        navigate(user?.role === 'staff' ? '/dashboard' : '/');
+        navigate(user?.role === 'staff' ? '/dashboard' : user?.role === 'owner' ? '/owner/dashboard' : '/admin/overview');
       } catch (pinError) {
         setError(pinError instanceof Error ? pinError.message : 'Unable to set your PIN.');
       }
@@ -55,7 +57,7 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
     try {
       const updatedUser = await setInitialPassword(password);
       if (!user) throw new Error(t('auth.signInBeforePassword'));
-      if (updatedUser.role === 'staff' && updatedUser.mustSetPin) {
+      if ((updatedUser.role === 'staff' || updatedUser.role === 'owner') && updatedUser.mustSetPin) {
         setPinStep(true);
         return;
       }
@@ -118,9 +120,9 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           {pinStep ? (
             <div>
-              <label htmlFor="staff-pin" className="mb-1.5 block font-body text-label-lg text-on-surface">Personal 4-digit PIN</label>
+              <label htmlFor="personal-pin" className="mb-1.5 block font-body text-label-lg text-on-surface">Personal 4-digit PIN</label>
               <input
-                id="staff-pin"
+                id="personal-pin"
                 required
                 pattern="[0-9]{4}"
                 maxLength={4}

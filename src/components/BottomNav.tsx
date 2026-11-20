@@ -5,8 +5,8 @@ import { BottomSheet } from './BottomSheet';
 import { t } from '../i18n/translations';
 import { useAuthStore } from '../stores/authStore';
 import { ownerMoreLinks, ownerPrimaryLinks } from '../app/navigation';
-import { notificationService, OWNER_NOTIFICATIONS_CHANGED_EVENT } from '../services/notificationService';
 import { orderService } from '../services/orderService';
+import { useNotificationStore } from '../stores/notificationStore';
 
 const staffNavigation = [
   { to: '/pos', label: 'nav.pos', icon: 'point_of_sale' },
@@ -22,7 +22,7 @@ export function BottomNav() {
   const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem('hanouti.sidebar-collapsed.v1') === 'true');
   const [moreOpen, setMoreOpen] = useState(false);
   const [pendingVoidCount, setPendingVoidCount] = useState(0);
-  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const unreadNotificationCount = useNotificationStore((state) => state.unreadCount);
 
   useEffect(() => {
     const storeId = user?.storeId;
@@ -31,24 +31,18 @@ export function BottomNav() {
     const refreshBadges = () => {
       void Promise.all([
         orderService.listAll(storeId),
-        notificationService.listFor(user),
-      ]).then(([orders, notifications]) => {
+      ]).then(([orders]) => {
         if (!active) return;
         setPendingVoidCount(orders.filter((order) => order.status === 'pending_void').length);
-        setUnreadNotificationCount(notifications.filter((notification) => !notification.readAt).length);
       }).catch((error: unknown) => {
         console.error('Could not load owner bottom navigation badges.', error);
       });
     };
     refreshBadges();
     window.addEventListener('focus', refreshBadges);
-    window.addEventListener('storage', refreshBadges);
-    window.addEventListener(OWNER_NOTIFICATIONS_CHANGED_EVENT, refreshBadges);
     return () => {
       active = false;
       window.removeEventListener('focus', refreshBadges);
-      window.removeEventListener('storage', refreshBadges);
-      window.removeEventListener(OWNER_NOTIFICATIONS_CHANGED_EVENT, refreshBadges);
     };
   }, [isOwner, user]);
 

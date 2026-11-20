@@ -2,8 +2,29 @@ import { Capacitor } from '@capacitor/core';
 import { Directory, Filesystem } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 
-export async function printOrSharePdf(element: HTMLElement | null, filename: string, title: string): Promise<void> {
+export async function printOrSharePdf(
+  element: HTMLElement | null,
+  filename: string,
+  title: string,
+  widthMillimetres: 58 | 80 = 80,
+): Promise<void> {
   if (!Capacitor.isNativePlatform()) {
+    if (!element) throw new Error('The printable receipt is not available.');
+    const printStyle = document.createElement('style');
+    printStyle.dataset.receiptPrintStyle = 'true';
+    printStyle.textContent = `@media print {
+      @page { size: ${widthMillimetres}mm auto; margin: 0; }
+      html, body, #root { width: ${widthMillimetres}mm !important; }
+      .receipt-print-target--active { --receipt-print-width: ${widthMillimetres}mm !important; }
+    }`;
+    document.head.append(printStyle);
+    element.classList.add('receipt-print-target--active');
+    const cleanup = () => {
+      element.classList.remove('receipt-print-target--active');
+      printStyle.remove();
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
     window.print();
     return;
   }
@@ -14,7 +35,6 @@ export async function printOrSharePdf(element: HTMLElement | null, filename: str
     import('jspdf'),
   ]);
   const canvas = await html2canvas(element, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
-  const widthMillimetres = 80;
   const heightMillimetres = canvas.height * widthMillimetres / canvas.width;
   const pdf = new jsPDF({
     orientation: 'portrait',
@@ -29,6 +49,44 @@ export async function printOrSharePdf(element: HTMLElement | null, filename: str
   const path = `${filename.replace(/[^a-z0-9_-]/gi, '-')}-${Date.now()}.pdf`;
   const file = await Filesystem.writeFile({ path, data, directory: Directory.Cache });
   await Share.share({ title, dialogTitle: title, files: [file.uri] });
+}
+
+export async function downloadThermalPdf(
+  element: HTMLElement | null,
+  filename: string,
+  title: string,
+  widthMillimetres: 58 | 80,
+): Promise<void> {
+  const pdf = await createThermalPdf(element, widthMillimetres);
+  await deliverPdf(pdf, filename, title, 'download');
+}
+
+export async function shareThermalPdf(
+  element: HTMLElement | null,
+  filename: string,
+  title: string,
+  widthMillimetres: 58 | 80,
+): Promise<void> {
+  const pdf = await createThermalPdf(element, widthMillimetres);
+  await deliverPdf(pdf, filename, title, 'share');
+}
+
+async function createThermalPdf(element: HTMLElement | null, widthMillimetres: 58 | 80) {
+  if (!element) throw new Error('The receipt is not available for export.');
+  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+    import('html2canvas'),
+    import('jspdf'),
+  ]);
+  const canvas = await html2canvas(element, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
+  const heightMillimetres = canvas.height * widthMillimetres / canvas.width;
+  const pdf = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: [widthMillimetres, heightMillimetres],
+    compress: true,
+  });
+  pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, widthMillimetres, heightMillimetres);
+  return pdf;
 }
 
 export async function downloadOrSharePdf(element: HTMLElement | null, filename: string, title: string): Promise<void> {
@@ -57,7 +115,7 @@ export async function downloadOrSharePdf(element: HTMLElement | null, filename: 
     pdf.addImage(pageCanvas.toDataURL('image/png'), 'PNG', 10, 10, pageWidth, sliceHeight * scale);
   }
 
-  await sharePdfFile(pdf, filename, title);
+  await deliverPdf(pdf, filename, title, 'share-or-download');
 }
 
 export async function shareTextAsPdf(text: string, filename: string, title: string): Promise<void> {
@@ -78,10 +136,15 @@ export async function shareTextAsPdf(text: string, filename: string, title: stri
     pdf.text(line, 14, y);
     y += 6;
   }
-  await sharePdfFile(pdf, filename, title);
+  await deliverPdf(pdf, filename, title, 'share-or-download');
 }
 
-async function sharePdfFile(pdf: import('jspdf').jsPDF, filename: string, title: string): Promise<void> {
+async function deliverPdf(
+  pdf: import('jspdf').jsPDF,
+  filename: string,
+  title: string,
+  action: 'download' | 'share' | 'share-or-download',
+): Promise<void> {
   const safeFilename = filename.replace(/[^a-z0-9_-]/gi, '-');
   if (Capacitor.isNativePlatform()) {
     const data = pdf.output('datauristring').split(',')[1];
@@ -92,10 +155,15 @@ async function sharePdfFile(pdf: import('jspdf').jsPDF, filename: string, title:
     return;
   }
 
+  if (action === 'download') {
+    pdf.save(`${safeFilename}.pdf`);
+    return;
+  }
   const file = new File([pdf.output('blob')], `${safeFilename}.pdf`, { type: 'application/pdf' });
   if (navigator.share && navigator.canShare?.({ files: [file] })) {
     await navigator.share({ title, files: [file] });
     return;
   }
+  if (action === 'share') throw new Error('PDF sharing is not supported in this browser. Download the PDF instead.');
   pdf.save(`${safeFilename}.pdf`);
 }

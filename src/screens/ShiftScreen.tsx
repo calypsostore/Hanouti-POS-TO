@@ -23,6 +23,9 @@ import { PageContainer } from '../components/layout';
 import { updateService } from '../services/updateService';
 import type { ShiftSalesBreakdown } from '../services/orderService';
 import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
+import { reportService } from '../services/reportService';
+import { ReportView } from '../components/ReportView';
+import type { ReportRecord } from '../types/domain';
 
 type ShiftCloseBreakdown = ShiftSalesBreakdown & {
   pendingVoidCount: number;
@@ -83,11 +86,21 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const [openShiftSheetOpen, setOpenShiftSheetOpen] = useState(false);
   const [closeShiftSheetOpen, setCloseShiftSheetOpen] = useState(false);
   const [forceCloseShiftTarget, setForceCloseShiftTarget] = useState<ShiftRecord | null>(null);
+  const [activeTab, setActiveTab] = useState<'shifts' | 'reports' | 'archive'>(() =>
+    ownerMode && new URLSearchParams(window.location.search).get('tab') === 'reports' ? 'reports' : 'shifts',
+  );
+  const [ownerPin, setOwnerPin] = useState('');
+  const [zCountedCash, setZCountedCash] = useState('');
+  const [zExpectedCash, setZExpectedCash] = useState(0);
+  const [zNote, setZNote] = useState('');
+  const [zSheetOpen, setZSheetOpen] = useState(false);
+  const [reportPreview, setReportPreview] = useState<ReportRecord>();
+  const [archiveReports, setArchiveReports] = useState<ReportRecord[]>([]);
 
   useEffect(() => updateService.registerUnsavedState(() => startingCashEdited || countedCash.length > 0), [startingCashEdited, countedCash.length]);
 
   const refresh = useCallback(async () => {
-    const [nextShifts, nextOpenShift, nextStore, nextMovements, users, cashPermission, comps] = await Promise.all([
+    const [nextShifts, nextOpenShift, nextStore, nextMovements, users, cashPermission, comps, nextReports] = await Promise.all([
       shiftService.listShifts(storeId),
       user ? shiftService.getOpenShiftForUser(storeId, user.id) : Promise.resolve(undefined),
       userService.getStore(storeId),
@@ -95,6 +108,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       userService.listUsers(storeId),
       user?.role === 'owner' ? Promise.resolve(true) : user ? userService.hasPermission(user.id, 'cash_in_out') : Promise.resolve(false),
       compService.listComps(storeId),
+      ownerMode ? reportService.listReports(storeId) : Promise.resolve([]),
     ]);
     setShifts(nextShifts);
     setOwnOpenShift(nextOpenShift);
@@ -102,6 +116,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     setCashMovements(nextMovements);
     setStaffNames(Object.fromEntries(users.map((member) => [member.id, member.name])));
     setCanCashInOut(cashPermission);
+    if (ownerMode) setArchiveReports(nextReports);
     const breakdowns = await Promise.all(nextShifts.filter((shift) => shift.status === 'open')
       .map(async (shift) => {
         const [sales, pendingVoidCount] = await Promise.all([
@@ -114,7 +129,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
         return [shift.id, { ...sales, pendingVoidCount, compsMillimes }] as const;
       }));
     setBreakdownsByShift(Object.fromEntries(breakdowns));
-  }, [storeId, user]);
+  }, [storeId, user, ownerMode]);
 
   useEffect(() => {
     setLoading(true);
@@ -217,6 +232,60 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     }));
   }
 
+  async function createXReport() {
+    if (!user) return;
+    setError('');
+    try {
+      const report = await reportService.createXReport(storeId, user.name);
+      setReportPreview(report);
+      setNotice('X report created. The day remains open.');
+    } catch (reportError) {
+      setError(reportError instanceof Error ? reportError.message : 'Unable to create the X report.');
+    }
+  }
+
+  async function openZCloseDialog() {
+    setError('');
+    setOwnerPin('');
+    setZCountedCash('');
+    setZNote('');
+    setZSheetOpen(true);
+    try {
+      const live = await reportService.getCurrentPeriodSummary(storeId);
+      setZExpectedCash(live.totalExpectedCashMillimes ?? 0);
+    } catch (summaryError) {
+      setZSheetOpen(false);
+      setError(summaryError instanceof Error ? summaryError.message : 'Unable to load expected cash totals.');
+    }
+  }
+
+  async function closeDayWithZ() {
+    if (!user) return;
+    setError('');
+    try {
+      const parsed = zCountedCash.trim() ? Number(zCountedCash.replace(',', '.')) : Number.NaN;
+      if (!ownerPin || !/^\d{4}$/.test(ownerPin)) throw new Error('Owner PIN is required for every Z report.');
+      if (!Number.isFinite(parsed) || parsed < 0) throw new Error('Enter the counted drawer total.');
+      const countedCashMillimes = Math.round(parsed * 1000);
+      const expectedCashMillimes = zExpectedCash;
+      const report = await reportService.closeDayWithZReport(storeId, user.name, ownerPin, {
+        countedCashMillimes,
+        differenceMillimes: countedCashMillimes - expectedCashMillimes,
+        note: zNote.trim() || undefined,
+      });
+      setOwnerPin('');
+      setZCountedCash('');
+      setZNote('');
+      setZSheetOpen(false);
+      setReportPreview(report);
+      await refresh();
+      setNotice('Z report created and the business day closed.');
+    } catch (reportError) {
+      setError(reportError instanceof Error ? reportError.message : 'Unable to close the business day.');
+    }
+
+  }
+
   async function submitCashMovement(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!user || !movementShiftId) return;
@@ -277,7 +346,58 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       } />
       <FirstRunHint id={`shift-${user?.id ?? 'guest'}`} title={t('hint.title')} message={t('hint.shift')} />
 
-      {closedShiftSummary && (
+      {ownerMode && (
+        <nav className="mb-4 grid grid-cols-3 gap-2" aria-label="Shift and report sections">
+          {([
+            ['shifts', 'Shifts'],
+            ['reports', 'X / Z'],
+            ['archive', 'Daily reports'],
+          ] as const).map(([tab, label]) => (
+            <Button key={tab} variant={activeTab === tab ? 'primary' : 'secondary'} onClick={() => setActiveTab(tab)}>{label}</Button>
+          ))}
+        </nav>
+      )}
+
+      {ownerMode && activeTab === 'reports' && (
+        <section className="grid gap-4 tablet:grid-cols-2">
+          <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+            <h2 className="font-display text-headline-md">Live X report</h2>
+            <p className="mt-2 font-body text-body-sm text-outline">A frozen snapshot for review. The day stays open.</p>
+            <Button className="mt-4 w-full" onClick={() => { void createXReport(); }}><MaterialIcon name="summarize" />Print X report</Button>
+          </article>
+          <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+            <h2 className="font-display text-headline-md">Close day: Z report</h2>
+            <p className="mt-2 font-body text-body-sm text-outline">Every Z requires the owner PIN and every shift must be closed.</p>
+            {openCount > 0 && <p role="alert" className="mt-3 rounded-lg bg-warning-container p-3 text-on-warning-container">Open shifts remain: use Force close shift in the Shifts tab.</p>}
+            <Button disabled={openCount > 0} variant="danger" className="mt-4 w-full" onClick={() => { void openZCloseDialog(); }}><MaterialIcon name="lock" />Close day: Z report</Button>
+          </article>
+          {reportPreview && <div className="tablet:col-span-2"><ReportView inline report={reportPreview} store={store ?? undefined} settings={store?.settings} storeName={store?.name ?? ''} onClose={() => setReportPreview(undefined)} /></div>}
+        </section>
+      )}
+
+      {ownerMode && activeTab === 'archive' && (
+        <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+          <h2 className="mb-3 font-display text-headline-md">Daily reports</h2>
+          {loading ? <ListSkeleton label="Loading daily reports" /> : (
+            <div className="flex flex-col gap-2">
+              {archiveReports.filter((report) => report.type === 'Z').map((report) => (
+                <button key={report.id} type="button" onClick={() => setReportPreview(report)} className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-low p-3 text-left">
+                  <div>
+                    <strong>{report.reportNumber ?? `Z-${String(report.zNumber ?? 0).padStart(6, '0')}`}</strong>
+                    <p className="font-body text-body-sm text-outline">{report.businessDate} · Sales {formatTnd((report.salesCollectedMillimes ?? report.salesMillimes) / 1000)} DT</p>
+                    <p className="font-body text-body-sm">Expected {formatTnd((report.totalExpectedCashMillimes ?? 0) / 1000)} · Counted {formatTnd((report.countedCashMillimes ?? report.totalCountedMillimes ?? 0) / 1000)} · Difference {formatTnd((report.cashDifference ?? report.cashDifferenceMillimes ?? 0) / 1000)}</p>
+                  </div>
+                  <StatusTag status="closed">{report.pinVerified === false ? 'PIN unavailable' : 'PIN verified'}</StatusTag>
+                </button>
+              ))}
+              {archiveReports.filter((report) => report.type === 'Z').length === 0 && <p className="font-body text-body-sm text-outline">No Z reports yet.</p>}
+            </div>
+          )}
+          {reportPreview && <div className="mt-4"><ReportView inline report={reportPreview} store={store ?? undefined} settings={store?.settings} storeName={store?.name ?? ''} onClose={() => setReportPreview(undefined)} /></div>}
+        </section>
+      )}
+
+      {closedShiftSummary && (!ownerMode || activeTab === 'shifts') && (
         <ClosedShiftSummary
           shift={closedShiftSummary.shift}
           breakdown={closedShiftSummary.breakdown}
@@ -285,7 +405,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
         />
       )}
 
-      {ownOpenShift ? (
+      {(!ownerMode || activeTab === 'shifts') && (ownOpenShift ? (
         <div className="grid gap-4 tablet:grid-cols-2">
           <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
             <div className="mb-4 flex items-start justify-between gap-3">
@@ -317,11 +437,11 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
         <Button className="w-full max-w-xl lg:hidden" onClick={() => setOpenShiftSheetOpen(true)}>
           <MaterialIcon name="lock_open" />{t('shift.openShift')}
         </Button>
-      ) : null}
+      ) : null)}
 
       {(error || notice) && <p role={error ? 'alert' : 'status'} className={`mt-4 rounded-lg p-3 font-body text-body-sm ${error ? 'bg-error-container text-on-error-container' : 'bg-success-container text-on-success-container'}`}>{error || notice}</p>}
 
-      <section className="mt-6">
+      {(!ownerMode || activeTab === 'shifts') && <section className="mt-6">
         <h2 className="mb-3 font-display text-headline-md text-on-surface">{t('shift.history')}</h2>
         {loading ? <ListSkeleton label="Loading shifts" /> : <DataTable<ShiftRecord>
           rows={shifts}
@@ -368,7 +488,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           )}
           empty={!loading && !error ? <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">{t('common.noData')}</p> : undefined}
         />}
-      </section>
+      </section>}
       <BottomSheet open={openShiftSheetOpen} onClose={() => setOpenShiftSheetOpen(false)} title={t('shift.openShift')}>
         <form onSubmit={(event) => { void openShift(event); }} className="flex flex-col gap-3">
           <p className="font-body text-body-sm text-on-surface-variant">Count the cash drawer before taking orders.</p>
@@ -378,6 +498,39 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           <div className="sheet-action-bar grid grid-cols-2 gap-2">
             <Button type="button" variant="ghost" onClick={() => setOpenShiftSheetOpen(false)}>{t('common.cancel')}</Button>
             <Button type="submit"><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
+          </div>
+        </form>
+      </BottomSheet>
+      <BottomSheet open={zSheetOpen} onClose={() => { setZSheetOpen(false); setOwnerPin(''); setZCountedCash(''); setZNote(''); }} title="Close day: Z report">
+        <form onSubmit={(event) => { event.preventDefault(); void closeDayWithZ(); }} className="flex flex-col gap-3">
+          <p className="font-body text-body-sm text-on-surface-variant">Enter the final drawer count. This snapshot freezes at close.</p>
+          <div className="space-y-2 rounded-xl bg-surface-container-low p-3">
+            <Metric label="Expected cash for the day" amount={zExpectedCash} prominent />
+            {shifts.filter((shift) => shift.status === 'closed').map((shift) => (
+              <Metric key={shift.id} label={`${staffNames[shift.staffId] ?? 'Staff'} shift count`} amount={shift.countedCashMillimes ?? 0} />
+            ))}
+            {zCountedCash.trim() && Number.isFinite(Number(zCountedCash.replace(',', '.'))) && (
+              <Metric
+                label="Live difference"
+                amount={Math.round(Number(zCountedCash.replace(',', '.')) * 1000) - zExpectedCash}
+                signed
+              />
+            )}
+          </div>
+          <label className="font-body text-label-md">Counted drawer total (TND)
+            <input readOnly inputMode="none" value={zCountedCash} placeholder="0.000" className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
+          </label>
+          <Keypad decimal onPress={(value) => setZCountedCash((current) => appendDecimalAmount(current, value))} onClear={() => setZCountedCash('')} onBackspace={() => setZCountedCash((current) => current.slice(0, -1))} />
+          <label className="font-body text-label-md">Optional note
+            <textarea maxLength={500} rows={2} value={zNote} onChange={(event) => setZNote(event.target.value)} className="mt-1.5 w-full rounded-lg bg-surface-container-low p-3" />
+          </label>
+          <label className="font-body text-label-md">Owner PIN
+            <input readOnly value={ownerPin} placeholder="••••" className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 tracking-[0.5em]" />
+          </label>
+          <Keypad onPress={(digit) => setOwnerPin((current) => current.length < 4 ? `${current}${digit}` : current)} onClear={() => setOwnerPin('')} onBackspace={() => setOwnerPin((current) => current.slice(0, -1))} />
+          <div className="sheet-action-bar grid grid-cols-2 gap-2">
+            <Button type="button" variant="ghost" onClick={() => { setZSheetOpen(false); setOwnerPin(''); setZCountedCash(''); setZNote(''); }}>Cancel</Button>
+            <Button type="submit" variant="danger" disabled={ownerPin.length !== 4 || zCountedCash === ''}><MaterialIcon name="lock" />Confirm Z close</Button>
           </div>
         </form>
       </BottomSheet>

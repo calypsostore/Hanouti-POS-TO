@@ -1,11 +1,16 @@
 import type {
   PaymentMethod,
+  ReportCashMovementLine,
   ReportCashOutLine,
   ReportCustomerTabLine,
+  ReportEmployeeLine,
+  ReportExpenseLine,
   ReportRecord,
   ReportShiftLine,
+  ReportVoidAdjustmentLine,
   TabRecord,
 } from '../types/domain';
+import { resolveStoreSettings } from '../types/domain';
 import { catalogService } from './catalogService';
 import { compService } from './compService';
 import { orderService } from './orderService';
@@ -21,10 +26,44 @@ import { isSupabaseDriver } from '../data/driver';
 import { listReports as listRemoteReports, saveReport as saveRemoteReport } from '../data/repositories/reportRepository';
 
 const getReports = () => readData('reports', seedReports);
-const todayKey = () => {
-  const date = new Date();
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-};
+function datePartsInTimezone(date: Date, timeZone: string): Record<string, string> {
+  return Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date).map((part) => [part.type, part.value]));
+}
+
+function todayKey(timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone): string {
+  const parts = datePartsInTimezone(new Date(), timeZone);
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function startOfBusinessDay(timeZone: string): string {
+  const parts = datePartsInTimezone(new Date(), timeZone);
+  const targetMidnight = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day));
+  let timestamp = targetMidnight;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const localParts = datePartsInTimezone(new Date(timestamp), timeZone);
+    const representedTimestamp = Date.UTC(
+      Number(localParts.year),
+      Number(localParts.month) - 1,
+      Number(localParts.day),
+      Number(localParts.hour),
+      Number(localParts.minute),
+      Number(localParts.second),
+    );
+    const correction = targetMidnight - representedTimestamp;
+    timestamp += correction;
+    if (correction === 0) break;
+  }
+  return new Date(timestamp).toISOString();
+}
 
 function getRangeStart(period: 'day' | 'week' | 'month' | 'year'): Date {
   const start = new Date();
@@ -35,11 +74,11 @@ function getRangeStart(period: 'day' | 'week' | 'month' | 'year'): Date {
   return start;
 }
 
-function sinceLastZ(storeId: string, reports = getReports()): string {
+function sinceLastZ(storeId: string, reports: ReportRecord[], timeZone: string): string {
   const previous = reports.filter((report) => report.storeId === storeId && report.type === 'Z')
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
-  if (previous) return previous.createdAt;
-  return getRangeStart('day').toISOString();
+  if (previous) return previous.periodTo ?? previous.createdAt;
+  return startOfBusinessDay(timeZone);
 }
 
 async function summarize(storeId: string, from: number, to: number) {
@@ -67,24 +106,39 @@ async function summarize(storeId: string, from: number, to: number) {
     return timestamp >= from && timestamp <= to;
   });
   const staffById = new Map(staff.map((user) => [user.id, user]));
+  const periodCashMovements = cashMovements.filter((movement) => {
+    const timestamp = new Date(movement.createdAt).getTime();
+    return timestamp >= from && timestamp <= to;
+  });
+  const periodVoidAdjustments: ReportVoidAdjustmentLine[] = shifts.flatMap((shift) =>
+    (shift.voidAdjustments ?? [])
+      .filter((adjustment) => {
+        const timestamp = new Date(adjustment.createdAt).getTime();
+        return timestamp >= from && timestamp <= to;
+      })
+      .map((adjustment) => ({
+        shiftId: shift.id,
+        staffName: staffById.get(shift.staffId)?.name ?? 'Staff',
+        orderNumber: adjustment.orderNumber,
+        amountMillimes: adjustment.amountMillimes,
+        createdAt: adjustment.createdAt,
+      })),
+  );
   const includedShifts = shifts.filter((shift) => {
     const opened = new Date(shift.openedAt).getTime();
     const closed = shift.closedAt ? new Date(shift.closedAt).getTime() : Number.POSITIVE_INFINITY;
-    const adjustedInPeriod = (shift.voidAdjustments ?? []).some((adjustment) => {
-      const timestamp = new Date(adjustment.createdAt).getTime();
-      return timestamp >= from && timestamp <= to;
-    });
-    return (opened <= to && closed >= from) || adjustedInPeriod;
+    return opened <= to && closed >= from;
   });
   const shiftLines: ReportShiftLine[] = await Promise.all(includedShifts.map(async (shift) => {
     const inProgress = shift.status === 'open';
-    const voidAdjustmentMillimes = (shift.voidAdjustments ?? [])
+    const voidAdjustmentMillimes = periodVoidAdjustments
+      .filter((adjustment) => adjustment.shiftId === shift.id)
       .reduce((sum, adjustment) => sum + adjustment.amountMillimes, 0);
     const [cashBreakdown, expectedCash] = await Promise.all([
       orderService.getShiftSalesBreakdown(shift.id),
       shiftService.getExpectedCash(shift.id),
     ]);
-    const shiftMovements = cashMovements.filter((movement) => movement.shiftId === shift.id);
+    const shiftMovements = periodCashMovements.filter((movement) => movement.shiftId === shift.id);
     const cashInMillimes = shiftMovements
       .filter((movement) => movement.kind === 'in')
       .reduce((sum, movement) => sum + movement.amountMillimes, 0);
@@ -94,14 +148,21 @@ async function summarize(storeId: string, from: number, to: number) {
     const expected = expectedCash + voidAdjustmentMillimes;
     const counted = shift.countedCashMillimes;
     const staffName = staff.find((user) => user.id === shift.staffId)?.name ?? 'Staff';
+    const shiftOrders = orders.filter((order) => order.shiftId === shift.id);
+    const shiftPaymentSplit: Record<PaymentMethod, number> = { cash: 0, card: 0, other: 0, tab: 0 };
+    for (const order of shiftOrders) shiftPaymentSplit[order.paymentMethod] += order.totalMillimes;
     return {
       shiftId: shift.id,
       staffName,
+      orderCount: shiftOrders.length,
       status: inProgress ? 'in_progress' : 'closed',
       openedAt: shift.openedAt,
       closedAt: shift.closedAt,
       startingCashMillimes: shift.startingCashMillimes,
-      cashSalesMillimes: cashBreakdown.cashSalesMillimes,
+      cashSalesMillimes: shiftPaymentSplit.cash,
+      cardSalesMillimes: shiftPaymentSplit.card,
+      otherSalesMillimes: shiftPaymentSplit.other,
+      tabSalesMillimes: shiftPaymentSplit.tab,
       tabPaymentsMillimes: cashBreakdown.tabPaymentsMillimes,
       cashInMillimes,
       cashOutMillimes,
@@ -115,7 +176,14 @@ async function summarize(storeId: string, from: number, to: number) {
   const itemIndex = new Map(catalogItems.map((item) => [item.id, item]));
   const categoryIndex = new Map(categories.map((category) => [category.id, category]));
   const categoryTotals = new Map<string, { name: string; quantity: number; totalMillimes: number }>();
-  const itemTotals = new Map<string, { name: string; quantity: number; totalMillimes: number }>();
+  const itemTotals = new Map<string, {
+    name: string;
+    quantity: number;
+    totalMillimes: number;
+    categoryId: string;
+    categoryName: string;
+    unitPriceMillimes: number;
+  }>();
   for (const order of orders) {
     for (const line of order.items) {
       const catalogItem = itemIndex.get(line.itemId);
@@ -125,10 +193,18 @@ async function summarize(storeId: string, from: number, to: number) {
       category.quantity += line.quantity;
       category.totalMillimes += line.lineTotalMillimes;
       categoryTotals.set(categoryId, category);
-      const item = itemTotals.get(line.itemId) ?? { name: line.name, quantity: 0, totalMillimes: 0 };
+      const itemKey = `${line.itemId}\u0000${line.unitPriceMillimes}\u0000${categoryId}`;
+      const item = itemTotals.get(itemKey) ?? {
+        name: line.name,
+        quantity: 0,
+        totalMillimes: 0,
+        categoryId,
+        categoryName,
+        unitPriceMillimes: line.unitPriceMillimes,
+      };
       item.quantity += line.quantity;
       item.totalMillimes += line.lineTotalMillimes;
-      itemTotals.set(line.itemId, item);
+      itemTotals.set(itemKey, item);
     }
   }
   const paymentSplit: Record<PaymentMethod, number> = { cash: 0, card: 0, other: 0, tab: 0 };
@@ -196,12 +272,17 @@ async function summarize(storeId: string, from: number, to: number) {
   const tabsOutstandingMillimes = customerTabs.reduce((total, customer) => total + customer.outstandingMillimes, 0);
   const receivableMillimes = customerTabs.reduce((total, customer) => total + Math.max(0, customer.outstandingMillimes), 0);
   const salesMillimes = orders.reduce((sum, order) => sum + order.totalMillimes, 0);
+  const chronologicalOrders = [...orders].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   const salesCollectedMillimes = paymentSplit.cash + paymentSplit.card + paymentSplit.other + tabsSettledMillimes;
   const expensesMillimes = expenses.reduce((sum, expense) => sum + expense.amountMillimes, 0);
   const netProfitMillimes = salesCollectedMillimes - expensesMillimes;
   const closedShiftLines = shiftLines.filter((shift) => shift.status !== 'in_progress');
+  const includedShiftIds = new Set(shiftLines.map((shift) => shift.shiftId));
+  const historicalVoidAdjustmentMillimes = periodVoidAdjustments
+    .filter((adjustment) => !includedShiftIds.has(adjustment.shiftId))
+    .reduce((sum, adjustment) => sum + adjustment.amountMillimes, 0);
   const cashDifferenceMillimes = closedShiftLines.reduce((sum, shift) => sum + (shift.differenceMillimes ?? 0), 0);
-  const cashOuts: ReportCashOutLine[] = cashMovements
+  const cashOuts: ReportCashOutLine[] = periodCashMovements
     .filter((movement) => movement.kind === 'out' && new Date(movement.createdAt).getTime() >= from && new Date(movement.createdAt).getTime() <= to)
     .map((movement) => ({
       shiftId: movement.shiftId,
@@ -211,6 +292,37 @@ async function summarize(storeId: string, from: number, to: number) {
       note: movement.note,
       createdAt: movement.createdAt,
     }));
+  const reportCashMovements: ReportCashMovementLine[] = periodCashMovements.map((movement) => ({
+    shiftId: movement.shiftId,
+    staffName: staffById.get(movement.staffId)?.name ?? 'Staff',
+    kind: movement.kind,
+    reason: movement.reason,
+    amountMillimes: movement.amountMillimes,
+    note: movement.note,
+    createdAt: movement.createdAt,
+  }));
+  const employeeBreakdown: ReportEmployeeLine[] = [...orders.reduce((totals, order) => {
+    const employee = totals.get(order.staffId) ?? {
+      staffId: order.staffId,
+      name: order.staffName ?? staffById.get(order.staffId)?.name ?? 'Staff',
+      orderCount: 0,
+      salesMillimes: 0,
+    };
+    employee.orderCount += 1;
+    employee.salesMillimes += order.totalMillimes;
+    totals.set(order.staffId, employee);
+    return totals;
+  }, new Map<string, ReportEmployeeLine>()).values()];
+  const expenseDetails: ReportExpenseLine[] = expenses.map((expense) => ({
+    expenseId: expense.id,
+    category: expense.category,
+    amountMillimes: expense.amountMillimes,
+    paidMillimes: expense.paidMillimes,
+    date: expense.date,
+    supplierId: expense.supplierId,
+    note: expense.note,
+    createdBy: staffById.get(expense.createdBy)?.name ?? expense.createdBy,
+  }));
   return {
     salesMillimes,
     salesCollectedMillimes,
@@ -218,6 +330,8 @@ async function summarize(storeId: string, from: number, to: number) {
     netProfitMillimes,
     receivableMillimes,
     orderCount: orders.length,
+    firstTicketNumber: chronologicalOrders.length > 0 ? chronologicalOrders[0].number : undefined,
+    lastTicketNumber: chronologicalOrders.length > 0 ? chronologicalOrders[chronologicalOrders.length - 1].number : undefined,
     cashDifferenceMillimes,
     topItems: [...itemTotals.values()].reduce<Record<string, number>>((totals, item) => {
       totals[item.name] = (totals[item.name] ?? 0) + item.quantity;
@@ -225,7 +339,7 @@ async function summarize(storeId: string, from: number, to: number) {
     }, {}),
     shifts: includedShifts,
     salesByCategory: [...categoryTotals].map(([categoryId, value]) => ({ categoryId, ...value })),
-    itemsSold: [...itemTotals].map(([itemId, value]) => ({ itemId, ...value })),
+    itemsSold: [...itemTotals].map(([itemKey, value]) => ({ itemId: itemKey.split('\u0000')[0], ...value })),
     voids: {
       count: voidedOrders.length,
       totalMillimes: voidedOrders.reduce((sum, order) => sum + order.totalMillimes, 0),
@@ -254,14 +368,24 @@ async function summarize(storeId: string, from: number, to: number) {
     },
     shiftLines,
     paymentSplit,
-    totalExpectedCashMillimes: shiftLines.reduce((sum, shift) => sum + (shift.expectedCashMillimes ?? 0), 0),
+    totalExpectedCashMillimes: shiftLines.reduce((sum, shift) => sum + (shift.expectedCashMillimes ?? 0), historicalVoidAdjustmentMillimes),
     totalCountedMillimes: closedShiftLines.reduce((sum, shift) => sum + (shift.countedCashMillimes ?? 0), 0),
     totalDifferenceMillimes: cashDifferenceMillimes,
     cashSalesMillimes: paymentSplit.cash,
     tabSalesMillimes: paymentSplit.tab,
     tabPaymentsReceivedMillimes: tabsSettledMillimes,
     cashFloatMillimes: shiftLines.reduce((sum, shift) => sum + shift.startingCashMillimes, 0),
+    cashInMillimes: periodCashMovements
+      .filter((movement) => movement.kind === 'in')
+      .reduce((sum, movement) => sum + movement.amountMillimes, 0),
+    cashOutMillimes: periodCashMovements
+      .filter((movement) => movement.kind === 'out')
+      .reduce((sum, movement) => sum + movement.amountMillimes, 0),
+    cashMovements: reportCashMovements,
+    voidAdjustments: periodVoidAdjustments,
+    employeeBreakdown,
     cashOuts,
+    expenseDetails,
     customerTabs,
     tabsIssuedMillimes,
     tabsSettledMillimes,
@@ -269,22 +393,48 @@ async function summarize(storeId: string, from: number, to: number) {
   };
 }
 
-async function createReport(storeId: string, type: 'X' | 'Z', generatedBy: string, ownerPin?: string): Promise<ReportRecord> {
+async function createReport(
+  storeId: string,
+  type: 'X' | 'Z',
+  generatedBy: string,
+  ownerPin?: string,
+  closeDetails?: { countedCashMillimes: number; differenceMillimes: number; note?: string },
+): Promise<ReportRecord> {
   const store = await userService.getStore(storeId);
   if (!store) throw new Error('The store could not be found.');
   const createdAt = new Date().toISOString();
   const reports = isSupabaseDriver() ? await listRemoteReports(storeId) : getReports();
-  const periodFrom = sinceLastZ(storeId, reports);
-  const summary = await summarize(storeId, new Date(periodFrom).getTime(), Date.now());
+  const storeTimeZone = store.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const periodFrom = sinceLastZ(storeId, reports, storeTimeZone);
+  const summary = await summarize(storeId, new Date(periodFrom).getTime(), new Date(createdAt).getTime());
+  const storeSettings = resolveStoreSettings(store.settings);
+  const businessDate = todayKey(storeTimeZone);
   const zNumber = type === 'Z'
     ? Math.max(0, ...reports.filter((report) => report.storeId === storeId && report.type === 'Z').map((report) => report.zNumber ?? 0)) + 1
+    : undefined;
+  const xNumber = type === 'X'
+    ? reports.filter((report) => report.storeId === storeId && report.type === 'X' && report.businessDate === businessDate).length + 1
     : undefined;
   const report: ReportRecord = {
     id: `report-${crypto.randomUUID()}`,
     storeId,
     storeName: store.name,
+    frozenStoreName: store.name,
+    frozenStoreAddress: store.address,
+    frozenStorePhone: store.phone,
+    frozenStoreTaxId: store.taxId,
+    frozenSettings: {
+      reportFooterText: storeSettings.reportFooterText,
+      storeLogoId: storeSettings.storeLogoId,
+      showLogo: storeSettings.showLogo,
+      showAddress: storeSettings.showAddress,
+      showPhone: storeSettings.showPhone,
+      paperWidth: storeSettings.paperWidth,
+    },
+    frozenReportFooterText: storeSettings.reportFooterText,
+    frozenPaperWidth: storeSettings.paperWidth,
     type,
-    businessDate: todayKey(),
+    businessDate,
     createdAt,
     salesMillimes: summary.salesMillimes,
     salesCollectedMillimes: summary.salesCollectedMillimes,
@@ -293,14 +443,25 @@ async function createReport(storeId: string, type: 'X' | 'Z', generatedBy: strin
     receivableMillimes: summary.receivableMillimes,
     orderCount: summary.orderCount,
     cashDifferenceMillimes: summary.cashDifferenceMillimes,
+    grossMillimes: summary.salesMillimes,
+    netMillimes: summary.salesMillimes,
     zNumber,
+    reportNumber: zNumber
+      ? `Z-${String(zNumber).padStart(6, '0')}`
+      : `X-${String(xNumber ?? 1).padStart(6, '0')}`,
     periodFrom,
     periodTo: createdAt,
+    dayOpenedAt: summary.shifts.map((shift) => shift.openedAt).sort()[0] ?? periodFrom,
+    dayClosedAt: type === 'Z' ? createdAt : undefined,
+    firstTicketNumber: summary.firstTicketNumber,
+    lastTicketNumber: summary.lastTicketNumber,
     generatedBy,
     salesByCategory: summary.salesByCategory,
     itemsSold: summary.itemsSold,
     voids: summary.voids,
+    voidAdjustments: summary.voidAdjustments,
     comps: summary.comps,
+    expenseDetails: summary.expenseDetails,
     shifts: summary.shiftLines,
     paymentSplit: summary.paymentSplit,
     totalExpectedCashMillimes: summary.totalExpectedCashMillimes,
@@ -310,11 +471,25 @@ async function createReport(storeId: string, type: 'X' | 'Z', generatedBy: strin
     tabSalesMillimes: summary.tabSalesMillimes,
     tabPaymentsReceivedMillimes: summary.tabPaymentsReceivedMillimes,
     cashFloatMillimes: summary.cashFloatMillimes,
+    cashInMillimes: summary.cashInMillimes,
+    cashOutMillimes: summary.cashOutMillimes,
+    cashMovements: summary.cashMovements,
+    employeeBreakdown: summary.employeeBreakdown,
     cashOuts: summary.cashOuts,
     customerTabs: summary.customerTabs,
     tabsIssuedMillimes: summary.tabsIssuedMillimes,
     tabsSettledMillimes: summary.tabsSettledMillimes,
     tabsOutstandingMillimes: summary.tabsOutstandingMillimes,
+    countedCashMillimes: closeDetails?.countedCashMillimes,
+    cashDifference: closeDetails?.differenceMillimes,
+    cashDifferenceNote: closeDetails?.note,
+    pinVerified: type === 'Z',
+    ...(closeDetails ? {
+      countedCashMillimes: closeDetails.countedCashMillimes,
+      cashDifference: closeDetails.differenceMillimes,
+      cashDifferenceNote: closeDetails.note,
+      cashDifferenceMillimes: closeDetails.differenceMillimes,
+    } : {}),
   };
   const savedReport = isSupabaseDriver()
     ? await saveRemoteReport(report, ownerPin)
@@ -346,8 +521,13 @@ async function createReport(storeId: string, type: 'X' | 'Z', generatedBy: strin
 
 export const reportService = {
   async getCurrentPeriodSummary(storeId: string) {
-    const reports = isSupabaseDriver() ? await listRemoteReports(storeId) : getReports();
-    return await summarize(storeId, new Date(sinceLastZ(storeId, reports)).getTime(), Date.now());
+    const [reports, store] = await Promise.all([
+      isSupabaseDriver() ? listRemoteReports(storeId) : Promise.resolve(getReports()),
+      userService.getStore(storeId),
+    ]);
+    if (!store) throw new Error('The store could not be found.');
+    const timeZone = store.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return await summarize(storeId, new Date(sinceLastZ(storeId, reports, timeZone)).getTime(), Date.now());
   },
 
   async getInsights(storeId: string, from: number, to: number) {
@@ -478,15 +658,27 @@ export const reportService = {
     return createReport(storeId, 'X', generatedBy);
   },
 
-  async closeDayWithZReport(storeId: string, generatedBy = 'Owner', ownerPin?: string): Promise<ReportRecord> {
+  async closeDayWithZReport(
+    storeId: string,
+    generatedBy = 'Owner',
+    ownerPin?: string,
+    closeDetails?: { countedCashMillimes: number; differenceMillimes: number; note?: string },
+  ): Promise<ReportRecord> {
+    if (!ownerPin || !/^\d{4}$/.test(ownerPin)) throw new Error('Owner PIN is required for every Z report.');
     if ((await shiftService.listOpenShifts(storeId)).length > 0) throw new Error('Force-close or close every shift before creating a Z report.');
     const store = await userService.getStore(storeId);
     if (!store) throw new Error('The store could not be found.');
-    if (!isSupabaseDriver() && store.dayClosedOn === todayKey()) {
-      if (!ownerPin) throw new Error('Owner PIN is required to create another Z report today.');
+    if (!isSupabaseDriver()) {
       if (!await userService.verifyStorePin(storeId, ownerPin, 'z_report')) throw new Error('The owner PIN is incorrect.');
     }
-    const report = await createReport(storeId, 'Z', generatedBy, ownerPin);
+    const report = await createReport(storeId, 'Z', generatedBy, ownerPin, closeDetails);
+    if (closeDetails) {
+      report.countedCashMillimes = closeDetails.countedCashMillimes;
+      report.cashDifference = closeDetails.differenceMillimes;
+      report.cashDifferenceNote = closeDetails.note;
+      report.cashDifferenceMillimes = closeDetails.differenceMillimes;
+      report.pinVerified = true;
+    }
     if (!isSupabaseDriver()) {
       writeData('stores', (await userService.listStores()).map((candidate) => candidate.id === storeId ? { ...candidate, dayClosedOn: todayKey() } : candidate));
     }

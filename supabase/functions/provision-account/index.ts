@@ -222,6 +222,7 @@ async function createOwner(
       name,
       email,
       must_change_password: true,
+      must_set_pin: true,
       is_active: true,
     });
     if (profileError) throw new Error(`Could not create owner profile: ${profileError.message}`);
@@ -248,6 +249,7 @@ async function createOwner(
         name,
         email,
         mustChangePassword: true,
+        mustSetPin: true,
         isActive: true,
         storeId,
         createdAt: authData.user.created_at,
@@ -407,9 +409,8 @@ async function resetPassword(admin: SupabaseClient, caller: CallerProfile, input
   const { error: profileError } = await admin.from('profiles').update({
     must_change_password: true,
     session_version: target.session_version + 1,
-    ...(target.role === 'staff'
-      ? { must_set_pin: true, pin_hash: null }
-      : { must_set_pin: false }),
+    must_set_pin: true,
+    pin_hash: null,
   }).eq('id', userId);
   if (profileError) throw new Error(`Could not update the account state: ${profileError.message}`);
   return { temporaryPassword };

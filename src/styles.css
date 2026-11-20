@@ -197,19 +197,92 @@ button {
   margin-bottom: 0.75rem;
 }
 
-.thermal-receipt {
+.receipt-document-view {
   width: 80mm;
   max-width: 100%;
   margin: 0 auto;
   background: #fff;
   color: #000;
-  padding: 5mm 4mm;
-  font: 11px/1.35 "Courier New", monospace;
+  padding: 3mm;
+  font: 9px/1.35 "Courier New", Courier, monospace;
   overflow-wrap: anywhere;
+}
+
+.receipt-width-58 {
+  width: 58mm;
+}
+
+.receipt-width-80 {
+  width: 80mm;
+}
+
+.receipt-logo {
+  display: block;
+  width: 20mm;
+  max-height: 16mm;
+  object-fit: contain;
+  margin: 0 auto 2mm;
+}
+
+.receipt-document-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.receipt-document-line {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  unicode-bidi: plaintext;
+}
+
+.receipt-line-center {
+  text-align: center;
+}
+
+.receipt-line-right {
+  text-align: right;
+}
+
+.receipt-line-bold {
+  font-weight: 700;
+}
+
+.receipt-line-double {
+  font-size: 1.35em;
+  line-height: 1.15;
+}
+
+.receipt-line-section {
+  margin-top: 2mm;
+}
+
+.receipt-line-footer {
+  margin-top: 1mm;
 }
 
 .report-dialog {
   width: min(100%, 56rem);
+}
+
+.receipt-inline-report {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  overflow: auto;
+  border-radius: 0.75rem;
+  background: #e9eef0;
+  padding: 1rem;
+}
+
+.receipt-inline-report .receipt-actions {
+  justify-content: flex-start;
+  margin-bottom: 0;
+}
+
+.receipt-inline-report .receipt-document-view {
+  box-shadow: 0 1px 5px rgb(16 27 32 / 18%);
 }
 
 .report-document {
@@ -489,8 +562,176 @@ button {
   min-width: 0;
 }
 
-.settings-section-nav {
-  display: none;
+.settings-page-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 1rem;
+  border: 1px solid rgb(var(--color-outline-variant));
+  border-radius: 1.25rem;
+  background:
+    radial-gradient(ellipse at 92% 10%, rgb(var(--color-primary) / 0.1), transparent 42%),
+    rgb(var(--color-surface-container-lowest));
+  padding: 1.25rem;
+}
+
+.settings-page-header__icon {
+  display: flex;
+  width: 3.25rem;
+  height: 3.25rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 1rem;
+  background: rgb(var(--color-primary) / 0.12);
+  color: rgb(var(--color-primary));
+}
+
+.settings-page-header__icon .material-symbols-outlined {
+  font-size: 1.75rem;
+}
+
+.settings-page-header__eyebrow,
+.settings-dashboard__eyebrow {
+  margin: 0 0 0.2rem;
+  color: rgb(var(--color-primary));
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.settings-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.settings-dashboard__intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.settings-dashboard__intro h2 {
+  margin: 0;
+}
+
+.settings-dashboard__count {
+  flex: 0 0 auto;
+  border: 1px solid rgb(var(--color-outline-variant));
+  border-radius: 999px;
+  background: rgb(var(--color-surface-container-lowest));
+  padding: 0.4rem 0.75rem;
+  color: rgb(var(--color-on-surface-variant));
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.settings-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+  gap: 0.875rem;
+}
+
+.settings-dashboard-card {
+  display: flex;
+  min-width: 0;
+  min-height: 7.25rem;
+  align-items: center;
+  gap: 0.875rem;
+  border: 1px solid rgb(var(--color-outline-variant));
+  border-radius: 1rem;
+  background: rgb(var(--color-surface-container-lowest));
+  padding: 1rem;
+  color: rgb(var(--color-on-surface));
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.settings-dashboard-card:hover,
+.settings-dashboard-card:focus-visible {
+  border-color: rgb(var(--color-primary) / 0.55);
+  box-shadow: 0 8px 24px rgb(var(--color-primary-dark) / 0.08);
+  outline: none;
+  transform: translateY(-2px);
+}
+
+.settings-dashboard-card__icon {
+  display: flex;
+  width: 2.875rem;
+  height: 2.875rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.875rem;
+  background: rgb(var(--color-primary) / 0.1);
+  color: rgb(var(--color-primary));
+}
+
+.settings-dashboard-card__icon .material-symbols-outlined {
+  font-size: 1.5rem;
+}
+
+.settings-dashboard-card__content {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.settings-dashboard-card__title {
+  font-size: 0.95rem;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.settings-dashboard-card__description {
+  color: rgb(var(--color-on-surface-variant));
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.settings-dashboard-card__arrow {
+  flex: 0 0 auto;
+  color: rgb(var(--color-outline));
+  font-size: 1.25rem;
+}
+
+.settings-back-button {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: 0.4rem;
+  border: 0;
+  border-radius: 0.75rem;
+  background: transparent;
+  padding: 0 0.75rem;
+  color: rgb(var(--color-primary));
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.settings-back-button:hover,
+.settings-back-button:focus-visible {
+  background: rgb(var(--color-primary) / 0.08);
+  outline: none;
+}
+
+.settings-section-content {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.settings-section-content [hidden] {
+  display: none !important;
 }
 
 .sales-help-tooltip {
@@ -695,60 +936,12 @@ button {
   }
 
   .settings-content {
-    display: grid;
-    grid-template-columns: 220px minmax(0, 1fr);
-    align-items: start;
-    column-gap: 24px;
-  }
-
-  .settings-content > header {
-    grid-column: 1 / -1;
-  }
-
-  .settings-section-nav {
-    position: sticky;
-    top: 88px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    border: 1px solid rgb(var(--color-outline-variant));
-    border-radius: 12px;
-    background: rgb(var(--color-surface-container-lowest));
-    padding: 8px;
-  }
-
-  .settings-section-nav a {
-    min-height: 40px;
-    border-radius: 8px;
-    padding: 10px;
-    color: rgb(var(--color-on-surface-variant));
-    text-decoration: none;
-  }
-
-  .settings-section-nav a:hover,
-  .settings-section-nav a:focus-visible {
-    background: rgb(var(--color-surface-container-low));
-    color: rgb(var(--color-primary));
-  }
-
-  .settings-section-content {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 16px;
   }
 
   .settings-section-content > * {
     margin-top: 0;
-  }
-
-  .settings-content > .settings-section-nav {
-    grid-row: 2;
-  }
-
-  .settings-content > .settings-section-content {
-    grid-row: 2;
-    grid-column: 2;
   }
 
   .staff-profile-actions > button {
@@ -869,11 +1062,7 @@ button {
   }
 
   .settings-section-content {
-    display: contents;
-  }
-
-  .settings-section-nav {
-    display: none;
+    display: flex;
   }
 }
 
@@ -2392,15 +2581,10 @@ button {
 }
 
 @media print {
-  @page {
-    size: 80mm auto;
-    margin: 0;
-  }
-
   html,
   body,
   #root {
-    width: 80mm !important;
+    width: auto !important;
     min-width: 0 !important;
     margin: 0 !important;
     padding: 0 !important;
@@ -2412,36 +2596,34 @@ button {
   }
 
   .receipt-overlay,
-  .receipt-overlay * {
-    visibility: visible !important;
-  }
-
-  .receipt-overlay {
-    position: absolute !important;
-    inset: 0 auto auto 0 !important;
-    display: block !important;
-    width: 80mm !important;
-    min-height: 0 !important;
-    overflow: visible !important;
-    padding: 0 !important;
-    background: #fff !important;
-  }
-
   .receipt-dialog {
-    width: 80mm !important;
+    position: static !important;
+    inset: auto !important;
+    width: auto !important;
     max-width: none !important;
+    overflow: visible !important;
     margin: 0 !important;
     padding: 0 !important;
     border-radius: 0 !important;
-    background: #fff !important;
+    background: transparent !important;
     box-shadow: none !important;
   }
 
-  .thermal-receipt {
-    width: 80mm !important;
+  .receipt-print-target--active,
+  .receipt-print-target--active * {
+    visibility: visible !important;
+  }
+
+  .receipt-print-target--active {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: var(--receipt-print-width, 80mm) !important;
     max-width: none !important;
     margin: 0 !important;
-    padding: 4mm !important;
+    padding: 3mm !important;
+    background: #fff !important;
+    font-family: "Courier New", monospace !important;
     print-color-adjust: exact;
   }
 

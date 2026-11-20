@@ -86,6 +86,16 @@ export type NotificationType =
 export interface StoreSettings {
   defaultSettlementTerms: SettlementTerms;
   notificationPreferences: Partial<Record<NotificationType, boolean>>;
+  ticketHeaderText: string[];
+  ticketFooterText: string[];
+  reportFooterText: string[];
+  storeLogoId: string;
+  showLogo: boolean;
+  showAddress: boolean;
+  showPhone: boolean;
+  showStaffName: boolean;
+  showDateTime: boolean;
+  paperWidth: 58 | 80;
 }
 
 export type SubscriptionPlan = 'trial' | 'monthly' | 'yearly';
@@ -123,6 +133,16 @@ export function resolveStoreSettings(settings?: Partial<StoreSettings>): StoreSe
       ...DEFAULT_NOTIFICATION_PREFERENCES,
       ...settings?.notificationPreferences,
     },
+    ticketHeaderText: settings?.ticketHeaderText?.slice(0, 2).map((line) => line.slice(0, 60)) ?? [],
+    ticketFooterText: settings?.ticketFooterText?.slice(0, 2).map((line) => line.slice(0, 60)) ?? ['Thank you'],
+    reportFooterText: settings?.reportFooterText?.slice(0, 2).map((line) => line.slice(0, 60)) ?? [],
+    storeLogoId: typeof settings?.storeLogoId === 'string' ? settings.storeLogoId : '',
+    showLogo: settings?.showLogo ?? true,
+    showAddress: settings?.showAddress ?? true,
+    showPhone: settings?.showPhone ?? true,
+    showStaffName: settings?.showStaffName ?? true,
+    showDateTime: settings?.showDateTime ?? true,
+    paperWidth: settings?.paperWidth === 58 ? 58 : 80,
   };
 }
 
@@ -131,6 +151,10 @@ export interface StoreRecord {
   ownerId: string;
   code: string;
   name: string;
+  timezone?: string;
+  address?: string;
+  phone?: string;
+  taxId?: string;
   allowCustomerCreditBalance?: boolean;
   allowCardPayments?: boolean;
   allowOtherPayments?: boolean;
@@ -361,6 +385,9 @@ export interface ReportItemLine {
   name: string;
   quantity: number;
   totalMillimes: number;
+  categoryId?: string;
+  categoryName?: string;
+  unitPriceMillimes?: number;
 }
 
 export interface ReportVoidLine {
@@ -368,6 +395,14 @@ export interface ReportVoidLine {
   reason: string;
   totalMillimes: number;
   approvedBy?: string;
+}
+
+export interface ReportVoidAdjustmentLine {
+  shiftId: string;
+  staffName: string;
+  orderNumber: number;
+  amountMillimes: number;
+  createdAt: string;
 }
 
 export interface ReportCompLine {
@@ -397,14 +432,46 @@ export interface ReportCashOutLine {
   createdAt: string;
 }
 
+export interface ReportExpenseLine {
+  expenseId: string;
+  category: ExpenseCategory;
+  amountMillimes: number;
+  paidMillimes: number;
+  date: string;
+  supplierId?: string;
+  note?: string;
+  createdBy: string;
+}
+
+export interface ReportCashMovementLine {
+  shiftId: string;
+  staffName: string;
+  kind: 'in' | 'out';
+  reason: CashMovementReason;
+  amountMillimes: number;
+  note?: string;
+  createdAt: string;
+}
+
+export interface ReportEmployeeLine {
+  staffId: string;
+  name: string;
+  orderCount: number;
+  salesMillimes: number;
+}
+
 export interface ReportShiftLine {
   shiftId: string;
   staffName: string;
+  orderCount?: number;
   status?: 'in_progress' | 'closed';
   openedAt: string;
   closedAt?: string;
   startingCashMillimes: number;
   cashSalesMillimes?: number;
+  cardSalesMillimes?: number;
+  otherSalesMillimes?: number;
+  tabSalesMillimes?: number;
   tabPaymentsMillimes?: number;
   cashInMillimes?: number;
   cashOutMillimes?: number;
@@ -430,12 +497,34 @@ export interface ReportRecord {
   orderCount: number;
   cashDifferenceMillimes: number;
   zNumber?: number;
+  reportNumber?: string;
+  dayOpenedAt?: string;
+  dayClosedAt?: string;
+  firstTicketNumber?: number;
+  lastTicketNumber?: number;
+  grossMillimes?: number;
+  discountsMillimes?: number;
+  netMillimes?: number;
+  countedCashMillimes?: number;
+  countedCash?: number;
+  cashDifference?: number;
+  cashDifferenceNote?: string;
+  pinVerified?: boolean;
+  frozenStoreName?: string;
+  frozenStoreAddress?: string;
+  frozenStorePhone?: string;
+  frozenStoreTaxId?: string;
+  frozenSettings?: Partial<StoreSettings>;
+  frozenReportFooterText?: string[];
+  frozenPaperWidth?: 58 | 80;
   periodFrom?: string;
   periodTo?: string;
   generatedBy?: string;
   salesByCategory?: ReportCategoryLine[];
   itemsSold?: ReportItemLine[];
   voids?: { count: number; totalMillimes: number; orders: ReportVoidLine[] };
+  voidAdjustments?: ReportVoidAdjustmentLine[];
+  expenseDetails?: ReportExpenseLine[];
   comps?: { count: number; quantity: number; totalMillimes: number; records: ReportCompLine[] };
   shifts?: ReportShiftLine[];
   paymentSplit?: Record<PaymentMethod, number>;
@@ -446,7 +535,12 @@ export interface ReportRecord {
   tabSalesMillimes?: number;
   tabPaymentsReceivedMillimes?: number;
   cashFloatMillimes?: number;
+  cashInMillimes?: number;
+  cashOutMillimes?: number;
+  cashRefundsMillimes?: number;
+  cashMovements?: ReportCashMovementLine[];
   cashOuts?: ReportCashOutLine[];
+  employeeBreakdown?: ReportEmployeeLine[];
   customerTabs?: ReportCustomerTabLine[];
   tabsIssuedMillimes?: number;
   tabsSettledMillimes?: number;

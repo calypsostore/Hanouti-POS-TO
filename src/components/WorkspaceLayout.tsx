@@ -5,10 +5,13 @@ import { BottomSheet } from './BottomSheet';
 import { MaterialIcon } from './MaterialIcon';
 import { TopBar } from './TopBar';
 import { t, type TranslationKey } from '../i18n/translations';
-import { notificationService, OWNER_NOTIFICATIONS_CHANGED_EVENT } from '../services/notificationService';
 import { orderService } from '../services/orderService';
 import { useAuthStore } from '../stores/authStore';
+import { useNotificationStore } from '../stores/notificationStore';
 import { PageContainer } from './layout/PageContainer';
+import { userService } from '../services/userService';
+import { resolveStoreSettings } from '../types/domain';
+import { getLogoDefinition } from '../data/logoCatalog';
 
 export interface WorkspaceLink {
   to: string;
@@ -31,8 +34,27 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
   const isOwnerWorkspace = links.some((link) => link.to === '/owner/dashboard');
   const [moreOpen, setMoreOpen] = useState(false);
   const [pendingVoidCount, setPendingVoidCount] = useState(0);
-  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const unreadNotificationCount = useNotificationStore((state) => state.unreadCount);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('hanouti.sidebar-collapsed.v1') === 'true');
+  const [storeLogoId, setStoreLogoId] = useState('');
+  const storeLogo = getLogoDefinition(storeLogoId);
+
+  useEffect(() => {
+    const storeId = user?.storeId;
+    if (!storeId) return;
+    let active = true;
+    const refreshLogo = () => {
+      void userService.getStore(storeId).then((store) => {
+        if (active) setStoreLogoId(resolveStoreSettings(store?.settings).storeLogoId);
+      }).catch((error: unknown) => console.error('Unable to load the store logo.', error));
+    };
+    refreshLogo();
+    window.addEventListener('hanouti:store-settings-updated', refreshLogo);
+    return () => {
+      active = false;
+      window.removeEventListener('hanouti:store-settings-updated', refreshLogo);
+    };
+  }, [user?.storeId]);
 
   useEffect(() => {
     const storeId = user?.storeId;
@@ -43,24 +65,18 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
       const currentRequestId = ++requestId;
       void Promise.all([
         orderService.listAll(storeId),
-        notificationService.listFor(user),
-      ]).then(([orders, notifications]) => {
+      ]).then(([orders]) => {
         if (!active || currentRequestId !== requestId) return;
         setPendingVoidCount(orders.filter((order) => order.status === 'pending_void').length);
-        setUnreadNotificationCount(notifications.filter((notification) => !notification.readAt).length);
       }).catch((error: unknown) => {
         console.error('Could not load owner navigation badges.', error);
       });
     };
     refreshBadges();
     window.addEventListener('focus', refreshBadges);
-    window.addEventListener('storage', refreshBadges);
-    window.addEventListener(OWNER_NOTIFICATIONS_CHANGED_EVENT, refreshBadges);
     return () => {
       active = false;
       window.removeEventListener('focus', refreshBadges);
-      window.removeEventListener('storage', refreshBadges);
-      window.removeEventListener(OWNER_NOTIFICATIONS_CHANGED_EVENT, refreshBadges);
     };
   }, [isOwnerWorkspace, user]);
 
@@ -90,10 +106,12 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
 
   return (
     <div className={`workspace-layout min-h-screen bg-surface pb-6${isOwnerWorkspace ? ' owner-workspace' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
-      <TopBar title={title} storeName={storeName} onProfileClick={() => navigate('/settings')} />
+      <TopBar title={title} storeName={storeName} storeLogoId={storeLogoId} onProfileClick={() => navigate('/settings')} />
       <aside className="desktop-sidebar" aria-label={t('common.workspaceNavigation')}>
         <div className="desktop-sidebar__brand">
-          <span className="desktop-sidebar__logo"><MaterialIcon name="local_cafe" /></span>
+          <span className="desktop-sidebar__logo">
+            {storeLogo ? <img src={storeLogo.src} alt="" className="h-8 w-8 object-contain" /> : <MaterialIcon name="local_cafe" />}
+          </span>
           {!sidebarCollapsed && <span className="desktop-sidebar__app-name">{t('common.appName')}</span>}
         </div>
         <nav className="desktop-sidebar__nav">

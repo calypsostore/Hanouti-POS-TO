@@ -138,8 +138,9 @@ describe('local money logic', () => {
 
   it('reopens the business day when a shift is opened after a Z report', async () => {
     setLocalData('shifts', []);
-
-    await reportService.closeDayWithZReport(storeId, 'owner-lamarsa');
+    setLocalData('stores', seedStores.map((store) => store.id === storeId ? { ...store, adminPin: '1234', adminPinHash: undefined } : store));
+    await expect(reportService.closeDayWithZReport(storeId, 'owner-lamarsa')).rejects.toThrow('Owner PIN is required');
+    await expect(reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234')).resolves.toBeDefined();
     expect((await userService.getStore(storeId))?.dayClosedOn).toBe(new Date().toLocaleDateString('en-CA'));
 
     await shiftService.openShift(storeId, staffId, 1_000);

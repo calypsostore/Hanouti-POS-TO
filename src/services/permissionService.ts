@@ -1,14 +1,39 @@
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import type { NotificationRecord, NotificationType } from '../types/domain';
+import { notificationPath } from '../lib/notificationPath';
+import { useAuthStore } from '../stores/authStore';
 
 export type NotificationPermissionStatus = 'granted' | 'denied' | 'prompt' | 'unsupported';
 
 export const PERMISSIONS_ASKED_KEY = 'permissionsAsked';
 const PERMISSION_STATUS_KEY = 'notificationPermissionStatus';
-const PERMISSION_CHANNEL_ID = '7anouti-general';
+export const NOTIFICATION_CHANNELS = {
+  orders: 'orders_v2',
+  alerts: 'alerts_v2',
+  system: 'system_v2',
+} as const;
+export const NOTIFICATION_CHANNEL_BY_TYPE: Record<NotificationType, keyof typeof NOTIFICATION_CHANNELS> = {
+  void_requested: 'alerts',
+  void_approved: 'orders',
+  void_rejected: 'orders',
+  schedule_published: 'orders',
+  customer_credit_warning: 'alerts',
+  customer_credit_limit: 'alerts',
+  customer_overdue: 'alerts',
+  stock_depleted: 'alerts',
+  item_86: 'alerts',
+  low_stock: 'alerts',
+  shift_opened: 'orders',
+  shift_closed: 'orders',
+  cash_difference: 'alerts',
+  cash_out_alert: 'alerts',
+  z_report_closed: 'system',
+  app_update: 'system',
+  subscription_expiring: 'system',
+};
 const statusListeners = new Set<(status: NotificationPermissionStatus) => void>();
 let channelCreation: Promise<void> | undefined;
-let nextNotificationId = Math.floor(Date.now() % 2_000_000_000);
 
 function normalizeStatus(status: string): NotificationPermissionStatus {
   if (status === 'granted' || status === 'denied') return status;
@@ -23,16 +48,46 @@ function saveStatus(status: NotificationPermissionStatus, asked = false): void {
   for (const listener of statusListeners) listener(status);
 }
 
-async function ensureDefaultChannel(): Promise<void> {
+export function stableNotificationId(id: string): number {
+  let hash = 0;
+  for (let index = 0; index < id.length; index += 1) {
+    hash = ((hash << 5) - hash + id.charCodeAt(index)) >>> 0;
+  }
+  return hash % 2_000_000_000;
+}
+
+async function ensureChannels(): Promise<void> {
   if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') return;
   if (!channelCreation) {
-    channelCreation = LocalNotifications.createChannel({
-      id: PERMISSION_CHANNEL_ID,
-      name: '7anouti-POS alerts',
-      description: 'Business alerts and app updates',
-      importance: 4,
-      visibility: 1,
-    });
+    channelCreation = (async () => {
+      await Promise.all([
+        LocalNotifications.createChannel({
+          id: NOTIFICATION_CHANNELS.orders,
+          name: 'Orders and shifts',
+          description: 'Orders, schedules, and shift activity',
+          importance: 4,
+          visibility: 1,
+          vibration: true,
+        }),
+        LocalNotifications.createChannel({
+          id: NOTIFICATION_CHANNELS.alerts,
+          name: 'Business alerts',
+          description: 'Void requests, cash differences, and stock alerts',
+          importance: 5,
+          visibility: 1,
+          vibration: true,
+        }),
+        LocalNotifications.createChannel({
+          id: NOTIFICATION_CHANNELS.system,
+          name: 'System updates',
+          description: 'App updates, reports, and summaries',
+          importance: 3,
+          visibility: 1,
+          vibration: false,
+        }),
+      ]);
+      await LocalNotifications.deleteChannel({ id: '7anouti-general' }).catch(() => undefined);
+    })();
   }
   try {
     await channelCreation;
@@ -94,22 +149,33 @@ export const permissionService = {
   },
 
   async createDefaultChannel(): Promise<void> {
-    await ensureDefaultChannel();
+    await ensureChannels();
   },
 
-  async showLocalNotification(title: string, body: string): Promise<boolean> {
+  async showLocalNotification(title: string, body: string, notification?: NotificationRecord): Promise<boolean> {
     const status = await this.getStatus();
     if (status !== 'granted') return false;
 
     if (this.isNative()) {
-      await ensureDefaultChannel();
-      nextNotificationId = (nextNotificationId % 2_000_000_000) + 1;
+      await ensureChannels();
+      const type = notification?.type ?? 'app_update';
+      const channelId = NOTIFICATION_CHANNELS[NOTIFICATION_CHANNEL_BY_TYPE[type]];
+      const numericId = notification
+        ? stableNotificationId(notification.id)
+        : ((Date.now() % 2_000_000_000) >>> 0);
+      const activeUser = useAuthStore.getState().user;
       await LocalNotifications.schedule({
         notifications: [{
-          id: nextNotificationId,
+          id: numericId,
           title,
           body,
-          channelId: PERMISSION_CHANNEL_ID,
+          channelId,
+          smallIcon: 'ic_stat_notification',
+          largeIcon: 'ic_notification_large',
+          extra: notification ? {
+            notificationId: notification.id,
+            route: activeUser ? notificationPath(notification, activeUser.role) : '/notifications',
+          } : undefined,
         }],
       });
       return true;

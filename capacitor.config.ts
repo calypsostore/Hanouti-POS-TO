@@ -14,6 +14,15 @@ const config: CapacitorConfig = {
   android: {
     path: 'android',
   },
+  plugins: {
+    LocalNotifications: {
+      smallIcon: 'ic_stat_notification',
+      iconColor: '#0F5E6E',
+    },
+    PushNotifications: {
+      presentationOptions: ['badge', 'sound', 'alert'],
+    },
+  },
 };
 
 export default config;

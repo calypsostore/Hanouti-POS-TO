@@ -971,7 +971,7 @@ export function PosScreen() {
       </div>
 
       <BottomNav />
-      {ticketOrder && <TicketView order={ticketOrder} storeName={store?.name ?? t('pos.cafe')} staffName={user?.name ?? t('common.staff')} onClose={() => setTicketOrder(null)} />}
+      {ticketOrder && <TicketView order={ticketOrder} storeName={store?.name ?? t('pos.cafe')} staffName={user?.name ?? t('common.staff')} onClose={() => setTicketOrder(null)} settings={store?.settings} storeAddress={store?.address} storePhone={store?.phone} storeTaxId={store?.taxId} />}
       <BottomSheet open={drawerOpen} onClose={() => setDrawerOpen(false)} title={t('pos.currentOrder')}>
         {renderTicketContent(true)}
       </BottomSheet>

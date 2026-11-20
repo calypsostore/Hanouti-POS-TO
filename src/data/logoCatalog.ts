@@ -107,3 +107,7 @@ export const logoGroupsList = logoGroups.map(({ key }) => t(key));
 export function getLogoDefinition(id: string): LogoDefinition | undefined {
   return logoCatalog.find((logo) => logo.id === id);
 }
+
+export function getLogoSrc(id: string): string | undefined {
+  return id ? getLogoDefinition(id)?.src : undefined;
+}

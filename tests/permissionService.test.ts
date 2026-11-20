@@ -7,6 +7,7 @@ const nativeNotifications = vi.hoisted(() => ({
   checkPermissions: vi.fn(),
   requestPermissions: vi.fn(),
   createChannel: vi.fn(),
+  deleteChannel: vi.fn(),
   schedule: vi.fn(),
 }));
 
@@ -18,6 +19,7 @@ describe('permissionService', () => {
     nativeNotifications.checkPermissions.mockReset();
     nativeNotifications.requestPermissions.mockReset();
     nativeNotifications.createChannel.mockReset().mockResolvedValue(undefined);
+    nativeNotifications.deleteChannel.mockReset().mockResolvedValue(undefined);
     nativeNotifications.schedule.mockReset().mockResolvedValue({ notifications: [] });
   });
 
@@ -75,14 +77,14 @@ describe('permissionService', () => {
 
     expect(checkPermissions).toHaveBeenCalledOnce();
     expect(createChannel).toHaveBeenCalledWith(expect.objectContaining({
-      id: '7anouti-general',
+      id: 'orders_v2',
       importance: 4,
     }));
     expect(schedule).toHaveBeenCalledWith({
       notifications: [expect.objectContaining({
         title: 'Update available',
         body: 'A new build is ready.',
-        channelId: '7anouti-general',
+        channelId: 'system_v2',
       })],
     });
   });

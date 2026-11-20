@@ -10,6 +10,7 @@ import { updateService, type UpdateCheckResult } from './services/updateService'
 import { notificationService } from './services/notificationService';
 import { UpdateRequiredModal } from './components/UpdateRequiredModal';
 import { PermissionsPrompt } from './components/PermissionsPrompt';
+import { NotificationsBridge } from './components/NotificationsBridge';
 import { StoreReadOnlyScreen } from './screens/StoreReadOnlyScreen';
 import { useAuthStore } from './stores/authStore';
 import { PERMISSIONS_CHANGED_EVENT, userService } from './services/userService';
@@ -346,6 +347,7 @@ export default function App() {
     <>
       <UpdateRequiredModal result={updateResult} />
       <PermissionsPrompt />
+      {user && !locked && <NotificationsBridge />}
       <Suspense fallback={<LoadingScreen message={t('app.loading')} />}>
         <Routes>
           <Route path="/" element={<GuestRoute />} />

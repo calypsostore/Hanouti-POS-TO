@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '../components/BottomNav';
 import { Button } from '../components/Button';
@@ -9,66 +9,27 @@ import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { CardGrid, PageContainer, PageHeader } from '../components/layout';
 import { adminWorkspaceLinks, ownerWorkspaceLinks } from '../app/navigation';
 import { t } from '../i18n/translations';
-import { notificationService, OWNER_NOTIFICATIONS_CHANGED_EVENT } from '../services/notificationService';
 import { userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
+import { useNotificationStore } from '../stores/notificationStore';
 import { notificationPath } from '../lib/notificationPath';
 import type { NotificationRecord } from '../types/domain';
-import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
 
 export function NotificationsScreen() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
-  const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
+  const notifications = useNotificationStore((state) => state.items);
+  const unreadCount = useNotificationStore((state) => state.unreadCount);
+  const loading = useNotificationStore((state) => state.status === 'loading');
+  const markRead = useNotificationStore((state) => state.markRead);
+  const markAllReadStore = useNotificationStore((state) => state.markAllRead);
   const [storeName, setStoreName] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
-
-  const refresh = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
-    try {
-      const [nextNotifications, store] = await Promise.all([
-        notificationService.listFor(user),
-        user.storeId ? userService.getStore(user.storeId) : Promise.resolve(undefined),
-      ]);
-      setNotifications(nextNotifications);
-      setStoreName(store?.name ?? '');
-      setError('');
-    } catch (loadError) {
-      console.error('Unable to load notifications.', loadError);
-      setError(t('common.loadFailed'));
-    } finally {
-      setLoading(false);
-    }
-  }, [user]);
-
-  useEffect(() => {
-    void refresh();
-    if (user) {
-      void notificationService.markAllRead(user).catch((markError: unknown) => {
-        console.error('Unable to mark notifications as read.', markError);
-        setError('Unable to mark notifications as read. Please try again.');
-      });
-    }
-    window.addEventListener('focus', refresh);
-    window.addEventListener('storage', refresh);
-    window.addEventListener(OWNER_NOTIFICATIONS_CHANGED_EVENT, refresh);
-    return () => {
-      window.removeEventListener('focus', refresh);
-      window.removeEventListener('storage', refresh);
-      window.removeEventListener(OWNER_NOTIFICATIONS_CHANGED_EVENT, refresh);
-    };
-  }, [refresh, user]);
 
   useEffect(() => {
     if (!user?.storeId) return;
-    return subscribeToStoreChanges(user.storeId, ['notifications'], () => {
-      void refresh();
-    });
-  }, [refresh, user?.storeId]);
-
-  const unreadCount = notifications.filter((notification) => !notification.readAt).length;
+    void userService.getStore(user.storeId).then((store) => setStoreName(store?.name ?? '')).catch(() => undefined);
+  }, [user?.storeId]);
   const groups = useMemo(() => {
     const today = new Date().toDateString();
     return [
@@ -80,8 +41,7 @@ export function NotificationsScreen() {
   async function markAllRead() {
     if (!user) return;
     try {
-      await notificationService.markAllRead(user);
-      await refresh();
+      await markAllReadStore(user);
     } catch (markError) {
       console.error('Unable to mark notifications as read.', markError);
       setError('Unable to mark notifications as read. Please try again.');
@@ -91,8 +51,7 @@ export function NotificationsScreen() {
   async function openNotification(notification: NotificationRecord) {
     if (!user) return;
     try {
-      if (!notification.readAt) await notificationService.markRead(user, notification.id);
-      await refresh();
+      if (!notification.readAt) await markRead(user, notification.id);
       navigate(notificationPath(notification, user.role));
     } catch (markError) {
       console.error('Unable to open this notification.', markError);

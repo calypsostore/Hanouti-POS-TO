@@ -49,6 +49,8 @@ const emptySummary: DashboardSummary = {
   salesByCategory: [],
   itemsSold: [],
   voids: { count: 0, totalMillimes: 0, orders: [] },
+  voidAdjustments: [],
+  expenseDetails: [],
   comps: { count: 0, quantity: 0, totalMillimes: 0, records: [] },
   shiftLines: [],
   paymentSplit: { cash: 0, card: 0, other: 0, tab: 0 },
@@ -60,6 +62,12 @@ const emptySummary: DashboardSummary = {
   tabPaymentsReceivedMillimes: 0,
   cashFloatMillimes: 0,
   cashOuts: [],
+  firstTicketNumber: undefined,
+  lastTicketNumber: undefined,
+  cashInMillimes: 0,
+  cashOutMillimes: 0,
+  cashMovements: [],
+  employeeBreakdown: [],
   customerTabs: [],
   tabsIssuedMillimes: 0,
   tabsSettledMillimes: 0,
@@ -494,8 +502,8 @@ function OwnerDashboardContent() {
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="schedule" className="text-primary" />Shift overview</h2>
             <div className="flex gap-2">
-              <Button variant="secondary" onClick={() => navigate('/owner/reports')}><MaterialIcon name="summarize" />X report</Button>
-              <Button variant="secondary" onClick={() => navigate('/owner/reports')}><MaterialIcon name="lock" />Z report</Button>
+              <Button variant="secondary" onClick={() => navigate('/owner/shifts?tab=reports')}><MaterialIcon name="summarize" />X report</Button>
+              <Button variant="secondary" onClick={() => navigate('/owner/shifts?tab=reports')}><MaterialIcon name="lock" />Z report</Button>
             </div>
           </div>
           <div className="flex flex-col gap-2">

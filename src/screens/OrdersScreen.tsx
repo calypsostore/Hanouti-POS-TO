@@ -357,7 +357,7 @@ export function OrdersScreen() {
           </div>
         )}
       </BottomSheet>
-      {ticketOrder && <TicketView order={ticketOrder.record} storeName={store?.name ?? ''} staffName={ticketOrder.staff} onClose={() => setTicketOrder(null)} />}
+      {ticketOrder && <TicketView order={ticketOrder.record} storeName={store?.name ?? ''} staffName={ticketOrder.staff} onClose={() => setTicketOrder(null)} settings={store?.settings} storeAddress={store?.address} storePhone={store?.phone} storeTaxId={store?.taxId} />}
       {toast && <div role="status" className="fixed left-1/2 top-20 z-50 -translate-x-1/2 rounded-full bg-primary-dark px-4 py-2.5 font-body text-label-md text-white shadow-overlay">{toast}</div>}
     </div>
   );

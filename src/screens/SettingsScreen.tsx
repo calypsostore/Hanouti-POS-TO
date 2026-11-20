@@ -1,14 +1,17 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { BottomNav } from '../components/BottomNav';
 import { Button } from '../components/Button';
 import { ChangePersonalPinForm } from '../components/ChangePersonalPinForm';
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
 import { PermissionsSettingsCard } from '../components/PermissionsSettingsCard';
+import { ReceiptDocumentView } from '../components/ReceiptDocumentView';
 import { Keypad } from '../components/Keypad';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
+import { LogoPicker } from '../components/LogoPicker';
+import { ItemLogo } from '../components/ItemLogo';
 import { PageContainer } from '../components/layout';
 import { catalogService } from '../services/catalogService';
 import { notificationService } from '../services/notificationService';
@@ -16,11 +19,14 @@ import { scheduleService } from '../services/scheduleService';
 import { settingsService } from '../services/settingsService';
 import { updateService, type UpdateCheckResult } from '../services/updateService';
 import { userService } from '../services/userService';
+import { buildReportDocument } from '../services/reportDocument';
+import { buildTicketDocument } from '../services/ticketDocument';
+import { downloadThermalPdf, printOrSharePdf, shareThermalPdf } from '../services/receiptExport';
 import { useAuthStore } from '../stores/authStore';
 import { updateDisplaySettings, useDisplaySettings, type DisplayTheme } from '../lib/displaySettings';
 import { t, type TranslationKey } from '../i18n/translations';
 import { adminWorkspaceLinks, ownerWorkspaceLinks } from '../app/navigation';
-import { DEFAULT_NOTIFICATION_PREFERENCES, resolveStoreSettings, type CatalogItemRecord, type CategoryRecord, type NotificationRecord, type NotificationType, type PositionRecord, type ScheduleShiftRecord, type SettlementTerms } from '../types/domain';
+import { DEFAULT_NOTIFICATION_PREFERENCES, resolveStoreSettings, type CatalogItemRecord, type CategoryRecord, type NotificationRecord, type NotificationType, type OrderRecord, type PositionRecord, type ReportRecord, type ScheduleShiftRecord, type SettlementTerms } from '../types/domain';
 
 const notificationOptions: { type: NotificationType; label: string; description: string }[] = [
   { type: 'void_requested', label: 'Void request received', description: 'Notify the owner when staff request an order void.' },
@@ -55,6 +61,13 @@ interface HelpStep {
   body: TranslationKey;
 }
 
+interface SettingsSection {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+}
+
 const staffHelpSteps: HelpStep[] = [
   { icon: 'lock_open', title: 'help.openShift.title', body: 'help.openShift.body' },
   { icon: 'point_of_sale', title: 'help.takeOrder.title', body: 'help.takeOrder.body' },
@@ -84,19 +97,203 @@ function parseTndAmount(value: string): number {
   return millimes;
 }
 
+function makeSampleOrder(storeId: string): OrderRecord {
+  return {
+    id: 'ticket-preview',
+    number: 1001,
+    storeId,
+    staffId: 'staff-preview',
+    staffName: 'Sample cashier',
+    shiftId: 'shift-preview',
+    status: 'done',
+    paymentMethod: 'cash',
+    items: [
+      { itemId: 'espresso-preview', categoryId: 'drinks', categoryName: 'Coffee', name: 'Espresso', quantity: 2, unitPriceMillimes: 2500, lineTotalMillimes: 5000, modifiers: [] },
+      { itemId: 'latte-preview', categoryId: 'drinks', categoryName: 'Coffee', name: 'Latte', quantity: 1, unitPriceMillimes: 3500, lineTotalMillimes: 3500, modifiers: ['Oat milk'] },
+    ],
+    totalMillimes: 8500,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function makeSampleReport(type: 'X' | 'Z'): ReportRecord {
+  const createdAt = new Date().toISOString();
+  const closed = type === 'Z';
+  return {
+    id: `preview-${type.toLowerCase()}`,
+    storeId: 'preview-store',
+    type,
+    businessDate: localDateKey(new Date()),
+    createdAt,
+    salesMillimes: 8500,
+    salesCollectedMillimes: 7500,
+    expensesMillimes: 1200,
+    netProfitMillimes: 6300,
+    grossMillimes: 8500,
+    netMillimes: 8500,
+    orderCount: 3,
+    cashDifferenceMillimes: closed ? -200 : 0,
+    zNumber: closed ? 12 : undefined,
+    reportNumber: closed ? 'Z-000012' : 'X-000018',
+    dayOpenedAt: createdAt,
+    dayClosedAt: closed ? createdAt : undefined,
+    periodFrom: createdAt,
+    periodTo: createdAt,
+    generatedBy: 'Sample owner',
+    firstTicketNumber: 1001,
+    lastTicketNumber: 1003,
+    salesByCategory: [
+      { categoryId: 'drinks', name: 'Coffee', quantity: 3, totalMillimes: 8500 },
+    ],
+    itemsSold: [
+      { itemId: 'espresso-preview', name: 'Espresso', quantity: 2, unitPriceMillimes: 2500, totalMillimes: 5000, categoryId: 'drinks', categoryName: 'Coffee' },
+      { itemId: 'latte-preview', name: 'Latte', quantity: 1, unitPriceMillimes: 3500, totalMillimes: 3500, categoryId: 'drinks', categoryName: 'Coffee' },
+    ],
+    paymentSplit: { cash: 5000, card: 2000, other: 0, tab: 1500 },
+    cashSalesMillimes: 5000,
+    tabSalesMillimes: 1500,
+    tabPaymentsReceivedMillimes: 500,
+    cashFloatMillimes: 10000,
+    cashInMillimes: 2000,
+    cashOutMillimes: 1500,
+    cashMovements: [
+      { shiftId: 'shift-preview', staffName: 'Sample cashier', kind: 'in', reason: 'change', amountMillimes: 2000, createdAt },
+      { shiftId: 'shift-preview', staffName: 'Sample cashier', kind: 'out', reason: 'expense', amountMillimes: 1500, createdAt },
+    ],
+    totalExpectedCashMillimes: 16000,
+    totalCountedMillimes: 15800,
+    totalDifferenceMillimes: -200,
+    countedCashMillimes: closed ? 15800 : undefined,
+    cashDifference: closed ? -200 : undefined,
+    pinVerified: closed,
+    shifts: [{
+      shiftId: 'shift-preview',
+      staffName: 'Sample cashier',
+      orderCount: 3,
+      status: 'closed',
+      openedAt: createdAt,
+      closedAt: createdAt,
+      startingCashMillimes: 10000,
+      cashSalesMillimes: 5000,
+      cardSalesMillimes: 2000,
+      tabSalesMillimes: 1500,
+      tabPaymentsMillimes: 500,
+      cashInMillimes: 2000,
+      cashOutMillimes: 1500,
+      expectedCashMillimes: 16000,
+      countedCashMillimes: 15800,
+      differenceMillimes: -200,
+      forceClosedByOwner: false,
+    }],
+    employeeBreakdown: [{ staffId: 'staff-preview', name: 'Sample cashier', orderCount: 3, salesMillimes: 8500 }],
+    voids: {
+      count: 1,
+      totalMillimes: 1200,
+      orders: [{ ticketNumber: 1000, reason: 'Sample void', totalMillimes: 1200, approvedBy: 'Sample owner' }],
+    },
+    expenseDetails: [{
+      expenseId: 'expense-preview',
+      category: 'supplier',
+      amountMillimes: 1200,
+      paidMillimes: 800,
+      date: localDateKey(new Date()),
+      supplierId: 'supplier-preview',
+      note: 'Sample supplies',
+      createdBy: 'Sample owner',
+    }],
+    customerTabs: [{
+      customerId: 'customer-preview',
+      customerName: 'Sample customer',
+      issuedMillimes: 1500,
+      paymentsMillimes: 500,
+      outstandingMillimes: 1000,
+    }],
+    tabsIssuedMillimes: 1500,
+    tabsSettledMillimes: 500,
+    tabsOutstandingMillimes: 1000,
+    comps: {
+      count: 1,
+      quantity: 1,
+      totalMillimes: 2500,
+      records: [{
+        staffName: 'Sample cashier',
+        itemName: 'Coffee',
+        quantity: 1,
+        valueMillimes: 2500,
+        reason: 'staff_drink',
+        note: 'Sample comp',
+        createdAt,
+      }],
+    },
+  };
+}
+
 export function SettingsScreen() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const user = useAuthStore((state) => state.user);
+  const updateOwnerProfile = useAuthStore((state) => state.updateOwnerProfile);
   const displaySettings = useDisplaySettings();
   const storeId = user?.storeId;
   const userRole = user?.role;
+  const settingsSections: SettingsSection[] = userRole === 'owner'
+    ? [
+        { id: 'display', title: 'Display', description: 'Theme and screen density', icon: 'palette' },
+        { id: 'store', title: 'Store and profile', description: 'Store details, contact information, and sales target', icon: 'storefront' },
+        { id: 'receipts', title: 'Tickets and reports', description: 'Receipt layout, paper size, and previews', icon: 'receipt_long' },
+        { id: 'security', title: 'Security', description: 'PIN, passwords, and POS access', icon: 'shield_lock' },
+        { id: 'customers', title: 'Customers', description: 'Credit balances and settlement terms', icon: 'groups' },
+        { id: 'staff', title: 'Staff rules', description: 'Position-based staff item permissions', icon: 'badge' },
+        { id: 'notifications', title: 'Notifications', description: 'Store alerts and cash-out thresholds', icon: 'notifications' },
+        { id: 'help', title: 'Help', description: 'Usage guides for POS operations', icon: 'help' },
+        { id: 'language', title: 'Language', description: 'Choose the app language', icon: 'language' },
+        { id: 'permissions', title: 'Permissions', description: 'Notification and device permissions', icon: 'lock_open' },
+        { id: 'updates', title: 'App updates', description: 'Check versions and install updates', icon: 'system_update' },
+      ]
+    : userRole === 'staff'
+      ? [
+          { id: 'display', title: 'Display', description: 'Theme and screen density', icon: 'palette' },
+          { id: 'security', title: 'Security', description: 'Personal PIN and password', icon: 'shield_lock' },
+          { id: 'notifications', title: 'Notifications and schedule', description: 'Alert preferences and upcoming shifts', icon: 'notifications' },
+          { id: 'help', title: 'Help', description: 'Usage guides for POS operations', icon: 'help' },
+          { id: 'language', title: 'Language', description: 'Choose the app language', icon: 'language' },
+          { id: 'permissions', title: 'Permissions', description: 'Notification and device permissions', icon: 'lock_open' },
+          { id: 'updates', title: 'App updates', description: 'Check versions and install updates', icon: 'system_update' },
+        ]
+      : [
+          { id: 'display', title: 'Display', description: 'Theme and screen density', icon: 'palette' },
+          { id: 'security', title: 'Security', description: 'Password and account access', icon: 'shield_lock' },
+          { id: 'help', title: 'Help', description: 'Usage guides for POS operations', icon: 'help' },
+          { id: 'language', title: 'Language', description: 'Choose the app language', icon: 'language' },
+          { id: 'permissions', title: 'Permissions', description: 'Notification and device permissions', icon: 'lock_open' },
+          { id: 'updates', title: 'App updates', description: 'Check versions and install updates', icon: 'system_update' },
+        ];
+  const activeSection = settingsSections.find((section) => section.id === searchParams.get('section'));
   const logout = useAuthStore((state) => state.logout);
   const [store, setStore] = useState<Awaited<ReturnType<typeof userService.getStore>>>();
   const [storeName, setStoreName] = useState(store?.name ?? '');
+  const [ownerName, setOwnerName] = useState(user?.name ?? '');
+  const [ownerPhone, setOwnerPhone] = useState(user?.phone ?? '');
   const [dailySalesTarget, setDailySalesTarget] = useState('0.000');
   const [adminPin, setAdminPin] = useState('');
   const [staffAutoLockMinutes, setStaffAutoLockMinutes] = useState('5');
   const [cashOutAlertThreshold, setCashOutAlertThreshold] = useState('50.000');
+  const [storeAddress, setStoreAddress] = useState('');
+  const [storePhone, setStorePhone] = useState('');
+  const [storeTaxId, setStoreTaxId] = useState('');
+  const [ticketHeaderText, setTicketHeaderText] = useState<string[]>([]);
+  const [ticketFooterText, setTicketFooterText] = useState<string[]>(['Thank you']);
+  const [reportFooterText, setReportFooterText] = useState<string[]>([]);
+  const [storeLogoId, setStoreLogoId] = useState('');
+  const [logoPickerOpen, setLogoPickerOpen] = useState(false);
+  const [showLogo, setShowLogo] = useState(true);
+  const [showAddress, setShowAddress] = useState(true);
+  const [showPhone, setShowPhone] = useState(true);
+  const [showStaffName, setShowStaffName] = useState(true);
+  const [showDateTime, setShowDateTime] = useState(true);
+  const [paperWidth, setPaperWidth] = useState<58 | 80>(80);
+  const [receiptPreviewType, setReceiptPreviewType] = useState<'ticket' | 'x' | 'z'>('ticket');
+  const receiptPreviewTarget = useRef<HTMLElement>(null);
   const [defaultSettlementTerms, setDefaultSettlementTerms] = useState<SettlementTerms>('monthly');
   const [notificationPreferences, setNotificationPreferences] = useState<Partial<Record<NotificationType, boolean>>>(DEFAULT_NOTIFICATION_PREFERENCES);
   const [userNotificationPreferences, setUserNotificationPreferences] = useState<Partial<Record<NotificationType, boolean>>>({});
@@ -151,9 +348,22 @@ export function SettingsScreen() {
         setDailySalesTarget(((nextStore?.dailySalesTargetMillimes ?? 0) / 1000).toFixed(3));
         setStaffAutoLockMinutes(String(nextStore?.staffAutoLockMinutes ?? 5));
         setCashOutAlertThreshold(((nextStore?.cashOutAlertThresholdMillimes ?? 50_000) / 1000).toFixed(3));
+        setStoreAddress(nextStore?.address ?? '');
+        setStorePhone(nextStore?.phone ?? '');
+        setStoreTaxId(nextStore?.taxId ?? '');
         const storeSettings = resolveStoreSettings(nextStore?.settings);
         setDefaultSettlementTerms(storeSettings.defaultSettlementTerms);
         setNotificationPreferences(storeSettings.notificationPreferences);
+        setTicketHeaderText(storeSettings.ticketHeaderText);
+        setTicketFooterText(storeSettings.ticketFooterText);
+        setReportFooterText(storeSettings.reportFooterText);
+        setStoreLogoId(storeSettings.storeLogoId);
+        setShowLogo(storeSettings.showLogo);
+        setShowAddress(storeSettings.showAddress);
+        setShowPhone(storeSettings.showPhone);
+        setShowStaffName(storeSettings.showStaffName);
+        setShowDateTime(storeSettings.showDateTime);
+        setPaperWidth(storeSettings.paperWidth);
         setPositions(nextPositions);
         setCategories(nextCategories);
         setCatalogItems(nextItems);
@@ -230,10 +440,75 @@ export function SettingsScreen() {
       setStore(await userService.updateStoreInfo(store.id, user.id, {
         name: storeName,
         dailySalesTargetMillimes: parseTndAmount(dailySalesTarget),
+        address: storeAddress,
+        phone: storePhone,
+        taxId: storeTaxId,
       }));
+      setStore(await userService.updateStoreSettings(store.id, user.id, {
+        ticketHeaderText: ticketHeaderText.map((line) => line.trim().slice(0, 60)).slice(0, 2),
+        ticketFooterText: ticketFooterText.map((line) => line.trim().slice(0, 60)).slice(0, 2),
+        reportFooterText: reportFooterText.map((line) => line.trim().slice(0, 60)).slice(0, 2),
+        storeLogoId,
+        showLogo,
+        showAddress,
+        showPhone,
+        showStaffName,
+        showDateTime,
+        paperWidth,
+      }));
+      window.dispatchEvent(new Event('hanouti:store-settings-updated'));
       setNotice('Store information saved.');
     } catch (storeError) {
       setError(storeError instanceof Error ? storeError.message : 'Unable to save store information.');
+    }
+  }
+
+  async function saveOwnerProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!user || user.role !== 'owner') return;
+    setError('');
+    setNotice('');
+    try {
+      const updatedOwner = await updateOwnerProfile({ name: ownerName, phone: ownerPhone });
+      setOwnerName(updatedOwner.name);
+      setOwnerPhone(updatedOwner.phone ?? '');
+      setNotice('Owner profile saved.');
+    } catch (profileError) {
+      setError(profileError instanceof Error ? profileError.message : 'Unable to save owner profile.');
+    }
+  }
+
+  async function printSampleTicket() {
+    setError('');
+    setNotice('');
+    try {
+      await printOrSharePdf(
+        receiptPreviewTarget.current,
+        'sample-ticket',
+        'Sample ticket',
+        sampleTicketDocument.width,
+      );
+    } catch (printError) {
+      if (printError instanceof Error && printError.name === 'AbortError') return;
+      setError(printError instanceof Error ? printError.message : 'Unable to print a test ticket.');
+    }
+  }
+
+  async function exportSampleTicket(action: 'download' | 'share') {
+    setError('');
+    setNotice('');
+    try {
+      const exportPdf = action === 'download' ? downloadThermalPdf : shareThermalPdf;
+      await exportPdf(
+        receiptPreviewTarget.current,
+        'sample-ticket',
+        'Sample ticket',
+        sampleTicketDocument.width,
+      );
+      setNotice(action === 'download' ? 'Sample ticket PDF downloaded.' : 'Sample ticket PDF shared.');
+    } catch (exportError) {
+      if (exportError instanceof Error && exportError.name === 'AbortError') return;
+      setError(exportError instanceof Error ? exportError.message : 'Unable to export the sample ticket.');
     }
   }
 
@@ -466,24 +741,84 @@ export function SettingsScreen() {
   }
 
   const upcomingSchedule = mySchedule.filter((shift) => shift.publishedAt && scheduleDate && shift.date >= scheduleDate);
+  const previewSettings = {
+    ...resolveStoreSettings(store?.settings),
+    ticketHeaderText,
+    ticketFooterText,
+    reportFooterText,
+    storeLogoId,
+    showLogo,
+    showAddress,
+    showPhone,
+    showStaffName,
+    showDateTime,
+    paperWidth,
+  };
+  const previewStore = {
+    name: storeName || store?.name || 'Sample store',
+    address: storeAddress,
+    phone: storePhone,
+    taxId: storeTaxId,
+  };
+  const sampleTicketDocument = buildTicketDocument(
+    makeSampleOrder(storeId ?? 'sample-store'),
+    previewStore,
+    user?.name ?? 'Sample cashier',
+    previewSettings,
+  );
+  const previewDocument = (() => {
+    if (receiptPreviewType === 'ticket') return sampleTicketDocument;
+    const reportType = receiptPreviewType === 'x' ? 'X' : 'Z';
+    return buildReportDocument(makeSampleReport(reportType), previewStore, previewSettings);
+  })();
   const content = (
     <div className="settings-content flex flex-col gap-4">
-      <header className="mb-1">
-        <h1 className="font-display text-headline-lg text-on-surface">{t('settings.title')}</h1>
-        <p className="mt-1 font-body text-body-md text-on-surface-variant">{user?.name}</p>
+      <header className="settings-page-header">
+        <div className="settings-page-header__icon"><MaterialIcon name="tune" /></div>
+        <div className="min-w-0">
+          <p className="settings-page-header__eyebrow">{user?.name}</p>
+          <h1 className="font-display text-headline-lg text-on-surface">{t('settings.title')}</h1>
+          <p className="mt-1 font-body text-body-md text-on-surface-variant">
+            {activeSection ? activeSection.description : 'Manage your preferences and workspace settings.'}
+          </p>
+        </div>
       </header>
 
-      <nav className="settings-section-nav" aria-label="Settings sections">
-        <a href="#display-settings-heading">Display</a>
-        <a href="#store-settings-heading">Store</a>
-        <a href="#security-settings-heading">Security</a>
-        <a href="#customer-settings-heading">Customers</a>
-        <a href="#staff-rules-heading">Staff rules</a>
-        <a href="#notification-settings-heading">Notifications</a>
-        <a href="#help-section-heading">Help</a>
-      </nav>
+      {!activeSection ? (
+        <section className="settings-dashboard" aria-label="Settings categories">
+          <div className="settings-dashboard__intro">
+            <div>
+              <p className="settings-dashboard__eyebrow">YOUR WORKSPACE</p>
+              <h2 className="font-display text-headline-md text-on-surface">What would you like to update?</h2>
+            </div>
+            <span className="settings-dashboard__count">{settingsSections.length} categories</span>
+          </div>
+          <div className="settings-dashboard-grid">
+            {settingsSections.map((section) => (
+              <button
+                key={section.id}
+                type="button"
+                className="settings-dashboard-card"
+                onClick={() => setSearchParams({ section: section.id })}
+              >
+                <span className="settings-dashboard-card__icon"><MaterialIcon name={section.icon} /></span>
+                <span className="settings-dashboard-card__content">
+                  <span className="settings-dashboard-card__title">{section.title}</span>
+                  <span className="settings-dashboard-card__description">{section.description}</span>
+                </span>
+                <MaterialIcon name="arrow_forward" className="settings-dashboard-card__arrow" />
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : (
+      <>
+      <button type="button" className="settings-back-button" onClick={() => setSearchParams({}, { replace: true })}>
+        <MaterialIcon name="arrow_back" className="text-lg" />
+        All settings
+      </button>
       <div className="settings-section-content">
-      <section aria-labelledby="display-settings-heading" className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+      <section hidden={activeSection.id !== 'display'} aria-labelledby="display-settings-heading" className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
         <div>
           <h2 id="display-settings-heading" className="font-display text-headline-md text-on-surface">Display</h2>
           <p className="mt-1 font-body text-body-sm text-on-surface-variant">Choose how 7anouti-POS looks on this device.</p>
@@ -530,7 +865,7 @@ export function SettingsScreen() {
         </label>
       </section>
 
-      {user?.role === 'staff' && (
+      {user?.role === 'staff' && activeSection.id === 'notifications' && (
         <>
           <section aria-labelledby="staff-notification-settings-heading" className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
             <div>
@@ -588,24 +923,94 @@ export function SettingsScreen() {
         </>
       )}
 
-      {user?.role === 'staff' && <ChangePersonalPinForm userId={user.id} />}
-      <ChangePasswordForm onError={setError} onNotice={setNotice} />
-      {user?.role === 'owner' && <p className="font-body text-body-sm text-on-surface-variant">If you forget your password, contact your platform super admin to issue a temporary reset password.</p>}
+      {activeSection.id === 'security' && <>
+        {(user?.role === 'staff' || user?.role === 'owner') && <ChangePersonalPinForm userId={user.id} />}
+        <ChangePasswordForm onError={setError} onNotice={setNotice} />
+        {user?.role === 'owner' && <p className="font-body text-body-sm text-on-surface-variant">If you forget your password, contact your platform super admin to issue a temporary reset password.</p>}
+      </>}
 
       {user?.role === 'owner' && store && (
         <>
+          <div hidden={activeSection.id !== 'store'}>
+          <section aria-labelledby="owner-profile-settings-heading" className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+            <h2 id="owner-profile-settings-heading" className="font-display text-headline-md text-on-surface">Owner profile</h2>
+            <form onSubmit={(event) => { void saveOwnerProfile(event); }} className="flex flex-col gap-3">
+              <label className="font-body text-label-md">Owner name<input required maxLength={200} value={ownerName} onChange={(event) => setOwnerName(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
+              <label className="font-body text-label-md">Owner email<input readOnly value={user.email ?? ''} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 text-on-surface-variant" /></label>
+              <label className="font-body text-label-md">Owner phone<input type="tel" maxLength={100} value={ownerPhone} onChange={(event) => setOwnerPhone(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
+              <Button type="submit" variant="secondary">{t('common.save')}</Button>
+            </form>
+          </section>
           <section aria-labelledby="store-settings-heading" className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
             <h2 id="store-settings-heading" className="font-display text-headline-md text-on-surface">Store</h2>
-            <form onSubmit={(event) => { void saveStoreInfo(event); }} className="flex flex-col gap-3">
+            <form id="store-settings-form" onSubmit={(event) => { void saveStoreInfo(event); }} className="flex flex-col gap-3">
               <label className="font-body text-label-md">{t('settings.storeName')}<input required value={storeName} onChange={(event) => setStoreName(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
+              <div className="flex flex-col gap-2">
+                <span className="font-body text-label-md">Store logo</span>
+                <button
+                  type="button"
+                  onClick={() => setLogoPickerOpen(true)}
+                  className="flex min-h-14 items-center gap-3 rounded-lg border border-outline-variant bg-surface-container-low px-3 text-left"
+                >
+                  {storeLogoId ? <ItemLogo id={storeLogoId} size="sm" /> : (
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-fixed text-primary"><MaterialIcon name="storefront" className="text-lg" /></span>
+                  )}
+                  <span className="flex-1 font-body text-label-md text-on-surface">{storeLogoId ? 'Change store logo' : 'Choose store logo'}</span>
+                  <MaterialIcon name="chevron_right" className="text-outline" />
+                </button>
+              </div>
+              <label className="font-body text-label-md">Store address<input value={storeAddress} maxLength={200} onChange={(event) => setStoreAddress(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
+              <label className="font-body text-label-md">Store phone<input value={storePhone} maxLength={50} onChange={(event) => setStorePhone(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
+              <label className="font-body text-label-md">Tax ID<input value={storeTaxId} maxLength={50} onChange={(event) => setStoreTaxId(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
               <label className="font-body text-label-md">Store ID<input readOnly value={store.code.toUpperCase()} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 text-on-surface-variant" /></label>
               <label className="font-body text-label-md">{t('settings.dailySalesTarget')} (DT)<input required type="number" min="0" step="0.001" inputMode="decimal" value={dailySalesTarget} onChange={(event) => setDailySalesTarget(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
               <p className="-mt-2 font-body text-body-sm text-outline">{t('settings.dailySalesTargetHelp')}</p>
               <Button type="submit" variant="secondary">{t('common.save')}</Button>
             </form>
           </section>
+          </div>
 
-          <section aria-labelledby="security-settings-heading" className="flex flex-col gap-4 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+          <section hidden={activeSection.id !== 'receipts'} aria-labelledby="ticket-report-settings-heading" className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+            <h2 id="ticket-report-settings-heading" className="font-display text-headline-md text-on-surface">Tickets and reports</h2>
+            <label className="font-body text-label-md">Ticket header line 1<input maxLength={60} value={ticketHeaderText[0] ?? ''} onChange={(event) => setTicketHeaderText([event.target.value, ticketHeaderText[1] ?? ''])} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
+            <label className="font-body text-label-md">Ticket header line 2<input maxLength={60} value={ticketHeaderText[1] ?? ''} onChange={(event) => setTicketHeaderText([ticketHeaderText[0] ?? '', event.target.value])} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
+            <label className="font-body text-label-md">Ticket footer line 1<input maxLength={60} value={ticketFooterText[0] ?? ''} onChange={(event) => setTicketFooterText([event.target.value, ticketFooterText[1] ?? ''])} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
+            <label className="font-body text-label-md">Ticket footer line 2<input maxLength={60} value={ticketFooterText[1] ?? ''} onChange={(event) => setTicketFooterText([ticketFooterText[0] ?? '', event.target.value])} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
+            <label className="font-body text-label-md">Report footer<input maxLength={60} value={reportFooterText[0] ?? ''} onChange={(event) => setReportFooterText([event.target.value])} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
+            <label className="font-body text-label-md">Thermal paper width
+              <select value={paperWidth} onChange={(event) => setPaperWidth(event.target.value === '58' ? 58 : 80)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3"><option value={80}>80 mm</option><option value={58}>58 mm</option></select>
+            </label>
+            {([
+              ['showLogo', showLogo, setShowLogo, 'Show logo'],
+              ['showAddress', showAddress, setShowAddress, 'Show address'],
+              ['showPhone', showPhone, setShowPhone, 'Show phone'],
+              ['showStaffName', showStaffName, setShowStaffName, 'Show staff name'],
+              ['showDateTime', showDateTime, setShowDateTime, 'Show date and time'],
+            ] as const).map(([key, checked, setter, label]) => (
+              <label key={key} className="flex min-h-12 items-center gap-3 rounded-lg bg-surface-container-low p-3"><input type="checkbox" checked={checked} onChange={(event) => setter(event.target.checked)} className="h-5 w-5 accent-primary" />{label}</label>
+            ))}
+            <label className="font-body text-label-md">Live document preview
+              <select value={receiptPreviewType} onChange={(event) => setReceiptPreviewType(event.target.value as 'ticket' | 'x' | 'z')} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3">
+                <option value="ticket">Customer ticket</option>
+                <option value="x">X report</option>
+                <option value="z">Z report</option>
+              </select>
+            </label>
+            <p className="font-body text-body-sm text-outline">Preview uses sample data. Real tickets and reports use the same receipt layout and settings.</p>
+            <div className="rounded-xl bg-surface-container-high p-3">
+              <ReceiptDocumentView ref={receiptPreviewTarget} document={previewDocument} />
+            </div>
+            {receiptPreviewType === 'ticket' && (
+              <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" onClick={() => { void printSampleTicket(); }}>Print test ticket</Button>
+                <Button variant="secondary" onClick={() => { void exportSampleTicket('download'); }}>Download PDF</Button>
+                <Button variant="secondary" onClick={() => { void exportSampleTicket('share'); }}>Share PDF</Button>
+              </div>
+            )}
+            <Button type="submit" form="store-settings-form" variant="secondary">Save ticket and report settings</Button>
+          </section>
+
+          <section hidden={activeSection.id !== 'security'} aria-labelledby="security-settings-heading" className="flex flex-col gap-4 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
             <h2 id="security-settings-heading" className="font-display text-headline-md text-on-surface">Security</h2>
             {store.pinMustChange && <p role="alert" className="flex items-center gap-2 rounded-xl bg-warning-container p-3 font-body text-body-md text-on-warning-container"><MaterialIcon name="warning" />Set your admin PIN</p>}
             <form onSubmit={(event) => { void savePin(event); }} className="flex flex-col gap-3">
@@ -638,7 +1043,7 @@ export function SettingsScreen() {
             </div>
           </section>
 
-          <section aria-labelledby="customer-settings-heading" className="flex flex-col gap-4 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+          <section hidden={activeSection.id !== 'customers'} aria-labelledby="customer-settings-heading" className="flex flex-col gap-4 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
             <h2 id="customer-settings-heading" className="font-display text-headline-md text-on-surface">Customers</h2>
             <label className="flex min-h-12 items-start gap-3 rounded-xl bg-surface-container-low p-3">
               <input type="checkbox" checked={store.allowCustomerCreditBalance ?? false} disabled={savingCreditPolicy} onChange={(event) => { void changeCustomerCreditBalance(event.target.checked); }} className="mt-1 h-5 w-5 accent-primary" />
@@ -659,7 +1064,7 @@ export function SettingsScreen() {
             </form>
           </section>
 
-          <section aria-labelledby="staff-rules-heading" className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+          <section hidden={activeSection.id !== 'staff'} aria-labelledby="staff-rules-heading" className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
             <div>
               <h2 id="staff-rules-heading" className="font-display text-headline-md text-on-surface">Staff rules</h2>
               <p className="mt-1 font-body text-body-sm text-on-surface-variant">Configure staff-drink comp limits and eligible items for each position.</p>
@@ -712,7 +1117,7 @@ export function SettingsScreen() {
             {positions.length === 0 && <p className="rounded-xl bg-surface-container-low p-3 font-body text-body-sm text-outline">Create a staff position before setting staff-item rules.</p>}
           </section>
 
-          <section aria-labelledby="notification-settings-heading" className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+          <section hidden={activeSection.id !== 'notifications'} aria-labelledby="notification-settings-heading" className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
             <div>
               <h2 id="notification-settings-heading" className="font-display text-headline-md text-on-surface">Notifications</h2>
               <p className="mt-1 font-body text-body-sm text-on-surface-variant">Choose which notification types are created. All are enabled by default.</p>
@@ -745,6 +1150,7 @@ export function SettingsScreen() {
         </>
       )}
 
+      <div hidden={activeSection.id !== 'help'}>
       <section aria-labelledby="help-section-heading" className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
         <h2 id="help-section-heading" className="flex items-center gap-2 font-display text-headline-md text-on-surface">
           <MaterialIcon name="help" className="text-primary" />{t('settings.help')}
@@ -753,16 +1159,22 @@ export function SettingsScreen() {
         <HelpGuide title={t('help.staff')} steps={staffHelpSteps} />
         {user?.role === 'owner' && <HelpGuide title={t('help.owner')} steps={ownerHelpSteps} />}
       </section>
+      </div>
 
+      <div hidden={activeSection.id !== 'language'}>
       <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
         <h2 className="mb-3 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="language" className="text-primary" />{t('settings.language')}</h2>
         <select value={language} onChange={(event) => { void changeLanguage(event.target.value as 'en'); }} className="h-12 w-full rounded-lg bg-surface-container-low px-3 font-body text-body-md outline-none focus:ring-2 focus:ring-primary">
           <option value="en">{t('settings.englishOnly')}</option>
         </select>
       </section>
+      </div>
 
+      <div hidden={activeSection.id !== 'permissions'}>
       <PermissionsSettingsCard />
+      </div>
 
+      <div hidden={activeSection.id !== 'updates'}>
       <section className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
         <h2 className="flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="system_update" className="text-primary" />{t('settings.appUpdates')}</h2>
         <div className="flex items-center justify-between gap-2 font-body text-body-sm">
@@ -812,10 +1224,21 @@ export function SettingsScreen() {
           </pre>
         </details>
       </section>
+      </div>
 
+      </div>
+      {user?.role === 'owner' && (
+        <LogoPicker
+          open={logoPickerOpen}
+          value={storeLogoId}
+          onChange={setStoreLogoId}
+          onClose={() => setLogoPickerOpen(false)}
+        />
+      )}
+      </>
+      )}
       {(error || notice) && <p role={error ? 'alert' : 'status'} className={`rounded-lg p-3 font-body text-body-sm ${error ? 'bg-error-container text-on-error-container' : 'bg-success-container text-on-success-container'}`}>{error || notice}</p>}
       <Button variant="danger" onClick={() => { void handleLogout(); }} className="w-full"><MaterialIcon name="logout" />{t('app.logOut')}</Button>
-      </div>
     </div>
   );
 

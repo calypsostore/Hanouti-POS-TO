@@ -14,7 +14,6 @@ import { userService } from './userService';
 import { getSupabaseClient } from '../data/supabaseClient';
 import { isSupabaseDriver } from '../data/driver';
 import { permissionService } from './permissionService';
-import { useAuthStore } from '../stores/authStore';
 
 export interface CustomerCreditAlert {
   customerId: string;
@@ -33,10 +32,8 @@ function notifyChanged(): void {
 
 async function showLocalNotificationForActiveUser(notification: NotificationRecord): Promise<void> {
   if (notification.type === 'app_update') return;
-  const activeUser = useAuthStore.getState().user;
-  if (!activeUser || activeUser.id !== notification.userId) return;
   try {
-    await permissionService.showLocalNotification(notification.title, notification.body);
+    await permissionService.showLocalNotification(notification.title, notification.body, notification);
   } catch (error) {
     console.error('[notifications] Could not show a local notification.', error);
   }
@@ -70,7 +67,7 @@ function notificationEnabled(store: { settings?: StoreSettings } | undefined, ty
     (isSupabaseDriver() || userPreferenceEnabled(userId, type));
 }
 
-function mapNotificationRow(row: Record<string, unknown>): NotificationRecord {
+export function mapNotificationRow(row: Record<string, unknown>): NotificationRecord {
   return {
     id: String(row.id),
     storeId: typeof row.store_id === 'string' ? row.store_id : undefined,
@@ -231,40 +228,54 @@ export const notificationService = {
     notifyChanged();
   },
 
-  async listFor(user: Pick<UserRecord, 'id' | 'role' | 'storeId'>): Promise<NotificationRecord[]> {
+  async listFor(
+    user: Pick<UserRecord, 'id' | 'role' | 'storeId'>,
+    before?: string,
+  ): Promise<NotificationRecord[]> {
     if (isSupabaseDriver()) {
       if (!user.storeId) return [];
-      const { data, error } = await getSupabaseClient()
+      let query = getSupabaseClient()
         .from('notifications')
         .select('*')
         .eq('store_id', user.storeId)
-        .order('created_at', { ascending: false });
+        .or(`user_id.eq.${user.id},and(user_id.is.null,target_role.eq.${user.role})`)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (before) query = query.lt('created_at', before);
+      const { data, error } = await query;
       if (error) throw new Error(`Could not load notifications: ${error.message}`, { cause: error });
       return (data ?? []).map((row) => mapNotificationRow(row as unknown as Record<string, unknown>));
     }
-    return getNotifications()
+    const notifications = getNotifications()
       .filter((notification) =>
         (!notification.storeId || notification.storeId === user.storeId) &&
         (notification.userId === user.id || notification.targetRole === user.role),
       )
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    return notifications
+      .filter((notification) => !before || notification.createdAt < before)
+      .slice(0, 50);
   },
 
   async unreadCount(user: Pick<UserRecord, 'id' | 'role' | 'storeId'>): Promise<number> {
-    return (await this.listFor(user)).filter((notification) => !notification.readAt).length;
+    if (isSupabaseDriver()) {
+      const { data, error } = await getSupabaseClient().rpc('unread_notification_count');
+      if (error) throw new Error(`Could not load unread notification count: ${error.message}`, { cause: error });
+      return typeof data === 'number' ? data : Number(data ?? 0);
+    }
+    return getNotifications().filter((notification) =>
+      !notification.readAt &&
+      (!notification.storeId || notification.storeId === user.storeId) &&
+      (notification.userId === user.id || notification.targetRole === user.role),
+    ).length;
   },
 
   async markRead(user: Pick<UserRecord, 'id' | 'role' | 'storeId'>, notificationId: string): Promise<void> {
     if (isSupabaseDriver()) {
       if (!user.storeId) throw new Error('A store is required to update notifications.');
-      const existing = (await this.listFor(user)).find((notification) => notification.id === notificationId);
-      if (!existing) throw new Error('Notification could not be found.');
-      if (existing.readAt) return;
-      const { error } = await getSupabaseClient().from('notifications')
-        .update({ read_at: new Date().toISOString() })
-        .eq('id', notificationId)
-        .eq('store_id', user.storeId);
+      const { data, error } = await getSupabaseClient().rpc('mark_notifications_read', { p_ids: [notificationId] });
       if (error) throw new Error(`Could not mark notification as read: ${error.message}`, { cause: error });
+      if (typeof data !== 'number' || data < 1) throw new Error('Notification could not be found.');
       notifyChanged();
       return;
     }
@@ -283,18 +294,11 @@ export const notificationService = {
   },
 
   async markAllRead(user: Pick<UserRecord, 'id' | 'role' | 'storeId'>): Promise<void> {
-    const unread = (await this.listFor(user)).filter((notification) => !notification.readAt);
-    if (unread.length === 0) return;
-    const unreadIds = new Set(unread.map((notification) => notification.id));
     if (isSupabaseDriver()) {
-      if (!user.storeId) return;
-      const { error } = await getSupabaseClient().from('notifications')
-        .update({ read_at: new Date().toISOString() })
-        .eq('store_id', user.storeId)
-        .in('id', [...unreadIds])
-        .is('read_at', null)
-        .or(`user_id.eq.${user.id},and(user_id.is.null,target_role.eq.${user.role})`);
+      if (!user.storeId) throw new Error('A store is required to update notifications.');
+      const { data, error } = await getSupabaseClient().rpc('mark_notifications_read', { p_ids: null });
       if (error) throw new Error(`Could not mark notifications as read: ${error.message}`, { cause: error });
+      if (typeof data !== 'number') throw new Error('Could not mark notifications as read.');
       notifyChanged();
       return;
     }
@@ -302,7 +306,7 @@ export const notificationService = {
     const readAt = new Date().toISOString();
     let changed = false;
     const updated = notifications.map((notification) => {
-      if (!unreadIds.has(notification.id) || notification.readAt ||
+      if (notification.readAt ||
         (notification.storeId && notification.storeId !== user.storeId) ||
         (notification.userId !== user.id && notification.targetRole !== user.role)) return notification;
       changed = true;

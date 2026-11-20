@@ -1,75 +1,43 @@
-import { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MaterialIcon } from './MaterialIcon';
 import { BottomSheet } from './BottomSheet';
 import { Button } from './Button';
 import { t } from '../i18n/translations';
-import { notificationService, OWNER_NOTIFICATIONS_CHANGED_EVENT } from '../services/notificationService';
 import { useAuthStore } from '../stores/authStore';
+import { useNotificationStore } from '../stores/notificationStore';
 import { notificationPath } from '../lib/notificationPath';
 import type { NotificationRecord } from '../types/domain';
+import { getLogoDefinition } from '../data/logoCatalog';
 
 interface TopBarProps {
   title: string;
   storeName?: string;
+  storeLogoId?: string;
   onProfileClick?: () => void;
   onDashboardClick?: () => void;
   onLockClick?: () => void;
 }
 
-export function TopBar({ title, storeName, onProfileClick, onDashboardClick, onLockClick }: TopBarProps) {
+export function TopBar({ title, storeName, storeLogoId, onProfileClick, onDashboardClick, onLockClick }: TopBarProps) {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const displayedStoreName = storeName?.trim() || t('common.appName');
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [recentNotifications, setRecentNotifications] = useState<NotificationRecord[]>([]);
+  const unreadCount = useNotificationStore((state) => state.unreadCount);
+  const notificationItems = useNotificationStore((state) => state.items);
+  const recentNotifications = useMemo(() => notificationItems.slice(0, 5), [notificationItems]);
+  const notificationsLoading = useNotificationStore((state) => state.status === 'loading');
+  const markRead = useNotificationStore((state) => state.markRead);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [notificationsLoading, setNotificationsLoading] = useState(true);
   const [notificationsError, setNotificationsError] = useState('');
   const [openingNotificationId, setOpeningNotificationId] = useState('');
-
-  useEffect(() => {
-    if (!user) {
-      setUnreadCount(0);
-      setRecentNotifications([]);
-      setNotificationsLoading(false);
-      return;
-    }
-    let active = true;
-    const refresh = () => {
-      setNotificationsLoading(true);
-      void notificationService.listFor(user).then((notifications) => {
-        if (!active) return;
-        const unread = notifications.filter((notification) => !notification.readAt);
-        setUnreadCount(unread.length);
-        setRecentNotifications(notifications.slice(0, 5));
-        setNotificationsError('');
-        setNotificationsLoading(false);
-      }).catch((error: unknown) => {
-        console.error('Could not load the notification badge.', error);
-        if (active) {
-          setNotificationsError('Unable to load notifications. Please try again.');
-          setNotificationsLoading(false);
-        }
-      });
-    };
-    refresh();
-    window.addEventListener('focus', refresh);
-    window.addEventListener('storage', refresh);
-    window.addEventListener(OWNER_NOTIFICATIONS_CHANGED_EVENT, refresh);
-    return () => {
-      active = false;
-      window.removeEventListener('focus', refresh);
-      window.removeEventListener('storage', refresh);
-      window.removeEventListener(OWNER_NOTIFICATIONS_CHANGED_EVENT, refresh);
-    };
-  }, [user]);
+  const storeLogo = getLogoDefinition(storeLogoId ?? '');
 
   async function openNotification(notification: NotificationRecord) {
     if (!user) return;
     setOpeningNotificationId(notification.id);
     try {
-      await notificationService.markRead(user, notification.id);
+      await markRead(user, notification.id);
       setNotificationsOpen(false);
       navigate(notificationPath(notification, user.role));
     } catch (error) {
@@ -83,11 +51,6 @@ export function TopBar({ title, storeName, onProfileClick, onDashboardClick, onL
   function openNotifications() {
     setNotificationsError('');
     setNotificationsOpen(true);
-    if (!user) return;
-    void notificationService.markAllRead(user).catch((error: unknown) => {
-      console.error('Unable to mark notifications as read.', error);
-      setNotificationsError('Unable to mark notifications as read. Please try again.');
-    });
   }
 
   return (
@@ -95,8 +58,12 @@ export function TopBar({ title, storeName, onProfileClick, onDashboardClick, onL
     <header className="safe-top sticky top-0 z-30 border-b border-outline-variant bg-surface/90 backdrop-blur-xl">
       <div className="top-bar-content flex h-16 items-center justify-between gap-3 px-4">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-fixed text-primary">
-            <MaterialIcon name="local_cafe" className="text-2xl" />
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-primary-fixed text-primary">
+            {storeLogo ? (
+              <img src={storeLogo.src} alt="" className="h-8 w-8 object-contain" />
+            ) : (
+              <MaterialIcon name="local_cafe" className="text-2xl" />
+            )}
           </span>
           <div className="min-w-0">
             <p className="truncate font-body text-label-sm text-outline">{displayedStoreName}</p>

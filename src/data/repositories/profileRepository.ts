@@ -30,7 +30,7 @@ export function profileFromRow(row: ProfileRow): UserSummary {
     notes: row.notes ?? undefined,
     positionId: row.position_id ?? undefined,
     mustChangePassword: row.must_change_password,
-    mustSetPin: row.role === 'staff' && row.must_set_pin,
+    mustSetPin: (row.role === 'staff' || row.role === 'owner') && row.must_set_pin,
     isActive: row.is_active,
     sessionVersion: row.session_version,
     createdAt: row.created_at,

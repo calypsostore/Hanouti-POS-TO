@@ -6,6 +6,7 @@ import { useCartStore } from './cartStore';
 import { getSupabaseClient } from '../data/supabaseClient';
 import { isSupabaseDriver } from '../data/driver';
 import { assertExpectedSchemaVersion } from '../services/schemaVersionService';
+import { userService } from '../services/userService';
 
 let authStateSubscription: { unsubscribe: () => void } | undefined;
 
@@ -19,6 +20,7 @@ interface AuthState {
   login: (identifier: string, password: string, roles?: UserRole[]) => Promise<UserSummary>;
   setInitialPassword: (password: string) => Promise<UserSummary>;
   setInitialPin: (pin: string) => Promise<void>;
+  updateOwnerProfile: (changes: { name: string; phone: string }) => Promise<UserSummary>;
   lock: () => Promise<void>;
   unlockWithPin: (pin: string) => Promise<void>;
   unlockWithPassword: (password: string) => Promise<void>;
@@ -90,6 +92,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const updatedUser = await authService.setPersonalPin(user.id, pin);
     set({ user: updatedUser });
   },
+  updateOwnerProfile: async (changes) => {
+    const user = get().user;
+    if (!user || user.role !== 'owner') throw new Error('Only a signed-in store owner can update this profile.');
+    const updatedUser = await userService.updateOwnerProfile(user.id, changes);
+    set({ user: updatedUser });
+    return updatedUser;
+  },
   lock: async () => {
     await authService.lockCurrentSession();
     set({ locked: true });
@@ -103,6 +112,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ user, locked: false });
   },
   logout: async () => {
+    if (isSupabaseDriver()) {
+      try {
+        const user = get().user;
+        if (user) {
+          await getSupabaseClient().from('device_tokens').delete().eq('user_id', user.id);
+        }
+      } catch (error) {
+        console.error('[push] Could not remove device tokens during logout.', error);
+      }
+    }
     await authService.logout();
     useCartStore.getState().clearOrder();
     set({ user: null, locked: false });

@@ -63,19 +63,26 @@ export function mapStore(row: StoreRow, settings?: StoreSettings): StoreRecord {
 
 export async function getStore(storeId: string): Promise<StoreRecord | undefined> {
   const client = getSupabaseClient();
-  const { data: row, error } = await client
-    .from('stores')
-    .select('id, store_id, owner_id, code, name, timezone, address, phone, tax_id, is_active, archived_at, day_closed_on, allow_customer_credit_balance, allow_card_payments, allow_other_payments, staff_auto_lock_minutes, cash_out_alert_threshold_millimes, daily_sales_target_millimes, pin_must_change, subscription_plan, subscription_paid_until, subscription_notes, created_at')
-    .eq('store_id', storeId)
-    .maybeSingle();
-  if (error) throw new Error(`Could not load store: ${error.message}`, { cause: error });
+  const [storeResult, settingsResult] = await Promise.all([
+    client
+      .from('stores')
+      .select('id, store_id, owner_id, code, name, timezone, address, phone, tax_id, is_active, archived_at, day_closed_on, allow_customer_credit_balance, allow_card_payments, allow_other_payments, staff_auto_lock_minutes, cash_out_alert_threshold_millimes, daily_sales_target_millimes, pin_must_change, subscription_plan, subscription_paid_until, subscription_notes, created_at')
+      .eq('store_id', storeId)
+      .maybeSingle(),
+    client
+      .from('store_settings')
+      .select('settings')
+      .eq('store_id', storeId)
+      .maybeSingle(),
+  ]);
+  if (storeResult.error) throw new Error(`Could not load store: ${storeResult.error.message}`, { cause: storeResult.error });
+  if (settingsResult.error) throw new Error(`Could not load store settings: ${settingsResult.error.message}`, { cause: settingsResult.error });
+  const row = storeResult.data;
   if (!row) return undefined;
-  const { data: settingsRow, error: settingsError } = await client
-    .from('store_settings')
-    .select('settings')
-    .eq('store_id', storeId)
-    .maybeSingle();
-  if (settingsError) throw new Error(`Could not load store settings: ${settingsError.message}`, { cause: settingsError });
+  const settingsRow = settingsResult.data;
+  if (!settingsRow) {
+    throw new Error('Could not load store settings: no shared settings row is visible. Apply the latest Supabase migrations and retry.');
+  }
   return mapStore(row as StoreRow, (settingsRow as StoreSettingsRow | null)?.settings);
 }
 

@@ -28,6 +28,12 @@ fixtures; a local-driver production build is rejected.
 `npm run dev` uses the local demo driver by default. Existing saved reports
 keep their frozen store and print settings when settings later change.
 
+The `local` driver stores data in that browser only; it does not sync to
+Android or other devices. For shared admin and staff data, configure web
+deployments and local development with `VITE_DATA_DRIVER=supabase` and the
+same Supabase project URL and anon key. Android loads the production web app
+and uses its configured Supabase project.
+
 ## First-time Supabase setup
 
 Complete this checklist once for each environment:

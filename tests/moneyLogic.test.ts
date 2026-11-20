@@ -693,6 +693,14 @@ describe('local money logic', () => {
     });
     expect(firstZ.expensesMillimes).toBe(800);
 
+    const preShiftExpense = {
+      ...previousExpense,
+      id: 'expense-before-new-shift',
+      amountMillimes: 400,
+      paidMillimes: 400,
+      createdAt: new Date().toISOString(),
+    };
+    setLocalData('expenses', [previousExpense, preShiftExpense]);
     await shiftService.openShift(storeId, staffId, 1_000);
     const newExpense = {
       ...previousExpense,

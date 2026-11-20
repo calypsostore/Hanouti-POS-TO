@@ -1,4 +1,11 @@
-import type { CatalogItemRecord, OrderLineRecord, OrderRecord, PaymentMethod, TabRecord } from '../types/domain';
+import type {
+  CatalogItemRecord,
+  OrderLineRecord,
+  OrderRecord,
+  PaymentMethod,
+  ReportRecord,
+  TabRecord,
+} from '../types/domain';
 import { shiftService } from './shiftService';
 import { userService } from './userService';
 import { catalogService } from './catalogService';
@@ -6,7 +13,7 @@ import { customerService } from './customerService';
 import { notificationService } from './notificationService';
 import { activityService } from './activityService';
 import { readData, writeData } from './storage';
-import { seedOrders } from './seedData';
+import { seedOrders, seedReports } from './seedData';
 import { isSupabaseDriver } from '../data/driver';
 import { offlineOrderQueue } from './offlineOrderQueue';
 import { requireOnlineForAction } from './offlineAvailability';
@@ -14,6 +21,7 @@ import {
   countPendingVoids,
   createOrder as createRemoteOrder,
   getCashSales as getRemoteCashSales,
+  getCurrentBusinessDate as getRemoteCurrentBusinessDate,
   getNextOrderNumber as getRemoteNextOrderNumber,
   getOrder as getRemoteOrder,
   getShiftBreakdown as getRemoteShiftBreakdown,
@@ -25,12 +33,37 @@ import {
 
 const getOrders = () => readData('orders', seedOrders);
 const saveOrders = (orders: OrderRecord[]) => writeData('orders', orders);
-const businessDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-const todayStart = () => {
-  const date = new Date();
-  date.setHours(0, 0, 0, 0);
-  return date.getTime();
-};
+
+function dateKeyInTimezone(date: Date, timeZone: string): string {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date).map((part) => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+async function getCurrentBusinessDate(storeId: string): Promise<string> {
+  if (isSupabaseDriver()) return getRemoteCurrentBusinessDate(storeId);
+  const store = await userService.getStore(storeId);
+  if (!store) throw new Error('The store could not be found.');
+  const timeZone = store.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const [reports, shifts] = await Promise.all([
+    Promise.resolve(readData<ReportRecord[]>('reports', seedReports)),
+    shiftService.listShifts(storeId),
+  ]);
+  const lastZ = reports
+    .filter((report) => report.storeId === storeId && report.type === 'Z')
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+  const lastZAt = lastZ
+    ? new Date(lastZ.periodTo ?? lastZ.createdAt).getTime()
+    : Number.NEGATIVE_INFINITY;
+  const firstShift = shifts
+    .filter((shift) => shift.storeId === storeId && new Date(shift.openedAt).getTime() > lastZAt)
+    .sort((left, right) => left.openedAt.localeCompare(right.openedAt))[0];
+  return dateKeyInTimezone(new Date(firstShift?.openedAt ?? Date.now()), timeZone);
+}
 
 export class OrderServiceError extends Error {
   readonly code = 'CREDIT_LIMIT';
@@ -205,6 +238,8 @@ async function createQueuedOrder(input: {
 export interface ShiftSalesBreakdown {
   orderCount: number;
   cashSalesMillimes: number;
+  cardSalesMillimes: number;
+  otherSalesMillimes: number;
   tabSalesMillimes: number;
   tabPaymentsMillimes: number;
   voidsMillimes: number;
@@ -212,10 +247,20 @@ export interface ShiftSalesBreakdown {
 
 export const orderService = {
   async listToday(storeId: string, staffId?: string): Promise<OrderRecord[]> {
-    if (isSupabaseDriver()) return listRemoteOrders(storeId, staffId, businessDate(new Date()));
-    const start = todayStart();
+    const currentBusinessDate = await getCurrentBusinessDate(storeId);
+    if (isSupabaseDriver()) return listRemoteOrders(storeId, staffId, currentBusinessDate);
+    const shifts = await shiftService.listShifts(storeId);
+    const shiftById = new Map(shifts.map((shift) => [shift.id, shift]));
+    const store = await userService.getStore(storeId);
+    if (!store) throw new Error('The store could not be found.');
+    const timeZone = store.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
     return getOrders()
-      .filter((order) => order.storeId === storeId && new Date(order.createdAt).getTime() >= start && (!staffId || order.staffId === staffId))
+      .filter((order) => order.storeId === storeId &&
+        (order.businessDate ?? dateKeyInTimezone(
+          new Date(shiftById.get(order.shiftId)?.openedAt ?? order.createdAt),
+          timeZone,
+        )) === currentBusinessDate &&
+        (!staffId || order.staffId === staffId))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },
 
@@ -320,7 +365,7 @@ export const orderService = {
         });
       }
     }
-    const dateKey = businessDate(new Date());
+    const dateKey = await getCurrentBusinessDate(input.storeId);
     const counters = readData<Record<string, { businessDate: string; nextNumber: number }>>('order-counters', {});
     const counter = counters[input.storeId];
     const number = counter?.businessDate === dateKey ? counter.nextNumber : 1;
@@ -328,6 +373,7 @@ export const orderService = {
       id: `order-${input.storeId}-${dateKey}-${number}`,
       number,
       storeId: input.storeId,
+      businessDate: dateKey,
       storeName: store.name,
       staffId: input.staffId,
       staffName: staff?.name,
@@ -631,6 +677,12 @@ export const orderService = {
         .filter((order) => order.status === 'done')
         .filter((order) => order.paymentMethod === 'cash')
         .reduce((sum, order) => sum + order.totalMillimes, 0),
+      cardSalesMillimes: completedOrders
+        .filter((order) => order.paymentMethod === 'card')
+        .reduce((sum, order) => sum + order.totalMillimes, 0),
+      otherSalesMillimes: completedOrders
+        .filter((order) => order.paymentMethod === 'other')
+        .reduce((sum, order) => sum + order.totalMillimes, 0),
       tabSalesMillimes: completedOrders
         .filter((order) => order.paymentMethod === 'tab')
         .reduce((sum, order) => sum + order.totalMillimes, 0),
@@ -652,10 +704,6 @@ export const orderService = {
   },
 
   async getTotalForToday(storeId: string, staffId?: string): Promise<number> {
-    if (isSupabaseDriver()) {
-      const orders = await listRemoteOrders(storeId, staffId, businessDate(new Date()));
-      return orders.filter((order) => order.status === 'done').reduce((total, order) => total + order.totalMillimes, 0);
-    }
     return (await this.listToday(storeId, staffId))
       .filter((order) => order.status === 'done')
       .reduce((sum, order) => sum + order.totalMillimes, 0);
@@ -663,7 +711,7 @@ export const orderService = {
 
   async getNextOrderNumber(storeId: string): Promise<number> {
     if (isSupabaseDriver()) return getRemoteNextOrderNumber();
-    const dateKey = businessDate(new Date());
+    const dateKey = await getCurrentBusinessDate(storeId);
     const counter = readData<Record<string, { businessDate: string; nextNumber: number }>>('order-counters', {})[storeId];
     return counter?.businessDate === dateKey ? counter.nextNumber : 1;
   },

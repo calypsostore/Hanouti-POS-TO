@@ -5,6 +5,7 @@ interface OrderRow {
   id: string;
   number: number;
   store_id: string;
+  business_date: string;
   store_name?: string;
   staff_id: string;
   staff_name?: string;
@@ -52,6 +53,7 @@ function mapOrder(row: OrderRow, itemRows: OrderLineRow[] = []): OrderRecord {
     id: row.id,
     number: row.number,
     storeId: row.store_id,
+    businessDate: row.business_date,
     storeName: row.store_name,
     staffId: row.staff_id,
     staffName: row.staff_name,
@@ -192,9 +194,22 @@ export async function getNextOrderNumber(): Promise<number> {
   return Number(data);
 }
 
+export async function getCurrentBusinessDate(storeId: string): Promise<string> {
+  const { data, error } = await getSupabaseClient().rpc('get_current_business_date', {
+    p_store_id: storeId,
+  });
+  if (error) reportWorkflowError(error, 'Could not load the current business date');
+  if (typeof data !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(data)) {
+    throw new Error('Current business date response is invalid.');
+  }
+  return data;
+}
+
 export async function getShiftBreakdown(shiftId: string): Promise<{
   orderCount: number;
   cashSalesMillimes: number;
+  cardSalesMillimes: number;
+  otherSalesMillimes: number;
   tabSalesMillimes: number;
   tabPaymentsMillimes: number;
   voidsMillimes: number;
@@ -215,11 +230,15 @@ export async function getShiftBreakdown(shiftId: string): Promise<{
     if (order.status !== 'done') return result;
     result.orderCount += 1;
     if (order.payment_method === 'cash') result.cashSalesMillimes += Number(order.total_millimes);
+    if (order.payment_method === 'card') result.cardSalesMillimes += Number(order.total_millimes);
+    if (order.payment_method === 'other') result.otherSalesMillimes += Number(order.total_millimes);
     if (order.payment_method === 'tab') result.tabSalesMillimes += Number(order.total_millimes);
     return result;
   }, {
     orderCount: 0,
     cashSalesMillimes: 0,
+    cardSalesMillimes: 0,
+    otherSalesMillimes: 0,
     tabSalesMillimes: 0,
     tabPaymentsMillimes: (tabs ?? []).reduce((sum, tab) => {
       if (tab.payment_method !== 'cash') return sum;

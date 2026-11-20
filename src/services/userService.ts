@@ -29,6 +29,7 @@ const PERMISSIONS: PermissionDefinition[] = [
   { id: 'tab_override_limit', group: 'Customers and tabs', label: 'Override tab credit limit' },
   { id: 'open_close_shift', group: 'Shift and cash', label: 'Open / close shift' },
   { id: 'cash_in_out', group: 'Shift and cash', label: 'Cash in/out' },
+  { id: 'print_x_report', group: 'Shift and cash', label: 'Print an X report for own shift' },
   { id: 'view_schedule', group: 'Other', label: 'View schedule' },
   { id: 'view_own_hours', group: 'Other', label: 'View own hours' },
 ];

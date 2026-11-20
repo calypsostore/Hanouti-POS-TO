@@ -35,7 +35,9 @@ const emptySummary: DashboardSummary = {
   totalCountedMillimes: 0, totalDifferenceMillimes: 0, cashSalesMillimes: 0, tabSalesMillimes: 0,
   tabPaymentsReceivedMillimes: 0, cashFloatMillimes: 0, expectedCashExFloatMillimes: 0,
   nonCashTabPaymentsMillimes: 0, cashOuts: [], customerTabs: [],
+  cardTabPaymentsMillimes: 0, otherTabPaymentsMillimes: 0,
   firstTicketNumber: undefined, lastTicketNumber: undefined, cashInMillimes: 0, cashOutMillimes: 0,
+  cashRefundsMillimes: 0,
   cashMovements: [], employeeBreakdown: [],
   tabsIssuedMillimes: 0, tabsSettledMillimes: 0,
 };

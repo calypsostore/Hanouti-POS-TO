@@ -15,8 +15,9 @@ Record:
 - `V`: cash total approved for void while the shift is open
 - `P`: cash total voided with PIN while the shift is open
 
-Expected cash after these steps is `S + C + T + I - O - V - P`. A tab order
-does not add cash until it is paid.
+Expected cash follows `float + cash sales + cash tab payments - cash out + cash in`.
+Tab orders do not add cash until paid. A pending void is treated as voided for
+sales and cash until rejected; stock is held (not restored) until approval.
 
 1. **Open shift.** Sign in as staff and open a shift with opening cash `S`.
    The shift opens and expected cash is `S`.
@@ -29,10 +30,11 @@ does not add cash until it is paid.
    decreases by `T`; expected cash increases by `T`.
 5. **Cash in and out.** Record cash-in `I`, then cash-out `O`. Expected cash
    increases by `I`, then decreases by `O`.
-6. **Void request and owner approval.** Submit a void request for a separate
-   cash order of `V`. While it is `pending_void`, expected cash still includes
-   `V`. Have the owner approve it before closing the shift; it becomes voided,
-   expected cash decreases by `V` once, and tracked stock is restored once.
+6. **Void request and owner decision.** Submit a void request for a separate
+   cash order of `V`. While it is `pending_void`, the order is excluded from
+   sales and expected cash, and tracked stock remains held. Approval restores
+   stock once and leaves the cash deduction in place. Rejection returns the
+   order to sales and adds its cash back to the shift ledger.
 7. **Void with PIN.** Void another small cash order of `P` with the Admin PIN.
    It becomes voided, expected cash decreases by `P` once, and tracked stock is
    restored once.

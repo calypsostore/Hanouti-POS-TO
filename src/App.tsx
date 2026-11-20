@@ -380,7 +380,7 @@ export default function App() {
           <Route path="/orders" element={<ProtectedRoute roles={['staff', 'owner']} permission="view_order_history"><OrdersScreen /></ProtectedRoute>} />
           <Route path="/customers" element={<ProtectedRoute roles={['staff', 'owner']} permission={['customers_view', 'use_tabs', 'settle_tabs']}><CustomersScreen /></ProtectedRoute>} />
           <Route path="/customers/:id" element={<ProtectedRoute roles={['staff', 'owner']} permission={['customers_view', 'use_tabs', 'settle_tabs']}><CustomersScreen /></ProtectedRoute>} />
-          <Route path="/shift" element={<ProtectedRoute roles={['staff']} permission="open_close_shift"><ShiftScreen /></ProtectedRoute>} />
+          <Route path="/shift" element={<ProtectedRoute roles={['staff']} permission={['open_close_shift', 'print_x_report']}><ShiftScreen /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute roles={['staff', 'owner', 'super_admin']}><SettingsScreen /></ProtectedRoute>} />
           <Route path="/notifications" element={<ProtectedRoute roles={['staff', 'owner', 'super_admin']}><NotificationsScreen /></ProtectedRoute>} />
           <Route path="/owner" element={<Navigate to="/owner/dashboard" replace />} />

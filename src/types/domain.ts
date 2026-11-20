@@ -254,6 +254,7 @@ export interface OrderRecord {
   syncStatus?: 'queued' | 'needs_attention';
   verificationStatus?: 'to_verify';
   storeId: string;
+  businessDate?: string;
   storeName?: string;
   staffId: string;
   staffName?: string;
@@ -534,6 +535,7 @@ export interface ReportRecord {
   netMillimes?: number;
   countedCashMillimes?: number;
   countedCash?: number;
+  countedCashIncludesFloat?: boolean;
   cashDifference?: number;
   cashDifferenceNote?: string;
   pinVerified?: boolean;
@@ -560,6 +562,13 @@ export interface ReportRecord {
   expectedCashExFloatMillimes?: number;
   totalCountedMillimes?: number;
   totalDifferenceMillimes?: number;
+  countedCardMillimes?: number;
+  expectedCardMillimes?: number;
+  cardDifferenceMillimes?: number;
+  countedOtherMillimes?: number;
+  expectedOtherMillimes?: number;
+  otherDifferenceMillimes?: number;
+  nonCashDifferenceNote?: string;
   cashSalesMillimes?: number;
   tabSalesMillimes?: number;
   tabPaymentsReceivedMillimes?: number;

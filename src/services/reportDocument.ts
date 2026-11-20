@@ -85,12 +85,22 @@ export function buildReportDocument(
     (report.totalExpectedCashMillimes === undefined ? undefined : report.totalExpectedCashMillimes - cashFloat);
   const countedCashExFloat = report.countedCashMillimes === undefined
     ? undefined
-    : report.expectedCashExFloatMillimes === undefined
+    : report.countedCashIncludesFloat
+      ? report.countedCashMillimes - cashFloat
+      : report.expectedCashExFloatMillimes === undefined
       ? report.countedCashMillimes - cashFloat
       : report.countedCashMillimes;
-  const cashDifference = countedCashExFloat !== undefined && expectedCashExFloat !== undefined
-    ? countedCashExFloat - expectedCashExFloat
-    : report.cashDifference ?? report.cashDifferenceMillimes;
+  const expectedCashForDrawer = report.countedCashIncludesFloat
+    ? report.totalExpectedCashMillimes
+    : expectedCashExFloat;
+  const countedCashForDrawer = report.countedCashIncludesFloat
+    ? report.countedCashMillimes
+    : countedCashExFloat;
+  const cashDifference = report.cashDifference ?? (
+    countedCashForDrawer !== undefined && expectedCashForDrawer !== undefined
+      ? countedCashForDrawer - expectedCashForDrawer
+      : report.cashDifferenceMillimes
+  );
 
   const paymentSplit = report.paymentSplit;
   const cashSales = paymentSplit?.cash ?? report.cashSalesMillimes;
@@ -157,10 +167,11 @@ export function buildReportDocument(
     ]);
   }
 
-  if (report.type === 'X') {
-    appendSection(sections, 'PENDING VOIDS (EXCLUDED FROM SALES AND CASH)', [
+  if (report.type === 'X' || report.type === 'Z') {
+    appendSection(sections, 'PENDING VOIDS (TREATED AS VOIDED FOR SALES AND CASH UNTIL REJECTED)', [
       { label: 'Pending void count', value: report.pendingVoids ? String(report.pendingVoids.count) : 'Not recorded', emphasized: true },
       { label: 'Pending void total', value: report.pendingVoids ? money(report.pendingVoids.totalMillimes) : 'Not recorded' },
+      { label: 'Stock handling', value: 'Stock is held until approval.' },
       ...(report.pendingVoids?.orders ?? []).map((item) => ({
         label: `#${item.ticketNumber} · ${item.staffName} · ${item.reason || 'Reason not recorded'}`,
         value: money(item.amountMillimes),
@@ -183,9 +194,18 @@ export function buildReportDocument(
         { label: 'Outstanding', value: money(customer.outstandingMillimes), emphasized: true },
       ]),
     ]);
-  } else if (report.tabsOutstandingMillimes !== undefined || report.receivableMillimes !== undefined) {
+  } else if (
+    report.tabsIssuedMillimes !== undefined ||
+    allTabPayments !== undefined ||
+    report.tabsOutstandingMillimes !== undefined ||
+    report.receivableMillimes !== undefined
+  ) {
     appendSection(sections, 'CUSTOMER TABS', [
-      { label: 'Outstanding', value: money(report.tabsOutstandingMillimes ?? report.receivableMillimes), emphasized: true },
+      {
+        label: 'Issued / paid / outstanding',
+        value: `${money(report.tabsIssuedMillimes)} / ${money(allTabPayments)} / ${money(report.tabsOutstandingMillimes ?? report.receivableMillimes)}`,
+        emphasized: true,
+      },
     ]);
   }
 
@@ -240,9 +260,9 @@ export function buildReportDocument(
         { label: 'Shift ID', value: shift.shiftId },
         { label: 'Opened', value: localDateTime(shift.openedAt) },
         ...(shift.closedAt ? [{ label: 'Closed', value: localDateTime(shift.closedAt) }] : []),
-        { label: 'Closed by force', value: shift.forceClosedByOwner ? 'Yes' : 'No' },
+        { label: 'Closed by force', value: shift.forceClosedByOwner ? 'Yes · UNVERIFIED' : 'No' },
         ...(shift.voidsAutoApprovedCount
-          ? [{ label: 'Voids auto-approved', value: String(shift.voidsAutoApprovedCount) }]
+          ? [{ label: 'Voids auto-approved', value: `${shift.voidsAutoApprovedCount} · UNVERIFIED` }]
           : []),
       ];
       const paymentAmounts = [
@@ -313,14 +333,14 @@ export function buildReportDocument(
     ...(voidAdjustmentTotal === 0 ? [] : [{ label: 'Post-close void adjustments', value: money(voidAdjustmentTotal) }]),
     {
       label: 'EXPECTED CASH',
-      value: expectedCashExFloat === undefined ? 'Not recorded' : money(expectedCashExFloat),
+      value: expectedCashForDrawer === undefined ? 'Not recorded' : money(expectedCashForDrawer),
       emphasized: true,
       size: 'double',
     },
     ...(report.type === 'Z' ? [
       {
         label: 'COUNTED CASH',
-        value: countedCashExFloat === undefined ? 'Not recorded' : money(countedCashExFloat),
+        value: countedCashForDrawer === undefined ? 'Not recorded' : money(countedCashForDrawer),
         emphasized: true,
         size: 'double' as const,
       },
@@ -337,11 +357,40 @@ export function buildReportDocument(
         size: 'double' as const,
       },
       ...(report.cashDifferenceNote ? [{ label: 'Note', value: report.cashDifferenceNote }] : []),
+      { label: 'Counted card', value: money(report.countedCardMillimes) },
+      { label: 'Expected card (sales + tab payments)', value: money(report.expectedCardMillimes) },
+      {
+        label: 'Card difference',
+        value: report.cardDifferenceMillimes === undefined
+          ? 'Not recorded'
+          : report.cardDifferenceMillimes < 0
+            ? `SHORT ${money(Math.abs(report.cardDifferenceMillimes))}`
+            : report.cardDifferenceMillimes > 0
+              ? `OVER ${money(report.cardDifferenceMillimes)}`
+              : 'BALANCED',
+        emphasized: true,
+      },
+      ...(report.countedOtherMillimes === undefined ? [] : [
+        { label: 'Counted other', value: money(report.countedOtherMillimes) },
+        { label: 'Expected other (sales + tab payments)', value: money(report.expectedOtherMillimes) },
+        {
+          label: 'Other difference',
+          value: report.otherDifferenceMillimes === undefined
+            ? 'Not recorded'
+            : report.otherDifferenceMillimes < 0
+              ? `SHORT ${money(Math.abs(report.otherDifferenceMillimes))}`
+              : report.otherDifferenceMillimes > 0
+                ? `OVER ${money(report.otherDifferenceMillimes)}`
+                : 'BALANCED',
+          emphasized: true,
+        },
+      ]),
+      ...(report.nonCashDifferenceNote ? [{ label: 'Card / other difference note', value: report.nonCashDifferenceNote }] : []),
     ] : [
       { label: 'Not counted - X report is interim', value: '' },
     ]),
   ];
-  appendSection(sections, 'FLOAT (NOT COUNTED)', [
+  appendSection(sections, report.countedCashIncludesFloat ? 'FLOAT (INCLUDED IN DRAWER COUNT)' : 'FLOAT (NOT COUNTED)', [
     ...reportShifts.map((shift) => ({
       label: `${shift.staffName} · ${localDateTime(shift.openedAt)}`,
       value: money(shift.startingCashMillimes),
@@ -356,7 +405,29 @@ export function buildReportDocument(
       value: flow === undefined ? 'Not recorded' : money(flow),
     };
   }));
-  appendSection(sections, 'CASH TO HAVE IN DRAWER (EXCLUDING FLOAT)', finalCashLines);
+  if (report.type === 'Z') {
+    const forcedShifts = reportShifts.filter((shift) => shift.forceClosedByOwner);
+    appendSection(sections, 'SHIFT DIFFERENCES', [
+      { label: 'Total shift differences', value: money(report.totalDifferenceMillimes), emphasized: true },
+      ...reportShifts.map((shift) => ({
+        label: `${shift.staffName} · ${shift.forceClosedByOwner ? 'UNVERIFIED · force-closed' : 'shift count'}`,
+        value: shift.differenceMillimes === undefined
+          ? 'Not recorded'
+          : shift.differenceMillimes < 0
+            ? `SHORT ${money(Math.abs(shift.differenceMillimes))}`
+            : shift.differenceMillimes > 0
+              ? `OVER ${money(shift.differenceMillimes)}`
+              : 'BALANCED',
+      })),
+      ...forcedShifts.map((shift) => ({
+        label: `${shift.staffName} · UNVERIFIED · force-closed · auto-approved voids`,
+        value: String(shift.voidsAutoApprovedCount ?? 0),
+      })),
+    ]);
+  }
+  appendSection(sections, report.countedCashIncludesFloat
+    ? 'CASH TO HAVE IN DRAWER (INCLUDING FLOAT)'
+    : 'CASH TO HAVE IN DRAWER (EXCLUDING FLOAT)', finalCashLines);
 
   const lines: ReceiptLine[] = [
     { text: storeName, align: 'center', bold: true, size: 'double' },
@@ -379,10 +450,10 @@ export function buildReportDocument(
       ? [{ text: formatReceiptRow('Owner PIN verified', report.pinVerified ? 'Yes' : 'No', width) }]
       : []),
     ...(report.firstTicketNumber === undefined ? [] : [
-      { text: formatReceiptRow('First ticket', String(report.firstTicketNumber), width) },
+      { text: formatReceiptRow('First sale ticket', String(report.firstTicketNumber), width) },
     ]),
     ...(report.lastTicketNumber === undefined ? [] : [
-      { text: formatReceiptRow('Last ticket', String(report.lastTicketNumber), width) },
+      { text: formatReceiptRow('Last sale ticket', String(report.lastTicketNumber), width) },
     ]),
     { text: divider(width), kind: 'divider' },
     ...sections.flatMap((section) => [

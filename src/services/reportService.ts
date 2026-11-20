@@ -54,8 +54,8 @@ function todayKey(timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone): 
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
-function startOfBusinessDay(timeZone: string): string {
-  const parts = datePartsInTimezone(new Date(), timeZone);
+function startOfBusinessDay(timeZone: string, referenceDate = new Date()): string {
+  const parts = datePartsInTimezone(referenceDate, timeZone);
   const targetMidnight = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day));
   let timestamp = targetMidnight;
   for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -84,11 +84,19 @@ function getRangeStart(period: 'day' | 'week' | 'month' | 'year'): Date {
   return start;
 }
 
-function sinceLastZ(storeId: string, reports: ReportRecord[], timeZone: string): string {
+function sinceLastZ(
+  storeId: string,
+  reports: ReportRecord[],
+  timeZone: string,
+  shifts: Awaited<ReturnType<typeof shiftService.listShifts>>,
+): string {
   const previous = reports.filter((report) => report.storeId === storeId && report.type === 'Z')
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
   if (previous) return previous.periodTo ?? previous.createdAt;
-  return startOfBusinessDay(timeZone);
+  const firstShift = shifts
+    .filter((shift) => shift.storeId === storeId)
+    .sort((left, right) => left.openedAt.localeCompare(right.openedAt))[0];
+  return startOfBusinessDay(timeZone, firstShift ? new Date(firstShift.openedAt) : new Date());
 }
 
 async function summarize(storeId: string, from: number, to: number) {
@@ -136,6 +144,12 @@ async function summarize(storeId: string, from: number, to: number) {
         createdAt: adjustment.createdAt,
       })),
   );
+  const customers = isSupabaseDriver()
+    ? await customerService.listCustomers(storeId)
+    : readData<import('../types/domain').CustomerRecord[]>('customers', []).filter((customer) => customer.storeId === storeId);
+  const allCustomerTransactions = isSupabaseDriver()
+    ? (await Promise.all(customers.map((customer) => customerService.listTransactions(customer.id)))).flat()
+    : readData<TabRecord[]>('tabs', []).filter((tab) => tab.storeId === storeId);
   const includedShifts = shifts.filter((shift) => {
     const opened = new Date(shift.openedAt).getTime();
     const closed = shift.closedAt ? new Date(shift.closedAt).getTime() : Number.POSITIVE_INFINITY;
@@ -233,12 +247,6 @@ async function summarize(storeId: string, from: number, to: number) {
   }
   const paymentSplit: Record<PaymentMethod, number> = { cash: 0, card: 0, other: 0, tab: 0 };
   for (const order of orders) paymentSplit[order.paymentMethod] += order.totalMillimes;
-  const customers = isSupabaseDriver()
-    ? await customerService.listCustomers(storeId)
-    : readData<import('../types/domain').CustomerRecord[]>('customers', []).filter((customer) => customer.storeId === storeId);
-  const allCustomerTransactions = isSupabaseDriver()
-    ? (await Promise.all(customers.map((customer) => customerService.listTransactions(customer.id)))).flat()
-    : readData<TabRecord[]>('tabs', []).filter((tab) => tab.storeId === storeId);
   const settlements = allCustomerTransactions.filter((tab) =>
     tab.storeId === storeId && tab.kind === 'settled' &&
     new Date(tab.createdAt).getTime() >= from && new Date(tab.createdAt).getTime() <= to,
@@ -256,6 +264,16 @@ async function summarize(storeId: string, from: number, to: number) {
     cashReversals.reduce((sum, tab) => sum + tab.amountMillimes, 0);
   const nonCashTabPaymentsMillimes = nonCashSettlements.reduce((sum, tab) => sum + tab.amountMillimes, 0) -
     nonCashReversals.reduce((sum, tab) => sum + tab.amountMillimes, 0);
+  const cardTabPaymentsMillimes = allCustomerTransactions
+    .filter((tab) => tab.storeId === storeId && tab.paymentMethod === 'card' &&
+      (tab.kind === 'settled' || tab.kind === 'reversal') &&
+      new Date(tab.createdAt).getTime() >= from && new Date(tab.createdAt).getTime() <= to)
+    .reduce((sum, tab) => sum + (tab.kind === 'settled' ? tab.amountMillimes : -tab.amountMillimes), 0);
+  const otherTabPaymentsMillimes = allCustomerTransactions
+    .filter((tab) => tab.storeId === storeId && tab.paymentMethod === 'other' &&
+      (tab.kind === 'settled' || tab.kind === 'reversal') &&
+      new Date(tab.createdAt).getTime() >= from && new Date(tab.createdAt).getTime() <= to)
+    .reduce((sum, tab) => sum + (tab.kind === 'settled' ? tab.amountMillimes : -tab.amountMillimes), 0);
   const customerTabs: ReportCustomerTabLine[] = customers.map((customer) => {
     const customerOrders = allOrders.filter((order) => order.customerId === customer.id && order.paymentMethod === 'tab');
     const transactions = allCustomerTransactions.filter((tab) => tab.customerId === customer.id);
@@ -278,6 +296,7 @@ async function summarize(storeId: string, from: number, to: number) {
         .reduce((sum, tab) => sum + tab.amountMillimes, 0);
     const ordersAtPeriodEnd = customerOrders.filter((order) =>
       new Date(order.createdAt).getTime() <= to &&
+      order.status !== 'pending_void' &&
       !(order.status === 'voided' && new Date(order.voidedAt ?? order.createdAt).getTime() <= to),
     );
     const transactionsAtPeriodEnd = transactions.filter((tab) => new Date(tab.createdAt).getTime() <= to);
@@ -302,7 +321,9 @@ async function summarize(storeId: string, from: number, to: number) {
   const tabsOutstandingMillimes = customerTabs.reduce((total, customer) => total + customer.outstandingMillimes, 0);
   const receivableMillimes = customerTabs.reduce((total, customer) => total + Math.max(0, customer.outstandingMillimes), 0);
   const salesMillimes = orders.reduce((sum, order) => sum + order.totalMillimes, 0);
-  const chronologicalOrders = [...orders].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  const chronologicalOrders = [...orders].sort((left, right) =>
+    left.createdAt.localeCompare(right.createdAt) || left.number - right.number,
+  );
   const salesCollectedMillimes = paymentSplit.cash + paymentSplit.card + paymentSplit.other +
     tabsSettledMillimes + nonCashTabPaymentsMillimes;
   const expensesMillimes = expenses.reduce((sum, expense) => sum + expense.amountMillimes, 0);
@@ -312,11 +333,17 @@ async function summarize(storeId: string, from: number, to: number) {
   const historicalVoidAdjustmentMillimes = periodVoidAdjustments
     .filter((adjustment) => !includedShiftIds.has(adjustment.shiftId))
     .reduce((sum, adjustment) => sum + adjustment.amountMillimes, 0);
+  const cashRefundsMillimes = cashReversals
+    .filter((reversal) => {
+      const shift = shifts.find((candidate) => candidate.id === reversal.shiftId);
+      return shift?.closedAt && new Date(shift.closedAt).getTime() < new Date(reversal.createdAt).getTime();
+    })
+    .reduce((sum, reversal) => sum + reversal.amountMillimes, 0);
   const cashDifferenceMillimes = closedShiftLines.reduce((sum, shift) => sum + (shift.differenceMillimes ?? 0), 0);
   const totalExpectedCashMillimes = shiftLines.reduce(
     (sum, shift) => sum + (shift.expectedCashMillimes ?? 0),
     historicalVoidAdjustmentMillimes,
-  );
+  ) - cashRefundsMillimes;
   const cashFloatMillimes = shiftLines.reduce((sum, shift) => sum + shift.startingCashMillimes, 0);
   const expectedCashExFloatMillimes = totalExpectedCashMillimes - cashFloatMillimes;
   const cashSalesForDrawerMillimes = shiftLines.reduce((sum, shift) => sum + (shift.cashSalesMillimes ?? 0), 0);
@@ -434,6 +461,7 @@ async function summarize(storeId: string, from: number, to: number) {
     cashOutMillimes: periodCashMovements
       .filter((movement) => movement.kind === 'out')
       .reduce((sum, movement) => sum + movement.amountMillimes, 0),
+    cashRefundsMillimes,
     cashMovements: reportCashMovements,
     voidAdjustments: periodVoidAdjustments,
     employeeBreakdown,
@@ -443,6 +471,8 @@ async function summarize(storeId: string, from: number, to: number) {
     tabsIssuedMillimes,
     tabsSettledMillimes,
     nonCashTabPaymentsMillimes,
+    cardTabPaymentsMillimes,
+    otherTabPaymentsMillimes,
     tabsOutstandingMillimes,
   };
 }
@@ -452,7 +482,12 @@ async function createReport(
   type: 'X' | 'Z',
   generatedBy: string,
   ownerPin?: string,
-  closeDetails?: { countedCashMillimes: number; note?: string },
+  closeDetails?: {
+    countedCashMillimes: number;
+    countedCardMillimes?: number;
+    countedOtherMillimes?: number;
+    note?: string;
+  },
 ): Promise<ReportRecord> {
   const dayStatus = await reportService.getDayStatus(storeId);
   if (dayStatus.dayIsClosed || !dayStatus.hasActivity) {
@@ -463,7 +498,8 @@ async function createReport(
   const createdAt = new Date().toISOString();
   const reports = isSupabaseDriver() ? await listRemoteReports(storeId) : getReports();
   const storeTimeZone = store.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const periodFrom = sinceLastZ(storeId, reports, storeTimeZone);
+  const shifts = await shiftService.listShifts(storeId);
+  const periodFrom = sinceLastZ(storeId, reports, storeTimeZone, shifts);
   const summary = await summarize(storeId, new Date(periodFrom).getTime(), new Date(createdAt).getTime());
   if (type === 'Z' && summary.pendingVoids.count > 0) {
     throw new Error('Resolve every void request before creating a Z report.');
@@ -473,16 +509,35 @@ async function createReport(
   }
   if (type === 'Z' && !closeDetails) throw new Error('Counted cash is required to close the business day.');
   const cashDifference = closeDetails
-    ? closeDetails.countedCashMillimes - summary.expectedCashExFloatMillimes
+    ? closeDetails.countedCashMillimes - summary.totalExpectedCashMillimes
+    : undefined;
+  const expectedCardMillimes = summary.paymentSplit.card + summary.cardTabPaymentsMillimes;
+  const expectedOtherMillimes = summary.paymentSplit.other + summary.otherTabPaymentsMillimes;
+  const cardDifferenceMillimes = closeDetails
+    ? (closeDetails.countedCardMillimes ?? 0) - expectedCardMillimes
+    : undefined;
+  const otherDifferenceMillimes = closeDetails
+    ? (closeDetails.countedOtherMillimes ?? 0) - expectedOtherMillimes
     : undefined;
   if (closeDetails && (!Number.isSafeInteger(closeDetails.countedCashMillimes) || closeDetails.countedCashMillimes < 0)) {
     throw new Error('Counted cash must be a non-negative whole number of millimes.');
   }
-  if (cashDifference !== undefined && cashDifference !== 0 && !closeDetails?.note?.trim()) {
-    throw new Error('A note is required for a cash difference.');
+  if (closeDetails && ((closeDetails.countedCardMillimes !== undefined &&
+      (!Number.isSafeInteger(closeDetails.countedCardMillimes) || closeDetails.countedCardMillimes < 0)) ||
+      (closeDetails.countedOtherMillimes !== undefined &&
+      (!Number.isSafeInteger(closeDetails.countedOtherMillimes) || closeDetails.countedOtherMillimes < 0)))) {
+    throw new Error('Card and other counts must be non-negative whole numbers of millimes.');
+  }
+  if ((cashDifference !== undefined && cashDifference !== 0 ||
+      cardDifferenceMillimes !== undefined && cardDifferenceMillimes !== 0 ||
+      otherDifferenceMillimes !== undefined && otherDifferenceMillimes !== 0) && !closeDetails?.note?.trim()) {
+    throw new Error('A note is required for every Z count difference.');
   }
   const storeSettings = resolveStoreSettings(store.settings);
-  const businessDate = todayKey(storeTimeZone);
+  const firstShiftAt = summary.shifts.map((shift) => shift.openedAt).sort()[0];
+  const businessDate = firstShiftAt
+    ? `${datePartsInTimezone(new Date(firstShiftAt), storeTimeZone).year}-${datePartsInTimezone(new Date(firstShiftAt), storeTimeZone).month}-${datePartsInTimezone(new Date(firstShiftAt), storeTimeZone).day}`
+    : todayKey(storeTimeZone);
   const zNumber = type === 'Z'
     ? Math.max(0, ...reports.filter((report) => report.storeId === storeId && report.type === 'Z').map((report) => report.zNumber ?? 0)) + 1
     : undefined;
@@ -549,6 +604,7 @@ async function createReport(
     cashFloatMillimes: summary.cashFloatMillimes,
     cashInMillimes: summary.cashInMillimes,
     cashOutMillimes: summary.cashOutMillimes,
+    cashRefundsMillimes: summary.cashRefundsMillimes,
     cashMovements: summary.cashMovements,
     employeeBreakdown: summary.employeeBreakdown,
     cashOuts: summary.cashOuts,
@@ -558,8 +614,16 @@ async function createReport(
     nonCashTabPaymentsMillimes: summary.nonCashTabPaymentsMillimes,
     tabsOutstandingMillimes: summary.tabsOutstandingMillimes,
     countedCashMillimes: closeDetails?.countedCashMillimes,
+    countedCashIncludesFloat: type === 'Z',
     cashDifference,
     cashDifferenceNote: closeDetails?.note,
+    countedCardMillimes: closeDetails ? closeDetails.countedCardMillimes ?? 0 : undefined,
+    expectedCardMillimes: type === 'Z' ? expectedCardMillimes : undefined,
+    cardDifferenceMillimes,
+    countedOtherMillimes: closeDetails ? closeDetails.countedOtherMillimes ?? 0 : undefined,
+    expectedOtherMillimes: type === 'Z' ? expectedOtherMillimes : undefined,
+    otherDifferenceMillimes,
+    nonCashDifferenceNote: cardDifferenceMillimes || otherDifferenceMillimes ? closeDetails?.note : undefined,
     pinVerified: type === 'Z',
   };
   const savedReport = isSupabaseDriver()
@@ -651,13 +715,14 @@ export const reportService = {
   },
 
   async getCurrentPeriodSummary(storeId: string) {
-    const [reports, store] = await Promise.all([
+    const [reports, store, shifts] = await Promise.all([
       isSupabaseDriver() ? listRemoteReports(storeId) : Promise.resolve(getReports()),
       userService.getStore(storeId),
+      shiftService.listShifts(storeId),
     ]);
     if (!store) throw new Error('The store could not be found.');
     const timeZone = store.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
-    return await summarize(storeId, new Date(sinceLastZ(storeId, reports, timeZone)).getTime(), Date.now());
+    return await summarize(storeId, new Date(sinceLastZ(storeId, reports, timeZone, shifts)).getTime(), Date.now());
   },
 
   async getInsights(storeId: string, from: number, to: number) {
@@ -788,11 +853,161 @@ export const reportService = {
     return createReport(storeId, 'X', generatedBy);
   },
 
+  async createOwnShiftXReport(storeId: string, staffId: string, generatedBy: string): Promise<ReportRecord> {
+    if (!await userService.hasPermission(staffId, 'print_x_report')) {
+      throw new Error('You do not have permission to print an X report.');
+    }
+    const shift = await shiftService.getOpenShiftForUser(storeId, staffId);
+    if (!shift) throw new Error('Open your shift before printing its X report.');
+    const now = new Date();
+    const periodFrom = new Date(shift.openedAt).getTime();
+    const periodTo = now.getTime();
+    const [allOrders, movements, users, allComps, store, breakdown] = await Promise.all([
+      orderService.listAll(storeId),
+      shiftService.listCashMovements(storeId),
+      userService.listUsers(storeId),
+      compService.listComps(storeId),
+      userService.getStore(storeId),
+      orderService.getShiftSalesBreakdown(shift.id),
+    ]);
+    const orders = allOrders.filter((order) => order.shiftId === shift.id &&
+      new Date(order.createdAt).getTime() >= periodFrom && new Date(order.createdAt).getTime() <= periodTo);
+    const completed = orders.filter((order) => order.status === 'done');
+    const pending = orders.filter((order) => order.status === 'pending_void');
+    const voided = orders.filter((order) => order.status === 'voided');
+    const paymentSplit: Record<PaymentMethod, number> = { cash: 0, card: 0, other: 0, tab: 0 };
+    for (const order of completed) paymentSplit[order.paymentMethod] += order.totalMillimes;
+    const cashMovementsForShift = movements.filter((movement) => movement.shiftId === shift.id &&
+      new Date(movement.createdAt).getTime() >= periodFrom && new Date(movement.createdAt).getTime() <= periodTo);
+    const cashInMillimes = cashMovementsForShift.filter((movement) => movement.kind === 'in')
+      .reduce((sum, movement) => sum + movement.amountMillimes, 0);
+    const cashOutMillimes = cashMovementsForShift.filter((movement) => movement.kind === 'out')
+      .reduce((sum, movement) => sum + movement.amountMillimes, 0);
+    const expectedCashMillimes = await shiftService.getExpectedCash(shift.id);
+    const staffName = users.find((user) => user.id === staffId)?.name ?? generatedBy;
+    const shiftLine: ReportShiftLine = {
+      shiftId: shift.id,
+      staffName,
+      orderCount: completed.length,
+      status: 'in_progress',
+      openedAt: shift.openedAt,
+      startingCashMillimes: shift.startingCashMillimes,
+      cashSalesMillimes: paymentSplit.cash,
+      cardSalesMillimes: paymentSplit.card,
+      otherSalesMillimes: paymentSplit.other,
+      tabSalesMillimes: paymentSplit.tab,
+      tabPaymentsMillimes: breakdown.tabPaymentsMillimes,
+      cashInMillimes,
+      cashOutMillimes,
+      expectedCashMillimes,
+      cashFlowExFloatMillimes: expectedCashMillimes - shift.startingCashMillimes,
+      forceClosedByOwner: false,
+    };
+    const comps = allComps.filter((comp) => comp.shiftId === shift.id &&
+      new Date(comp.createdAt).getTime() >= periodFrom && new Date(comp.createdAt).getTime() <= periodTo);
+    const cashFloatMillimes = shift.startingCashMillimes;
+    const expectedCashExFloatMillimes = expectedCashMillimes - cashFloatMillimes;
+    const timeZone = store?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const dateParts = datePartsInTimezone(now, timeZone);
+    const chronologicalCompleted = [...completed].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return {
+      id: `x-own-${crypto.randomUUID()}`,
+      storeId,
+      type: 'X',
+      businessDate: `${dateParts.year}-${dateParts.month}-${dateParts.day}`,
+      createdAt: now.toISOString(),
+      periodFrom: shift.openedAt,
+      periodTo: now.toISOString(),
+      generatedBy,
+      reportNumber: `X-SHIFT-${shift.id.slice(-6).toUpperCase()}`,
+      salesMillimes: completed.reduce((sum, order) => sum + order.totalMillimes, 0),
+      salesCollectedMillimes: paymentSplit.cash + paymentSplit.card + paymentSplit.other
+        + breakdown.tabPaymentsMillimes,
+      expensesMillimes: 0,
+      netProfitMillimes: paymentSplit.cash + paymentSplit.card + paymentSplit.other
+        + breakdown.tabPaymentsMillimes,
+      receivableMillimes: 0,
+      orderCount: completed.length,
+      cashDifferenceMillimes: 0,
+      cashSalesMillimes: paymentSplit.cash,
+      tabSalesMillimes: paymentSplit.tab,
+      tabPaymentsReceivedMillimes: breakdown.tabPaymentsMillimes,
+      cashFloatMillimes,
+      expectedCashExFloatMillimes,
+      totalExpectedCashMillimes: expectedCashMillimes,
+      cashInMillimes,
+      cashOutMillimes,
+      paymentSplit,
+      shifts: [shiftLine],
+      cashMovements: cashMovementsForShift.map((movement) => ({
+        shiftId: movement.shiftId,
+        staffName,
+        kind: movement.kind,
+        reason: movement.reason,
+        amountMillimes: movement.amountMillimes,
+        note: movement.note,
+        createdAt: movement.createdAt,
+      })),
+      cashOuts: cashMovementsForShift.filter((movement) => movement.kind === 'out').map((movement) => ({
+        shiftId: movement.shiftId,
+        staffName,
+        reason: movement.reason,
+        amountMillimes: movement.amountMillimes,
+        note: movement.note,
+        createdAt: movement.createdAt,
+      })),
+      voids: {
+        count: voided.length,
+        totalMillimes: voided.reduce((sum, order) => sum + order.totalMillimes, 0),
+        orders: voided.map((order) => ({
+          ticketNumber: order.number,
+          reason: order.voidReason ?? '',
+          totalMillimes: order.totalMillimes,
+          approvedBy: order.voidedBy ?? 'Unknown',
+        })),
+      },
+      pendingVoids: {
+        count: pending.length,
+        totalMillimes: pending.reduce((sum, order) => sum + order.totalMillimes, 0),
+        orders: pending.map((order) => ({
+          ticketNumber: order.number,
+          staffName,
+          shiftId: shift.id,
+          amountMillimes: order.totalMillimes,
+          paymentMethod: order.paymentMethod,
+          reason: order.voidReason ?? '',
+          requestedAt: order.voidRequestedAt ?? order.createdAt,
+        })),
+      },
+      comps: {
+        count: comps.length,
+        quantity: comps.reduce((sum, comp) => sum + comp.quantity, 0),
+        totalMillimes: comps.reduce((sum, comp) => sum + comp.valueMillimes, 0),
+        records: comps.map((comp) => ({
+          staffName,
+          itemName: comp.name,
+          quantity: comp.quantity,
+          valueMillimes: comp.valueMillimes,
+          reason: comp.reason,
+          note: comp.note,
+          createdAt: comp.createdAt,
+        })),
+      },
+      firstTicketNumber: chronologicalCompleted[0]?.number,
+      lastTicketNumber: chronologicalCompleted.at(-1)?.number,
+    };
+  },
+
   async closeDayWithZReport(
     storeId: string,
     generatedBy = 'Owner',
     ownerPin?: string,
-    closeDetails?: { countedCashMillimes: number; note?: string },
+    closeDetails?: {
+      countedCashMillimes: number;
+      countedCardMillimes?: number;
+      countedOtherMillimes?: number;
+      note?: string;
+    },
   ): Promise<ReportRecord> {
     if (!ownerPin || !/^\d{4}$/.test(ownerPin)) throw new Error('Owner PIN is required for every Z report.');
     const store = await userService.getStore(storeId);

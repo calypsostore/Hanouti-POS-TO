@@ -37,6 +37,8 @@ type ShiftCloseBreakdown = ShiftSalesBreakdown & {
 const emptyShiftBreakdown: ShiftCloseBreakdown = {
   orderCount: 0,
   cashSalesMillimes: 0,
+  cardSalesMillimes: 0,
+  otherSalesMillimes: 0,
   tabSalesMillimes: 0,
   tabPaymentsMillimes: 0,
   voidsMillimes: 0,
@@ -54,13 +56,18 @@ function parseTnd(value: string): number {
 function reportDrawerAmounts(report: ReportRecord) {
   const cashFloat = report.cashFloatMillimes ??
     (report.shifts ?? []).reduce((sum, shift) => sum + shift.startingCashMillimes, 0);
-  const expected = report.expectedCashExFloatMillimes ??
-    (report.totalExpectedCashMillimes ?? 0) - cashFloat;
+  const expectedTotal = report.totalExpectedCashMillimes ??
+    (report.expectedCashExFloatMillimes ?? 0) + cashFloat;
+  const expected = report.countedCashIncludesFloat
+    ? expectedTotal
+    : report.expectedCashExFloatMillimes ?? expectedTotal - cashFloat;
   const counted = report.countedCashMillimes === undefined
     ? 0
-    : report.expectedCashExFloatMillimes === undefined
-      ? report.countedCashMillimes - cashFloat
-      : report.countedCashMillimes;
+    : report.countedCashIncludesFloat
+      ? report.countedCashMillimes
+      : report.expectedCashExFloatMillimes === undefined
+        ? report.countedCashMillimes - cashFloat
+        : report.countedCashMillimes;
   const difference = report.countedCashMillimes === undefined
     ? report.cashDifference ?? report.cashDifferenceMillimes ?? 0
     : counted - expected;
@@ -93,6 +100,8 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const [closedShiftSummary, setClosedShiftSummary] = useState<{ shift: ShiftRecord; breakdown: ShiftCloseBreakdown }>();
   const [cashMovements, setCashMovements] = useState<CashMovementRecord[]>([]);
   const [canCashInOut, setCanCashInOut] = useState(false);
+  const [canOpenCloseShift, setCanOpenCloseShift] = useState(false);
+  const [canPrintOwnX, setCanPrintOwnX] = useState(false);
   const [movementSheetOpen, setMovementSheetOpen] = useState(false);
   const [movementShiftId, setMovementShiftId] = useState('');
   const [movementKind, setMovementKind] = useState<'in' | 'out'>('in');
@@ -112,6 +121,16 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const [forceEverythingConfirmed, setForceEverythingConfirmed] = useState(false);
   const [zCountedCash, setZCountedCash] = useState('');
   const [zExpectedCash, setZExpectedCash] = useState(0);
+  const [zCountedCard, setZCountedCard] = useState('');
+  const [zCountedOther, setZCountedOther] = useState('');
+  const [zExpectedCard, setZExpectedCard] = useState(0);
+  const [zExpectedOther, setZExpectedOther] = useState(0);
+  const [zPaymentSplit, setZPaymentSplit] = useState({ cash: 0, card: 0, other: 0, tab: 0 });
+  const [zCardTabPayments, setZCardTabPayments] = useState(0);
+  const [zOtherTabPayments, setZOtherTabPayments] = useState(0);
+  const [zVoids, setZVoids] = useState({ count: 0, totalMillimes: 0 });
+  const [zPendingVoids, setZPendingVoids] = useState({ count: 0, totalMillimes: 0 });
+  const [zReviewed, setZReviewed] = useState(false);
   const [zShiftLines, setZShiftLines] = useState<ReportShiftLine[]>([]);
   const [zStep, setZStep] = useState<0 | 1 | 2>(1);
   const [zBusy, setZBusy] = useState(false);
@@ -129,7 +148,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   useEffect(() => updateService.registerUnsavedState(() => startingCashEdited || countedCash.length > 0), [startingCashEdited, countedCash.length]);
 
   const refresh = useCallback(async () => {
-    const [nextShifts, nextOpenShift, nextStore, nextMovements, allOrders, users, cashPermission, comps, nextReports, nextDayStatus] = await Promise.all([
+    const [nextShifts, nextOpenShift, nextStore, nextMovements, allOrders, users, cashPermission, shiftPermission, xPermission, comps, nextReports, nextDayStatus] = await Promise.all([
       shiftService.listShifts(storeId),
       user ? shiftService.getOpenShiftForUser(storeId, user.id) : Promise.resolve(undefined),
       userService.getStore(storeId),
@@ -137,6 +156,8 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       orderService.listAll(storeId),
       userService.listUsers(storeId),
       user?.role === 'owner' ? Promise.resolve(true) : user ? userService.hasPermission(user.id, 'cash_in_out') : Promise.resolve(false),
+      user?.role === 'owner' ? Promise.resolve(true) : user ? userService.hasPermission(user.id, 'open_close_shift') : Promise.resolve(false),
+      user?.role === 'owner' ? Promise.resolve(false) : user ? userService.hasPermission(user.id, 'print_x_report') : Promise.resolve(false),
       compService.listComps(storeId),
       ownerMode ? reportService.listReports(storeId) : Promise.resolve([]),
       reportService.getDayStatus(storeId),
@@ -149,6 +170,8 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     setPendingVoidOrders(allOrders.filter((order) => order.status === 'pending_void' &&
       (ownerMode || order.staffId === user?.id)));
     setCanCashInOut(cashPermission);
+    setCanOpenCloseShift(shiftPermission);
+    setCanPrintOwnX(xPermission);
     setDayStatus(nextDayStatus);
     if (ownerMode) setArchiveReports(nextReports);
     const breakdowns = await Promise.all(nextShifts.filter((shift) => shift.status === 'open')
@@ -262,9 +285,11 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     if (!user) return;
     setError('');
     try {
-      const report = await reportService.createXReport(storeId, user.name);
+      const report = ownerMode
+        ? await reportService.createXReport(storeId, user.name)
+        : await reportService.createOwnShiftXReport(storeId, user.id, user.name);
       setReportPreview(report);
-      setNotice('X report created. The day remains open.');
+      setNotice(ownerMode ? 'X report created. The day remains open.' : 'Own-shift X preview created. Nothing was recorded as a Z report.');
     } catch (reportError) {
       setError(reportError instanceof Error ? reportError.message : 'Unable to create the X report.');
     }
@@ -274,7 +299,17 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     setError('');
     setOwnerPin('');
     setZCountedCash('');
+    setZCountedCard('');
+    setZCountedOther('');
     setZExpectedCash(0);
+    setZExpectedCard(0);
+    setZExpectedOther(0);
+    setZPaymentSplit({ cash: 0, card: 0, other: 0, tab: 0 });
+    setZCardTabPayments(0);
+    setZOtherTabPayments(0);
+    setZVoids({ count: 0, totalMillimes: 0 });
+    setZPendingVoids({ count: 0, totalMillimes: 0 });
+    setZReviewed(false);
     setZShiftLines([]);
     setZStep(1);
     setZNote('');
@@ -341,8 +376,16 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
         throw new Error('The owner PIN is incorrect.');
       }
       const live = await reportService.getCurrentPeriodSummary(storeId);
-      setZExpectedCash(live.expectedCashExFloatMillimes);
+      setZExpectedCash(live.totalExpectedCashMillimes);
+      setZExpectedCard(live.paymentSplit.card + live.cardTabPaymentsMillimes);
+      setZExpectedOther(live.paymentSplit.other + live.otherTabPaymentsMillimes);
+      setZPaymentSplit(live.paymentSplit);
+      setZCardTabPayments(live.cardTabPaymentsMillimes);
+      setZOtherTabPayments(live.otherTabPaymentsMillimes);
+      setZVoids({ count: live.voids.count, totalMillimes: live.voids.totalMillimes });
+      setZPendingVoids({ count: live.pendingVoids.count, totalMillimes: live.pendingVoids.totalMillimes });
       setZShiftLines(live.shiftLines.filter((shift) => shift.status === 'closed'));
+      setZReviewed(false);
       setZStep(2);
     } catch (pinError) {
       setError(pinError instanceof Error ? pinError.message : 'Unable to verify the owner PIN.');
@@ -354,19 +397,35 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   async function closeDayWithZ() {
     if (!user) return;
     setError('');
+    if (!zReviewed) {
+      setZReviewed(true);
+      return;
+    }
     setZBusy(true);
     try {
       if (!ownerPin || !/^\d{4}$/.test(ownerPin)) throw new Error('Owner PIN is required for every Z report.');
       const countedCashMillimes = parseTnd(zCountedCash);
+      const countedCardMillimes = parseTnd(zCountedCard);
+      const countedOtherMillimes = store?.allowOtherPayments ? parseTnd(zCountedOther) : 0;
       const differenceMillimes = countedCashMillimes - zExpectedCash;
+      const cardDifferenceMillimes = countedCardMillimes - zExpectedCard;
+      const otherDifferenceMillimes = countedOtherMillimes - zExpectedOther;
       if (differenceMillimes !== 0 && !zNote.trim()) throw new Error('A note is required for a cash difference.');
+      if ((cardDifferenceMillimes !== 0 || otherDifferenceMillimes !== 0) && !zNote.trim()) {
+        throw new Error('A note is required for a card or other payment difference.');
+      }
       const report = await reportService.closeDayWithZReport(storeId, user.name, ownerPin, {
         countedCashMillimes,
+        countedCardMillimes,
+        countedOtherMillimes,
         note: zNote.trim() || undefined,
       });
       setOwnerPin('');
       setZCountedCash('');
+      setZCountedCard('');
+      setZCountedOther('');
       setZNote('');
+      setZReviewed(false);
       setZSheetOpen(false);
       setReportPreview(report);
       await refresh();
@@ -455,6 +514,18 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     ? parsedZMillimes
     : undefined;
   const zDifference = parsedZCountedCash === undefined ? undefined : parsedZCountedCash - zExpectedCash;
+  const parsedZCardMillimes = zCountedCard.trim() ? Math.round(Number(zCountedCard.replace(',', '.')) * 1000) : undefined;
+  const parsedZOtherMillimes = zCountedOther.trim() ? Math.round(Number(zCountedOther.replace(',', '.')) * 1000) : undefined;
+  const zCardDifference = parsedZCardMillimes === undefined ? undefined : parsedZCardMillimes - zExpectedCard;
+  const zOtherDifference = store?.allowOtherPayments
+    ? parsedZOtherMillimes === undefined ? undefined : parsedZOtherMillimes - zExpectedOther
+    : 0;
+  const hasZCountInputs = parsedZCountedCash !== undefined &&
+    parsedZCardMillimes !== undefined &&
+    (!store?.allowOtherPayments || parsedZOtherMillimes !== undefined);
+  const hasZDifference = Boolean(zDifference !== undefined && zDifference !== 0 ||
+    zCardDifference !== undefined && zCardDifference !== 0 ||
+    zOtherDifference !== undefined && zOtherDifference !== 0);
 
   return (
     <>
@@ -467,7 +538,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           ? <Button onClick={() => setOpenShiftSheetOpen(true)}><MaterialIcon name="lock_open" />Open my shift</Button>
           : ownerMode
             ? <StatusTag status="started">{`${openCount} open`}</StatusTag>
-            : !ownOpenShift && (!closedShiftSummary || dayStatus.dayIsClosed)
+            : canOpenCloseShift && !ownOpenShift && (!closedShiftSummary || dayStatus.dayIsClosed)
               ? <Button onClick={() => setOpenShiftSheetOpen(true)}><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
               : null}
       </div>
@@ -477,7 +548,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             <StatusTag status="started">{`${openCount} open`}</StatusTag>
             {!ownOpenShift && <Button onClick={() => setOpenShiftSheetOpen(true)}><MaterialIcon name="lock_open" />Open my shift</Button>}
           </div>
-          : !ownOpenShift && (!closedShiftSummary || dayStatus.dayIsClosed)
+          : canOpenCloseShift && !ownOpenShift && (!closedShiftSummary || dayStatus.dayIsClosed)
             ? <Button className="w-full lg:w-auto lg:min-w-[160px]" onClick={() => setOpenShiftSheetOpen(true)}><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
             : undefined
       } />
@@ -555,7 +626,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
                       <strong>{report.reportNumber ?? `Z-${String(report.zNumber ?? 0).padStart(6, '0')}`}</strong>
                       <p className="font-body text-body-sm text-outline">{report.businessDate} · Sales {formatTnd((report.salesCollectedMillimes ?? report.salesMillimes) / 1000)} DT</p>
                       <p className="font-body text-body-sm">
-                        Expected ex-float {formatTnd(amounts.expected / 1000)} ·
+                        Expected {report.countedCashIncludesFloat ? 'total cash' : 'ex-float'} {formatTnd(amounts.expected / 1000)} ·
                         Counted {formatTnd(amounts.counted / 1000)} ·
                         Difference {formatTnd(amounts.difference / 1000)}
                       </p>
@@ -592,6 +663,8 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             <div className="space-y-3">
               <Metric label={t('shift.startingCash')} amount={ownOpenShift.startingCashMillimes} />
               <Metric label="Cash sales" amount={ownBreakdown.cashSalesMillimes} />
+              <Metric label="Card sales" amount={ownBreakdown.cardSalesMillimes} />
+              {store?.allowOtherPayments && <Metric label="Other sales" amount={ownBreakdown.otherSalesMillimes} />}
               <Metric label="Tab sales" amount={ownBreakdown.tabSalesMillimes} />
               <Metric label="Tab payments received in cash" amount={ownBreakdown.tabPaymentsMillimes} />
               <Metric label="Cash in" amount={ownMovementTotals.cashInMillimes} />
@@ -606,15 +679,24 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             )}
             <CashMovementList movements={movementsForShift(ownOpenShift.id)} staffNames={staffNames} />
           </section>
-          <Button className="w-full lg:w-auto" onClick={() => setCloseShiftSheetOpen(true)}>
-            <MaterialIcon name="lock" />{t('shift.closeShift')}
-          </Button>
+          <div className="flex flex-col gap-2">
+            {canPrintOwnX && <Button variant="secondary" onClick={() => { void createXReport(); }}>
+              <MaterialIcon name="summarize" />Print X for my shift
+            </Button>}
+            {canOpenCloseShift && <Button className="w-full lg:w-auto" onClick={() => setCloseShiftSheetOpen(true)}>
+              <MaterialIcon name="lock" />{t('shift.closeShift')}
+            </Button>}
+          </div>
         </div>
-      ) : !closedShiftSummary || ownerMode || dayStatus.dayIsClosed ? (
+      ) : canOpenCloseShift && (!closedShiftSummary || ownerMode || dayStatus.dayIsClosed) ? (
         <Button className="w-full max-w-xl" onClick={() => setOpenShiftSheetOpen(true)}>
           <MaterialIcon name="lock_open" />{ownerMode ? 'Open my shift' : t('shift.openShift')}
         </Button>
       ) : null)}
+
+      {reportPreview && !ownerMode && <div className="mt-4">
+        <ReportView inline report={reportPreview} store={store ?? undefined} settings={store?.settings} storeName={store?.name ?? ''} onClose={() => setReportPreview(undefined)} />
+      </div>}
 
       {(error || notice) && <p role={error ? 'alert' : 'status'} className={`mt-4 rounded-lg p-3 font-body text-body-sm ${error ? 'bg-error-container text-on-error-container' : 'bg-success-container text-on-success-container'}`}>{error || notice}</p>}
 
@@ -750,30 +832,56 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           </form>
         ) : (
           <form onSubmit={(event) => { event.preventDefault(); void closeDayWithZ(); }} className="flex flex-col gap-3">
-            <p className="font-body text-body-sm text-on-surface-variant">Review each closed shift, then count the drawer without its starting floats.</p>
+            <p className="font-body text-body-sm text-on-surface-variant">Review the recorded activity, count all cash in the drawer including float and the card terminal, then submit to reveal the differences. Pending void requests are treated as voided for sales and cash until rejected; stock remains held until approval.</p>
             {error && <p role="alert" className="rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
             <div className="space-y-3 rounded-xl bg-surface-container-low p-3">
+              <section className="space-y-1 border-b border-outline-variant pb-3">
+                <h3 className="font-display text-title-sm">Period sales and voids</h3>
+                <Metric label="Cash / card / other / tab sales" amount={zPaymentSplit.cash + zPaymentSplit.card + zPaymentSplit.other + zPaymentSplit.tab} />
+                <p className="font-body text-body-sm text-on-surface-variant">
+                  Cash {formatTnd(zPaymentSplit.cash / 1000)} · Card {formatTnd(zPaymentSplit.card / 1000)} · Other {formatTnd(zPaymentSplit.other / 1000)} · Tab {formatTnd(zPaymentSplit.tab / 1000)}
+                </p>
+                <p className="font-body text-body-sm text-on-surface-variant">
+                  Non-cash tab payments · Card {formatTnd(zCardTabPayments / 1000)} · Other {formatTnd(zOtherTabPayments / 1000)}
+                </p>
+                <Metric label={`Voided orders (${zVoids.count})`} amount={zVoids.totalMillimes} />
+                <Metric label={`Pending void requests (${zPendingVoids.count})`} amount={zPendingVoids.totalMillimes} />
+              </section>
               {zShiftLines.map((shift) => (
                 <section key={shift.shiftId} className="space-y-1 border-b border-outline-variant pb-3 last:border-0 last:pb-0">
                   <h3 className="font-display text-title-sm">{shift.staffName}</h3>
-                  <Metric label="Float - not counted" amount={shift.startingCashMillimes} />
+                  <Metric label="Float" amount={shift.startingCashMillimes} />
                   <Metric label="Cash sales" amount={shift.cashSalesMillimes ?? 0} />
+                  <Metric label="Card sales" amount={shift.cardSalesMillimes ?? 0} />
+                  {store?.allowOtherPayments && <Metric label="Other sales" amount={shift.otherSalesMillimes ?? 0} />}
+                  <Metric label="Tab sales (not cash)" amount={shift.tabSalesMillimes ?? 0} />
                   <Metric label="Tab payments in cash" amount={shift.tabPaymentsMillimes ?? 0} />
                   <Metric label="Cash in" amount={shift.cashInMillimes ?? 0} />
                   <Metric label="Cash out" amount={shift.cashOutMillimes ?? 0} />
-                  <Metric label="Cash flow ex-float" amount={shift.cashFlowExFloatMillimes ?? 0} />
+                  <Metric label="Post-close void adjustments" amount={shift.voidAdjustmentMillimes ?? 0} />
                   {shift.forceClosedByOwner && <p className="font-body text-label-sm text-warning">Closed by force</p>}
-                  {(shift.voidsAutoApprovedCount ?? 0) > 0 && <p className="font-body text-label-sm text-warning">Voids auto-approved: {shift.voidsAutoApprovedCount}</p>}
+                  {shift.forceClosedByOwner && <p className="font-body text-label-sm text-warning">Unverified count · auto-approved voids: {shift.voidsAutoApprovedCount ?? 0}</p>}
                 </section>
               ))}
             </div>
-            <label className="font-body text-label-md">Total cash in drawer WITHOUT the float (TND)
+            <label className="font-body text-label-md">Total cash in drawer including float (TND)
               <input readOnly inputMode="none" value={zCountedCash} placeholder="0.000" className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
             </label>
             <Keypad decimal onPress={(value) => setZCountedCash((current) => appendDecimalAmount(current, value))} onClear={() => setZCountedCash('')} onBackspace={() => setZCountedCash((current) => current.slice(0, -1))} />
-            {zDifference !== undefined && (
+            <label className="font-body text-label-md">Total card payments in period (TND)
+              <input readOnly inputMode="none" value={zCountedCard} placeholder="0.000" className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
+            </label>
+            <Keypad decimal onPress={(value) => setZCountedCard((current) => appendDecimalAmount(current, value))} onClear={() => setZCountedCard('')} onBackspace={() => setZCountedCard((current) => current.slice(0, -1))} />
+            {store?.allowOtherPayments && <>
+              <label className="font-body text-label-md">Total other payments in period (TND)
+                <input readOnly inputMode="none" value={zCountedOther} placeholder="0.000" className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
+              </label>
+              <Keypad decimal onPress={(value) => setZCountedOther((current) => appendDecimalAmount(current, value))} onClear={() => setZCountedOther('')} onBackspace={() => setZCountedOther((current) => current.slice(0, -1))} />
+            </>}
+            {zReviewed && zDifference !== undefined && (
               <div className="space-y-2 rounded-xl bg-surface-container-low p-3" aria-live="polite">
-                <Metric label="Expected cash ex-float" amount={zExpectedCash} prominent />
+                <Metric label="Counted cash in drawer" amount={parsedZCountedCash ?? 0} />
+                <Metric label="Expected cash in drawer" amount={zExpectedCash} prominent />
                 <p className={`text-center font-display text-title-md font-bold ${
                   zDifference < 0 ? 'text-error-dark' : zDifference > 0 ? 'text-warning-dark' : 'text-success-dark'
                 }`}>
@@ -783,11 +891,23 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
                       ? `OVER ${formatTnd(zDifference / 1000)} DT`
                       : 'BALANCED'}
                 </p>
+                <Metric label="Counted card" amount={parsedZCardMillimes ?? 0} />
+                <Metric label="Expected card (sales + tab payments)" amount={zExpectedCard} />
+                <p className="text-center font-display text-title-sm font-bold">
+                  Card {zCardDifference === 0 ? 'BALANCED' : zCardDifference !== undefined && zCardDifference < 0 ? `SHORT ${formatTnd(Math.abs(zCardDifference) / 1000)} DT` : zCardDifference !== undefined ? `OVER ${formatTnd(zCardDifference / 1000)} DT` : ''}
+                </p>
+                {store?.allowOtherPayments && <>
+                  <Metric label="Counted other" amount={parsedZOtherMillimes ?? 0} />
+                  <Metric label="Expected other (sales + tab payments)" amount={zExpectedOther} />
+                  <p className="text-center font-display text-title-sm font-bold">
+                    Other {zOtherDifference === 0 ? 'BALANCED' : zOtherDifference !== undefined && zOtherDifference < 0 ? `SHORT ${formatTnd(Math.abs(zOtherDifference) / 1000)} DT` : zOtherDifference !== undefined ? `OVER ${formatTnd(zOtherDifference / 1000)} DT` : ''}
+                  </p>
+                </>}
               </div>
             )}
-            <label className="font-body text-label-md">Note{zDifference !== undefined && zDifference !== 0 ? ' (required)' : ' (optional)'}
+            <label className="font-body text-label-md">Note{zReviewed && hasZDifference ? ' (required)' : ' (optional)'}
               <textarea
-                required={zDifference !== undefined && zDifference !== 0}
+                required={zReviewed && hasZDifference}
                 maxLength={500}
                 rows={2}
                 value={zNote}
@@ -800,9 +920,9 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
               <Button
                 type="submit"
                 variant="danger"
-                disabled={zBusy || parsedZCountedCash === undefined || (zDifference !== undefined && zDifference !== 0 && !zNote.trim())}
+                disabled={zBusy || !hasZCountInputs || (zReviewed && hasZDifference && !zNote.trim())}
               >
-                <MaterialIcon name="lock" />Confirm Z close
+                <MaterialIcon name="lock" />{zReviewed ? 'Confirm Z close' : 'Review counts'}
               </Button>
             </div>
           </form>
@@ -960,6 +1080,7 @@ function ShiftCloseForm({
   submitLabel: string;
   pendingVoidOrders: OrderRecord[];
 }) {
+  const [reviewed, setReviewed] = useState(false);
   const movementTotals = getCashMovementTotals(movements, shift.id);
   const expectedCash = getExpectedCash(shift, breakdown, movements);
   const parsedCount = countedCash.trim() ? Number(countedCash.replace(',', '.')) : Number.NaN;
@@ -967,13 +1088,21 @@ function ShiftCloseForm({
     ? Math.round(parsedCount * 1000)
     : undefined;
   const difference = countedCashMillimes === undefined ? undefined : countedCashMillimes - expectedCash;
+  function submitOrReview(event: FormEvent<HTMLFormElement>) {
+    if (!reviewed) {
+      event.preventDefault();
+      setReviewed(true);
+      return;
+    }
+    onSubmit(event);
+  }
 
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+    <form onSubmit={submitOrReview} className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
       <h2 className="font-display text-headline-md text-on-surface">{t('shift.closeShift')}</h2>
       {breakdown.pendingVoidCount > 0 && (
         <section className="space-y-2 rounded-lg bg-warning-container p-3 text-on-warning-container">
-          <h3 className="font-body text-label-md">Pending voids (excluded from expected cash)</h3>
+          <h3 className="font-body text-label-md">Pending voids are treated as voided for sales and cash until rejected. Stock is held until approval.</h3>
           {pendingVoidOrders.map((order) => (
             <p key={order.id} className="font-body text-body-sm">
               #{order.number} · {formatTnd(order.totalMillimes / 1000)} DT · {order.voidReason || 'Reason not recorded'}
@@ -984,15 +1113,20 @@ function ShiftCloseForm({
       <div className="space-y-2 rounded-xl bg-surface-container-low p-3">
         <Metric label="Starting cash (float)" amount={shift.startingCashMillimes} />
         <Metric label="Cash sales" amount={breakdown.cashSalesMillimes} />
+        <Metric label="Card sales" amount={breakdown.cardSalesMillimes} />
+        <Metric label="Other sales" amount={breakdown.otherSalesMillimes} />
         <Metric label="Tab sales (charged to customers; excluded from expected cash)" amount={breakdown.tabSalesMillimes} />
         <Metric label="Tab payments received in cash" amount={breakdown.tabPaymentsMillimes} />
         <Metric label="Cash in" amount={movementTotals.cashInMillimes} />
         <Metric label="Cash out" amount={movementTotals.cashOutMillimes} />
         <Metric label="Comps value" amount={breakdown.compsMillimes} />
         <Metric label="Voids" amount={breakdown.voidsMillimes} />
-        <div className="border-t border-outline-variant pt-2">
-          <Metric label="Expected cash in drawer" amount={expectedCash} prominent />
-        </div>
+        {reviewed && countedCashMillimes !== undefined && <>
+          <div className="border-t border-outline-variant pt-2">
+            <Metric label="Counted cash" amount={countedCashMillimes} />
+            <Metric label="Expected cash in drawer" amount={expectedCash} prominent />
+          </div>
+        </>}
       </div>
       <label htmlFor={`counted-cash-${shift.id}`} className="font-body text-label-md">{t('shift.countedCash')} (TND)</label>
       <input
@@ -1009,7 +1143,7 @@ function ShiftCloseForm({
         onClear={onCountClear}
         onBackspace={onCountBackspace}
       />
-      {difference !== undefined && (
+      {reviewed && difference !== undefined && (
         <p
           aria-live="polite"
           className={`rounded-lg p-3 text-center font-display text-title-md ${
@@ -1022,7 +1156,7 @@ function ShiftCloseForm({
             : `${difference < 0 ? 'Short' : 'Over'} ${formatTnd(Math.abs(difference) / 1000)} DT`}
         </p>
       )}
-      {difference !== undefined && difference !== 0 && (
+      {reviewed && difference !== undefined && difference !== 0 && (
         <label className="font-body text-label-md text-on-surface">
           Short note (required)
           <textarea
@@ -1036,8 +1170,8 @@ function ShiftCloseForm({
         </label>
       )}
       <div className="sheet-action-bar">
-        <Button type="submit" variant="danger" className="w-full" disabled={countedCashMillimes === undefined}>
-          <MaterialIcon name="lock" />{submitLabel}
+        <Button type="submit" variant="danger" className="w-full" disabled={countedCashMillimes === undefined || (reviewed && difference !== 0 && !differenceNote.trim())}>
+          <MaterialIcon name={reviewed ? 'lock' : 'calculate'} />{reviewed ? submitLabel : 'Review count'}
         </Button>
       </div>
     </form>

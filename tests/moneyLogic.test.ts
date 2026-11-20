@@ -1,10 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CashMovementRecord, CustomerRecord, OrderRecord, ShiftRecord, TabRecord } from '../src/types/domain';
 import { customerService } from '../src/services/customerService';
 import { orderService, OrderServiceError } from '../src/services/orderService';
 import { reportService } from '../src/services/reportService';
 import { shiftService } from '../src/services/shiftService';
-import { seedStores, seedUsers } from '../src/services/seedData';
+import { seedPositions, seedStores, seedUsers } from '../src/services/seedData';
 import { userService } from '../src/services/userService';
 
 const STORAGE_PREFIX = '7anouti-pos:';
@@ -132,7 +132,7 @@ describe('local money logic', () => {
     await expect(shiftService.getExpectedCash(shiftId)).resolves.toBe(15_900);
   });
 
-  it('reconciles two staff floats separately from the counted drawer cash', async () => {
+  it('reconciles two staff floats as part of the counted drawer cash', async () => {
     const now = new Date();
     const openedAt = new Date(now.getTime() - 8 * 60 * 60 * 1000).toISOString();
     const closedAt = new Date(now.getTime() - 60_000).toISOString();
@@ -174,14 +174,15 @@ describe('local money logic', () => {
     expect(summary.expectedCashExFloatMillimes).toBe(115_000);
 
     const report = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
-      countedCashMillimes: 115_000,
+      countedCashMillimes: 215_000,
     });
-    expect(report.countedCashMillimes).toBe(115_000);
+    expect(report.countedCashMillimes).toBe(215_000);
     expect(report.cashDifference).toBe(0);
     expect(report.cashDifferenceMillimes).toBe(0);
+    expect(report.countedCashIncludesFloat).toBe(true);
   });
 
-  it('records a short of 1.500 DT against expected cash excluding float', async () => {
+  it('records a short of 1.500 DT against expected cash including float', async () => {
     const now = new Date();
     const openedAt = new Date(now.getTime() - 8 * 60 * 60 * 1000).toISOString();
     const closedAt = new Date(now.getTime() - 60_000).toISOString();
@@ -218,7 +219,7 @@ describe('local money logic', () => {
       : store));
 
     const report = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
-      countedCashMillimes: 113_500,
+      countedCashMillimes: 213_500,
       note: 'Cash count is short.',
     });
     expect(report.expectedCashExFloatMillimes).toBe(115_000);
@@ -242,6 +243,62 @@ describe('local money logic', () => {
       cashSalesMillimes: 0,
       tabPaymentsMillimes: 18_000,
     });
+  });
+
+  it('books a post-close cash tab reversal into the new Z period instead of the closed shift count', async () => {
+    const shiftId = 'shift-tab-reversal';
+    const closedShift = makeShift(shiftId, 0);
+    prepareReportData([closedShift]);
+    setLocalData('customers', [makeCustomer()]);
+    setLocalData('tabs', [makeTab('settled-before-close', shiftId, 'settled', 5_000)]);
+    await shiftService.closeShift(shiftId, 5_000);
+
+    await customerService.reversePayment({
+      storeId,
+      customerId: 'customer-test',
+      paymentId: 'settled-before-close',
+      ownerId,
+      pin: '1234',
+      reason: 'Cash refunded after shift close',
+    });
+
+    const summary = await reportService.getCurrentPeriodSummary(storeId);
+    expect(summary.cashRefundsMillimes).toBe(5_000);
+    expect(summary.expectedCashExFloatMillimes).toBe(0);
+    const zReport = await reportService.closeDayWithZReport(storeId, 'Owner', '1234', {
+      countedCashMillimes: 0,
+      countedCardMillimes: 0,
+      countedOtherMillimes: 0,
+    });
+    expect(zReport.cashDifferenceMillimes).toBe(0);
+    expect(zReport.cashRefundsMillimes).toBe(5_000);
+  });
+
+  it('records a PIN void on a closed cash shift and reconciles the Z cash ledger', async () => {
+    const shiftId = 'shift-pin-void-closed';
+    const shift = {
+      ...makeClosedShift(shiftId, 0),
+      expectedCashMillimes: 10_000,
+      countedCashMillimes: 10_000,
+    };
+    prepareReportData([shift]);
+    setLocalData('users', seedUsers);
+    setLocalData('orders', [makeOrder('pin-void-cash', shiftId, 'done', 'cash', 10_000)]);
+
+    await orderService.voidWithPin('pin-void-cash', '1234', ownerId, 'Customer refund');
+
+    await expect(shiftService.getExpectedCash(shiftId)).resolves.toBe(0);
+    await expect(shiftService.getShift(shiftId)).resolves.toMatchObject({
+      voidAdjustments: [expect.objectContaining({ kind: 'approved', amountMillimes: -10_000 })],
+    });
+    const report = await reportService.closeDayWithZReport(storeId, ownerId, '1234', {
+      countedCashMillimes: 0,
+      countedCardMillimes: 0,
+      countedOtherMillimes: 0,
+    });
+    expect(report.totalExpectedCashMillimes).toBe(0);
+    expect(report.expectedCashExFloatMillimes).toBe(0);
+    expect(report.cashDifferenceMillimes).toBe(0);
   });
 
   it('removes an open-shift cash void from expected cash and sales, then restores it on rejection', async () => {
@@ -310,6 +367,7 @@ describe('local money logic', () => {
     const shiftId = 'shift-pending-closed';
     const shift = { ...makeClosedShift(shiftId, 10_000), expectedCashMillimes: 10_000, countedCashMillimes: 10_000 };
     setLocalData('shifts', [shift]);
+    setLocalData('users', seedUsers);
     setLocalData('orders', [
       { ...makeOrder('pending-closed', shiftId, 'pending_void', 'cash', 20_000), voidReason: 'Refunded' },
     ]);
@@ -348,9 +406,106 @@ describe('local money logic', () => {
     await orderService.resolveVoidRequest('z-pending-void', ownerId, 'reject');
     const summary = await reportService.getCurrentPeriodSummary(storeId);
     const zReport = await reportService.closeDayWithZReport(storeId, ownerId, '1234', {
-      countedCashMillimes: summary.expectedCashExFloatMillimes,
+      countedCashMillimes: summary.totalExpectedCashMillimes,
     });
     expect(zReport.pendingVoids?.count).toBe(0);
+  });
+
+  it('reconciles counted card and other totals against sales and non-cash tab payments', async () => {
+    const shiftId = 'shift-z-noncash-counts';
+    prepareReportData([makeClosedShift(shiftId)]);
+    setLocalData('orders', [
+      makeOrder('card-sale', shiftId, 'done', 'card', 4_000),
+      makeOrder('other-sale', shiftId, 'done', 'other', 3_000),
+    ]);
+    setLocalData('tabs', [
+      makeTab('card-tab-payment', shiftId, 'settled', 1_000, 'card'),
+      makeTab('other-tab-payment', shiftId, 'settled', 2_000, 'other'),
+    ]);
+
+    const report = await reportService.closeDayWithZReport(storeId, 'Owner', '1234', {
+      countedCashMillimes: 0,
+      countedCardMillimes: 5_000,
+      countedOtherMillimes: 5_000,
+    });
+
+    expect(report.expectedCardMillimes).toBe(5_000);
+    expect(report.cardDifferenceMillimes).toBe(0);
+    expect(report.expectedOtherMillimes).toBe(5_000);
+    expect(report.otherDifferenceMillimes).toBe(0);
+  });
+
+  it('creates a read-only own-shift X snapshot for staff with permission without recording a Z', async () => {
+    const shiftId = 'shift-own-x';
+    const staff = seedUsers.find((user) => user.id === staffId)!;
+    prepareReportData([makeShift(shiftId, 2_000)]);
+    setLocalData('users', [staff]);
+    setLocalData('positions', seedPositions.map((position) => ({
+      ...position,
+      permissionIds: position.id === staff.positionId
+        ? [...position.permissionIds, 'print_x_report']
+        : position.permissionIds,
+    })));
+    setLocalData('orders', [makeOrder('own-x-sale', shiftId, 'done', 'cash', 3_000)]);
+
+    const report = await reportService.createOwnShiftXReport(storeId, staffId, 'Cashier');
+
+    expect(report).toMatchObject({
+      type: 'X',
+      reportNumber: expect.stringMatching(/^X-SHIFT-/),
+      orderCount: 1,
+      salesMillimes: 3_000,
+      shifts: [expect.objectContaining({ shiftId })],
+    });
+    expect(await reportService.listReports(storeId)).toHaveLength(0);
+  });
+
+  it('keeps overnight tickets on their shift business date and resets after Z', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-02T03:00:00.000Z'));
+    try {
+      setLocalData('stores', seedStores.map((store) => store.id === storeId
+        ? { ...store, timezone: 'UTC' }
+        : store));
+      setLocalData('reports', []);
+      const shiftId = 'shift-overnight-business-date';
+      setLocalData('shifts', [{
+        ...makeShift(shiftId),
+        openedAt: '2026-01-01T23:00:00.000Z',
+      }]);
+      setLocalData('order-counters', {
+        [storeId]: { businessDate: '2026-01-01', nextNumber: 8 },
+      });
+      setLocalData('orders', [{
+        ...makeOrder('overnight-ticket', shiftId, 'done', 'cash', 1_000),
+        businessDate: '2026-01-01',
+        createdAt: '2026-01-02T00:30:00.000Z',
+      }]);
+
+      await expect(orderService.getNextOrderNumber(storeId)).resolves.toBe(8);
+      await expect(orderService.listToday(storeId)).resolves.toEqual([
+        expect.objectContaining({ id: 'overnight-ticket' }),
+      ]);
+
+      setLocalData('reports', [{
+        id: 'first-z',
+        storeId,
+        type: 'Z',
+        businessDate: '2026-01-01',
+        createdAt: '2026-01-02T02:00:00.000Z',
+        periodTo: '2026-01-02T02:00:00.000Z',
+        salesMillimes: 0,
+        orderCount: 0,
+        cashDifferenceMillimes: 0,
+      }]);
+      setLocalData('shifts', [{
+        ...makeShift('shift-second-business-date'),
+        openedAt: '2026-01-02T02:30:00.000Z',
+      }]);
+      await expect(orderService.getNextOrderNumber(storeId)).resolves.toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('force-closes all open shifts at zero, auto-approves pending voids, and records the Z tags', async () => {
@@ -384,7 +539,7 @@ describe('local money logic', () => {
 
     const summary = await reportService.getCurrentPeriodSummary(storeId);
     const zReport = await reportService.closeDayWithZReport(storeId, ownerId, '1234', {
-      countedCashMillimes: summary.expectedCashExFloatMillimes,
+      countedCashMillimes: summary.totalExpectedCashMillimes,
     });
     expect(zReport.shifts).toEqual(expect.arrayContaining([
       expect.objectContaining({ shiftId: openShift.id, forceClosedByOwner: true, voidsAutoApprovedCount: 1 }),
@@ -437,12 +592,12 @@ describe('local money logic', () => {
     await expect(reportService.closeDayWithZReport(storeId, 'owner-lamarsa')).rejects.toThrow('Owner PIN is required');
     await expect(reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234')).rejects.toThrow('Counted cash is required');
     const firstZ = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
-      countedCashMillimes: 0,
+      countedCashMillimes: 1_000,
     });
     expect((await userService.getStore(storeId))?.dayClosedOn).toBe(new Date().toLocaleDateString('en-CA'));
 
     await expect(reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
-      countedCashMillimes: 0,
+      countedCashMillimes: 1_000,
     })).rejects.toThrow('The business day is closed. Open a new shift before creating another report.');
     await expect(reportService.createXReport(storeId)).rejects.toThrow(
       'The business day is closed. Open a new shift before creating another report.',
@@ -459,7 +614,7 @@ describe('local money logic', () => {
     const xReport = await reportService.createXReport(storeId);
     expect(xReport.periodFrom).toBe(firstZ.periodTo);
     await expect(reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
-      countedCashMillimes: 1_000,
+      countedCashMillimes: 2_000,
     })).rejects.toThrow('Force-close or close every shift before creating a Z report.');
   });
 
@@ -484,7 +639,7 @@ describe('local money logic', () => {
     expect(openShift).toBeDefined();
     await shiftService.closeShift(openShift!.id, 1_000);
     const secondZ = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
-      countedCashMillimes: 0,
+      countedCashMillimes: 1_000,
     });
     expect(secondZ.periodFrom).toBe(firstZ.periodTo);
   });
@@ -501,7 +656,7 @@ describe('local money logic', () => {
     await shiftService.closeShift(staffShift.id, 13_000);
     await shiftService.closeShift(ownerShift.id, 25_000);
     const report = await reportService.closeDayWithZReport(storeId, ownerId, '1234', {
-      countedCashMillimes: 8_000,
+      countedCashMillimes: 38_000,
     });
 
     expect(report.shifts).toEqual(expect.arrayContaining([

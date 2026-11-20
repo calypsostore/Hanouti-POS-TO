@@ -32,7 +32,6 @@ function makeReport(type: 'X' | 'Z'): ReportRecord {
     cashOutMillimes: 250,
     countedCashMillimes: 1000,
     cashDifference: 0,
-    cashDifferenceMillimes: 0,
   };
 }
 
@@ -203,7 +202,7 @@ describe('report document', () => {
         });
       }
       if (type === 'X') {
-        expect(document.sections.find((section) => section.title === 'PENDING VOIDS (EXCLUDED FROM SALES AND CASH)')?.lines)
+        expect(document.sections.find((section) => section.title === 'PENDING VOIDS (TREATED AS VOIDED FOR SALES AND CASH UNTIL REJECTED)')?.lines)
           .toEqual(expect.arrayContaining([expect.objectContaining({ label: '#14 · Cashier · Wrong item' })]));
       }
     }
@@ -226,6 +225,57 @@ describe('report document', () => {
     });
     expect(finalSection.lines.find((line) => line.label === 'SHORT 1.500 DT')).toMatchObject({ size: 'double' });
     expect(document.lines.find((line) => line.text.includes('SHORT 1.500 DT'))?.size).toBe('double');
+  });
+
+  it('prints current Z counts and expectations including the float', () => {
+    const report = makeReport('Z');
+    report.countedCashIncludesFloat = true;
+    report.countedCashMillimes = 2_000;
+    report.cashDifference = 0;
+    const document = buildReportDocument(report, { name: 'Test Store' });
+    const drawerSection = document.sections.find((section) =>
+      section.title === 'CASH TO HAVE IN DRAWER (INCLUDING FLOAT)',
+    );
+    expect(drawerSection?.lines).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'EXPECTED CASH', value: '2.000 DT' }),
+      expect.objectContaining({ label: 'COUNTED CASH', value: '2.000 DT' }),
+    ]));
+    expect(document.sections.some((section) => section.title === 'FLOAT (INCLUDED IN DRAWER COUNT)')).toBe(true);
+  });
+
+  it('prints Z card and other counts, the owner drawer difference, total shift differences, and unverified force closes', () => {
+    const report = makeReport('Z');
+    report.countedCardMillimes = 1200;
+    report.expectedCardMillimes = 1000;
+    report.cardDifferenceMillimes = 200;
+    report.countedOtherMillimes = 400;
+    report.expectedOtherMillimes = 500;
+    report.otherDifferenceMillimes = -100;
+    report.nonCashDifferenceNote = 'Terminal settlement differs.';
+    report.totalDifferenceMillimes = -250;
+    report.shifts = [{
+      shiftId: 'shift-force',
+      staffName: 'Cashier',
+      status: 'closed',
+      openedAt: '2026-11-20T07:00:00.000Z',
+      startingCashMillimes: 1000,
+      countedCashMillimes: 1750,
+      expectedCashMillimes: 2000,
+      differenceMillimes: -250,
+      forceClosedByOwner: true,
+      voidsAutoApprovedCount: 2,
+    }];
+
+    const document = buildReportDocument(report, { name: 'Test Store' });
+    const text = document.lines.map((line) => line.text).join('\n').replace(/\s+/g, ' ');
+    expect(text).toContain('Counted card');
+    expect(text).toContain('Expected card (sales + tab payments)');
+    expect(text).toContain('OVER 0.200 DT');
+    expect(text).toContain('SHORT 0.100 DT');
+    expect(text).toContain('Total shift differences');
+    expect(text).toContain('UNVERIFIED · force-closed');
+    expect(text).toContain('auto-approved voids');
+    expect(text).toContain('Terminal settlement differs.');
   });
 
   it('uses the frozen report settings and shows only recorded cash movements', () => {

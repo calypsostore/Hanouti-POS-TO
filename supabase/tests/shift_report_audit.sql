@@ -306,6 +306,7 @@ declare
   v_minus_shift uuid;
   v_force_shift uuid;
   v_z_shift uuid;
+  v_next_z_shift uuid;
   v_order_cash uuid;
   v_order_card uuid;
   v_order_other uuid;
@@ -313,11 +314,13 @@ declare
   v_order_approve uuid;
   v_order_force uuid;
   v_pending_order uuid;
+  v_next_z_order uuid;
   v_pin_void_order uuid;
   v_tab_payment uuid;
   v_expected bigint;
   v_result jsonb;
   v_z_report public.reports%rowtype;
+  v_next_z_report public.reports%rowtype;
   v_snapshot jsonb;
   v_next_business_date date;
 begin
@@ -670,6 +673,39 @@ begin
     ) then
     raise exception 'Reprinting changed the stored Z snapshot or report RLS permits mutation.';
   end if;
+
+  perform set_config('request.jwt.claim.sub', report_store.staff_id::text, true);
+  perform set_config('request.jwt.claim.role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', report_store.staff_id, 'role', 'authenticated', 'session_id', report_store.session_id
+  )::text, true);
+  v_next_z_shift := (public.open_shift(0)).id;
+  v_result := public.create_order(
+    v_next_z_shift, pg_temp.shift_audit_order_items(report_store.item_id), 'cash'
+  );
+  v_next_z_order := (v_result->'order'->>'id')::uuid;
+  perform public.close_shift(v_next_z_shift, 1000, null);
+  perform set_config('request.jwt.claim.sub', report_store.owner_id::text, true);
+  perform set_config('request.jwt.claim.role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', report_store.owner_id, 'role', 'authenticated'
+  )::text, true);
+  v_snapshot := pg_temp.shift_audit_z_snapshot(report_store.store_id, 1000, null, 0, 0);
+  select public.record_report(v_snapshot, '1234') into v_next_z_report;
+  if v_next_z_report.z_number <> 2
+    or v_next_z_report.sales_millimes <> 1000
+    or (v_next_z_report.data->>'periodFrom')::timestamptz is distinct from (
+      select opened_at from public.shifts where id = v_next_z_shift
+    )
+    or jsonb_array_length(v_next_z_report.data->'shifts') <> 1
+    or (v_next_z_report.data->'shifts'->0->>'shiftId')::uuid <> v_next_z_shift
+    or not exists (
+      select 1 from public.orders where id = v_next_z_order
+        and created_at between v_next_z_report.period_from and v_next_z_report.period_to
+    ) then
+    raise exception 'The second Z report did not isolate the newly opened shift period.';
+  end if;
+  v_z_report := v_next_z_report;
 
   select (coalesce(report.period_to, report.created_at) at time zone store.timezone)::date + 1
   into v_next_business_date

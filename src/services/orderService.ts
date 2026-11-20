@@ -34,6 +34,18 @@ import {
 const getOrders = () => readData('orders', seedOrders);
 const saveOrders = (orders: OrderRecord[]) => writeData('orders', orders);
 
+function assertOrderNotArchivedInZ(order: OrderRecord): void {
+  const reports = readData<ReportRecord[]>('reports', seedReports);
+  const orderCreatedAt = new Date(order.createdAt).getTime();
+  const archived = reports.some((report) => {
+    if (report.storeId !== order.storeId || report.type !== 'Z') return false;
+    const periodFrom = new Date(report.periodFrom ?? report.createdAt).getTime();
+    const periodTo = new Date(report.periodTo ?? report.createdAt).getTime();
+    return orderCreatedAt >= periodFrom && orderCreatedAt <= periodTo;
+  });
+  if (archived) throw new Error('Orders included in a closed Z report are archived and cannot be changed.');
+}
+
 function dateKeyInTimezone(date: Date, timeZone: string): string {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
     timeZone,
@@ -465,6 +477,7 @@ export const orderService = {
     const orders = getOrders();
     const order = orders.find((candidate) => candidate.id === orderId && candidate.staffId === staffId);
     if (!order || order.status !== 'done') throw new Error('This order is not available for a void request.');
+    assertOrderNotArchivedInZ(order);
     const cleanedReason = reason.trim();
     if (!cleanedReason) throw new Error('A reason is required to request an order void.');
     const updated = { ...order, status: 'pending_void' as const, voidRequestedAt: new Date().toISOString(), voidReason: cleanedReason };
@@ -508,6 +521,7 @@ export const orderService = {
     const orders = getOrders();
     const order = orders.find((candidate) => candidate.id === orderId && candidate.status === 'done');
     if (!order) throw new Error('This order is not available to void.');
+    assertOrderNotArchivedInZ(order);
     const cleanedReason = reason.trim();
     if (!cleanedReason) throw new Error('A reason is required to void an order.');
     if ((await userService.getStore(order.storeId))?.pinMustChange) {
@@ -574,6 +588,7 @@ export const orderService = {
     const orders = getOrders();
     const order = orders.find((candidate) => candidate.id === orderId && candidate.status === 'pending_void');
     if (!order) throw new Error('Pending void request could not be found.');
+    assertOrderNotArchivedInZ(order);
     const store = await userService.getStore(order.storeId);
     if (!store || store.ownerId !== ownerId) {
       throw new Error('Only this store owner can resolve the request.');

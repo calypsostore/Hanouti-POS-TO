@@ -9,6 +9,7 @@ interface ExpenseRow {
   amount_millimes: number;
   paid_millimes: number;
   date: string;
+  created_at: string | null;
   note: string | null;
   created_by: string;
 }
@@ -51,6 +52,7 @@ const mapExpense = (row: ExpenseRow): ExpenseRecord => ({
   amountMillimes: Number(row.amount_millimes),
   paidMillimes: Number(row.paid_millimes),
   date: row.date,
+  createdAt: row.created_at ?? undefined,
   note: row.note ?? undefined,
   createdBy: row.created_by,
 });

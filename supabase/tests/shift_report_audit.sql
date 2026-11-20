@@ -107,7 +107,6 @@ returns jsonb
 language plpgsql
 as $$
 declare
-  v_timezone text;
   v_business_date date;
   v_period_from timestamptz;
   v_period_to timestamptz := now();
@@ -134,16 +133,17 @@ declare
   v_expected_card bigint;
   v_expected_other bigint;
 begin
-  select store.timezone into v_timezone
-  from public.stores store where store.store_id = p_store_id;
   v_business_date := public.get_current_business_date(p_store_id);
-  select coalesce(
-    (select coalesce(report.period_to, report.created_at)
-     from public.reports report
-     where report.store_id = p_store_id and report.type = 'Z'
-     order by report.created_at desc limit 1),
-    v_business_date::timestamp at time zone v_timezone
-  ) into v_period_from;
+  select min(shift.opened_at)
+  into v_period_from
+  from public.shifts shift
+  where shift.store_id = p_store_id
+    and shift.opened_at > coalesce((
+      select coalesce(report.period_to, report.created_at)
+      from public.reports report
+      where report.store_id = p_store_id and report.type = 'Z'
+      order by report.created_at desc limit 1
+    ), '-infinity'::timestamptz);
 
   select count(*)::integer,
          coalesce(sum(order_record.total_millimes), 0)::bigint,
@@ -250,8 +250,7 @@ begin
          ) filter (where shift.status = 'closed'), 0)::bigint
   into v_shift_lines, v_expected_cash, v_cash_float, v_total_counted, v_total_difference
   from public.shifts shift
-  where shift.store_id = p_store_id and shift.opened_at <= v_period_to
-    and coalesce(shift.closed_at, v_period_to) >= v_period_from;
+  where shift.store_id = p_store_id and shift.opened_at between v_period_from and v_period_to;
   v_expected_cash := v_expected_cash - v_cash_refunds;
 
   return jsonb_build_object(
@@ -617,6 +616,23 @@ begin
     ) then
     raise exception 'Z after force-close did not reconcile to the stored snapshot.';
   end if;
+
+  begin
+    update public.orders set note = 'mutated after Z' where id = v_pending_order;
+    raise exception 'An order included in the Z report was unexpectedly mutable.';
+  exception when others then
+    if position('Orders included in a closed Z report are archived and cannot be changed.' in sqlerrm) = 0 then
+      raise;
+    end if;
+  end;
+  begin
+    update public.order_lines set quantity = quantity + 1 where order_id = v_pending_order;
+    raise exception 'An order line included in the Z report was unexpectedly mutable.';
+  exception when others then
+    if position('Order lines included in a closed Z report are archived and cannot be changed.' in sqlerrm) = 0 then
+      raise;
+    end if;
+  end;
 
   begin
     perform public.record_report(v_snapshot, '1234');

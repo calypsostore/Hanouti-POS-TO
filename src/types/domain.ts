@@ -325,6 +325,7 @@ export interface ExpenseRecord {
   amountMillimes: number;
   paidMillimes: number;
   date: string;
+  createdAt?: string;
   note?: string;
   createdBy: string;
 }

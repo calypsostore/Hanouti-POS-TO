@@ -80,6 +80,7 @@ export const expenseService = {
       amountMillimes: input.amountMillimes,
       paidMillimes: input.category === 'supplier' ? 0 : input.amountMillimes,
       date: input.date,
+      createdAt: new Date().toISOString(),
       note: note || undefined,
       createdBy: input.actorId,
     };

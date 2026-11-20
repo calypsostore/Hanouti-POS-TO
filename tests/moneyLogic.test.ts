@@ -591,7 +591,7 @@ describe('local money logic', () => {
     prepareReportData([makeClosedShift('shift-before-z', 1_000)]);
     await expect(reportService.closeDayWithZReport(storeId, 'owner-lamarsa')).rejects.toThrow('Owner PIN is required');
     await expect(reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234')).rejects.toThrow('Counted cash excluding opening floats is required');
-    const firstZ = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
+    await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
       countedCashMillimes: 0,
     });
     expect((await userService.getStore(storeId))?.dayClosedOn).toBe(new Date().toLocaleDateString('en-CA'));
@@ -603,7 +603,7 @@ describe('local money logic', () => {
       'The business day is closed. Open a new shift before creating another report.',
     );
 
-    await shiftService.openShift(storeId, staffId, 1_000);
+    const newShift = await shiftService.openShift(storeId, staffId, 1_000);
 
     expect((await userService.getStore(storeId))?.dayClosedOn).toBeUndefined();
     await expect(reportService.getDayStatus(storeId)).resolves.toMatchObject({
@@ -612,7 +612,7 @@ describe('local money logic', () => {
       openShiftCount: 1,
     });
     const xReport = await reportService.createXReport(storeId);
-    expect(xReport.periodFrom).toBe(firstZ.periodTo);
+    expect(xReport.periodFrom).toBe(newShift.openedAt);
     await expect(reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
       countedCashMillimes: 2_000,
     })).rejects.toThrow('Force-close or close every shift before creating a Z report.');
@@ -625,23 +625,91 @@ describe('local money logic', () => {
     })).rejects.toThrow('Force-close or close every shift before creating a Z report.');
   });
 
-  it('starts the next report period at the previous Z and allows another Z after the new shift closes', async () => {
+  it('starts the next report period at the first new shift and allows another Z the same day', async () => {
     prepareReportData([makeClosedShift('shift-first-day')]);
     const firstZ = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
       countedCashMillimes: 0,
     });
 
-    await shiftService.openShift(storeId, staffId, 1_000);
+    const newShift = await shiftService.openShift(storeId, staffId, 1_000);
     const xReport = await reportService.createXReport(storeId);
-    expect(xReport.periodFrom).toBe(firstZ.periodTo);
+    expect(xReport.periodFrom).toBe(newShift.openedAt);
 
-    const openShift = await shiftService.getOpenShiftForUser(storeId, staffId);
-    expect(openShift).toBeDefined();
-    await shiftService.closeShift(openShift!.id, 1_000);
+    await shiftService.closeShift(newShift.id, 1_000);
     const secondZ = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
       countedCashMillimes: 0,
     });
-    expect(secondZ.periodFrom).toBe(firstZ.periodTo);
+    expect(secondZ.periodFrom).toBe(newShift.openedAt);
+    expect(new Date(secondZ.periodFrom).getTime()).toBeGreaterThan(new Date(firstZ.periodTo!).getTime());
+  });
+
+  it('limits each Z to shifts and orders opened in its period and freezes archived orders', async () => {
+    const firstShift = makeClosedShift('shift-archived-period');
+    const archivedOrder = {
+      ...makeOrder('order-archived-period', firstShift.id, 'done', 'cash', 2_500),
+      createdAt: new Date(Date.now() - 2_000).toISOString(),
+    };
+    prepareReportData([firstShift]);
+    setLocalData('orders', [archivedOrder]);
+    const firstZ = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
+      countedCashMillimes: 0,
+    });
+    expect(firstZ.salesMillimes).toBe(2_500);
+
+    await expect(orderService.requestVoid(archivedOrder.id, staffId, 'Wrong item'))
+      .rejects.toThrow('Orders included in a closed Z report are archived and cannot be changed.');
+
+    const currentShift = await shiftService.openShift(storeId, staffId, 1_000);
+    const currentOrder = makeOrder('order-current-period', currentShift.id, 'done', 'cash', 700);
+    setLocalData('orders', [archivedOrder, currentOrder]);
+    await shiftService.closeShift(currentShift.id, 1_700);
+
+    const secondZ = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
+      countedCashMillimes: 700,
+    });
+    expect(secondZ.periodFrom).toBe(currentShift.openedAt);
+    expect(secondZ.salesMillimes).toBe(700);
+    expect(secondZ.shifts?.map((shift) => shift.shiftId)).toEqual([currentShift.id]);
+  });
+
+  it('does not repeat same-day expenses already included in the previous Z report', async () => {
+    prepareReportData([makeClosedShift('shift-first-day')]);
+    const now = new Date();
+    const expenseDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const previousExpense = {
+      id: 'expense-previous-z',
+      storeId,
+      category: 'other' as const,
+      amountMillimes: 800,
+      paidMillimes: 800,
+      date: expenseDate,
+      createdAt: new Date(now.getTime() - 30 * 60_000).toISOString(),
+      createdBy: ownerId,
+    };
+    setLocalData('expenses', [previousExpense]);
+
+    const firstZ = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
+      countedCashMillimes: 0,
+    });
+    expect(firstZ.expensesMillimes).toBe(800);
+
+    await shiftService.openShift(storeId, staffId, 1_000);
+    const newExpense = {
+      ...previousExpense,
+      id: 'expense-next-z',
+      amountMillimes: 300,
+      paidMillimes: 300,
+      createdAt: new Date().toISOString(),
+    };
+    setLocalData('expenses', [previousExpense, newExpense]);
+    const openShift = await shiftService.getOpenShiftForUser(storeId, staffId);
+    await shiftService.closeShift(openShift!.id, 1_000);
+
+    const secondZ = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
+      countedCashMillimes: 0,
+    });
+    expect(secondZ.expensesMillimes).toBe(300);
+    expect(secondZ.expenseDetails?.map((expense) => expense.expenseId)).toEqual(['expense-next-z']);
   });
 
   it('includes owner-opened shifts in report lines and expected cash with their float', async () => {

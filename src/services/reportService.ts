@@ -92,14 +92,26 @@ function sinceLastZ(
 ): string {
   const previous = reports.filter((report) => report.storeId === storeId && report.type === 'Z')
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
-  if (previous) return previous.periodTo ?? previous.createdAt;
+  const previousZAt = previous ? new Date(previous.periodTo ?? previous.createdAt).getTime() : Number.NEGATIVE_INFINITY;
   const firstShift = shifts
-    .filter((shift) => shift.storeId === storeId)
+    .filter((shift) => shift.storeId === storeId && new Date(shift.openedAt).getTime() > previousZAt)
     .sort((left, right) => left.openedAt.localeCompare(right.openedAt))[0];
-  return startOfBusinessDay(timeZone, firstShift ? new Date(firstShift.openedAt) : new Date());
+  return firstShift?.openedAt ?? startOfBusinessDay(timeZone);
 }
 
-async function summarize(storeId: string, from: number, to: number) {
+function expensesIncludedInZReports(storeId: string, reports: ReportRecord[]): Set<string> {
+  return new Set(reports
+    .filter((report) => report.storeId === storeId && report.type === 'Z')
+    .flatMap((report) => report.expenseDetails?.map((expense) => expense.expenseId) ?? []));
+}
+
+async function summarize(
+  storeId: string,
+  from: number,
+  to: number,
+  excludedExpenseIds = new Set<string>(),
+  useExpenseCreationPeriod = false,
+) {
   const allOrders = await orderService.listAll(storeId);
   const periodOrders = allOrders.filter((order) => {
       const timestamp = new Date(order.createdAt).getTime();
@@ -118,8 +130,15 @@ async function summarize(storeId: string, from: number, to: number) {
     userService.listUsers(storeId),
     compService.listComps(storeId),
     shiftService.listCashMovements(storeId),
-    expenseService.listForRange(storeId, from, to),
+    useExpenseCreationPeriod ? expenseService.list(storeId) : expenseService.listForRange(storeId, from, to),
   ]);
+  const currentExpenses = expenses.filter((expense) => {
+    if (excludedExpenseIds.has(expense.id)) return false;
+    if (!useExpenseCreationPeriod) return true;
+    if (!expense.createdAt) return false;
+    const createdAt = new Date(expense.createdAt).getTime();
+    return createdAt >= from && createdAt <= to;
+  });
   const compRecords = allComps.filter((comp) => {
     const timestamp = new Date(comp.createdAt).getTime();
     return timestamp >= from && timestamp <= to;
@@ -152,8 +171,7 @@ async function summarize(storeId: string, from: number, to: number) {
     : readData<TabRecord[]>('tabs', []).filter((tab) => tab.storeId === storeId);
   const includedShifts = shifts.filter((shift) => {
     const opened = new Date(shift.openedAt).getTime();
-    const closed = shift.closedAt ? new Date(shift.closedAt).getTime() : Number.POSITIVE_INFINITY;
-    return opened <= to && closed >= from;
+    return opened >= from && opened <= to;
   });
   const shiftLines: ReportShiftLine[] = await Promise.all(includedShifts.map(async (shift) => {
     const inProgress = shift.status === 'open';
@@ -326,7 +344,7 @@ async function summarize(storeId: string, from: number, to: number) {
   );
   const salesCollectedMillimes = paymentSplit.cash + paymentSplit.card + paymentSplit.other +
     tabsSettledMillimes + nonCashTabPaymentsMillimes;
-  const expensesMillimes = expenses.reduce((sum, expense) => sum + expense.amountMillimes, 0);
+  const expensesMillimes = currentExpenses.reduce((sum, expense) => sum + expense.amountMillimes, 0);
   const netProfitMillimes = salesCollectedMillimes - expensesMillimes;
   const closedShiftLines = shiftLines.filter((shift) => shift.status !== 'in_progress');
   const includedShiftIds = new Set(shiftLines.map((shift) => shift.shiftId));
@@ -378,7 +396,7 @@ async function summarize(storeId: string, from: number, to: number) {
     totals.set(order.staffId, employee);
     return totals;
   }, new Map<string, ReportEmployeeLine>()).values()];
-  const expenseDetails: ReportExpenseLine[] = expenses.map((expense) => ({
+  const expenseDetails: ReportExpenseLine[] = currentExpenses.map((expense) => ({
     expenseId: expense.id,
     category: expense.category,
     amountMillimes: expense.amountMillimes,
@@ -500,7 +518,13 @@ async function createReport(
   const storeTimeZone = store.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
   const shifts = await shiftService.listShifts(storeId);
   const periodFrom = sinceLastZ(storeId, reports, storeTimeZone, shifts);
-  const summary = await summarize(storeId, new Date(periodFrom).getTime(), new Date(createdAt).getTime());
+  const summary = await summarize(
+    storeId,
+    new Date(periodFrom).getTime(),
+    new Date(createdAt).getTime(),
+    expensesIncludedInZReports(storeId, reports),
+    true,
+  );
   if (type === 'Z' && summary.pendingVoids.count > 0) {
     throw new Error('Resolve every void request before creating a Z report.');
   }
@@ -722,7 +746,13 @@ export const reportService = {
     ]);
     if (!store) throw new Error('The store could not be found.');
     const timeZone = store.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
-    return await summarize(storeId, new Date(sinceLastZ(storeId, reports, timeZone, shifts)).getTime(), Date.now());
+    return await summarize(
+      storeId,
+      new Date(sinceLastZ(storeId, reports, timeZone, shifts)).getTime(),
+      Date.now(),
+      expensesIncludedInZReports(storeId, reports),
+      true,
+    );
   },
 
   async getInsights(storeId: string, from: number, to: number) {

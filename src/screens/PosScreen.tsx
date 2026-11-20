@@ -816,7 +816,12 @@ export function PosScreen() {
 
   return (
     <div className="min-h-screen bg-surface pb-36 tablet:pb-20">
-      <TopBar title={t('pos.terminal')} storeName={store?.name} showConnectionStatus onLockClick={user?.role === 'staff' ? () => { void lockTerminal(); } : undefined} />
+      <TopBar
+        title={t('pos.terminal')}
+        storeName={store?.name}
+        onDashboardClick={() => navigate(user?.role === 'owner' ? '/owner/dashboard' : '/dashboard')}
+        onLockClick={user?.role === 'staff' ? () => { void lockTerminal(); } : undefined}
+      />
       <div className="flex items-center justify-between gap-2 bg-surface-container-low px-3 py-2.5">
         <div className="min-w-0">
           <h2 className="flex items-center gap-1 truncate font-display text-headline-sm text-primary">

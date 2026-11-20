@@ -1333,7 +1333,7 @@ button {
 @media (min-width: 768px) and (max-width: 1023px) {
   .pos-terminal-layout {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 360px;
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 34vw);
   }
 
   .pos-terminal-layout > section {
@@ -1343,7 +1343,7 @@ button {
 
   .pos-terminal-layout > aside {
     grid-column: 2;
-    width: 360px;
+    width: 100%;
   }
 
   .pos-category-list {
@@ -1584,12 +1584,6 @@ button {
 
   .pos-terminal-layout > aside {
     width: 420px;
-  }
-}
-
-@media (min-width: 768px) {
-  .pos-terminal-layout > aside {
-    height: min(calc(100dvh - 112px), calc(100dvh - 320px));
   }
 }
 

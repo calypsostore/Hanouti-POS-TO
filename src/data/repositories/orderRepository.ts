@@ -202,13 +202,17 @@ export async function getShiftBreakdown(shiftId: string): Promise<{
   const client = getSupabaseClient();
   const [{ data: orders, error: orderError }, { data: tabs, error: tabError }] = await Promise.all([
     client.from('orders').select('status, payment_method, total_millimes').eq('shift_id', shiftId),
-    client.from('tabs').select('kind, amount_millimes').eq('shift_id', shiftId),
+    client.from('tabs').select('kind, payment_method, amount_millimes').eq('shift_id', shiftId),
   ]);
   if (orderError) reportWorkflowError(orderError, 'Could not calculate shift sales');
   if (tabError) reportWorkflowError(tabError, 'Could not calculate shift tab payments');
   return (orders ?? []).reduce((result, order) => {
     if (order.status === 'voided') {
       result.voidsMillimes += Number(order.total_millimes);
+      return result;
+    }
+    if (order.status === 'pending_void') {
+      if (order.payment_method === 'cash') result.cashSalesMillimes += Number(order.total_millimes);
       return result;
     }
     if (order.status !== 'done') return result;
@@ -220,7 +224,12 @@ export async function getShiftBreakdown(shiftId: string): Promise<{
     orderCount: 0,
     cashSalesMillimes: 0,
     tabSalesMillimes: 0,
-    tabPaymentsMillimes: (tabs ?? []).reduce((sum, tab) => tab.kind === 'settled' ? sum + Number(tab.amount_millimes) : sum, 0),
+    tabPaymentsMillimes: (tabs ?? []).reduce((sum, tab) => {
+      if (tab.payment_method !== 'cash') return sum;
+      if (tab.kind === 'settled') return sum + Number(tab.amount_millimes);
+      if (tab.kind === 'reversal') return sum - Number(tab.amount_millimes);
+      return sum;
+    }, 0),
     voidsMillimes: 0,
   });
 }

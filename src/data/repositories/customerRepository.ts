@@ -24,6 +24,7 @@ interface TabRow {
   shift_id: string;
   staff_id: string;
   kind: TabRecord['kind'];
+  payment_method: TabRecord['paymentMethod'];
   amount_millimes: number;
   note: string | null;
   reverses_tab_id: string | null;
@@ -55,6 +56,7 @@ function mapTab(row: TabRow): TabRecord {
     shiftId: row.shift_id,
     staffId: row.staff_id,
     kind: row.kind,
+    paymentMethod: row.payment_method,
     amountMillimes: Number(row.amount_millimes),
     note: row.note ?? undefined,
     reversesTabId: row.reverses_tab_id ?? undefined,

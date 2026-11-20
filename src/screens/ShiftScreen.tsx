@@ -25,7 +25,7 @@ import type { ShiftSalesBreakdown } from '../services/orderService';
 import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
 import { reportService } from '../services/reportService';
 import { ReportView } from '../components/ReportView';
-import type { ReportRecord } from '../types/domain';
+import type { ReportRecord, ReportShiftLine } from '../types/domain';
 
 type ShiftCloseBreakdown = ShiftSalesBreakdown & {
   pendingVoidCount: number;
@@ -47,6 +47,22 @@ function parseTnd(value: string): number {
   const millimes = Math.round(parsed * 1000);
   if (!Number.isFinite(parsed) || parsed < 0 || !Number.isSafeInteger(millimes)) throw new Error('Enter a non-negative cash amount.');
   return millimes;
+}
+
+function reportDrawerAmounts(report: ReportRecord) {
+  const cashFloat = report.cashFloatMillimes ??
+    (report.shifts ?? []).reduce((sum, shift) => sum + shift.startingCashMillimes, 0);
+  const expected = report.expectedCashExFloatMillimes ??
+    (report.totalExpectedCashMillimes ?? 0) - cashFloat;
+  const counted = report.countedCashMillimes === undefined
+    ? 0
+    : report.expectedCashExFloatMillimes === undefined
+      ? report.countedCashMillimes - cashFloat
+      : report.countedCashMillimes;
+  const difference = report.countedCashMillimes === undefined
+    ? report.cashDifference ?? report.cashDifferenceMillimes ?? 0
+    : counted - expected;
+  return { expected, counted, difference };
 }
 
 const cashMovementReasons: { reason: CashMovementReason; label: string }[] = [
@@ -92,6 +108,9 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const [ownerPin, setOwnerPin] = useState('');
   const [zCountedCash, setZCountedCash] = useState('');
   const [zExpectedCash, setZExpectedCash] = useState(0);
+  const [zShiftLines, setZShiftLines] = useState<ReportShiftLine[]>([]);
+  const [zStep, setZStep] = useState<1 | 2>(1);
+  const [zBusy, setZBusy] = useState(false);
   const [zNote, setZNote] = useState('');
   const [zSheetOpen, setZSheetOpen] = useState(false);
   const [reportPreview, setReportPreview] = useState<ReportRecord>();
@@ -244,33 +263,50 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     }
   }
 
-  async function openZCloseDialog() {
+  function openZCloseDialog() {
     setError('');
     setOwnerPin('');
     setZCountedCash('');
+    setZExpectedCash(0);
+    setZShiftLines([]);
+    setZStep(1);
     setZNote('');
     setZSheetOpen(true);
+  }
+
+  async function verifyZOwnerPin() {
+    setError('');
+    if (!/^\d{4}$/.test(ownerPin)) {
+      setError('Enter the 4-digit owner PIN.');
+      return;
+    }
+    setZBusy(true);
     try {
+      if (!await userService.verifyStorePin(storeId, ownerPin, 'z_report')) {
+        throw new Error('The owner PIN is incorrect.');
+      }
       const live = await reportService.getCurrentPeriodSummary(storeId);
-      setZExpectedCash(live.totalExpectedCashMillimes ?? 0);
-    } catch (summaryError) {
-      setZSheetOpen(false);
-      setError(summaryError instanceof Error ? summaryError.message : 'Unable to load expected cash totals.');
+      setZExpectedCash(live.expectedCashExFloatMillimes);
+      setZShiftLines(live.shiftLines.filter((shift) => shift.status === 'closed'));
+      setZStep(2);
+    } catch (pinError) {
+      setError(pinError instanceof Error ? pinError.message : 'Unable to verify the owner PIN.');
+    } finally {
+      setZBusy(false);
     }
   }
 
   async function closeDayWithZ() {
     if (!user) return;
     setError('');
+    setZBusy(true);
     try {
-      const parsed = zCountedCash.trim() ? Number(zCountedCash.replace(',', '.')) : Number.NaN;
       if (!ownerPin || !/^\d{4}$/.test(ownerPin)) throw new Error('Owner PIN is required for every Z report.');
-      if (!Number.isFinite(parsed) || parsed < 0) throw new Error('Enter the counted drawer total.');
-      const countedCashMillimes = Math.round(parsed * 1000);
-      const expectedCashMillimes = zExpectedCash;
+      const countedCashMillimes = parseTnd(zCountedCash);
+      const differenceMillimes = countedCashMillimes - zExpectedCash;
+      if (differenceMillimes !== 0 && !zNote.trim()) throw new Error('A note is required for a cash difference.');
       const report = await reportService.closeDayWithZReport(storeId, user.name, ownerPin, {
         countedCashMillimes,
-        differenceMillimes: countedCashMillimes - expectedCashMillimes,
         note: zNote.trim() || undefined,
       });
       setOwnerPin('');
@@ -282,8 +318,9 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       setNotice('Z report created and the business day closed.');
     } catch (reportError) {
       setError(reportError instanceof Error ? reportError.message : 'Unable to close the business day.');
+    } finally {
+      setZBusy(false);
     }
-
   }
 
   async function submitCashMovement(event: FormEvent<HTMLFormElement>) {
@@ -328,6 +365,14 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const ownBreakdown = ownOpenShift ? breakdownsByShift[ownOpenShift.id] ?? emptyShiftBreakdown : emptyShiftBreakdown;
   const pageTitle = t('shift.title');
   const movementsForShift = (shiftId: string) => cashMovements.filter((movement) => movement.shiftId === shiftId);
+  const parsedZAmount = Number(zCountedCash.replace(',', '.'));
+  const parsedZMillimes = Math.round(parsedZAmount * 1000);
+  const parsedZCountedCash = zCountedCash.trim() && Number.isFinite(parsedZAmount) &&
+    parsedZAmount >= 0 && Number.isSafeInteger(parsedZMillimes)
+    ? parsedZMillimes
+    : undefined;
+  const zDifference = parsedZCountedCash === undefined ? undefined : parsedZCountedCash - zExpectedCash;
+
   return (
     <>
       <div className="mb-4 flex items-center justify-between gap-3 lg:hidden">
@@ -380,16 +425,23 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           <h2 className="mb-3 font-display text-headline-md">Daily reports</h2>
           {loading ? <ListSkeleton label="Loading daily reports" /> : (
             <div className="flex flex-col gap-2">
-              {archiveReports.filter((report) => report.type === 'Z').map((report) => (
-                <button key={report.id} type="button" onClick={() => setReportPreview(report)} className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-low p-3 text-left">
-                  <div>
-                    <strong>{report.reportNumber ?? `Z-${String(report.zNumber ?? 0).padStart(6, '0')}`}</strong>
-                    <p className="font-body text-body-sm text-outline">{report.businessDate} · Sales {formatTnd((report.salesCollectedMillimes ?? report.salesMillimes) / 1000)} DT</p>
-                    <p className="font-body text-body-sm">Expected {formatTnd((report.totalExpectedCashMillimes ?? 0) / 1000)} · Counted {formatTnd((report.countedCashMillimes ?? report.totalCountedMillimes ?? 0) / 1000)} · Difference {formatTnd((report.cashDifference ?? report.cashDifferenceMillimes ?? 0) / 1000)}</p>
-                  </div>
-                  <StatusTag status="closed">{report.pinVerified === false ? 'PIN unavailable' : 'PIN verified'}</StatusTag>
-                </button>
-              ))}
+              {archiveReports.filter((report) => report.type === 'Z').map((report) => {
+                const amounts = reportDrawerAmounts(report);
+                return (
+                  <button key={report.id} type="button" onClick={() => setReportPreview(report)} className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-low p-3 text-left">
+                    <div>
+                      <strong>{report.reportNumber ?? `Z-${String(report.zNumber ?? 0).padStart(6, '0')}`}</strong>
+                      <p className="font-body text-body-sm text-outline">{report.businessDate} · Sales {formatTnd((report.salesCollectedMillimes ?? report.salesMillimes) / 1000)} DT</p>
+                      <p className="font-body text-body-sm">
+                        Expected ex-float {formatTnd(amounts.expected / 1000)} ·
+                        Counted {formatTnd(amounts.counted / 1000)} ·
+                        Difference {formatTnd(amounts.difference / 1000)}
+                      </p>
+                    </div>
+                    <StatusTag status="closed">{report.pinVerified === false ? 'PIN unavailable' : 'PIN verified'}</StatusTag>
+                  </button>
+                );
+              })}
               {archiveReports.filter((report) => report.type === 'Z').length === 0 && <p className="font-body text-body-sm text-outline">No Z reports yet.</p>}
             </div>
           )}
@@ -501,38 +553,81 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           </div>
         </form>
       </BottomSheet>
-      <BottomSheet open={zSheetOpen} onClose={() => { setZSheetOpen(false); setOwnerPin(''); setZCountedCash(''); setZNote(''); }} title="Close day: Z report">
-        <form onSubmit={(event) => { event.preventDefault(); void closeDayWithZ(); }} className="flex flex-col gap-3">
-          <p className="font-body text-body-sm text-on-surface-variant">Enter the final drawer count. This snapshot freezes at close.</p>
-          <div className="space-y-2 rounded-xl bg-surface-container-low p-3">
-            <Metric label="Expected cash for the day" amount={zExpectedCash} prominent />
-            {shifts.filter((shift) => shift.status === 'closed').map((shift) => (
-              <Metric key={shift.id} label={`${staffNames[shift.staffId] ?? 'Staff'} shift count`} amount={shift.countedCashMillimes ?? 0} />
-            ))}
-            {zCountedCash.trim() && Number.isFinite(Number(zCountedCash.replace(',', '.'))) && (
-              <Metric
-                label="Live difference"
-                amount={Math.round(Number(zCountedCash.replace(',', '.')) * 1000) - zExpectedCash}
-                signed
-              />
+      <BottomSheet
+        open={zSheetOpen}
+        onClose={() => { setZSheetOpen(false); setOwnerPin(''); setZCountedCash(''); setZNote(''); setZStep(1); }}
+        title="Close day: Z report"
+      >
+        {zStep === 1 ? (
+          <form onSubmit={(event) => { event.preventDefault(); void verifyZOwnerPin(); }} className="flex flex-col gap-3">
+            <p className="font-body text-body-sm text-on-surface-variant">Verify the owner PIN to continue with the Z close.</p>
+            {error && <p role="alert" className="rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
+            <label className="font-body text-label-md">Owner PIN
+              <input readOnly value={ownerPin} placeholder="••••" className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 tracking-[0.5em]" />
+            </label>
+            <Keypad onPress={(digit) => setOwnerPin((current) => current.length < 4 ? `${current}${digit}` : current)} onClear={() => setOwnerPin('')} onBackspace={() => setOwnerPin((current) => current.slice(0, -1))} />
+            <div className="sheet-action-bar grid grid-cols-2 gap-2">
+              <Button type="button" variant="ghost" onClick={() => { setZSheetOpen(false); setOwnerPin(''); setZStep(1); }}>Cancel</Button>
+              <Button type="submit" disabled={zBusy || ownerPin.length !== 4}><MaterialIcon name="lock" />Continue</Button>
+            </div>
+          </form>
+        ) : (
+          <form onSubmit={(event) => { event.preventDefault(); void closeDayWithZ(); }} className="flex flex-col gap-3">
+            <p className="font-body text-body-sm text-on-surface-variant">Review each closed shift, then count the drawer without its starting floats.</p>
+            {error && <p role="alert" className="rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
+            <div className="space-y-3 rounded-xl bg-surface-container-low p-3">
+              {zShiftLines.map((shift) => (
+                <section key={shift.shiftId} className="space-y-1 border-b border-outline-variant pb-3 last:border-0 last:pb-0">
+                  <h3 className="font-display text-title-sm">{shift.staffName}</h3>
+                  <Metric label="Float - not counted" amount={shift.startingCashMillimes} />
+                  <Metric label="Cash sales" amount={shift.cashSalesMillimes ?? 0} />
+                  <Metric label="Tab payments in cash" amount={shift.tabPaymentsMillimes ?? 0} />
+                  <Metric label="Cash in" amount={shift.cashInMillimes ?? 0} />
+                  <Metric label="Cash out" amount={shift.cashOutMillimes ?? 0} />
+                  <Metric label="Cash flow ex-float" amount={shift.cashFlowExFloatMillimes ?? 0} />
+                </section>
+              ))}
+            </div>
+            <label className="font-body text-label-md">Total cash in drawer WITHOUT the float (TND)
+              <input readOnly inputMode="none" value={zCountedCash} placeholder="0.000" className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
+            </label>
+            <Keypad decimal onPress={(value) => setZCountedCash((current) => appendDecimalAmount(current, value))} onClear={() => setZCountedCash('')} onBackspace={() => setZCountedCash((current) => current.slice(0, -1))} />
+            {zDifference !== undefined && (
+              <div className="space-y-2 rounded-xl bg-surface-container-low p-3" aria-live="polite">
+                <Metric label="Expected cash ex-float" amount={zExpectedCash} prominent />
+                <p className={`text-center font-display text-title-md font-bold ${
+                  zDifference < 0 ? 'text-error-dark' : zDifference > 0 ? 'text-warning-dark' : 'text-success-dark'
+                }`}>
+                  {zDifference < 0
+                    ? `SHORT ${formatTnd(Math.abs(zDifference) / 1000)} DT`
+                    : zDifference > 0
+                      ? `OVER ${formatTnd(zDifference / 1000)} DT`
+                      : 'BALANCED'}
+                </p>
+              </div>
             )}
-          </div>
-          <label className="font-body text-label-md">Counted drawer total (TND)
-            <input readOnly inputMode="none" value={zCountedCash} placeholder="0.000" className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
-          </label>
-          <Keypad decimal onPress={(value) => setZCountedCash((current) => appendDecimalAmount(current, value))} onClear={() => setZCountedCash('')} onBackspace={() => setZCountedCash((current) => current.slice(0, -1))} />
-          <label className="font-body text-label-md">Optional note
-            <textarea maxLength={500} rows={2} value={zNote} onChange={(event) => setZNote(event.target.value)} className="mt-1.5 w-full rounded-lg bg-surface-container-low p-3" />
-          </label>
-          <label className="font-body text-label-md">Owner PIN
-            <input readOnly value={ownerPin} placeholder="••••" className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 tracking-[0.5em]" />
-          </label>
-          <Keypad onPress={(digit) => setOwnerPin((current) => current.length < 4 ? `${current}${digit}` : current)} onClear={() => setOwnerPin('')} onBackspace={() => setOwnerPin((current) => current.slice(0, -1))} />
-          <div className="sheet-action-bar grid grid-cols-2 gap-2">
-            <Button type="button" variant="ghost" onClick={() => { setZSheetOpen(false); setOwnerPin(''); setZCountedCash(''); setZNote(''); }}>Cancel</Button>
-            <Button type="submit" variant="danger" disabled={ownerPin.length !== 4 || zCountedCash === ''}><MaterialIcon name="lock" />Confirm Z close</Button>
-          </div>
-        </form>
+            <label className="font-body text-label-md">Note{zDifference !== undefined && zDifference !== 0 ? ' (required)' : ' (optional)'}
+              <textarea
+                required={zDifference !== undefined && zDifference !== 0}
+                maxLength={500}
+                rows={2}
+                value={zNote}
+                onChange={(event) => setZNote(event.target.value)}
+                className="mt-1.5 w-full rounded-lg bg-surface-container-low p-3"
+              />
+            </label>
+            <div className="sheet-action-bar grid grid-cols-2 gap-2">
+              <Button type="button" variant="ghost" onClick={() => { setError(''); setZStep(1); }}>Back</Button>
+              <Button
+                type="submit"
+                variant="danger"
+                disabled={zBusy || parsedZCountedCash === undefined || (zDifference !== undefined && zDifference !== 0 && !zNote.trim())}
+              >
+                <MaterialIcon name="lock" />Confirm Z close
+              </Button>
+            </div>
+          </form>
+        )}
       </BottomSheet>
       <BottomSheet open={closeShiftSheetOpen && Boolean(ownOpenShift)} onClose={() => setCloseShiftSheetOpen(false)} title={t('shift.closeShift')}>
         {ownOpenShift && <ShiftCloseForm

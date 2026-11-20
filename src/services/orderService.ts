@@ -567,21 +567,23 @@ export const orderService = {
     const completedOrders = shiftOrders.filter((order) => order.status === 'done');
     const shiftTabPayments = readData<TabRecord[]>('tabs', [])
       .filter((tab) => tab.shiftId === shiftId);
-    const settlements = shiftTabPayments
-      .filter((tab) => tab.kind === 'settled')
-      .reduce((sum, tab) => sum + tab.amountMillimes, 0);
-    const reversals = shiftTabPayments
-      .filter((tab) => tab.kind === 'reversal')
-      .reduce((sum, tab) => sum + tab.amountMillimes, 0);
+    const cashTabPaymentsTotal = shiftTabPayments
+      .filter((tab) => (tab.paymentMethod ?? 'cash') === 'cash')
+      .reduce((sum, tab) => {
+        if (tab.kind === 'settled') return sum + tab.amountMillimes;
+        if (tab.kind === 'reversal') return sum - tab.amountMillimes;
+        return sum;
+      }, 0);
     return {
       orderCount: completedOrders.length,
-      cashSalesMillimes: completedOrders
+      cashSalesMillimes: shiftOrders
+        .filter((order) => order.status === 'done' || order.status === 'pending_void')
         .filter((order) => order.paymentMethod === 'cash')
         .reduce((sum, order) => sum + order.totalMillimes, 0),
       tabSalesMillimes: completedOrders
         .filter((order) => order.paymentMethod === 'tab')
         .reduce((sum, order) => sum + order.totalMillimes, 0),
-      tabPaymentsMillimes: settlements - reversals,
+      tabPaymentsMillimes: cashTabPaymentsTotal,
       voidsMillimes: shiftOrders
         .filter((order) => order.status === 'voided')
         .reduce((sum, order) => sum + order.totalMillimes, 0),

@@ -476,6 +476,7 @@ export interface ReportShiftLine {
   cashInMillimes?: number;
   cashOutMillimes?: number;
   expectedCashMillimes?: number;
+  cashFlowExFloatMillimes?: number;
   countedCashMillimes?: number;
   differenceMillimes?: number;
   forceClosedByOwner: boolean;
@@ -529,6 +530,7 @@ export interface ReportRecord {
   shifts?: ReportShiftLine[];
   paymentSplit?: Record<PaymentMethod, number>;
   totalExpectedCashMillimes?: number;
+  expectedCashExFloatMillimes?: number;
   totalCountedMillimes?: number;
   totalDifferenceMillimes?: number;
   cashSalesMillimes?: number;
@@ -544,6 +546,7 @@ export interface ReportRecord {
   customerTabs?: ReportCustomerTabLine[];
   tabsIssuedMillimes?: number;
   tabsSettledMillimes?: number;
+  nonCashTabPaymentsMillimes?: number;
   tabsOutstandingMillimes?: number;
 }
 
@@ -569,6 +572,7 @@ export interface TabRecord {
   shiftId: string;
   staffId: string;
   kind: 'issued' | 'settled' | 'reversal';
+  paymentMethod: Exclude<PaymentMethod, 'tab'>;
   amountMillimes: number;
   note?: string;
   reversesTabId?: string;

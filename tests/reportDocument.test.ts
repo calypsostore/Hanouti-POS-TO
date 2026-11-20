@@ -24,13 +24,15 @@ function makeReport(type: 'X' | 'Z'): ReportRecord {
     ],
     salesByCategory: [{ categoryId: 'c1', name: 'Drinks', quantity: 3, totalMillimes: 3000 }],
     totalExpectedCashMillimes: 2000,
+    expectedCashExFloatMillimes: 1000,
     cashFloatMillimes: 1000,
     cashSalesMillimes: 1000,
     tabPaymentsReceivedMillimes: 250,
     cashInMillimes: 500,
     cashOutMillimes: 250,
-    countedCashMillimes: 2000,
+    countedCashMillimes: 1000,
     cashDifference: 0,
+    cashDifferenceMillimes: 0,
   };
 }
 
@@ -102,6 +104,7 @@ describe('report document', () => {
       expectedCashMillimes: 2000,
       countedCashMillimes: 1800,
       differenceMillimes: -200,
+      cashFlowExFloatMillimes: 1000,
       forceClosedByOwner: true,
     }];
 
@@ -114,15 +117,24 @@ describe('report document', () => {
     expect(text).toContain('Coffee beans');
     expect(text).toContain('0.800 DT paid');
     expect(text).toContain('Closed by owner');
-    expect(text).toContain('Cash difference');
+    expect(text).toContain('BALANCED');
   });
 
   it('builds the required sections and reconciles category totals', () => {
     const report = makeReport('Z');
     const document = buildReportDocument(report, { name: 'Test Store' }, resolveStoreSettings());
     expect(document.sections.map((section) => section.title)).toEqual(
-      expect.arrayContaining(['SALES', 'ITEMS SOLD', 'CASH MOVEMENTS', 'EXPECTED / COUNTED / DIFFERENCE', 'BY CATEGORY']),
+      expect.arrayContaining([
+        'SALES',
+        'ITEMS SOLD',
+        'CASH MOVEMENTS',
+        'FLOAT (NOT COUNTED)',
+        'CASH FLOW BY SHIFT',
+        'CASH TO HAVE IN DRAWER (EXCLUDING FLOAT)',
+        'BY CATEGORY',
+      ]),
     );
+    expect(document.sections.at(-1)?.title).toBe('CASH TO HAVE IN DRAWER (EXCLUDING FLOAT)');
     const categoryTotal = report.salesByCategory?.reduce((sum, category) => sum + category.totalMillimes, 0);
     expect(categoryTotal).toBe(3000);
   });
@@ -132,13 +144,40 @@ describe('report document', () => {
     const document = buildReportDocument(report, { name: 'Test Store' }, resolveStoreSettings());
     expect(document.lines.some((line) => line.text.includes('Z-000012'))).toBe(true);
     expect(document.subtitle).toBe('Official day close');
-    expect(document.sections.map((section) => section.title)).toContain('FINAL CLOSING SUMMARY');
+    expect(document.sections.at(-1)?.title).toBe('CASH TO HAVE IN DRAWER (EXCLUDING FLOAT)');
+    const finalSection = document.sections.at(-1)!;
+    expect(finalSection.lines.find((line) => line.label === 'EXPECTED CASH')).toMatchObject({ size: 'double' });
+    expect(finalSection.lines.find((line) => line.label === 'COUNTED CASH')).toMatchObject({ size: 'double' });
+    expect(finalSection.lines.find((line) => line.label === 'BALANCED')).toMatchObject({ size: 'double' });
+    expect(document.lines.find((line) => line.text.includes('EXPECTED CASH'))?.size).toBe('double');
+    expect(document.lines.find((line) => line.text.includes('BALANCED'))?.size).toBe('double');
   });
 
   it('marks an X report interim without presenting it as a day close', () => {
     const document = buildReportDocument(makeReport('X'), { name: 'Test Store' });
     expect(document.lines.some((line) => line.text === 'INTERIM - DAY REMAINS OPEN')).toBe(true);
-    expect(document.sections.map((section) => section.title)).not.toContain('FINAL CLOSING SUMMARY');
+    expect(document.sections.at(-1)?.title).toBe('CASH TO HAVE IN DRAWER (EXCLUDING FLOAT)');
+    expect(document.sections.at(-1)?.lines.find((line) => line.label === 'EXPECTED CASH')?.size).toBe('double');
+    expect(document.sections.at(-1)?.lines.some((line) => line.label === 'Not counted - X report is interim')).toBe(true);
+  });
+
+  it('prints an ex-float shortage with the double-size difference and supports old snapshots', () => {
+    const report = makeReport('Z');
+    report.totalExpectedCashMillimes = 215_000;
+    report.cashFloatMillimes = 100_000;
+    report.expectedCashExFloatMillimes = undefined;
+    report.countedCashMillimes = 213_500;
+    report.cashDifference = -1_500;
+    report.cashDifferenceMillimes = -1_500;
+    const document = buildReportDocument(report, { name: 'Test Store' });
+    const finalSection = document.sections.at(-1)!;
+
+    expect(finalSection.lines.find((line) => line.label === 'EXPECTED CASH')).toMatchObject({
+      value: '115.000 DT',
+      size: 'double',
+    });
+    expect(finalSection.lines.find((line) => line.label === 'SHORT 1.500 DT')).toMatchObject({ size: 'double' });
+    expect(document.lines.find((line) => line.text.includes('SHORT 1.500 DT'))?.size).toBe('double');
   });
 
   it('uses the frozen report settings and shows only recorded cash movements', () => {

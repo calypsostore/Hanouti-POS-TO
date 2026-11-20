@@ -21,7 +21,7 @@ export interface ThermalReceiptDocument {
 
 export interface ReportSection {
   title: string;
-  lines: { label: string; value: string; emphasized?: boolean }[];
+  lines: { label: string; value: string; emphasized?: boolean; size?: 'double' }[];
 }
 
 export interface ReportDocument extends ThermalReceiptDocument {
@@ -75,9 +75,26 @@ export function buildReportDocument(
   const sections: ReportSection[] = [];
   const customerTabDetails = report.customerTabs ?? [];
   const tabPayments = report.tabsSettledMillimes ?? report.tabPaymentsReceivedMillimes;
+  const nonCashTabPayments = report.nonCashTabPaymentsMillimes;
+  const allTabPayments = tabPayments === undefined
+    ? nonCashTabPayments
+    : tabPayments + (nonCashTabPayments ?? 0);
+  const reportShifts = report.shifts ?? [];
+  const cashFloat = report.cashFloatMillimes ?? reportShifts.reduce((sum, shift) => sum + shift.startingCashMillimes, 0);
+  const expectedCashExFloat = report.expectedCashExFloatMillimes ??
+    (report.totalExpectedCashMillimes === undefined ? undefined : report.totalExpectedCashMillimes - cashFloat);
+  const countedCashExFloat = report.countedCashMillimes === undefined
+    ? undefined
+    : report.expectedCashExFloatMillimes === undefined
+      ? report.countedCashMillimes - cashFloat
+      : report.countedCashMillimes;
+  const cashDifference = countedCashExFloat !== undefined && expectedCashExFloat !== undefined
+    ? countedCashExFloat - expectedCashExFloat
+    : report.cashDifference ?? report.cashDifferenceMillimes;
 
   const paymentSplit = report.paymentSplit;
   const cashSales = paymentSplit?.cash ?? report.cashSalesMillimes;
+  const drawerCashSales = report.cashSalesMillimes ?? cashSales;
   const tabSales = paymentSplit?.tab ?? report.tabSalesMillimes;
   appendSection(sections, 'SALES', [
     { label: 'Transactions', value: String(report.orderCount) },
@@ -138,14 +155,15 @@ export function buildReportDocument(
     ]);
   }
 
-  if (tabPayments !== undefined && tabPayments !== 0) {
+  if ((tabPayments !== undefined && tabPayments !== 0) || (nonCashTabPayments !== undefined && nonCashTabPayments !== 0)) {
     appendSection(sections, 'TAB PAYMENTS', [
-      { label: 'Payments received', value: money(tabPayments) },
+      ...(tabPayments === undefined ? [] : [{ label: 'Payments received in cash', value: money(tabPayments) }]),
+      ...(nonCashTabPayments === undefined ? [] : [{ label: 'Payments received by card / other (not cash)', value: money(nonCashTabPayments) }]),
     ]);
   }
   if (customerTabDetails.length) {
     appendSection(sections, 'CUSTOMER TABS', [
-      { label: 'Issued / settled / outstanding', value: `${money(report.tabsIssuedMillimes ?? customerTabDetails.reduce((sum, item) => sum + item.issuedMillimes, 0))} / ${money(tabPayments ?? customerTabDetails.reduce((sum, item) => sum + item.paymentsMillimes, 0))} / ${money(report.tabsOutstandingMillimes ?? report.receivableMillimes ?? customerTabDetails.reduce((sum, item) => sum + item.outstandingMillimes, 0))}`, emphasized: true },
+      { label: 'Issued / settled / outstanding', value: `${money(report.tabsIssuedMillimes ?? customerTabDetails.reduce((sum, item) => sum + item.issuedMillimes, 0))} / ${money(allTabPayments ?? customerTabDetails.reduce((sum, item) => sum + item.paymentsMillimes, 0))} / ${money(report.tabsOutstandingMillimes ?? report.receivableMillimes ?? customerTabDetails.reduce((sum, item) => sum + item.outstandingMillimes, 0))}`, emphasized: true },
       ...customerTabDetails.flatMap((customer) => [
         { label: customer.customerName, value: '' },
         { label: 'Issued / paid', value: `${money(customer.issuedMillimes)} / ${money(customer.paymentsMillimes)}` },
@@ -166,8 +184,7 @@ export function buildReportDocument(
   }
 
   const cashMovements: ReportSection['lines'] = [];
-  if (report.cashFloatMillimes !== undefined) cashMovements.push({ label: 'Opening float', value: money(report.cashFloatMillimes) });
-  if (cashSales !== undefined) cashMovements.push({ label: 'Cash sales', value: `+${money(cashSales)}` });
+  if (drawerCashSales !== undefined) cashMovements.push({ label: 'Cash sales', value: `+${money(drawerCashSales)}` });
   if (tabPayments !== undefined) cashMovements.push({ label: 'Tab payments received', value: `+${money(tabPayments)}` });
   if (report.cashInMillimes !== undefined) cashMovements.push({ label: 'Cash in', value: `+${money(report.cashInMillimes)}` });
   if (report.cashOutMillimes !== undefined) cashMovements.push({ label: 'Cash out', value: `-${money(report.cashOutMillimes)}` });
@@ -193,24 +210,6 @@ export function buildReportDocument(
   }
   appendSection(sections, 'CASH MOVEMENTS', cashMovements);
 
-  const hasShiftCounts = (report.shifts ?? []).some((shift) => shift.countedCashMillimes !== undefined);
-  appendSection(sections, 'EXPECTED / COUNTED / DIFFERENCE', [
-    { label: 'Expected cash', value: report.totalExpectedCashMillimes === undefined ? 'Not recorded' : money(report.totalExpectedCashMillimes) },
-    {
-      label: report.type === 'Z' ? 'End-of-day counted cash' : 'Shift counts recorded',
-      value: report.countedCashMillimes === undefined
-        ? report.totalCountedMillimes === undefined || !hasShiftCounts ? 'Not recorded' : money(report.totalCountedMillimes)
-        : money(report.countedCashMillimes),
-    },
-    {
-      label: 'Difference',
-      value: report.cashDifference === undefined
-        ? report.totalDifferenceMillimes === undefined ? money(report.cashDifferenceMillimes) : money(report.totalDifferenceMillimes)
-        : `${report.cashDifference > 0 ? '+' : report.cashDifference < 0 ? '-' : ''}${money(Math.abs(report.cashDifference))}`,
-      emphasized: true,
-    },
-  ]);
-
   if (report.employeeBreakdown?.length) {
     appendSection(sections, 'BY EMPLOYEE', report.employeeBreakdown.map((employee) => ({
       label: `${employee.name} · ${employee.orderCount} orders`,
@@ -218,8 +217,8 @@ export function buildReportDocument(
     })));
   }
 
-  if (report.shifts?.length) {
-    appendSection(sections, 'BY SHIFT / PERSON', report.shifts.flatMap((shift) => {
+  if (reportShifts.length) {
+    appendSection(sections, 'BY SHIFT / PERSON', reportShifts.flatMap((shift) => {
       const lines: ReportSection['lines'] = [
         {
           label: `${shift.staffName} · ${shift.orderCount === undefined ? 'Order count unavailable' : `${shift.orderCount} orders`} · ${shift.status === 'in_progress' ? 'Open' : shift.status === 'closed' ? 'Closed' : 'Status unavailable'}`,
@@ -242,7 +241,6 @@ export function buildReportDocument(
           value: paymentAmounts.map((amount) => amount === undefined ? '—' : money(amount)).join(' / '),
         });
       }
-      lines.push({ label: 'Opening float', value: money(shift.startingCashMillimes) });
       if (shift.tabPaymentsMillimes !== undefined) lines.push({ label: 'Tab payments', value: money(shift.tabPaymentsMillimes) });
       if (shift.voidAdjustmentMillimes !== undefined) {
         lines.push({ label: 'Post-close void adjustments', value: money(shift.voidAdjustmentMillimes) });
@@ -251,18 +249,6 @@ export function buildReportDocument(
         lines.push({
           label: 'Cash in / out',
           value: `${shift.cashInMillimes === undefined ? '—' : money(shift.cashInMillimes)} / ${shift.cashOutMillimes === undefined ? '—' : money(shift.cashOutMillimes)}`,
-        });
-      }
-      lines.push({
-        label: 'Expected cash',
-        value: shift.expectedCashMillimes === undefined ? 'Not recorded' : money(shift.expectedCashMillimes),
-      });
-      if (shift.countedCashMillimes !== undefined) lines.push({ label: 'Counted cash', value: money(shift.countedCashMillimes) });
-      if (shift.differenceMillimes !== undefined) {
-        lines.push({
-          label: 'Cash difference',
-          value: `${shift.differenceMillimes > 0 ? '+' : shift.differenceMillimes < 0 ? '-' : ''}${money(Math.abs(shift.differenceMillimes))}`,
-          emphasized: true,
         });
       }
       return lines;
@@ -285,20 +271,58 @@ export function buildReportDocument(
     ]);
   }
 
-  if (report.type === 'Z') {
-    appendSection(sections, 'FINAL CLOSING SUMMARY', [
-      { label: 'Sales', value: money(report.netMillimes ?? report.salesMillimes) },
-      { label: 'Expected cash', value: report.totalExpectedCashMillimes === undefined ? 'Not recorded' : money(report.totalExpectedCashMillimes) },
-      { label: 'Counted cash', value: report.countedCashMillimes === undefined ? 'Not recorded' : money(report.countedCashMillimes) },
+  const finalCashLines: ReportSection['lines'] = [
+    { label: 'Cash sales', value: money(report.cashSalesMillimes ?? paymentSplit?.cash) },
+    { label: 'Tab payments received in cash', value: money(tabPayments) },
+    { label: 'Cash in', value: money(report.cashInMillimes) },
+    { label: 'Cash out', value: money(report.cashOutMillimes) },
+    ...(voidAdjustmentTotal === 0 ? [] : [{ label: 'Post-close void adjustments', value: money(voidAdjustmentTotal) }]),
+    {
+      label: 'EXPECTED CASH',
+      value: expectedCashExFloat === undefined ? 'Not recorded' : money(expectedCashExFloat),
+      emphasized: true,
+      size: 'double',
+    },
+    ...(report.type === 'Z' ? [
       {
-        label: 'Difference',
-        value: report.cashDifference === undefined
-          ? 'Not recorded'
-          : `${report.cashDifference > 0 ? '+' : report.cashDifference < 0 ? '-' : ''}${money(Math.abs(report.cashDifference))}`,
+        label: 'COUNTED CASH',
+        value: countedCashExFloat === undefined ? 'Not recorded' : money(countedCashExFloat),
+        emphasized: true,
+        size: 'double' as const,
+      },
+      {
+        label: cashDifference === undefined
+          ? 'DIFFERENCE NOT RECORDED'
+          : cashDifference < 0
+            ? `SHORT ${money(Math.abs(cashDifference))}`
+            : cashDifference > 0
+              ? `OVER ${money(cashDifference)}`
+              : 'BALANCED',
+        value: '',
+        emphasized: true,
+        size: 'double' as const,
       },
       ...(report.cashDifferenceNote ? [{ label: 'Note', value: report.cashDifferenceNote }] : []),
-    ]);
-  }
+    ] : [
+      { label: 'Not counted - X report is interim', value: '' },
+    ]),
+  ];
+  appendSection(sections, 'FLOAT (NOT COUNTED)', [
+    ...reportShifts.map((shift) => ({
+      label: `${shift.staffName} · ${localDateTime(shift.openedAt)}`,
+      value: money(shift.startingCashMillimes),
+    })),
+    { label: 'Total float', value: money(cashFloat), emphasized: true },
+  ]);
+  appendSection(sections, 'CASH FLOW BY SHIFT', reportShifts.map((shift) => {
+    const flow = shift.cashFlowExFloatMillimes ??
+      (shift.expectedCashMillimes === undefined ? undefined : shift.expectedCashMillimes - shift.startingCashMillimes);
+    return {
+      label: `${shift.staffName} · ${localDateTime(shift.openedAt)}`,
+      value: flow === undefined ? 'Not recorded' : money(flow),
+    };
+  }));
+  appendSection(sections, 'CASH TO HAVE IN DRAWER (EXCLUDING FLOAT)', finalCashLines);
 
   const lines: ReceiptLine[] = [
     { text: storeName, align: 'center', bold: true, size: 'double' },
@@ -332,6 +356,7 @@ export function buildReportDocument(
       ...section.lines.map((line) => ({
         text: line.value ? formatReceiptRow(line.label, line.value, width) : line.label,
         bold: line.emphasized,
+        size: line.size,
       })),
       { text: divider(width), kind: 'divider' as const },
     ]),

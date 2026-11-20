@@ -136,7 +136,9 @@ async function summarize(storeId: string, from: number, to: number) {
       .reduce((sum, adjustment) => sum + adjustment.amountMillimes, 0);
     const [cashBreakdown, expectedCash] = await Promise.all([
       orderService.getShiftSalesBreakdown(shift.id),
-      shiftService.getExpectedCash(shift.id),
+      !inProgress && shift.expectedCashMillimes !== undefined
+        ? Promise.resolve(shift.expectedCashMillimes)
+        : shiftService.getExpectedCash(shift.id),
     ]);
     const shiftMovements = periodCashMovements.filter((movement) => movement.shiftId === shift.id);
     const cashInMillimes = shiftMovements
@@ -159,7 +161,7 @@ async function summarize(storeId: string, from: number, to: number) {
       openedAt: shift.openedAt,
       closedAt: shift.closedAt,
       startingCashMillimes: shift.startingCashMillimes,
-      cashSalesMillimes: shiftPaymentSplit.cash,
+      cashSalesMillimes: cashBreakdown.cashSalesMillimes,
       cardSalesMillimes: shiftPaymentSplit.card,
       otherSalesMillimes: shiftPaymentSplit.other,
       tabSalesMillimes: shiftPaymentSplit.tab,
@@ -167,6 +169,7 @@ async function summarize(storeId: string, from: number, to: number) {
       cashInMillimes,
       cashOutMillimes,
       expectedCashMillimes: expected,
+      cashFlowExFloatMillimes: expected - shift.startingCashMillimes,
       countedCashMillimes: inProgress ? undefined : counted,
       differenceMillimes: inProgress ? undefined : (counted ?? 0) - expected,
       forceClosedByOwner: shift.forceClosedByOwner ?? false,
@@ -224,8 +227,14 @@ async function summarize(storeId: string, from: number, to: number) {
     new Date(tab.createdAt).getTime() >= from && new Date(tab.createdAt).getTime() <= to,
   );
   const tabsIssuedMillimes = orders.filter((order) => order.paymentMethod === 'tab').reduce((sum, order) => sum + order.totalMillimes, 0);
-  const tabsSettledMillimes = settlements.reduce((sum, tab) => sum + tab.amountMillimes, 0) -
-    reversals.reduce((sum, tab) => sum + tab.amountMillimes, 0);
+  const cashSettlements = settlements.filter((tab) => (tab.paymentMethod ?? 'cash') === 'cash');
+  const nonCashSettlements = settlements.filter((tab) => tab.paymentMethod !== undefined && tab.paymentMethod !== 'cash');
+  const cashReversals = reversals.filter((tab) => (tab.paymentMethod ?? 'cash') === 'cash');
+  const nonCashReversals = reversals.filter((tab) => tab.paymentMethod !== undefined && tab.paymentMethod !== 'cash');
+  const tabsSettledMillimes = cashSettlements.reduce((sum, tab) => sum + tab.amountMillimes, 0) -
+    cashReversals.reduce((sum, tab) => sum + tab.amountMillimes, 0);
+  const nonCashTabPaymentsMillimes = nonCashSettlements.reduce((sum, tab) => sum + tab.amountMillimes, 0) -
+    nonCashReversals.reduce((sum, tab) => sum + tab.amountMillimes, 0);
   const customerTabs: ReportCustomerTabLine[] = customers.map((customer) => {
     const customerOrders = allOrders.filter((order) => order.customerId === customer.id && order.paymentMethod === 'tab');
     const transactions = allCustomerTransactions.filter((tab) => tab.customerId === customer.id);
@@ -273,7 +282,8 @@ async function summarize(storeId: string, from: number, to: number) {
   const receivableMillimes = customerTabs.reduce((total, customer) => total + Math.max(0, customer.outstandingMillimes), 0);
   const salesMillimes = orders.reduce((sum, order) => sum + order.totalMillimes, 0);
   const chronologicalOrders = [...orders].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
-  const salesCollectedMillimes = paymentSplit.cash + paymentSplit.card + paymentSplit.other + tabsSettledMillimes;
+  const salesCollectedMillimes = paymentSplit.cash + paymentSplit.card + paymentSplit.other +
+    tabsSettledMillimes + nonCashTabPaymentsMillimes;
   const expensesMillimes = expenses.reduce((sum, expense) => sum + expense.amountMillimes, 0);
   const netProfitMillimes = salesCollectedMillimes - expensesMillimes;
   const closedShiftLines = shiftLines.filter((shift) => shift.status !== 'in_progress');
@@ -282,6 +292,13 @@ async function summarize(storeId: string, from: number, to: number) {
     .filter((adjustment) => !includedShiftIds.has(adjustment.shiftId))
     .reduce((sum, adjustment) => sum + adjustment.amountMillimes, 0);
   const cashDifferenceMillimes = closedShiftLines.reduce((sum, shift) => sum + (shift.differenceMillimes ?? 0), 0);
+  const totalExpectedCashMillimes = shiftLines.reduce(
+    (sum, shift) => sum + (shift.expectedCashMillimes ?? 0),
+    historicalVoidAdjustmentMillimes,
+  );
+  const cashFloatMillimes = shiftLines.reduce((sum, shift) => sum + shift.startingCashMillimes, 0);
+  const expectedCashExFloatMillimes = totalExpectedCashMillimes - cashFloatMillimes;
+  const cashSalesForDrawerMillimes = shiftLines.reduce((sum, shift) => sum + (shift.cashSalesMillimes ?? 0), 0);
   const cashOuts: ReportCashOutLine[] = periodCashMovements
     .filter((movement) => movement.kind === 'out' && new Date(movement.createdAt).getTime() >= from && new Date(movement.createdAt).getTime() <= to)
     .map((movement) => ({
@@ -368,13 +385,14 @@ async function summarize(storeId: string, from: number, to: number) {
     },
     shiftLines,
     paymentSplit,
-    totalExpectedCashMillimes: shiftLines.reduce((sum, shift) => sum + (shift.expectedCashMillimes ?? 0), historicalVoidAdjustmentMillimes),
+    totalExpectedCashMillimes,
+    expectedCashExFloatMillimes,
     totalCountedMillimes: closedShiftLines.reduce((sum, shift) => sum + (shift.countedCashMillimes ?? 0), 0),
     totalDifferenceMillimes: cashDifferenceMillimes,
-    cashSalesMillimes: paymentSplit.cash,
+    cashSalesMillimes: cashSalesForDrawerMillimes,
     tabSalesMillimes: paymentSplit.tab,
     tabPaymentsReceivedMillimes: tabsSettledMillimes,
-    cashFloatMillimes: shiftLines.reduce((sum, shift) => sum + shift.startingCashMillimes, 0),
+    cashFloatMillimes,
     cashInMillimes: periodCashMovements
       .filter((movement) => movement.kind === 'in')
       .reduce((sum, movement) => sum + movement.amountMillimes, 0),
@@ -389,6 +407,7 @@ async function summarize(storeId: string, from: number, to: number) {
     customerTabs,
     tabsIssuedMillimes,
     tabsSettledMillimes,
+    nonCashTabPaymentsMillimes,
     tabsOutstandingMillimes,
   };
 }
@@ -398,7 +417,7 @@ async function createReport(
   type: 'X' | 'Z',
   generatedBy: string,
   ownerPin?: string,
-  closeDetails?: { countedCashMillimes: number; differenceMillimes: number; note?: string },
+  closeDetails?: { countedCashMillimes: number; note?: string },
 ): Promise<ReportRecord> {
   const store = await userService.getStore(storeId);
   if (!store) throw new Error('The store could not be found.');
@@ -407,6 +426,16 @@ async function createReport(
   const storeTimeZone = store.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
   const periodFrom = sinceLastZ(storeId, reports, storeTimeZone);
   const summary = await summarize(storeId, new Date(periodFrom).getTime(), new Date(createdAt).getTime());
+  if (type === 'Z' && !closeDetails) throw new Error('Counted cash is required to close the business day.');
+  const cashDifference = closeDetails
+    ? closeDetails.countedCashMillimes - summary.expectedCashExFloatMillimes
+    : undefined;
+  if (closeDetails && (!Number.isSafeInteger(closeDetails.countedCashMillimes) || closeDetails.countedCashMillimes < 0)) {
+    throw new Error('Counted cash must be a non-negative whole number of millimes.');
+  }
+  if (cashDifference !== undefined && cashDifference !== 0 && !closeDetails?.note?.trim()) {
+    throw new Error('A note is required for a cash difference.');
+  }
   const storeSettings = resolveStoreSettings(store.settings);
   const businessDate = todayKey(storeTimeZone);
   const zNumber = type === 'Z'
@@ -442,7 +471,7 @@ async function createReport(
     netProfitMillimes: summary.netProfitMillimes,
     receivableMillimes: summary.receivableMillimes,
     orderCount: summary.orderCount,
-    cashDifferenceMillimes: summary.cashDifferenceMillimes,
+    cashDifferenceMillimes: cashDifference ?? summary.cashDifferenceMillimes,
     grossMillimes: summary.salesMillimes,
     netMillimes: summary.salesMillimes,
     zNumber,
@@ -465,6 +494,7 @@ async function createReport(
     shifts: summary.shiftLines,
     paymentSplit: summary.paymentSplit,
     totalExpectedCashMillimes: summary.totalExpectedCashMillimes,
+    expectedCashExFloatMillimes: summary.expectedCashExFloatMillimes,
     totalCountedMillimes: summary.totalCountedMillimes,
     totalDifferenceMillimes: summary.totalDifferenceMillimes,
     cashSalesMillimes: summary.cashSalesMillimes,
@@ -479,17 +509,12 @@ async function createReport(
     customerTabs: summary.customerTabs,
     tabsIssuedMillimes: summary.tabsIssuedMillimes,
     tabsSettledMillimes: summary.tabsSettledMillimes,
+    nonCashTabPaymentsMillimes: summary.nonCashTabPaymentsMillimes,
     tabsOutstandingMillimes: summary.tabsOutstandingMillimes,
     countedCashMillimes: closeDetails?.countedCashMillimes,
-    cashDifference: closeDetails?.differenceMillimes,
+    cashDifference,
     cashDifferenceNote: closeDetails?.note,
     pinVerified: type === 'Z',
-    ...(closeDetails ? {
-      countedCashMillimes: closeDetails.countedCashMillimes,
-      cashDifference: closeDetails.differenceMillimes,
-      cashDifferenceNote: closeDetails.note,
-      cashDifferenceMillimes: closeDetails.differenceMillimes,
-    } : {}),
   };
   const savedReport = isSupabaseDriver()
     ? await saveRemoteReport(report, ownerPin)
@@ -662,7 +687,7 @@ export const reportService = {
     storeId: string,
     generatedBy = 'Owner',
     ownerPin?: string,
-    closeDetails?: { countedCashMillimes: number; differenceMillimes: number; note?: string },
+    closeDetails?: { countedCashMillimes: number; note?: string },
   ): Promise<ReportRecord> {
     if (!ownerPin || !/^\d{4}$/.test(ownerPin)) throw new Error('Owner PIN is required for every Z report.');
     if ((await shiftService.listOpenShifts(storeId)).length > 0) throw new Error('Force-close or close every shift before creating a Z report.');
@@ -672,13 +697,6 @@ export const reportService = {
       if (!await userService.verifyStorePin(storeId, ownerPin, 'z_report')) throw new Error('The owner PIN is incorrect.');
     }
     const report = await createReport(storeId, 'Z', generatedBy, ownerPin, closeDetails);
-    if (closeDetails) {
-      report.countedCashMillimes = closeDetails.countedCashMillimes;
-      report.cashDifference = closeDetails.differenceMillimes;
-      report.cashDifferenceNote = closeDetails.note;
-      report.cashDifferenceMillimes = closeDetails.differenceMillimes;
-      report.pinVerified = true;
-    }
     if (!isSupabaseDriver()) {
       writeData('stores', (await userService.listStores()).map((candidate) => candidate.id === storeId ? { ...candidate, dayClosedOn: todayKey() } : candidate));
     }

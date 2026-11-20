@@ -1,12 +1,28 @@
 import { useEffect, useState } from 'react';
 import { Button } from './Button';
 import { updateService, type UpdateCheckResult } from '../services/updateService';
-import { shouldShowUpdateModal } from '../services/updateModalLogic';
+import {
+  shouldShowUpdateModal,
+  UPDATE_REMINDER_DELAY_MS,
+  type UpdateReminder,
+} from '../services/updateModalLogic';
 
 export function UpdateRequiredModal({ result }: { result: UpdateCheckResult | null }) {
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState('');
-  const visible = shouldShowUpdateModal(result);
+  const [reminder, setReminder] = useState<UpdateReminder | null>(null);
+  const updateBuild = result?.latestBuild ?? result?.latestVersion ?? 'unknown';
+  const snoozed = reminder?.build === updateBuild;
+  const visible = shouldShowUpdateModal(result) && !snoozed;
+
+  useEffect(() => {
+    if (!reminder) return;
+    const timeoutId = window.setTimeout(
+      () => setReminder(null),
+      Math.max(0, reminder.remindAt - Date.now()),
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [reminder]);
 
   useEffect(() => {
     if (!visible) return;
@@ -37,6 +53,13 @@ export function UpdateRequiredModal({ result }: { result: UpdateCheckResult | nu
     }
   }
 
+  function remindLater() {
+    setReminder({
+      build: updateBuild,
+      remindAt: Date.now() + UPDATE_REMINDER_DELAY_MS,
+    });
+  }
+
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-primary-dark/70 p-4 backdrop-blur-sm">
       <section
@@ -44,7 +67,7 @@ export function UpdateRequiredModal({ result }: { result: UpdateCheckResult | nu
         aria-modal="true"
         aria-labelledby="required-update-title"
         aria-describedby="required-update-message"
-        className="w-full max-w-lg rounded-2xl bg-surface-container-lowest p-6 shadow-overlay"
+        className="max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl bg-surface-container-lowest p-6 shadow-overlay"
       >
         <h1 id="required-update-title" className="font-display text-headline-lg text-on-surface">
           Update required
@@ -73,6 +96,14 @@ export function UpdateRequiredModal({ result }: { result: UpdateCheckResult | nu
           className="mt-6 min-h-14 w-full text-label-lg"
         >
           {updating ? 'Updating…' : bundled ? 'Download the new APK' : 'Update now'}
+        </Button>
+        <Button
+          variant="secondary"
+          onClick={remindLater}
+          disabled={updating}
+          className="mt-3 min-h-12 w-full"
+        >
+          Remind me after 5 minutes
         </Button>
       </section>
     </div>

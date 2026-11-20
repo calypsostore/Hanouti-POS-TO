@@ -2,7 +2,11 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { UpdateRequiredModal } from '../src/components/UpdateRequiredModal';
-import { confirmUpdateIfUnsaved } from '../src/services/updateModalLogic';
+import {
+  confirmUpdateIfUnsaved,
+  shouldSnoozeUpdate,
+  UPDATE_REMINDER_DELAY_MS,
+} from '../src/services/updateModalLogic';
 import type { UpdateCheckResult } from '../src/services/updateService';
 
 vi.mock('../src/services/updateService', () => ({
@@ -33,6 +37,16 @@ describe('required update modal logic', () => {
     expect(markup).toContain('Current: v1.0.3 (build old-build)');
     expect(markup).toContain('New: v1.0.4 (build new-build)');
     expect(markup).toContain('Update now');
+    expect(markup).toContain('Remind me after 5 minutes');
+  });
+
+  it('snoozes only the matching update build until the reminder deadline', () => {
+    const reminder = { build: 'new-build', remindAt: 300_000 };
+
+    expect(UPDATE_REMINDER_DELAY_MS).toBe(300_000);
+    expect(shouldSnoozeUpdate(reminder, 'new-build', 299_999)).toBe(true);
+    expect(shouldSnoozeUpdate(reminder, 'new-build', 300_000)).toBe(false);
+    expect(shouldSnoozeUpdate(reminder, 'another-build', 299_999)).toBe(false);
   });
 
   it('does not show the modal when the build matches', () => {

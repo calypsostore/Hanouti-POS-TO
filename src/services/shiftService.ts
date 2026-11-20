@@ -102,7 +102,7 @@ export const shiftService = {
       });
     }
     const shift = await this.getShift(input.shiftId);
-    if (!shift || shift.status !== 'open') throw new Error('Cash movements can only be recorded during an open shift.');
+    if (!shift || shift.status !== 'open') throw new Error('The business day is closed. Open a new shift to continue.');
     const [store, actor] = await Promise.all([
       userService.getStore(shift.storeId),
       userService.getUser(input.actorId),

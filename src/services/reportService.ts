@@ -23,9 +23,18 @@ import { activityService } from './activityService';
 import { expenseService } from './expenseService';
 import { notificationService } from './notificationService';
 import { isSupabaseDriver } from '../data/driver';
+import { getSupabaseClient } from '../data/supabaseClient';
 import { listReports as listRemoteReports, saveReport as saveRemoteReport } from '../data/repositories/reportRepository';
 
 const getReports = () => readData('reports', seedReports);
+
+export interface ReportDayStatus {
+  dayIsClosed: boolean;
+  hasActivity: boolean;
+  openShiftCount: number;
+  lastZ?: { reportNumber: string; createdAt: string };
+}
+
 function datePartsInTimezone(date: Date, timeZone: string): Record<string, string> {
   return Object.fromEntries(new Intl.DateTimeFormat('en-US', {
     timeZone,
@@ -419,6 +428,13 @@ async function createReport(
   ownerPin?: string,
   closeDetails?: { countedCashMillimes: number; note?: string },
 ): Promise<ReportRecord> {
+  const dayStatus = await reportService.getDayStatus(storeId);
+  if (dayStatus.dayIsClosed || !dayStatus.hasActivity) {
+    throw new Error('The business day is closed. Open a new shift before creating another report.');
+  }
+  if (type === 'Z' && dayStatus.openShiftCount > 0) {
+    throw new Error('Force-close or close every shift before creating a Z report.');
+  }
   const store = await userService.getStore(storeId);
   if (!store) throw new Error('The store could not be found.');
   const createdAt = new Date().toISOString();
@@ -545,6 +561,65 @@ async function createReport(
 }
 
 export const reportService = {
+  async getDayStatus(storeId: string): Promise<ReportDayStatus> {
+    if (isSupabaseDriver()) {
+      const { data: authData, error: authError } = await getSupabaseClient().auth.getUser();
+      if (authError) throw authError;
+      const actor = authData.user ? await userService.getUser(authData.user.id) : undefined;
+      if (actor?.role !== 'owner') {
+        const { data, error } = await getSupabaseClient().rpc('get_business_day_status', {
+          p_store_id: storeId,
+        });
+        if (error) throw new Error(`Could not load business-day status: ${error.message}`, { cause: error });
+        if (typeof data !== 'object' || data === null) {
+          throw new Error('Business-day status response is invalid.');
+        }
+        const status = data as {
+          dayIsClosed?: unknown;
+          hasActivity?: unknown;
+          openShiftCount?: unknown;
+          lastZ?: { reportNumber?: unknown; createdAt?: unknown } | null;
+        };
+        if (typeof status.dayIsClosed !== 'boolean' || typeof status.hasActivity !== 'boolean' ||
+          typeof status.openShiftCount !== 'number') {
+          throw new Error('Business-day status response is incomplete.');
+        }
+        return {
+          dayIsClosed: status.dayIsClosed,
+          hasActivity: status.hasActivity,
+          openShiftCount: status.openShiftCount,
+          lastZ: status.lastZ && typeof status.lastZ.reportNumber === 'string' &&
+            typeof status.lastZ.createdAt === 'string'
+            ? { reportNumber: status.lastZ.reportNumber, createdAt: status.lastZ.createdAt }
+            : undefined,
+        };
+      }
+    }
+    const [reports, shifts] = await Promise.all([
+      this.listReports(storeId),
+      shiftService.listShifts(storeId),
+    ]);
+    const lastZReport = reports
+      .filter((report) => report.storeId === storeId && report.type === 'Z')
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+    const lastZPeriodTo = lastZReport?.periodTo ?? lastZReport?.createdAt;
+    const activityShifts = shifts.filter((shift) =>
+      !lastZPeriodTo || new Date(shift.openedAt).getTime() > new Date(lastZPeriodTo).getTime(),
+    );
+    const hasActivity = activityShifts.length > 0;
+    return {
+      dayIsClosed: Boolean(lastZReport) && !hasActivity,
+      hasActivity,
+      openShiftCount: shifts.filter((shift) => shift.status === 'open').length,
+      lastZ: lastZReport
+        ? {
+          reportNumber: lastZReport.reportNumber ?? `Z-${String(lastZReport.zNumber ?? 0).padStart(6, '0')}`,
+          createdAt: lastZReport.createdAt,
+        }
+        : undefined,
+    };
+  },
+
   async getCurrentPeriodSummary(storeId: string) {
     const [reports, store] = await Promise.all([
       isSupabaseDriver() ? listRemoteReports(storeId) : Promise.resolve(getReports()),
@@ -690,7 +765,6 @@ export const reportService = {
     closeDetails?: { countedCashMillimes: number; note?: string },
   ): Promise<ReportRecord> {
     if (!ownerPin || !/^\d{4}$/.test(ownerPin)) throw new Error('Owner PIN is required for every Z report.');
-    if ((await shiftService.listOpenShifts(storeId)).length > 0) throw new Error('Force-close or close every shift before creating a Z report.');
     const store = await userService.getStore(storeId);
     if (!store) throw new Error('The store could not be found.');
     if (!isSupabaseDriver()) {

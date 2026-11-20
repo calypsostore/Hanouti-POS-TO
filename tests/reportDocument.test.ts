@@ -122,6 +122,18 @@ describe('report document', () => {
 
   it('builds the required sections and reconciles category totals', () => {
     const report = makeReport('Z');
+    report.shifts = [{
+      shiftId: 'shift-1',
+      staffName: 'Cashier',
+      orderCount: 2,
+      status: 'closed',
+      openedAt: '2026-11-20T07:00:00.000Z',
+      closedAt: '2026-11-20T15:00:00.000Z',
+      startingCashMillimes: 1000,
+      expectedCashMillimes: 2000,
+      countedCashMillimes: 1800,
+      cashFlowExFloatMillimes: 1000,
+    }];
     const document = buildReportDocument(report, { name: 'Test Store' }, resolveStoreSettings());
     expect(document.sections.map((section) => section.title)).toEqual(
       expect.arrayContaining([

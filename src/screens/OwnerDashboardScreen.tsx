@@ -12,7 +12,8 @@ import { TabStatementView } from '../components/TabStatementView';
 import { ownerWorkspaceLinks } from '../app/navigation';
 import { t, type TranslationKey } from '../i18n/translations';
 import { formatTnd } from '../lib/format';
-import { reportService } from '../services/reportService';
+import { reportService, type ReportDayStatus } from '../services/reportService';
+import { shiftService } from '../services/shiftService';
 import { userService } from '../services/userService';
 import { orderService } from '../services/orderService';
 import { customerService } from '../services/customerService';
@@ -61,6 +62,8 @@ const emptySummary: DashboardSummary = {
   tabSalesMillimes: 0,
   tabPaymentsReceivedMillimes: 0,
   cashFloatMillimes: 0,
+  expectedCashExFloatMillimes: 0,
+  nonCashTabPaymentsMillimes: 0,
   cashOuts: [],
   firstTicketNumber: undefined,
   lastTicketNumber: undefined,
@@ -80,6 +83,12 @@ function OwnerDashboardContent() {
   const [store, setStore] = useState<StoreRecord>();
   const [period, setPeriod] = useState<Period>('day');
   const [summary, setSummary] = useState<DashboardSummary>(emptySummary);
+  const [dayStatus, setDayStatus] = useState<ReportDayStatus>({
+    dayIsClosed: false,
+    hasActivity: false,
+    openShiftCount: 0,
+  });
+  const [runningShifts, setRunningShifts] = useState<ShiftRecord[]>([]);
   const [periodOrders, setPeriodOrders] = useState<OrderRecord[]>([]);
   const [todaySalesMillimes, setTodaySalesMillimes] = useState(0);
   const [lastWeekSalesMillimes, setLastWeekSalesMillimes] = useState(0);
@@ -100,16 +109,20 @@ function OwnerDashboardContent() {
       setLoading(true);
       setLoadError('');
       try {
-        const [nextSummary, allOrders, allUsers, nextStore, nextOverdueCustomers, nextCatalogItems] = await Promise.all([
+        const [nextSummary, allOrders, allUsers, nextStore, nextOverdueCustomers, nextCatalogItems, nextDayStatus, nextOpenShifts] = await Promise.all([
         reportService.getDashboard(storeId, period),
         orderService.listAll(storeId),
         userService.listUsers(storeId),
         userService.getStore(storeId),
         customerService.listOverdueCustomers(storeId),
         catalogService.listItems(storeId),
+        reportService.getDayStatus(storeId),
+        shiftService.listOpenShifts(storeId),
         ]);
         if (!active) return;
         setSummary(nextSummary);
+        setDayStatus(nextDayStatus);
+        setRunningShifts(nextOpenShifts);
         setPeriodOrders(filterOrdersForPeriod(allOrders, period));
         const salesComparison = getTodaySalesComparison(allOrders);
         setTodaySalesMillimes(salesComparison.today);
@@ -290,6 +303,22 @@ function OwnerDashboardContent() {
       <p className="mt-2 font-body text-body-sm text-on-surface-variant">{salesComparisonLabel}</p>
     </article>
   );
+  const dayStatusMessage = dayStatus.openShiftCount > 0
+    ? `Day open - ${dayStatus.openShiftCount} ${dayStatus.openShiftCount === 1 ? 'shift' : 'shifts'} running: ${runningShifts.map((shift) =>
+      shift.staffId === user?.id ? user?.name ?? 'Owner' : staff.find((member) => member.id === shift.staffId)?.name ?? 'Staff',
+    ).join(', ')}`
+    : dayStatus.dayIsClosed
+      ? `Day closed - ${dayStatus.lastZ?.reportNumber ?? 'Z report'} at ${dayStatus.lastZ ? new Date(dayStatus.lastZ.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}. Open a shift to start a new day.`
+      : dayStatus.hasActivity
+        ? 'Day open - no shifts running'
+        : 'No shift opened yet today';
+  const reportDisabledReason = dayStatus.dayIsClosed
+    ? 'The business day is closed. Open a new shift before creating another report.'
+    : !dayStatus.hasActivity
+      ? 'No shift has been opened yet today.'
+      : '';
+  const zDisabledReason = reportDisabledReason ||
+    (dayStatus.openShiftCount > 0 ? 'Close every open shift before creating a Z report.' : '');
 
   return (
     <>
@@ -303,6 +332,9 @@ function OwnerDashboardContent() {
           ))}
         </div>
       } />
+      <p role="status" className={`mb-4 rounded-xl p-3 font-body text-body-sm ${dayStatus.dayIsClosed ? 'bg-warning-container text-on-warning-container' : 'bg-surface-container-low text-on-surface-variant'}`}>
+        {dayStatusMessage}
+      </p>
 
       {renderTargetCard('lg:hidden')}
 
@@ -502,10 +534,13 @@ function OwnerDashboardContent() {
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="schedule" className="text-primary" />Shift overview</h2>
             <div className="flex gap-2">
-              <Button variant="secondary" onClick={() => navigate('/owner/shifts?tab=reports')}><MaterialIcon name="summarize" />X report</Button>
-              <Button variant="secondary" onClick={() => navigate('/owner/shifts?tab=reports')}><MaterialIcon name="lock" />Z report</Button>
+              <Button disabled={Boolean(reportDisabledReason)} variant="secondary" onClick={() => navigate('/owner/shifts?tab=reports')}><MaterialIcon name="summarize" />X report</Button>
+              <Button disabled={Boolean(zDisabledReason)} variant="secondary" onClick={() => navigate('/owner/shifts?tab=reports')}><MaterialIcon name="lock" />Z report</Button>
             </div>
           </div>
+          {(reportDisabledReason || zDisabledReason) && (
+            <p className="mb-3 font-body text-body-sm text-outline">{reportDisabledReason || zDisabledReason}</p>
+          )}
           <div className="flex flex-col gap-2">
             {summary.shifts.map((shift) => <ShiftSummary key={shift.id} shift={shift} />)}
             {summary.shifts.length === 0 && <p className="rounded-xl bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('common.noData')}</p>}

@@ -233,7 +233,7 @@ export const orderService = {
       }
       try {
         const shift = await shiftService.getOpenShiftForUser(input.storeId, input.staffId);
-        if (!shift) throw new Error('Open a shift before taking orders.');
+        if (!shift) throw new Error('The business day is closed. Open a new shift to continue.');
         const order = await createRemoteOrder({
           shift,
           items: input.items,
@@ -259,9 +259,8 @@ export const orderService = {
     const store = await userService.getStore(input.storeId);
     if (!store?.isActive) throw new Error('This store is inactive.');
     const staff = await userService.getUser(input.staffId);
-    if (store.dayClosedOn === businessDate(new Date())) throw new Error('The business day is closed. Open a new shift to continue.');
     const shift = await shiftService.getOpenShiftForUser(input.storeId, input.staffId);
-    if (!shift) throw new Error('Open a shift before taking orders.');
+    if (!shift) throw new Error('The business day is closed. Open a new shift to continue.');
     let tabCustomer: Awaited<ReturnType<typeof customerService.getCustomer>>;
     if (input.paymentMethod === 'tab') {
       if (!input.customerId) throw new Error('Select a customer before charging this order to a tab.');

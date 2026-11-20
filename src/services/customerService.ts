@@ -545,7 +545,7 @@ export const customerService = {
       const customer = await getRemoteCustomer(input.customerId, input.storeId);
       if (!customer?.isActive) throw new Error('Customer could not be found in this store.');
       const shift = await shiftService.getOpenShiftForUser(input.storeId, input.staffId);
-      if (!shift) throw new Error('Open your shift before accepting a tab payment.');
+      if (!shift) throw new Error('The business day is closed. Open a new shift to continue.');
       return settleRemoteTab({
         customerId: customer.id,
         amountMillimes: input.amountMillimes,
@@ -568,7 +568,7 @@ export const customerService = {
       throw new Error('This payment exceeds the balance. Ask the owner to enable customer credit balances in Store settings.');
     }
     const shift = await shiftService.getOpenShiftForUser(input.storeId, input.staffId);
-    if (!shift) throw new Error('Open your shift before accepting a tab payment.');
+    if (!shift) throw new Error('The business day is closed. Open a new shift to continue.');
     const createdAt = new Date().toISOString();
     const record: TabRecord = {
       id: `tab-${crypto.randomUUID()}`,

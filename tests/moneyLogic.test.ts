@@ -10,6 +10,7 @@ import { userService } from '../src/services/userService';
 const STORAGE_PREFIX = '7anouti-pos:';
 const storeId = seedStores[0].id;
 const staffId = seedUsers.find((user) => user.role === 'staff')!.id;
+const ownerId = seedUsers.find((user) => user.role === 'owner')!.id;
 
 function setLocalData(key: string, value: unknown): void {
   localStorage.setItem(`${STORAGE_PREFIX}${key}`, JSON.stringify(value));
@@ -24,6 +25,31 @@ function makeShift(id: string, startingCashMillimes = 0, shiftStaffId = staffId)
     startingCashMillimes,
     openedAt: new Date().toISOString(),
   };
+}
+
+function makeClosedShift(id: string, startingCashMillimes = 0, shiftStaffId = staffId): ShiftRecord {
+  const now = Date.now();
+  return {
+    ...makeShift(id, startingCashMillimes, shiftStaffId),
+    status: 'closed',
+    openedAt: new Date(now - 60 * 60_000).toISOString(),
+    closedAt: new Date(now - 1_000).toISOString(),
+    expectedCashMillimes: startingCashMillimes,
+    countedCashMillimes: startingCashMillimes,
+    differenceMillimes: 0,
+  };
+}
+
+function prepareReportData(shifts: ShiftRecord[]): void {
+  setLocalData('shifts', shifts);
+  setLocalData('orders', []);
+  setLocalData('tabs', []);
+  setLocalData('cash-movements', []);
+  setLocalData('reports', []);
+  setLocalData('customers', []);
+  setLocalData('stores', seedStores.map((store) => store.id === storeId
+    ? { ...store, adminPin: '1234', adminPinHash: undefined }
+    : store));
 }
 
 function makeOrder(
@@ -255,23 +281,85 @@ describe('local money logic', () => {
     await expect(customerService.getBalance('customer-test')).resolves.toBe(0);
   });
 
-  it('reopens the business day when a shift is opened after a Z report', async () => {
-    setLocalData('shifts', []);
-    setLocalData('orders', []);
-    setLocalData('tabs', []);
-    setLocalData('cash-movements', []);
-    setLocalData('reports', []);
-    setLocalData('stores', seedStores.map((store) => store.id === storeId ? { ...store, adminPin: '1234', adminPinHash: undefined } : store));
+  it('requires activity after the last Z and blocks a second Z and X until a new shift opens', async () => {
+    prepareReportData([makeClosedShift('shift-before-z', 1_000)]);
     await expect(reportService.closeDayWithZReport(storeId, 'owner-lamarsa')).rejects.toThrow('Owner PIN is required');
     await expect(reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234')).rejects.toThrow('Counted cash is required');
+    const firstZ = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
+      countedCashMillimes: 0,
+    });
+    expect((await userService.getStore(storeId))?.dayClosedOn).toBe(new Date().toLocaleDateString('en-CA'));
+
     await expect(reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
       countedCashMillimes: 0,
-    })).resolves.toBeDefined();
-    expect((await userService.getStore(storeId))?.dayClosedOn).toBe(new Date().toLocaleDateString('en-CA'));
+    })).rejects.toThrow('The business day is closed. Open a new shift before creating another report.');
+    await expect(reportService.createXReport(storeId)).rejects.toThrow(
+      'The business day is closed. Open a new shift before creating another report.',
+    );
 
     await shiftService.openShift(storeId, staffId, 1_000);
 
     expect((await userService.getStore(storeId))?.dayClosedOn).toBeUndefined();
+    await expect(reportService.getDayStatus(storeId)).resolves.toMatchObject({
+      dayIsClosed: false,
+      hasActivity: true,
+      openShiftCount: 1,
+    });
+    const xReport = await reportService.createXReport(storeId);
+    expect(xReport.periodFrom).toBe(firstZ.periodTo);
+    await expect(reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
+      countedCashMillimes: 1_000,
+    })).rejects.toThrow('Force-close or close every shift before creating a Z report.');
+  });
+
+  it('does not allow Z while any shift is open', async () => {
+    prepareReportData([makeShift('shift-open-z')]);
+    await expect(reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
+      countedCashMillimes: 0,
+    })).rejects.toThrow('Force-close or close every shift before creating a Z report.');
+  });
+
+  it('starts the next report period at the previous Z and allows another Z after the new shift closes', async () => {
+    prepareReportData([makeClosedShift('shift-first-day')]);
+    const firstZ = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
+      countedCashMillimes: 0,
+    });
+
+    await shiftService.openShift(storeId, staffId, 1_000);
+    const xReport = await reportService.createXReport(storeId);
+    expect(xReport.periodFrom).toBe(firstZ.periodTo);
+
+    const openShift = await shiftService.getOpenShiftForUser(storeId, staffId);
+    expect(openShift).toBeDefined();
+    await shiftService.closeShift(openShift!.id, 1_000);
+    const secondZ = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
+      countedCashMillimes: 0,
+    });
+    expect(secondZ.periodFrom).toBe(firstZ.periodTo);
+  });
+
+  it('includes owner-opened shifts in report lines and expected cash with their float', async () => {
+    prepareReportData([]);
+    const staffShift = await shiftService.openShift(storeId, staffId, 10_000);
+    const ownerShift = await shiftService.openShift(storeId, ownerId, 20_000);
+    setLocalData('orders', [
+      makeOrder('staff-cash', staffShift.id, 'done', 'cash', 3_000),
+      { ...makeOrder('owner-cash', ownerShift.id, 'done', 'cash', 5_000), staffId: ownerId },
+    ]);
+
+    await shiftService.closeShift(staffShift.id, 13_000);
+    await shiftService.closeShift(ownerShift.id, 25_000);
+    const report = await reportService.closeDayWithZReport(storeId, ownerId, '1234', {
+      countedCashMillimes: 8_000,
+    });
+
+    expect(report.shifts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ staffName: 'Sarah', expectedCashMillimes: 13_000, startingCashMillimes: 10_000 }),
+      expect.objectContaining({ staffName: 'Si Mohamed', expectedCashMillimes: 25_000, startingCashMillimes: 20_000 }),
+    ]));
+    expect(report.totalExpectedCashMillimes).toBe(38_000);
+    expect(report.cashFloatMillimes).toBe(30_000);
+    expect(report.expectedCashExFloatMillimes).toBe(8_000);
   });
 
   it('resolves permissions as position permissions plus grants minus revocations', async () => {

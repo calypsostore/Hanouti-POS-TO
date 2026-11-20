@@ -86,6 +86,8 @@ export type NotificationType =
 export interface StoreSettings {
   defaultSettlementTerms: SettlementTerms;
   notificationPreferences: Partial<Record<NotificationType, boolean>>;
+  quickPickMode: QuickPickMode;
+  quickPickItemIds: string[];
   ticketHeaderText: string[];
   ticketFooterText: string[];
   reportFooterText: string[];
@@ -97,6 +99,8 @@ export interface StoreSettings {
   showDateTime: boolean;
   paperWidth: 58 | 80;
 }
+
+export type QuickPickMode = 'auto' | 'manual';
 
 export type SubscriptionPlan = 'trial' | 'monthly' | 'yearly';
 
@@ -133,6 +137,10 @@ export function resolveStoreSettings(settings?: Partial<StoreSettings>): StoreSe
       ...DEFAULT_NOTIFICATION_PREFERENCES,
       ...settings?.notificationPreferences,
     },
+    quickPickMode: settings?.quickPickMode === 'manual' ? 'manual' : 'auto',
+    quickPickItemIds: Array.isArray(settings?.quickPickItemIds)
+      ? [...new Set(settings.quickPickItemIds.filter((id) => typeof id === 'string' && id.trim()))]
+      : [],
     ticketHeaderText: settings?.ticketHeaderText?.slice(0, 2).map((line) => line.slice(0, 60)) ?? [],
     ticketFooterText: settings?.ticketFooterText?.slice(0, 2).map((line) => line.slice(0, 60)) ?? ['Thank you'],
     reportFooterText: settings?.reportFooterText?.slice(0, 2).map((line) => line.slice(0, 60)) ?? [],

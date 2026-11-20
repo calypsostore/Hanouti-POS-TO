@@ -13,7 +13,7 @@ import { t } from '../i18n/translations';
 import { formatTnd } from '../lib/format';
 import { catalogService } from '../services/catalogService';
 import { useAuthStore } from '../stores/authStore';
-import type { CatalogItemRecord, CatalogModifierRecord, CategoryRecord, ItemHistoryRecord, StoreRecord } from '../types/domain';
+import { resolveStoreSettings, type CatalogItemRecord, type CatalogModifierRecord, type CategoryRecord, type ItemHistoryRecord, type QuickPickMode, type StoreRecord } from '../types/domain';
 import { userService } from '../services/userService';
 import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
 
@@ -39,6 +39,7 @@ interface ProductDraft {
   lowStockThreshold: string;
   availability: Availability;
   isActive: boolean;
+  quickPick: boolean;
   modifierGroupName: string;
   modifiersRequired: boolean;
   modifierSelectionMode: 'single' | 'multiple';
@@ -56,13 +57,14 @@ const emptyDraft = (categoryId = ''): ProductDraft => ({
   lowStockThreshold: '5',
   availability: 'available',
   isActive: true,
+  quickPick: false,
   modifierGroupName: '',
   modifiersRequired: false,
   modifierSelectionMode: 'multiple',
   modifiers: [],
 });
 
-function draftFromItem(item: CatalogItemRecord): ProductDraft {
+function draftFromItem(item: CatalogItemRecord, isQuickPick: boolean): ProductDraft {
   return {
     name: item.name,
     description: item.description ?? '',
@@ -74,6 +76,7 @@ function draftFromItem(item: CatalogItemRecord): ProductDraft {
     lowStockThreshold: String(item.lowStockThreshold ?? 5),
     availability: item.stockCount === 0 ? 'out' : item.outOfStock ? '86' : 'available',
     isActive: item.isActive,
+    quickPick: isQuickPick,
     modifierGroupName: item.modifierGroupName ?? '',
     modifiersRequired: item.modifiersRequired ?? false,
     modifierSelectionMode: item.modifierSelectionMode ?? 'multiple',
@@ -121,6 +124,11 @@ function OwnerCatalogContent() {
   const [store, setStore] = useState<StoreRecord>();
   const [categories, setCategories] = useState<CategoryRecord[]>([]);
   const [items, setItems] = useState<CatalogItemRecord[]>([]);
+  const [quickPickMode, setQuickPickMode] = useState<QuickPickMode>('auto');
+  const [quickPickItemIds, setQuickPickItemIds] = useState<string[]>([]);
+  const [savingQuickPicks, setSavingQuickPicks] = useState(false);
+  const [quickPicksError, setQuickPicksError] = useState('');
+  const [quickPicksNotice, setQuickPicksNotice] = useState('');
   const [loading, setLoading] = useState(true);
   const [categoryId, setCategoryId] = useState('all');
   const [productStateFilter, setProductStateFilter] = useState<ProductStateFilter>('active');
@@ -161,7 +169,12 @@ function OwnerCatalogContent() {
       console.error('Unable to load the catalog.', loadError);
       setError(t('common.loadFailed'));
     }).finally(() => setLoading(false));
-    void userService.getStore(storeId).then(setStore).catch((loadError: unknown) => {
+    void userService.getStore(storeId).then((nextStore) => {
+      setStore(nextStore);
+      const settings = resolveStoreSettings(nextStore?.settings);
+      setQuickPickMode(settings.quickPickMode);
+      setQuickPickItemIds(settings.quickPickItemIds);
+    }).catch((loadError: unknown) => {
       console.error('Unable to load store information for the catalog.', loadError);
       setError(t('common.storeLoadFailed'));
     });
@@ -203,7 +216,7 @@ function OwnerCatalogContent() {
 
   function openEditItem(item: CatalogItemRecord) {
     setError('');
-    setDraft(draftFromItem(item));
+    setDraft(draftFromItem(item, quickPickItemIds.includes(item.id)));
     setEditingItem(item);
     setSheet('item');
   }
@@ -278,11 +291,51 @@ function OwnerCatalogContent() {
       };
       if (!changes.name) throw new Error('Product name is required.');
 
+      const savedItemId = editingItem?.id;
+      if (quickPickMode === 'manual' &&
+        (draft.isActive && draft.quickPick) !== quickPickItemIds.includes(savedItemId ?? '') &&
+        !user) {
+        throw new Error('Your account could not be loaded.');
+      }
+
+      let updatedItem: CatalogItemRecord;
       if (editingItem) {
         if (!user) throw new Error('Your account could not be loaded.');
-        await catalogService.updateItem(editingItem.id, changes, { id: user.id, name: user.name });
+        updatedItem = await catalogService.updateItem(editingItem.id, changes, { id: user.id, name: user.name });
       } else {
-        await catalogService.createItem({ storeId, ...changes });
+        updatedItem = await catalogService.createItem({ storeId, ...changes });
+      }
+
+      if (quickPickMode === 'manual') {
+        const nextQuickPickItemIds = [...quickPickItemIds];
+        if (draft.isActive && draft.quickPick && !nextQuickPickItemIds.includes(updatedItem.id)) {
+          nextQuickPickItemIds.push(updatedItem.id);
+        } else if ((!draft.isActive || !draft.quickPick) && nextQuickPickItemIds.includes(updatedItem.id)) {
+          nextQuickPickItemIds.splice(nextQuickPickItemIds.indexOf(updatedItem.id), 1);
+        }
+        const quickPickSelectionChanged = nextQuickPickItemIds.length !== quickPickItemIds.length ||
+          nextQuickPickItemIds.some((itemId, index) => itemId !== quickPickItemIds[index]);
+        if (quickPickSelectionChanged) {
+          try {
+            if (!user) throw new Error('Your account could not be loaded.');
+            const updatedStore = await userService.updateStoreSettings(storeId, user.id, {
+              quickPickMode: 'manual',
+              quickPickItemIds: nextQuickPickItemIds,
+            });
+            setStore(updatedStore);
+            setQuickPickItemIds(nextQuickPickItemIds);
+          } catch (quickPickSaveError) {
+            console.error('Product saved, but its Quick Picks selection could not be updated.', quickPickSaveError);
+            setQuickPicksError(`Product saved, but its Quick Picks selection could not be updated: ${quickPickSaveError instanceof Error ? quickPickSaveError.message : 'Please try again.'}`);
+            setSheet(null);
+            setEditingItem(null);
+            void refresh().catch((loadError: unknown) => {
+              console.error('Unable to refresh the catalog after saving a product.', loadError);
+              setError(t('common.refreshFailed'));
+            });
+            return;
+          }
+        }
       }
       await refresh();
       setSheet(null);
@@ -387,6 +440,29 @@ function OwnerCatalogContent() {
     }
   }
 
+  async function saveQuickPicks() {
+    setQuickPicksError('');
+    setQuickPicksNotice('');
+    if (!user || !store) {
+      setQuickPicksError('Your store information could not be loaded.');
+      return;
+    }
+    setSavingQuickPicks(true);
+    try {
+      const updatedStore = await userService.updateStoreSettings(storeId, user.id, {
+        quickPickMode,
+      });
+      setStore(updatedStore);
+      setQuickPickItemIds(resolveStoreSettings(updatedStore.settings).quickPickItemIds);
+      setQuickPicksNotice('Quick Picks settings saved.');
+    } catch (saveError) {
+      console.error('Unable to save Quick Picks settings.', saveError);
+      setQuickPicksError(saveError instanceof Error ? saveError.message : 'Unable to save Quick Picks settings.');
+    } finally {
+      setSavingQuickPicks(false);
+    }
+  }
+
   const visibleItems = items.filter((item) => {
     const query = search.trim().toLocaleLowerCase();
     const matchesCategory = categoryId === 'all' || item.categoryId === categoryId;
@@ -405,6 +481,37 @@ function OwnerCatalogContent() {
           <Button onClick={openNewItem}><MaterialIcon name="add" />{t('catalog.addItem')}</Button>
         </>
       } />
+
+      <section aria-labelledby="quick-picks-settings-title" className="mb-5 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+        <div className="mb-3">
+          <h2 id="quick-picks-settings-title" className="font-display text-headline-sm text-on-surface">POS Quick Picks</h2>
+          <p className="mt-1 font-body text-body-sm text-on-surface-variant">Choose automatic top sellers, or add products to Quick Picks from each product’s add/edit form.</p>
+        </div>
+        <fieldset>
+          <legend className="sr-only">Quick Picks mode</legend>
+          <div className="flex flex-wrap gap-3">
+            <label className="flex min-h-11 items-center gap-2 rounded-lg bg-surface-container-low px-3 font-body text-body-sm">
+              <input type="radio" name="quick-pick-mode" value="auto" checked={quickPickMode === 'auto'} onChange={() => { setQuickPickMode('auto'); setQuickPicksError(''); setQuickPicksNotice(''); }} className="h-4 w-4 accent-primary" />
+              Automatic · top sellers
+            </label>
+            <label className="flex min-h-11 items-center gap-2 rounded-lg bg-surface-container-low px-3 font-body text-body-sm">
+              <input type="radio" name="quick-pick-mode" value="manual" checked={quickPickMode === 'manual'} onChange={() => { setQuickPickMode('manual'); setQuickPicksError(''); setQuickPicksNotice(''); }} className="h-4 w-4 accent-primary" />
+              Choose products manually
+            </label>
+          </div>
+        </fieldset>
+        {quickPicksError && <p role="alert" className="mt-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{quickPicksError}</p>}
+        {quickPicksNotice && <p role="status" className="mt-3 rounded-lg bg-success-container p-3 font-body text-body-sm text-on-success-container">{quickPicksNotice}</p>}
+        <Button
+          type="button"
+          className="mt-3"
+          onClick={() => { void saveQuickPicks(); }}
+          disabled={savingQuickPicks}
+        >
+          <MaterialIcon name={savingQuickPicks ? 'hourglass_top' : 'save'} />
+          {savingQuickPicks ? 'Saving…' : 'Save Quick Picks'}
+        </Button>
+      </section>
 
       <div className="mb-4 flex flex-col gap-3">
         <label className="relative block">
@@ -521,6 +628,15 @@ function OwnerCatalogContent() {
           </fieldset>
 
           <label className="flex items-center gap-2 font-body text-label-md"><input type="checkbox" checked={draft.isActive} onChange={(event) => setDraft((current) => ({ ...current, isActive: event.target.checked }))} className="h-4 w-4 accent-primary" />Product is active in the POS</label>
+          {quickPickMode === 'manual' && (
+            <div>
+              <label className={`flex items-center gap-2 font-body text-label-md ${draft.isActive ? '' : 'text-outline'}`}>
+                <input type="checkbox" checked={draft.quickPick} disabled={!draft.isActive} onChange={(event) => setDraft((current) => ({ ...current, quickPick: event.target.checked }))} className="h-4 w-4 accent-primary" />
+                Show in POS Quick Picks
+              </label>
+              {!draft.isActive && <p className="ml-6 mt-1 font-body text-body-sm text-outline">Activate this product in the POS to include it in Quick Picks.</p>}
+            </div>
+          )}
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
           <Button type="submit">{editingItem ? 'Save changes' : t('catalog.save')}</Button>
         </form>

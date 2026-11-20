@@ -23,7 +23,7 @@ import { PageContainer } from '../components/layout';
 import { updateService } from '../services/updateService';
 import type { ShiftSalesBreakdown } from '../services/orderService';
 import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
-import { reportService } from '../services/reportService';
+import { reportService, type ReportDayStatus } from '../services/reportService';
 import { ReportView } from '../components/ReportView';
 import type { ReportRecord, ReportShiftLine } from '../types/domain';
 
@@ -114,12 +114,18 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const [zNote, setZNote] = useState('');
   const [zSheetOpen, setZSheetOpen] = useState(false);
   const [reportPreview, setReportPreview] = useState<ReportRecord>();
+  const [archivePreviewDismissed, setArchivePreviewDismissed] = useState(false);
   const [archiveReports, setArchiveReports] = useState<ReportRecord[]>([]);
+  const [dayStatus, setDayStatus] = useState<ReportDayStatus>({
+    dayIsClosed: false,
+    hasActivity: false,
+    openShiftCount: 0,
+  });
 
   useEffect(() => updateService.registerUnsavedState(() => startingCashEdited || countedCash.length > 0), [startingCashEdited, countedCash.length]);
 
   const refresh = useCallback(async () => {
-    const [nextShifts, nextOpenShift, nextStore, nextMovements, users, cashPermission, comps, nextReports] = await Promise.all([
+    const [nextShifts, nextOpenShift, nextStore, nextMovements, users, cashPermission, comps, nextReports, nextDayStatus] = await Promise.all([
       shiftService.listShifts(storeId),
       user ? shiftService.getOpenShiftForUser(storeId, user.id) : Promise.resolve(undefined),
       userService.getStore(storeId),
@@ -128,6 +134,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       user?.role === 'owner' ? Promise.resolve(true) : user ? userService.hasPermission(user.id, 'cash_in_out') : Promise.resolve(false),
       compService.listComps(storeId),
       ownerMode ? reportService.listReports(storeId) : Promise.resolve([]),
+      reportService.getDayStatus(storeId),
     ]);
     setShifts(nextShifts);
     setOwnOpenShift(nextOpenShift);
@@ -135,6 +142,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     setCashMovements(nextMovements);
     setStaffNames(Object.fromEntries(users.map((member) => [member.id, member.name])));
     setCanCashInOut(cashPermission);
+    setDayStatus(nextDayStatus);
     if (ownerMode) setArchiveReports(nextReports);
     const breakdowns = await Promise.all(nextShifts.filter((shift) => shift.status === 'open')
       .map(async (shift) => {
@@ -363,8 +371,34 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const openCount = shifts.filter((shift) => shift.status === 'open').length;
   const enteredMovementMillimes = Math.round(Number(movementAmount.replace(',', '.')) * 1000);
   const ownBreakdown = ownOpenShift ? breakdownsByShift[ownOpenShift.id] ?? emptyShiftBreakdown : emptyShiftBreakdown;
+  const ownMovementTotals = ownOpenShift
+    ? getCashMovementTotals(cashMovements, ownOpenShift.id)
+    : { cashInMillimes: 0, cashOutMillimes: 0 };
   const pageTitle = t('shift.title');
   const movementsForShift = (shiftId: string) => cashMovements.filter((movement) => movement.shiftId === shiftId);
+  const openShifts = shifts.filter((shift) => shift.status === 'open');
+  const openStaffNames = openShifts.map((shift) => staffNames[shift.staffId] ?? 'Staff').join(', ');
+  const dayStatusMessage = !ownerMode && dayStatus.dayIsClosed
+    ? 'Day closed. Open a shift to start a new day.'
+    : openCount > 0
+    ? `Day open - ${openCount} ${openCount === 1 ? 'shift' : 'shifts'} running${openStaffNames ? `: ${openStaffNames}` : ''}`
+    : dayStatus.dayIsClosed
+      ? `Day closed - ${dayStatus.lastZ?.reportNumber ?? 'Z report'} at ${dayStatus.lastZ ? new Date(dayStatus.lastZ.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}. Open a shift to start a new day.`
+      : dayStatus.hasActivity
+        ? 'Day open - no shifts running'
+        : 'No shift opened yet today';
+  const reportDisabledReason = dayStatus.dayIsClosed
+    ? 'The business day is closed. Open a new shift before creating another report.'
+    : !dayStatus.hasActivity
+      ? 'No shift has been opened yet today.'
+      : '';
+  const zDisabledReason = reportDisabledReason || (openCount > 0 ? 'Close every open shift before creating a Z report.' : '');
+  const isArchivePreview = reportPreview?.type === 'Z'
+    ? reportPreview
+    : archivePreviewDismissed
+      ? undefined
+      : archiveReports.filter((report) => report.type === 'Z')
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
   const parsedZAmount = Number(zCountedCash.replace(',', '.'));
   const parsedZMillimes = Math.round(parsedZAmount * 1000);
   const parsedZCountedCash = zCountedCash.trim() && Number.isFinite(parsedZAmount) &&
@@ -380,15 +414,29 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           <h1 className="font-display text-headline-lg text-on-surface">{pageTitle}</h1>
           <p className="mt-1 font-body text-body-md text-on-surface-variant">{store?.name}</p>
         </div>
-        {ownerMode && <StatusTag status="started">{`${openCount} open`}</StatusTag>}
+        {ownerMode && !ownOpenShift
+          ? <Button onClick={() => setOpenShiftSheetOpen(true)}><MaterialIcon name="lock_open" />Open my shift</Button>
+          : ownerMode
+            ? <StatusTag status="started">{`${openCount} open`}</StatusTag>
+            : !ownOpenShift && (!closedShiftSummary || dayStatus.dayIsClosed)
+              ? <Button onClick={() => setOpenShiftSheetOpen(true)}><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
+              : null}
       </div>
       <PageHeader className="hidden lg:flex" title={pageTitle} subtitle={store?.name} actions={
         ownerMode
-          ? <StatusTag status="started">{`${openCount} open`}</StatusTag>
-          : !ownOpenShift && !closedShiftSummary
+          ? <div className="flex items-center gap-2">
+            <StatusTag status="started">{`${openCount} open`}</StatusTag>
+            {!ownOpenShift && <Button onClick={() => setOpenShiftSheetOpen(true)}><MaterialIcon name="lock_open" />Open my shift</Button>}
+          </div>
+          : !ownOpenShift && (!closedShiftSummary || dayStatus.dayIsClosed)
             ? <Button className="w-full lg:w-auto lg:min-w-[160px]" onClick={() => setOpenShiftSheetOpen(true)}><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
             : undefined
       } />
+      {(ownerMode || (dayStatus.dayIsClosed && !ownOpenShift)) && (
+        <p role="status" className={`mb-4 rounded-xl p-3 font-body text-body-sm ${dayStatus.dayIsClosed ? 'bg-warning-container text-on-warning-container' : 'bg-surface-container-low text-on-surface-variant'}`}>
+          {dayStatusMessage}
+        </p>
+      )}
       <FirstRunHint id={`shift-${user?.id ?? 'guest'}`} title={t('hint.title')} message={t('hint.shift')} />
 
       {ownerMode && (
@@ -408,13 +456,14 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
             <h2 className="font-display text-headline-md">Live X report</h2>
             <p className="mt-2 font-body text-body-sm text-outline">A frozen snapshot for review. The day stays open.</p>
-            <Button className="mt-4 w-full" onClick={() => { void createXReport(); }}><MaterialIcon name="summarize" />Print X report</Button>
+            <Button disabled={Boolean(reportDisabledReason)} className="mt-4 w-full" onClick={() => { void createXReport(); }}><MaterialIcon name="summarize" />Print X report</Button>
+            {reportDisabledReason && <p className="mt-2 font-body text-body-sm text-outline">{reportDisabledReason}</p>}
           </article>
           <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
             <h2 className="font-display text-headline-md">Close day: Z report</h2>
             <p className="mt-2 font-body text-body-sm text-outline">Every Z requires the owner PIN and every shift must be closed.</p>
-            {openCount > 0 && <p role="alert" className="mt-3 rounded-lg bg-warning-container p-3 text-on-warning-container">Open shifts remain: use Force close shift in the Shifts tab.</p>}
-            <Button disabled={openCount > 0} variant="danger" className="mt-4 w-full" onClick={() => { void openZCloseDialog(); }}><MaterialIcon name="lock" />Close day: Z report</Button>
+            <Button disabled={Boolean(zDisabledReason)} variant="danger" className="mt-4 w-full" onClick={() => { void openZCloseDialog(); }}><MaterialIcon name="lock" />Close day: Z report</Button>
+            {zDisabledReason && <p role="status" className="mt-2 rounded-lg bg-warning-container p-3 text-on-warning-container">{zDisabledReason}</p>}
           </article>
           {reportPreview && <div className="tablet:col-span-2"><ReportView inline report={reportPreview} store={store ?? undefined} settings={store?.settings} storeName={store?.name ?? ''} onClose={() => setReportPreview(undefined)} /></div>}
         </section>
@@ -428,7 +477,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
               {archiveReports.filter((report) => report.type === 'Z').map((report) => {
                 const amounts = reportDrawerAmounts(report);
                 return (
-                  <button key={report.id} type="button" onClick={() => setReportPreview(report)} className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-low p-3 text-left">
+                  <button key={report.id} type="button" onClick={() => { setReportPreview(report); setArchivePreviewDismissed(false); }} className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-low p-3 text-left">
                     <div>
                       <strong>{report.reportNumber ?? `Z-${String(report.zNumber ?? 0).padStart(6, '0')}`}</strong>
                       <p className="font-body text-body-sm text-outline">{report.businessDate} · Sales {formatTnd((report.salesCollectedMillimes ?? report.salesMillimes) / 1000)} DT</p>
@@ -445,7 +494,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
               {archiveReports.filter((report) => report.type === 'Z').length === 0 && <p className="font-body text-body-sm text-outline">No Z reports yet.</p>}
             </div>
           )}
-          {reportPreview && <div className="mt-4"><ReportView inline report={reportPreview} store={store ?? undefined} settings={store?.settings} storeName={store?.name ?? ''} onClose={() => setReportPreview(undefined)} /></div>}
+          {isArchivePreview && <div className="mt-4"><ReportView inline report={isArchivePreview} store={store ?? undefined} settings={store?.settings} storeName={store?.name ?? ''} onClose={() => { setReportPreview(undefined); setArchivePreviewDismissed(true); }} /></div>}
         </section>
       )}
 
@@ -470,10 +519,13 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             <div className="space-y-3">
               <Metric label={t('shift.startingCash')} amount={ownOpenShift.startingCashMillimes} />
               <Metric label="Cash sales" amount={ownBreakdown.cashSalesMillimes} />
+              <Metric label="Tab sales" amount={ownBreakdown.tabSalesMillimes} />
               <Metric label="Tab payments received in cash" amount={ownBreakdown.tabPaymentsMillimes} />
+              <Metric label="Cash in" amount={ownMovementTotals.cashInMillimes} />
+              <Metric label="Cash out" amount={ownMovementTotals.cashOutMillimes} />
               <Metric label={t('shift.expectedCash')} amount={getExpectedCash(ownOpenShift, ownBreakdown, cashMovements)} prominent />
             </div>
-            {canCashInOut && !ownerMode && (
+            {canCashInOut && (
               <div className="mt-4 grid grid-cols-2 gap-2">
                 <Button type="button" variant="secondary" onClick={() => openCashMovement('in', ownOpenShift.id)}><MaterialIcon name="add" />Cash in</Button>
                 <Button type="button" variant="secondary" onClick={() => openCashMovement('out', ownOpenShift.id)}><MaterialIcon name="remove" />Cash out</Button>
@@ -485,9 +537,9 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             <MaterialIcon name="lock" />{t('shift.closeShift')}
           </Button>
         </div>
-      ) : !closedShiftSummary ? (
-        <Button className="w-full max-w-xl lg:hidden" onClick={() => setOpenShiftSheetOpen(true)}>
-          <MaterialIcon name="lock_open" />{t('shift.openShift')}
+      ) : !closedShiftSummary || ownerMode || dayStatus.dayIsClosed ? (
+        <Button className="w-full max-w-xl" onClick={() => setOpenShiftSheetOpen(true)}>
+          <MaterialIcon name="lock_open" />{ownerMode ? 'Open my shift' : t('shift.openShift')}
         </Button>
       ) : null)}
 

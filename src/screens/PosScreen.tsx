@@ -20,9 +20,11 @@ import { catalogService } from '../services/catalogService';
 import { compService, type StaffDrinkAllowance } from '../services/compService';
 import { OrderNotificationError, OrderServiceError, orderService } from '../services/orderService';
 import { shiftService } from '../services/shiftService';
+import { reportService, type ReportDayStatus } from '../services/reportService';
 import { PERMISSIONS_CHANGED_EVENT, userService } from '../services/userService';
 import { updateService } from '../services/updateService';
 import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
+import { resolveStoreSettings } from '../types/domain';
 import { useAuthStore } from '../stores/authStore';
 import { useCartStore, type CartLine, type CartSnapshot } from '../stores/cartStore';
 import type { CatalogItemRecord, CatalogModifierRecord, CategoryRecord, CompReason, CustomerRecord, OrderLineRecord, OrderRecord, PaymentMethod, ShiftRecord, StoreRecord } from '../types/domain';
@@ -102,6 +104,11 @@ export function PosScreen() {
   const [catalogError, setCatalogError] = useState('');
   const [categoryRecords, setCategoryRecords] = useState<CategoryRecord[]>([]);
   const [openShift, setOpenShift] = useState<ShiftRecord>();
+  const [dayStatus, setDayStatus] = useState<ReportDayStatus>({
+    dayIsClosed: false,
+    hasActivity: false,
+    openShiftCount: 0,
+  });
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [needsAttentionOrders, setNeedsAttentionOrders] = useState<Array<{ order: OrderRecord; message: string }>>([]);
   const [selectedItem, setSelectedItem] = useState<ProductView | null>(null);
@@ -169,7 +176,7 @@ export function PosScreen() {
       setCatalogLoading(true);
       setCatalogError('');
       try {
-        const [items, categories, shift, currentStore, todaysOrders, permission, compPermission, tabsPermission, overridePermission, customerList] = await Promise.all([
+        const [items, categories, shift, currentStore, todaysOrders, permission, compPermission, tabsPermission, overridePermission, customerList, nextDayStatus] = await Promise.all([
           catalogService.listItems(storeId),
           catalogService.listCategories(storeId),
           user ? shiftService.getOpenShiftForUser(storeId, user.id) : Promise.resolve(undefined),
@@ -180,6 +187,7 @@ export function PosScreen() {
           user && user.role === 'staff' ? userService.hasPermission(user.id, 'use_tabs') : Promise.resolve(false),
           user && user.role === 'staff' ? userService.hasPermission(user.id, 'tab_override_limit') : Promise.resolve(false),
           storeId ? customerService.listCustomers(storeId) : Promise.resolve([]),
+          reportService.getDayStatus(storeId),
         ]);
         const creditStatusEntries = await Promise.all(customerList.map(async (customer) =>
           [customer.id, await customerService.getCreditStatus(customer.id)] as const,
@@ -190,6 +198,7 @@ export function PosScreen() {
         setCatalogRecords(items);
         setCategoryRecords(categories);
         setOpenShift(shift);
+        setDayStatus(nextDayStatus);
         setStore(currentStore);
         setOrders([...todaysOrders, ...queuedOrders]);
         setCan86Items(permission);
@@ -346,6 +355,14 @@ export function PosScreen() {
     (category === 'all' || item.categoryId === category),
   ), [allProducts, category, search]);
   const quickPicks = useMemo(() => {
+    const settings = resolveStoreSettings(store?.settings);
+    if (settings.quickPickMode === 'manual') {
+      const itemsById = new Map(allProducts.map((item) => [item.id, item]));
+      return settings.quickPickItemIds.flatMap((itemId) => {
+        const item = itemsById.get(itemId);
+        return item ? [item] : [];
+      });
+    }
     const quantities = new Map<string, number>();
     for (const order of orders) {
       if (order.status !== 'done') continue;
@@ -355,7 +372,7 @@ export function PosScreen() {
       .filter((item) => quantities.has(item.id))
       .sort((left, right) => (quantities.get(right.id) ?? 0) - (quantities.get(left.id) ?? 0));
     return (soldItems.length ? soldItems : allProducts).slice(0, 4);
-  }, [allProducts, orders]);
+  }, [allProducts, orders, store?.settings]);
 
   const totalMillimes = cart.reduce((sum, line) => sum + line.quantity * line.unitPriceMillimes, 0);
   const count = cart.reduce((sum, line) => sum + line.quantity, 0);
@@ -828,10 +845,17 @@ export function PosScreen() {
             <MaterialIcon name="storefront" className="text-lg" filled />
             {store?.name ?? t('pos.cafe')}
           </h2>
-          <span className={`mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-body text-label-sm ${openShift ? 'bg-success text-on-success' : 'bg-error-container text-on-error-container'}`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${openShift ? 'bg-success-dark' : 'bg-error-dark'}`} />
-            {openShift ? t('pos.shiftOpenSince', { time: new Date(openShift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }) : t('pos.shiftRequired')}
-          </span>
+          {openShift ? (
+            <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-success px-2 py-0.5 font-body text-label-sm text-on-success">
+              <span className="h-1.5 w-1.5 rounded-full bg-success-dark" />
+              {t('pos.shiftOpenSince', { time: new Date(openShift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })}
+            </span>
+          ) : (
+            <button type="button" onClick={() => navigate(user?.role === 'owner' ? '/owner/shifts' : '/shift')} className="mt-1 inline-flex items-center gap-1 rounded-full bg-error-container px-2 py-0.5 font-body text-label-sm text-on-error-container">
+              <span className="h-1.5 w-1.5 rounded-full bg-error-dark" />
+              {t('pos.shiftRequired')}
+            </button>
+          )}
         </div>
         {canCompItems && (
           <Button type="button" variant="secondary" onClick={openCompForm} className="min-h-11 shrink-0 rounded-xl px-3 text-label-sm">
@@ -840,6 +864,14 @@ export function PosScreen() {
           </Button>
         )}
       </div>
+      {!openShift && dayStatus.dayIsClosed && (
+        <section role="status" className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-warning-container p-3 text-on-warning-container">
+          <p className="font-body text-body-sm">Day closed. Open a shift to start a new day.</p>
+          <Button type="button" onClick={() => navigate(user?.role === 'owner' ? '/owner/shifts' : '/shift')}>
+            <MaterialIcon name="lock_open" />Open shift
+          </Button>
+        </section>
+      )}
       <FirstRunHint id={`pos-${user?.id ?? 'guest'}`} title={t('hint.title')} message={t('hint.pos')} />
       {user?.role === 'owner' && needsAttentionOrders.length > 0 && (
         <section aria-label="Needs attention" className="mx-3 mt-3 rounded-xl border border-error/30 bg-error-container p-3 text-on-error-container">
@@ -883,7 +915,9 @@ export function PosScreen() {
                 <MaterialIcon name="bolt" className="text-lg text-secondary" filled />
                 {t('pos.quickPicks')}
               </h2>
-              <span className="font-body text-label-sm text-outline">{t('pos.highVelocity')}</span>
+              <span className="font-body text-label-sm text-outline">
+                {resolveStoreSettings(store?.settings).quickPickMode === 'manual' ? 'Admin selected' : t('pos.highVelocity')}
+              </span>
             </div>
             <div className="scrollbar-hidden flex gap-2.5 overflow-x-auto px-3 pb-1">
               {quickPicks.map((item) => (

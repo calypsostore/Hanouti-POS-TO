@@ -208,6 +208,8 @@ export const userService = {
     changes: {
       defaultSettlementTerms?: StoreSettings['defaultSettlementTerms'];
       notificationPreferences?: Partial<StoreSettings['notificationPreferences']>;
+      quickPickMode?: StoreSettings['quickPickMode'];
+      quickPickItemIds?: StoreSettings['quickPickItemIds'];
       ticketHeaderText?: string[];
       ticketFooterText?: string[];
       reportFooterText?: string[];
@@ -220,6 +222,16 @@ export const userService = {
       paperWidth?: 58 | 80;
     },
   ): Promise<StoreRecord> {
+    if (changes.quickPickMode !== undefined && !['auto', 'manual'].includes(changes.quickPickMode)) {
+      throw new Error('Choose automatic or manual Quick Picks.');
+    }
+    if (changes.quickPickItemIds &&
+      changes.quickPickItemIds.some((itemId) => typeof itemId !== 'string' || !itemId.trim())) {
+      throw new Error('Quick Pick product selections are invalid.');
+    }
+    const normalizedChanges = changes.quickPickItemIds
+      ? { ...changes, quickPickItemIds: [...new Set(changes.quickPickItemIds)] }
+      : changes;
     if (isSupabaseDriver()) {
       if (changes.defaultSettlementTerms !== undefined &&
         !['weekly', 'monthly', 'anytime'].includes(changes.defaultSettlementTerms)) {
@@ -236,10 +248,10 @@ export const userService = {
       if (!store || store.ownerId !== ownerId) throw new Error('Only this store owner can change store settings.');
       const settings = {
         ...resolveStoreSettings(store.settings),
-        ...changes,
+        ...normalizedChanges,
         notificationPreferences: {
           ...resolveStoreSettings(store.settings).notificationPreferences,
-          ...changes.notificationPreferences,
+          ...normalizedChanges.notificationPreferences,
         },
       };
       const { error } = await getSupabaseClient().from('store_settings').upsert({ store_id: storeId, settings });
@@ -274,10 +286,10 @@ export const userService = {
     const currentSettings = resolveStoreSettings(store.settings);
     const settings: StoreSettings = {
       ...currentSettings,
-      ...changes,
+      ...normalizedChanges,
       notificationPreferences: {
         ...currentSettings.notificationPreferences,
-        ...changes.notificationPreferences,
+        ...normalizedChanges.notificationPreferences,
       },
     };
     const updated = { ...store, settings };

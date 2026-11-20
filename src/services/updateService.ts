@@ -217,6 +217,12 @@ async function checkForUpdates(): Promise<UpdateCheckResult> {
     updateAvailable: false,
   };
 
+  if (import.meta.env.DEV && mode === 'web' && isLocalhost(origin)) {
+    clearUpdateAvailable();
+    saveResult(result);
+    return result;
+  }
+
   try {
     if (mode === 'bundled') {
       const installedApp = await App.getInfo();

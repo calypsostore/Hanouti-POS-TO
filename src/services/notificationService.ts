@@ -67,6 +67,15 @@ function notificationEnabled(store: { settings?: StoreSettings } | undefined, ty
     (isSupabaseDriver() || userPreferenceEnabled(userId, type));
 }
 
+export function shouldRegisterPushNotifications(
+  enabled: boolean,
+  isNative: boolean,
+  usesSupabase: boolean,
+  storeId?: string,
+): boolean {
+  return enabled && isNative && usesSupabase && Boolean(storeId);
+}
+
 export function mapNotificationRow(row: Record<string, unknown>): NotificationRecord {
   return {
     id: String(row.id),

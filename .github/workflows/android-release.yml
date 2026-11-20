@@ -100,6 +100,7 @@ jobs:
       - name: Build web assets
         env:
           VITE_DATA_DRIVER: supabase
+          VITE_ANDROID_PUSH_ENABLED: 'false'
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: npm run build
@@ -237,6 +238,7 @@ jobs:
       - name: Build web assets
         env:
           VITE_DATA_DRIVER: supabase
+          VITE_ANDROID_PUSH_ENABLED: 'false'
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: npm run build
@@ -286,7 +288,7 @@ jobs:
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
           RELEASE_VERSION_CODE: ${{ steps.version.outputs.version_code }}
-          RELEASE_NOTES: ${{ inputs.notes || 'Isolate Z reports by shift and hide archived-period orders from Active Orders.' }}
+          RELEASE_NOTES: ${{ inputs.notes || 'Prevent Android login crashes when Firebase push is not configured; skip local development update checks.' }}
         run: |
           export RELEASE_VERSION RELEASE_VERSION_CODE RELEASE_NOTES
           python3 -c 'import json, os; repo=os.environ["GITHUB_REPOSITORY"]; version=os.environ["RELEASE_VERSION"]; print(json.dumps({"versionCode": int(os.environ["RELEASE_VERSION_CODE"]), "versionName": version, "apkUrl": f"https://github.com/{repo}/releases/download/v{version}/7anouti-POS-v{version}.apk", "notes": os.environ.get("RELEASE_NOTES", "")}))' > version.json
@@ -296,7 +298,7 @@ jobs:
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: 7anouti-POS v${{ steps.version.outputs.version }}
-          body: ${{ inputs.notes || 'Isolate Z reports by shift and hide archived-period orders from Active Orders.' }}
+          body: ${{ inputs.notes || 'Prevent Android login crashes when Firebase push is not configured; skip local development update checks.' }}
           files: |
             ${{ steps.apk.outputs.path }}
             version.json

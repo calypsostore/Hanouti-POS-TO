@@ -27,6 +27,9 @@ Do not publish while the database migration check is failing. The app compares i
 5. Deploy `send-push` and configure a Database Webhook or insert trigger for
    `public.notifications`.
 6. Run `npm run apk:sync`, then `npx cap sync android`, and publish a new APK.
+7. Keep `VITE_ANDROID_PUSH_ENABLED` unset or `false` unless the Android build
+   includes `google-services.json`; enabling registration without Firebase
+   configuration can crash the app when a user signs in.
 
 ## PL/pgSQL diagnostics
 

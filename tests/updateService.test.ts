@@ -59,6 +59,22 @@ describe('updateService.checkForUpdates', () => {
     );
   });
 
+  it('skips version manifest requests on localhost during development', async () => {
+    vi.stubGlobal('window', {
+      location: { origin: 'http://127.0.0.1:5173', reload: vi.fn() },
+      setTimeout: (...args: Parameters<typeof setTimeout>) => globalThis.setTimeout(...args),
+      clearTimeout: (...args: Parameters<typeof clearTimeout>) => globalThis.clearTimeout(...args),
+      setInterval: (...args: Parameters<typeof setInterval>) => globalThis.setInterval(...args),
+      clearInterval: (...args: Parameters<typeof clearInterval>) => globalThis.clearInterval(...args),
+    });
+
+    const result = await updateService.checkForUpdates();
+
+    expect(result).toMatchObject({ mode: 'web', updateAvailable: false });
+    expect(result.error).toBeUndefined();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('reports a different hosted build as an available update', async () => {
     const waiting = { postMessage: vi.fn() };
     const workerRegistration = { waiting, update: vi.fn().mockResolvedValue(undefined) };

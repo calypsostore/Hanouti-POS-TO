@@ -6,7 +6,12 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { getSupabaseClient } from '../data/supabaseClient';
 import { isSupabaseDriver } from '../data/driver';
-import { mapNotificationRow, notificationService, OWNER_NOTIFICATIONS_CHANGED_EVENT } from '../services/notificationService';
+import {
+  mapNotificationRow,
+  notificationService,
+  OWNER_NOTIFICATIONS_CHANGED_EVENT,
+  shouldRegisterPushNotifications,
+} from '../services/notificationService';
 import { permissionService } from '../services/permissionService';
 import { useAuthStore } from '../stores/authStore';
 import { useNotificationStore } from '../stores/notificationStore';
@@ -73,7 +78,12 @@ export function NotificationsBridge() {
   }, [markRead, navigate]);
 
   useEffect(() => {
-    if (!isSupabaseDriver() || !Capacitor.isNativePlatform() || !user?.storeId) return;
+    if (!user?.storeId || !shouldRegisterPushNotifications(
+      import.meta.env.VITE_ANDROID_PUSH_ENABLED === 'true',
+      Capacitor.isNativePlatform(),
+      isSupabaseDriver(),
+      user?.storeId,
+    )) return;
     let disposed = false;
     const saveToken = async (token: string) => {
       if (disposed) return;

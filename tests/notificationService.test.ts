@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NotificationRecord, UserRecord } from '../src/types/domain';
-import { notificationService } from '../src/services/notificationService';
+import {
+  notificationService,
+  shouldRegisterPushNotifications,
+} from '../src/services/notificationService';
 
 const owner: Pick<UserRecord, 'id' | 'role' | 'storeId'> = {
   id: 'owner-1',
@@ -43,5 +46,12 @@ describe('notification service', () => {
     const saved = JSON.parse(localStorage.getItem('7anouti-pos:notifications') ?? '[]') as NotificationRecord[];
     expect(saved.find(({ id }) => id === initial.id)?.readAt).toBeTruthy();
     expect(saved.find(({ id }) => id === later.id)?.readAt).toBeUndefined();
+  });
+
+  it('only registers native push when explicitly enabled for a Supabase store', () => {
+    expect(shouldRegisterPushNotifications(false, true, true, owner.storeId)).toBe(false);
+    expect(shouldRegisterPushNotifications(true, true, true, owner.storeId)).toBe(true);
+    expect(shouldRegisterPushNotifications(true, false, true, owner.storeId)).toBe(false);
+    expect(shouldRegisterPushNotifications(true, true, false, owner.storeId)).toBe(false);
   });
 });

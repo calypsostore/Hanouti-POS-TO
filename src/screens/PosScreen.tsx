@@ -297,8 +297,14 @@ export function PosScreen() {
     window.addEventListener(OFFLINE_ORDER_SYNCED_EVENT, onOrderSynced);
     window.addEventListener(PERMISSIONS_CHANGED_EVENT, onFocus);
     const unsubscribe = subscribeToStoreChanges(storeId, ['orders', 'shifts', 'notifications', 'catalog_items'], onFocus);
+    const unsubscribeStoreSettings = subscribeToStoreChanges(storeId, ['store_settings'], () => {
+      void userService.getStore(storeId).then(setStore).catch((error: unknown) => {
+        console.error('Unable to refresh store settings after a live update.', error);
+      });
+    });
     return () => {
       unsubscribe();
+      unsubscribeStoreSettings();
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('online', onFocus);
       window.removeEventListener(OFFLINE_QUEUE_CHANGED_EVENT, onQueueChanged);

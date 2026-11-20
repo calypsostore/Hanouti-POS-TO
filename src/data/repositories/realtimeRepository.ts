@@ -1,7 +1,7 @@
 import { isSupabaseDriver } from '../driver';
 import { getSupabaseClient } from '../supabaseClient';
 
-export type StoreRealtimeTable = 'orders' | 'shifts' | 'notifications' | 'catalog_items';
+export type StoreRealtimeTable = 'orders' | 'shifts' | 'notifications' | 'catalog_items' | 'store_settings';
 
 export function subscribeToStoreChanges(
   storeId: string,

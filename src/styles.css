@@ -374,6 +374,58 @@ button {
   display: none;
 }
 
+.staff-bottom-nav {
+  position: fixed;
+  z-index: 60;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: block;
+  border-top: 1px solid rgb(var(--color-outline-variant));
+  background: rgb(var(--color-surface-container-lowest) / 0.96);
+  padding: 0.25rem 0 max(0.25rem, env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -4px 16px rgb(var(--color-primary-dark) / 0.08);
+  backdrop-filter: blur(16px);
+}
+
+.staff-bottom-nav__items {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  align-items: stretch;
+}
+
+.staff-bottom-nav__items--without-customers {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.staff-bottom-nav .owner-mobile-nav__item {
+  display: flex;
+  min-height: 48px;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  border: 0;
+  background: transparent;
+  color: rgb(var(--color-on-surface-variant));
+  font: 500 0.65rem/1.1 Inter, sans-serif;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.staff-bottom-nav .owner-mobile-nav__item.is-active {
+  color: rgb(var(--color-primary));
+}
+
+.staff-bottom-nav .owner-mobile-nav__icon {
+  font-size: 1.4rem;
+}
+
+.staff-sidebar-collapse {
+  display: none;
+}
+
 .desktop-sidebar {
   display: none;
 }
@@ -1575,6 +1627,7 @@ button {
   }
 
   .staff-bottom-nav__items {
+    display: flex;
     height: auto !important;
     flex-direction: column;
     justify-content: flex-start !important;
@@ -1582,7 +1635,8 @@ button {
     padding: 12px 10px;
   }
 
-  .staff-bottom-nav__items > a {
+  .staff-bottom-nav .staff-bottom-nav__items > a,
+  .staff-bottom-nav .staff-bottom-nav__items > button {
     min-height: 44px;
     width: 100%;
     flex: none;
@@ -1593,16 +1647,23 @@ button {
     padding: 8px 10px;
   }
 
-  .staff-bottom-nav__items > a span {
+  .staff-bottom-nav .staff-bottom-nav__items > a .staff-nav-label,
+  .staff-bottom-nav .staff-bottom-nav__items > button .staff-nav-label {
     font-size: 13px;
   }
 
-  .staff-sidebar-collapsed .staff-bottom-nav__items > a {
+  .staff-sidebar-collapsed .staff-bottom-nav__items > a,
+  .staff-sidebar-collapsed .staff-bottom-nav__items > button {
     justify-content: center;
   }
 
-  .staff-sidebar-collapsed .staff-bottom-nav__items > a span {
+  .staff-sidebar-collapsed .staff-bottom-nav__items .staff-nav-label {
     display: none;
+  }
+
+  .staff-sidebar-layout .staff-bottom-nav {
+    padding: 0;
+    border-top: 0;
   }
 
   .staff-sidebar-layout main {

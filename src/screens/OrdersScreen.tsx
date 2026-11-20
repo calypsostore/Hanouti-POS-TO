@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BottomNav } from '../components/BottomNav';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
@@ -18,6 +18,7 @@ import { t, type TranslationKey } from '../i18n/translations';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
 import { DataTable, type DataTableColumn } from '../components/layout';
+import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
 
 type OrderStatus = 'done' | 'pending' | 'voided';
 type OrderFilter = 'all' | 'done' | 'pending' | 'voided';
@@ -89,6 +90,7 @@ export function OrdersScreen() {
   const [voidReason, setVoidReason] = useState('');
   const [ticketOrder, setTicketOrder] = useState<OrderView | null>(null);
   const [pinLockedSeconds, setPinLockedSeconds] = useState(0);
+  const hasLoadedOrdersRef = useRef(false);
 
   const visibleOrders = useMemo(
     () => orders.filter((order) => filter === 'all' || order.status === filter),
@@ -100,13 +102,15 @@ export function OrdersScreen() {
   const voidedCount = orders.filter((order) => order.status === 'voided').length;
 
   const refreshOrders = useCallback(async () => {
-    setLoading(true);
+    const initialLoad = !hasLoadedOrdersRef.current;
+    if (initialLoad) setLoading(true);
     setLoadError('');
     try {
       const records = await orderService.listToday(storeId, staffFilter);
       setOrders(await Promise.all(records.map(toOrderView)));
+      hasLoadedOrdersRef.current = true;
     } finally {
-      setLoading(false);
+      if (initialLoad) setLoading(false);
     }
   }, [storeId, staffFilter]);
 
@@ -114,6 +118,23 @@ export function OrdersScreen() {
     void refreshOrders().catch(() => setLoadError(t('common.loadFailed')));
     void userService.getStore(storeId).then(setStore).catch(() => setLoadError(t('common.storeLoadFailed')));
   }, [refreshOrders, storeId, user]);
+
+  useEffect(() => {
+    const refresh = () => {
+      void refreshOrders().catch((loadError: unknown) => {
+        console.error('Unable to refresh orders after a live update.', loadError);
+        setLoadError(t('common.refreshFailed'));
+      });
+    };
+    const unsubscribe = subscribeToStoreChanges(storeId, ['orders'], refresh);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('online', refresh);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('online', refresh);
+    };
+  }, [refreshOrders, storeId]);
 
   useEffect(() => {
     if (user?.role !== 'staff') return;
@@ -151,6 +172,10 @@ export function OrdersScreen() {
   async function pressPin(digit: string) {
     if (pinLockedSeconds > 0) return;
     if (pin.length >= 4) return;
+    if (pin.length === 3 && !voidReason.trim()) {
+      setFeedback('A reason is required to void this order.');
+      return;
+    }
     const nextPin = `${pin}${digit}`;
     setPin(nextPin);
     if (nextPin.length === 4) {

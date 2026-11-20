@@ -339,7 +339,7 @@ export function buildReportDocument(
     },
     ...(report.type === 'Z' ? [
       {
-        label: 'COUNTED CASH',
+        label: report.countedCashIncludesFloat ? 'COUNTED CASH' : 'COUNTED CASH (EXCLUDING FLOAT)',
         value: countedCashForDrawer === undefined ? 'Not recorded' : money(countedCashForDrawer),
         emphasized: true,
         size: 'double' as const,

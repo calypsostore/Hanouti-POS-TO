@@ -132,7 +132,7 @@ describe('local money logic', () => {
     await expect(shiftService.getExpectedCash(shiftId)).resolves.toBe(15_900);
   });
 
-  it('reconciles two staff floats as part of the counted drawer cash', async () => {
+  it('reconciles daily cash excluding the two staff floats', async () => {
     const now = new Date();
     const openedAt = new Date(now.getTime() - 8 * 60 * 60 * 1000).toISOString();
     const closedAt = new Date(now.getTime() - 60_000).toISOString();
@@ -174,15 +174,15 @@ describe('local money logic', () => {
     expect(summary.expectedCashExFloatMillimes).toBe(115_000);
 
     const report = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
-      countedCashMillimes: 215_000,
+      countedCashMillimes: 115_000,
     });
-    expect(report.countedCashMillimes).toBe(215_000);
+    expect(report.countedCashMillimes).toBe(115_000);
     expect(report.cashDifference).toBe(0);
     expect(report.cashDifferenceMillimes).toBe(0);
-    expect(report.countedCashIncludesFloat).toBe(true);
+    expect(report.countedCashIncludesFloat).toBe(false);
   });
 
-  it('records a short of 1.500 DT against expected cash including float', async () => {
+  it('records a short of 1.500 DT against expected daily cash excluding floats', async () => {
     const now = new Date();
     const openedAt = new Date(now.getTime() - 8 * 60 * 60 * 1000).toISOString();
     const closedAt = new Date(now.getTime() - 60_000).toISOString();
@@ -219,7 +219,7 @@ describe('local money logic', () => {
       : store));
 
     const report = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
-      countedCashMillimes: 213_500,
+      countedCashMillimes: 113_500,
       note: 'Cash count is short.',
     });
     expect(report.expectedCashExFloatMillimes).toBe(115_000);
@@ -406,7 +406,7 @@ describe('local money logic', () => {
     await orderService.resolveVoidRequest('z-pending-void', ownerId, 'reject');
     const summary = await reportService.getCurrentPeriodSummary(storeId);
     const zReport = await reportService.closeDayWithZReport(storeId, ownerId, '1234', {
-      countedCashMillimes: summary.totalExpectedCashMillimes,
+      countedCashMillimes: summary.expectedCashExFloatMillimes,
     });
     expect(zReport.pendingVoids?.count).toBe(0);
   });
@@ -539,7 +539,7 @@ describe('local money logic', () => {
 
     const summary = await reportService.getCurrentPeriodSummary(storeId);
     const zReport = await reportService.closeDayWithZReport(storeId, ownerId, '1234', {
-      countedCashMillimes: summary.totalExpectedCashMillimes,
+      countedCashMillimes: summary.expectedCashExFloatMillimes,
     });
     expect(zReport.shifts).toEqual(expect.arrayContaining([
       expect.objectContaining({ shiftId: openShift.id, forceClosedByOwner: true, voidsAutoApprovedCount: 1 }),
@@ -590,9 +590,9 @@ describe('local money logic', () => {
   it('requires activity after the last Z and blocks a second Z and X until a new shift opens', async () => {
     prepareReportData([makeClosedShift('shift-before-z', 1_000)]);
     await expect(reportService.closeDayWithZReport(storeId, 'owner-lamarsa')).rejects.toThrow('Owner PIN is required');
-    await expect(reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234')).rejects.toThrow('Counted cash is required');
+    await expect(reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234')).rejects.toThrow('Counted cash excluding opening floats is required');
     const firstZ = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
-      countedCashMillimes: 1_000,
+      countedCashMillimes: 0,
     });
     expect((await userService.getStore(storeId))?.dayClosedOn).toBe(new Date().toLocaleDateString('en-CA'));
 
@@ -639,7 +639,7 @@ describe('local money logic', () => {
     expect(openShift).toBeDefined();
     await shiftService.closeShift(openShift!.id, 1_000);
     const secondZ = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
-      countedCashMillimes: 1_000,
+      countedCashMillimes: 0,
     });
     expect(secondZ.periodFrom).toBe(firstZ.periodTo);
   });
@@ -656,7 +656,7 @@ describe('local money logic', () => {
     await shiftService.closeShift(staffShift.id, 13_000);
     await shiftService.closeShift(ownerShift.id, 25_000);
     const report = await reportService.closeDayWithZReport(storeId, ownerId, '1234', {
-      countedCashMillimes: 38_000,
+      countedCashMillimes: 8_000,
     });
 
     expect(report.shifts).toEqual(expect.arrayContaining([
@@ -666,6 +666,9 @@ describe('local money logic', () => {
     expect(report.totalExpectedCashMillimes).toBe(38_000);
     expect(report.cashFloatMillimes).toBe(30_000);
     expect(report.expectedCashExFloatMillimes).toBe(8_000);
+    expect(report.countedCashMillimes).toBe(8_000);
+    expect(report.cashDifferenceMillimes).toBe(0);
+    expect(report.countedCashIncludesFloat).toBe(false);
   });
 
   it('resolves permissions as position permissions plus grants minus revocations', async () => {

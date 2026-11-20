@@ -285,8 +285,8 @@ begin
     'totalCountedMillimes', v_total_counted,
     'totalDifferenceMillimes', v_total_difference,
     'countedCashMillimes', p_counted_cash,
-    'countedCashIncludesFloat', true,
-    'cashDifferenceMillimes', p_counted_cash - v_expected_cash,
+    'countedCashIncludesFloat', false,
+    'cashDifferenceMillimes', p_counted_cash - (v_expected_cash - v_cash_float),
     'cashDifferenceNote', p_note,
     'countedCardMillimes', p_counted_card,
     'expectedCardMillimes', v_expected_card,
@@ -552,7 +552,7 @@ begin
   perform set_config('request.jwt.claims', jsonb_build_object(
     'sub', report_store.staff_id, 'role', 'authenticated', 'session_id', report_store.session_id
   )::text, true);
-  v_z_shift := (public.open_shift(0)).id;
+  v_z_shift := (public.open_shift(500)).id;
   v_pending_order := (public.create_order(
     v_z_shift, pg_temp.shift_audit_order_items(report_store.item_id), 'cash'
   )->'order'->>'id')::uuid;
@@ -597,8 +597,13 @@ begin
   if v_z_report.type <> 'Z'
     or v_z_report.cash_difference_millimes <> 0
     or (v_z_report.data->>'cashDifferenceMillimes')::bigint <> 0
+    or (v_z_report.data->>'cashDifference')::bigint <> 0
     or v_z_report.z_number <> 1
-    or (v_z_report.data->>'totalExpectedCashMillimes')::bigint <> 0
+    or (v_z_report.data->>'totalExpectedCashMillimes')::bigint <> 500
+    or (v_z_report.data->>'cashFloatMillimes')::bigint <> 500
+    or (v_z_report.data->>'expectedCashExFloatMillimes')::bigint <> 0
+    or (v_z_report.data->>'countedCashMillimes')::bigint <> 0
+    or (v_z_report.data->>'countedCashIncludesFloat')::boolean
     or (v_z_report.data->>'totalDifferenceMillimes')::bigint <> 1000
     or (v_z_report.data->>'cashRefundsMillimes')::bigint <> 500
     or (v_z_report.data->>'expectedCardMillimes')::bigint <> 1100
@@ -612,6 +617,15 @@ begin
     ) then
     raise exception 'Z after force-close did not reconcile to the stored snapshot.';
   end if;
+
+  begin
+    perform public.record_report(v_snapshot, '1234');
+    raise exception 'A second Z report was unexpectedly created for the closed business day.';
+  exception when others then
+    if position('The business day is closed. Open a new shift before creating another report.' in sqlerrm) = 0 then
+      raise;
+    end if;
+  end;
 
   begin
     update public.reports set data = data || '{"tampered":true}'::jsonb where id = v_z_report.id;

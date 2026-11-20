@@ -699,6 +699,7 @@ export const orderService = {
   },
 
   getPinLockRemainingMs(storeId: string): number {
+    if (isSupabaseDriver()) return 0;
     const attempts = readData<Record<string, { count: number; lockedUntil: number }>>('void-pin-attempts', {});
     return Math.max(0, (attempts[storeId]?.lockedUntil ?? 0) - Date.now());
   },

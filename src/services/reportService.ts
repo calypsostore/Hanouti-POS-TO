@@ -507,9 +507,9 @@ async function createReport(
   if (type === 'Z' && dayStatus.openShiftCount > 0) {
     throw new Error('Force-close or close every shift before creating a Z report.');
   }
-  if (type === 'Z' && !closeDetails) throw new Error('Counted cash is required to close the business day.');
+  if (type === 'Z' && !closeDetails) throw new Error('Counted cash excluding opening floats is required to close the business day.');
   const cashDifference = closeDetails
-    ? closeDetails.countedCashMillimes - summary.totalExpectedCashMillimes
+    ? closeDetails.countedCashMillimes - summary.expectedCashExFloatMillimes
     : undefined;
   const expectedCardMillimes = summary.paymentSplit.card + summary.cardTabPaymentsMillimes;
   const expectedOtherMillimes = summary.paymentSplit.other + summary.otherTabPaymentsMillimes;
@@ -614,7 +614,7 @@ async function createReport(
     nonCashTabPaymentsMillimes: summary.nonCashTabPaymentsMillimes,
     tabsOutstandingMillimes: summary.tabsOutstandingMillimes,
     countedCashMillimes: closeDetails?.countedCashMillimes,
-    countedCashIncludesFloat: type === 'Z',
+    countedCashIncludesFloat: false,
     cashDifference,
     cashDifferenceNote: closeDetails?.note,
     countedCardMillimes: closeDetails ? closeDetails.countedCardMillimes ?? 0 : undefined,

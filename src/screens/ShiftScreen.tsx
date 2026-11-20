@@ -376,7 +376,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
         throw new Error('The owner PIN is incorrect.');
       }
       const live = await reportService.getCurrentPeriodSummary(storeId);
-      setZExpectedCash(live.totalExpectedCashMillimes);
+      setZExpectedCash(live.expectedCashExFloatMillimes);
       setZExpectedCard(live.paymentSplit.card + live.cardTabPaymentsMillimes);
       setZExpectedOther(live.paymentSplit.other + live.otherTabPaymentsMillimes);
       setZPaymentSplit(live.paymentSplit);
@@ -832,7 +832,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           </form>
         ) : (
           <form onSubmit={(event) => { event.preventDefault(); void closeDayWithZ(); }} className="flex flex-col gap-3">
-            <p className="font-body text-body-sm text-on-surface-variant">Review the recorded activity, count all cash in the drawer including float and the card terminal, then submit to reveal the differences. Pending void requests are treated as voided for sales and cash until rejected; stock remains held until approval.</p>
+            <p className="font-body text-body-sm text-on-surface-variant">Review the recorded activity, then count the whole-day cash and card totals. Exclude shift opening floats from the cash count; each shift's float is shown separately for reference. Submit your counts to reveal the differences.</p>
             {error && <p role="alert" className="rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
             <div className="space-y-3 rounded-xl bg-surface-container-low p-3">
               <section className="space-y-1 border-b border-outline-variant pb-3">
@@ -846,6 +846,16 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
                 </p>
                 <Metric label={`Voided orders (${zVoids.count})`} amount={zVoids.totalMillimes} />
                 <Metric label={`Pending void requests (${zPendingVoids.count})`} amount={zPendingVoids.totalMillimes} />
+              </section>
+              <section className="space-y-1 border-b border-outline-variant pb-3">
+                <h3 className="font-display text-title-sm">Day totals</h3>
+                <Metric label="Opening floats (excluded from cash count)" amount={zShiftLines.reduce((total, shift) => total + shift.startingCashMillimes, 0)} />
+                <Metric label="Cash sales" amount={zPaymentSplit.cash} />
+                <Metric label="Cash tab payments" amount={zShiftLines.reduce((total, shift) => total + (shift.tabPaymentsMillimes ?? 0), 0)} />
+                <Metric label="Cash in" amount={zShiftLines.reduce((total, shift) => total + (shift.cashInMillimes ?? 0), 0)} />
+                <Metric label="Cash out" amount={zShiftLines.reduce((total, shift) => total + (shift.cashOutMillimes ?? 0), 0)} />
+                <Metric label="Card total (sales + tab payments)" amount={zExpectedCard} />
+                {store?.allowOtherPayments && <Metric label="Other total (sales + tab payments)" amount={zExpectedOther} />}
               </section>
               {zShiftLines.map((shift) => (
                 <section key={shift.shiftId} className="space-y-1 border-b border-outline-variant pb-3 last:border-0 last:pb-0">
@@ -864,7 +874,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
                 </section>
               ))}
             </div>
-            <label className="font-body text-label-md">Total cash in drawer including float (TND)
+            <label className="font-body text-label-md">Total cash for the day, excluding opening floats (TND)
               <input readOnly inputMode="none" value={zCountedCash} placeholder="0.000" className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
             </label>
             <Keypad decimal onPress={(value) => setZCountedCash((current) => appendDecimalAmount(current, value))} onClear={() => setZCountedCash('')} onBackspace={() => setZCountedCash((current) => current.slice(0, -1))} />
@@ -880,8 +890,8 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             </>}
             {zReviewed && zDifference !== undefined && (
               <div className="space-y-2 rounded-xl bg-surface-container-low p-3" aria-live="polite">
-                <Metric label="Counted cash in drawer" amount={parsedZCountedCash ?? 0} />
-                <Metric label="Expected cash in drawer" amount={zExpectedCash} prominent />
+                <Metric label="Counted day cash (excluding floats)" amount={parsedZCountedCash ?? 0} />
+                <Metric label="Expected day cash (excluding floats)" amount={zExpectedCash} prominent />
                 <p className={`text-center font-display text-title-md font-bold ${
                   zDifference < 0 ? 'text-error-dark' : zDifference > 0 ? 'text-warning-dark' : 'text-success-dark'
                 }`}>

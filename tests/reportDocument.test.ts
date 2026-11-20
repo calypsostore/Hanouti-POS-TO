@@ -158,7 +158,7 @@ describe('report document', () => {
     expect(document.sections.at(-1)?.title).toBe('CASH TO HAVE IN DRAWER (EXCLUDING FLOAT)');
     const finalSection = document.sections.at(-1)!;
     expect(finalSection.lines.find((line) => line.label === 'EXPECTED CASH')).toMatchObject({ size: 'double' });
-    expect(finalSection.lines.find((line) => line.label === 'COUNTED CASH')).toMatchObject({ size: 'double' });
+    expect(finalSection.lines.find((line) => line.label === 'COUNTED CASH (EXCLUDING FLOAT)')).toMatchObject({ size: 'double' });
     expect(finalSection.lines.find((line) => line.label === 'BALANCED')).toMatchObject({ size: 'double' });
     expect(document.lines.find((line) => line.text.includes('EXPECTED CASH'))?.size).toBe('double');
     expect(document.lines.find((line) => line.text.includes('BALANCED'))?.size).toBe('double');
@@ -191,7 +191,7 @@ describe('report document', () => {
       const document = buildReportDocument(report, { name: 'Test Store' });
       const finalSection = document.sections.at(-1)!;
       expect(finalSection.title).toBe('CASH TO HAVE IN DRAWER (EXCLUDING FLOAT)');
-      for (const label of ['EXPECTED CASH', ...(type === 'Z' ? ['COUNTED CASH', 'BALANCED'] : [])]) {
+      for (const label of ['EXPECTED CASH', ...(type === 'Z' ? ['COUNTED CASH (EXCLUDING FLOAT)', 'BALANCED'] : [])]) {
         expect(finalSection.lines.find((line) => line.label === label)).toMatchObject({
           size: 'double',
           emphasized: true,
@@ -227,7 +227,7 @@ describe('report document', () => {
     expect(document.lines.find((line) => line.text.includes('SHORT 1.500 DT'))?.size).toBe('double');
   });
 
-  it('prints current Z counts and expectations including the float', () => {
+  it('prints legacy Z counts and expectations including the float', () => {
     const report = makeReport('Z');
     report.countedCashIncludesFloat = true;
     report.countedCashMillimes = 2_000;
@@ -241,6 +241,22 @@ describe('report document', () => {
       expect.objectContaining({ label: 'COUNTED CASH', value: '2.000 DT' }),
     ]));
     expect(document.sections.some((section) => section.title === 'FLOAT (INCLUDED IN DRAWER COUNT)')).toBe(true);
+  });
+
+  it('prints current Z cash counts excluding floats while listing the float separately', () => {
+    const report = makeReport('Z');
+    report.countedCashMillimes = 1_000;
+    report.countedCashIncludesFloat = false;
+    report.cashDifference = 0;
+    const document = buildReportDocument(report, { name: 'Test Store' });
+    const drawerSection = document.sections.find((section) =>
+      section.title === 'CASH TO HAVE IN DRAWER (EXCLUDING FLOAT)',
+    );
+    expect(drawerSection?.lines).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'EXPECTED CASH', value: '1.000 DT' }),
+      expect.objectContaining({ label: 'COUNTED CASH (EXCLUDING FLOAT)', value: '1.000 DT' }),
+    ]));
+    expect(document.sections.some((section) => section.title === 'FLOAT (NOT COUNTED)')).toBe(true);
   });
 
   it('prints Z card and other counts, the owner drawer difference, total shift differences, and unverified force closes', () => {

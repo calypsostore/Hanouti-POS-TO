@@ -32,6 +32,7 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
   const location = useLocation();
   const user = useAuthStore((state) => state.user);
   const isOwnerWorkspace = links.some((link) => link.to === '/owner/dashboard');
+  const isDashboardWorkspace = location.pathname === '/owner/dashboard' || location.pathname === '/admin/overview';
   const [moreOpen, setMoreOpen] = useState(false);
   const [pendingVoidCount, setPendingVoidCount] = useState(0);
   const unreadNotificationCount = useNotificationStore((state) => state.unreadCount);
@@ -105,7 +106,7 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
     : [{ title: 'System', links }];
 
   return (
-    <div className={`workspace-layout min-h-screen bg-surface pb-6${isOwnerWorkspace ? ' owner-workspace' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
+    <div className={`workspace-layout min-h-screen bg-surface pb-6${isOwnerWorkspace ? ' owner-workspace' : ''}${isDashboardWorkspace ? ' dashboard-workspace' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
       <TopBar title={title} storeName={storeName} storeLogoId={storeLogoId} onProfileClick={() => navigate('/settings')} />
       <aside className="desktop-sidebar" aria-label={t('common.workspaceNavigation')}>
         <div className="desktop-sidebar__brand">

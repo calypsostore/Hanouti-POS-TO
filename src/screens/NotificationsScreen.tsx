@@ -25,6 +25,7 @@ export function NotificationsScreen() {
   const markAllReadStore = useNotificationStore((state) => state.markAllRead);
   const [storeName, setStoreName] = useState('');
   const [error, setError] = useState('');
+  const [activeNotificationId, setActiveNotificationId] = useState('');
 
   useEffect(() => {
     if (!user?.storeId) return;
@@ -50,12 +51,28 @@ export function NotificationsScreen() {
 
   async function openNotification(notification: NotificationRecord) {
     if (!user) return;
+    setActiveNotificationId(notification.id);
     try {
       if (!notification.readAt) await markRead(user, notification.id);
       navigate(notificationPath(notification, user.role));
     } catch (markError) {
       console.error('Unable to open this notification.', markError);
       setError('Unable to open this notification. Please try again.');
+    } finally {
+      setActiveNotificationId('');
+    }
+  }
+
+  async function markNotificationRead(notificationId: string) {
+    if (!user) return;
+    setActiveNotificationId(notificationId);
+    try {
+      await markRead(user, notificationId);
+    } catch (markError) {
+      console.error('Unable to mark this notification as read.', markError);
+      setError('Unable to mark this notification as read. Please try again.');
+    } finally {
+      setActiveNotificationId('');
     }
   }
 
@@ -73,29 +90,47 @@ export function NotificationsScreen() {
           <h2 className="px-1 font-body text-label-lg text-on-surface-variant">{group.title}</h2>
           <CardGrid className="mobile-card-list mobile-gap-2">
           {group.entries.map((notification) => (
-            <button
+            <article
               key={notification.id}
-              type="button"
-              onClick={() => { void openNotification(notification); }}
-              className={`flex min-w-0 items-start gap-3 rounded-xl p-4 text-left shadow-card ${
+              className={`rounded-xl p-3 shadow-card ${
                 notification.readAt ? 'bg-surface-container-lowest' : 'bg-primary-fixed/40'
               }`}
             >
-              <span className={`mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
-                notification.readAt ? 'bg-surface-container text-outline' : 'bg-primary-fixed text-primary'
-              }`}>
-                <MaterialIcon name="notifications" className="text-xl" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="flex items-start justify-between gap-2">
-                  <span className="break-words font-body text-label-lg text-on-surface">{notification.title}</span>
-                  {!notification.readAt && <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-primary" aria-label="Unread" />}
+              <button
+                type="button"
+                disabled={activeNotificationId === notification.id}
+                onClick={() => { void openNotification(notification); }}
+                aria-label={`Open notification: ${notification.title}`}
+                className="flex w-full min-w-0 items-start gap-3 text-left disabled:opacity-60"
+              >
+                <span className={`mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+                  notification.readAt ? 'bg-surface-container text-outline' : 'bg-primary-fixed text-primary'
+                }`}>
+                  <MaterialIcon name="notifications" className="text-xl" />
                 </span>
-                <span className="mt-1 block break-words font-body text-body-sm text-on-surface-variant">{notification.body}</span>
-                <span className="mt-2 block font-body text-body-xs text-outline">{new Date(notification.createdAt).toLocaleString()}</span>
-              </span>
-              <MaterialIcon name="chevron_right" className="mt-1 shrink-0 text-outline" />
-            </button>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-start justify-between gap-2">
+                    <span className="break-words font-body text-label-lg text-on-surface">{notification.title}</span>
+                    {!notification.readAt && <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-primary" aria-label="Unread" />}
+                  </span>
+                  <span className="mt-1 block break-words font-body text-body-sm text-on-surface-variant">{notification.body}</span>
+                  <span className="mt-2 block font-body text-body-xs text-outline">{new Date(notification.createdAt).toLocaleString()}</span>
+                </span>
+                <MaterialIcon name="chevron_right" className="mt-1 shrink-0 text-outline" />
+              </button>
+              {!notification.readAt && (
+                <button
+                  type="button"
+                  disabled={activeNotificationId === notification.id}
+                  onClick={() => { void markNotificationRead(notification.id); }}
+                  aria-label={`Mark notification as read: ${notification.title}`}
+                  className="ml-12 mt-1 flex items-center gap-1 text-left font-body text-label-sm text-primary underline disabled:opacity-60"
+                >
+                  <MaterialIcon name="done" className="text-base" />
+                  Mark as read
+                </button>
+              )}
+            </article>
           ))}
           </CardGrid>
         </section>

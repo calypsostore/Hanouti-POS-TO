@@ -274,7 +274,7 @@ function OwnerDashboardContent() {
     ? (todaySalesMillimes > 0 ? t('owner.newSalesLastWeek') : t('owner.noSalesLastWeek'))
     : `${salesDifference >= 0 ? '+' : '-'}${formatTnd(Math.abs(salesDifference) / 1000)} DT (${salesDifferencePercent > 0 ? '+' : ''}${salesDifferencePercent}%) ${t('owner.vsLastWeek')}`;
   const renderTargetCard = (className: string) => (
-    <article className={`dashboard-target-card rounded-2xl bg-surface-container-lowest p-5 shadow-card ${className}`}>
+    <article className={`dashboard-target-card dashboard-glass dashboard-glass-tint--amber rounded-3xl p-5 ${className}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="font-display text-headline-md text-on-surface">{t('owner.salesTarget')}</h2>
@@ -327,8 +327,9 @@ function OwnerDashboardContent() {
   return (
     <>
     <WorkspaceLayout title={t('owner.dashboard')} storeName={store?.name} links={ownerWorkspaceLinks}>
-      <PageHeader title={t('owner.dashboard')} subtitle={store?.name} actions={
-        <div className="dashboard-period-switcher flex gap-1 rounded-xl bg-surface-container-high p-1">
+      <div className="role-dashboard owner-dashboard">
+      <PageHeader title={t('owner.dashboard')} subtitle={store?.name} className="dashboard-welcome" actions={
+        <div className="dashboard-period-switcher dashboard-segmented-control flex gap-1 rounded-xl bg-surface-container-high p-1">
           {(Object.keys(periodLabels) as Period[]).map((value) => (
             <button key={value} type="button" onClick={() => selectPeriod(value)} className={`min-h-10 rounded-lg px-3 font-body text-label-sm ${period === value ? 'bg-primary text-on-primary shadow-card' : 'text-on-surface-variant'}`}>
               {t(periodLabels[value])}
@@ -336,25 +337,25 @@ function OwnerDashboardContent() {
           ))}
         </div>
       } />
-      <p role="status" className={`mb-4 rounded-xl p-3 font-body text-body-sm ${dayStatus.dayIsClosed ? 'bg-warning-container text-on-warning-container' : 'bg-surface-container-low text-on-surface-variant'}`}>
+      <p role="status" className={`dashboard-status mb-4 rounded-xl p-3 font-body text-body-sm ${dayStatus.dayIsClosed ? 'bg-warning-container text-on-warning-container' : 'bg-surface-container-low text-on-surface-variant'}`}>
         {dayStatusMessage}
       </p>
 
-      {renderTargetCard('lg:hidden')}
-
       <StatGrid className="owner-kpi-grid mt-4">
-        <SummaryCard icon="payments" label={`${t('finance.sales')} · ${t(periodLabels[period])}`} value={`${formatTnd(summary.salesCollectedMillimes / 1000)} DT`} tone="primary" />
-        <SummaryCard icon="request_quote" label={`${t('finance.expenses')} · ${t(periodLabels[period])}`} value={`${formatTnd(summary.expensesMillimes / 1000)} DT`} tone="warning" />
-        <SummaryCard icon="account_balance" label={`${t('finance.netProfit')} · ${t(periodLabels[period])}`} value={`${formatTnd(summary.netProfitMillimes / 1000)} DT`} tone={summary.netProfitMillimes < 0 ? 'error' : 'success'} />
-        <SummaryCard icon="account_balance_wallet" label={t('finance.receivable')} value={`${formatTnd(summary.receivableMillimes / 1000)} DT`} tone="warning" />
-        <SummaryCard icon="receipt_long" label={`Orders · ${t(periodLabels[period])}`} value={String(summary.orderCount)} tone="success" />
-        <SummaryCard icon="price_change" label={`${t('owner.cashDifferences')} · ${t(periodLabels[period])}`} value={formatSignedAmount(summary.cashDifferenceMillimes)} tone={summary.cashDifferenceMillimes === 0 ? 'success' : 'warning'} />
+        <SummaryCard icon="payments" label={`${t('finance.sales')} · ${t(periodLabels[period])}`} value={`${formatTnd(summary.salesCollectedMillimes / 1000)} DT`} tone="blue" />
+        <SummaryCard icon="request_quote" label={`${t('finance.expenses')} · ${t(periodLabels[period])}`} value={`${formatTnd(summary.expensesMillimes / 1000)} DT`} tone="amber" />
+        <SummaryCard icon="account_balance" label={`${t('finance.netProfit')} · ${t(periodLabels[period])}`} value={`${formatTnd(summary.netProfitMillimes / 1000)} DT`} tone={summary.netProfitMillimes < 0 ? 'rose' : 'green'} />
+        <SummaryCard icon="account_balance_wallet" label={t('finance.receivable')} value={`${formatTnd(summary.receivableMillimes / 1000)} DT`} tone="violet" />
+        <SummaryCard icon="receipt_long" label={`Orders · ${t(periodLabels[period])}`} value={String(summary.orderCount)} tone="teal" />
+        <SummaryCard icon="price_change" label={`${t('owner.cashDifferences')} · ${t(periodLabels[period])}`} value={formatSignedAmount(summary.cashDifferenceMillimes)} tone={summary.cashDifferenceMillimes === 0 ? 'green' : 'amber'} />
       </StatGrid>
 
+      {renderTargetCard('lg:hidden')}
+
       <CardGrid className="owner-alert-grid mobile-card-list mobile-gap-3 mt-4">
-        <button type="button" onClick={() => navigate('/owner/voids')} className="w-full rounded-2xl bg-surface-container-lowest p-5 text-left shadow-card">
+        <button type="button" onClick={() => navigate('/owner/voids')} className="dashboard-glass dashboard-glass-tint--rose w-full rounded-3xl p-5 text-left">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="font-display text-headline-md text-on-surface">{t('owner.pendingVoidRequests')}</h2>
+            <h2 className="flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="pending_actions" className="dashboard-tone-icon dashboard-tone-icon--rose" />{t('owner.pendingVoidRequests')}</h2>
             <strong className="font-display text-headline-md tabular-nums text-error-dark">{pendingVoidOrders.length}</strong>
           </div>
           {pendingVoidOrders.length > 0 ? (
@@ -366,9 +367,9 @@ function OwnerDashboardContent() {
           ) : <p className="mt-2 font-body text-body-sm text-on-surface-variant">No requests awaiting review.</p>}
         </button>
 
-        <button type="button" onClick={() => navigate('/owner/inventory')} className="w-full rounded-2xl bg-surface-container-lowest p-5 text-left shadow-card">
+        <button type="button" onClick={() => navigate('/owner/inventory')} className="dashboard-glass dashboard-glass-tint--amber w-full rounded-3xl p-5 text-left">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="font-display text-headline-md text-on-surface">{t('owner.lowStockItems')}</h2>
+            <h2 className="flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="inventory_2" className="dashboard-tone-icon dashboard-tone-icon--amber" />{t('owner.lowStockItems')}</h2>
             <strong className="font-display text-headline-md tabular-nums text-warning-dark">{lowStockItems.length}</strong>
           </div>
           {lowStockItems.length > 0 ? (
@@ -383,9 +384,9 @@ function OwnerDashboardContent() {
           ) : <p className="mt-2 font-body text-body-sm text-on-surface-variant">No items below their stock thresholds.</p>}
         </button>
 
-        <article className="rounded-2xl bg-surface-container-lowest p-5 shadow-card">
+        <article className="dashboard-glass dashboard-glass-tint--green rounded-3xl p-5">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="font-display text-headline-md text-on-surface">{t('owner.staffOnShift')}</h2>
+            <h2 className="flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="groups" className="dashboard-tone-icon dashboard-tone-icon--green" />{t('owner.staffOnShift')}</h2>
             <strong className="font-display text-headline-md tabular-nums text-primary">{currentlyWorking.length}</strong>
           </div>
           <div className="mt-2 flex flex-col gap-2">
@@ -410,7 +411,7 @@ function OwnerDashboardContent() {
         </section>
       )}
 
-      <section aria-label={t('owner.overdueTabs')} className="mt-4 rounded-2xl bg-surface-container-lowest p-5 shadow-card">
+      <section aria-label={t('owner.overdueTabs')} className="dashboard-glass mt-4 rounded-2xl p-5 shadow-card">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="flex items-center gap-2 font-display text-headline-md text-on-surface">
@@ -445,41 +446,41 @@ function OwnerDashboardContent() {
       <section className="owner-chart-grid mobile-gap-3 mt-4 grid grid-cols-1 gap-4 lg:grid-cols-12">
         {renderTargetCard('hidden lg:block dashboard-target-card--desktop')}
 
-        <article className="dashboard-peak-chart rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+        <article className="dashboard-peak-chart dashboard-glass dashboard-glass-tint--blue rounded-2xl p-4 shadow-card">
           <h2 className="font-display text-headline-md text-on-surface">{t('owner.peakHours')} · {t(periodLabels[period])}</h2>
           <p className="mt-1 font-body text-body-sm text-on-surface-variant">Completed orders by hour of day.</p>
           <div className="mt-3 h-64 min-w-0">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={peakHours} margin={{ left: 0, right: 8, top: 8, bottom: 8 }}>
-                <CartesianGrid stroke="#E1ECEE" vertical={false} />
+                <CartesianGrid stroke="#E6EBF7" vertical={false} />
                 <XAxis dataKey="hour" tick={{ fontSize: 10 }} interval={2} tickFormatter={formatHour} />
                 <YAxis allowDecimals={false} width={28} tick={{ fontSize: 10 }} />
                 <Tooltip labelFormatter={(hour) => formatHour(Number(hour))} />
-                <Bar dataKey="orders" name="Orders" fill="#0F5F6E" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="orders" name="Orders" fill="#3B82F6" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </article>
 
-        <article className="dashboard-sales-chart rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+        <article className="dashboard-sales-chart dashboard-glass dashboard-glass-tint--amber rounded-2xl p-4 shadow-card">
           <h2 className="font-display text-headline-md text-on-surface">Sales over time · {t(periodLabels[period])}</h2>
           <p className="mt-1 font-body text-body-sm text-on-surface-variant">Completed order sales by day.</p>
           {salesByDate.length ? (
             <div className="mt-3 h-64 min-w-0">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={salesByDate} margin={{ left: 0, right: 12, top: 8, bottom: 8 }}>
-                  <CartesianGrid stroke="#E1ECEE" vertical={false} />
+                  <CartesianGrid stroke="#E6EBF7" vertical={false} />
                   <XAxis dataKey="label" tick={{ fontSize: 10 }} minTickGap={20} />
                   <YAxis width={48} tick={{ fontSize: 10 }} />
                   <Tooltip formatter={(value) => [`${formatTnd(Number(value))} DT`, 'Sales']} />
-                  <Bar dataKey="sales" name="Sales" fill="#0F5F6E" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="sales" name="Sales" fill="#F8A81A" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
           ) : <p className="mt-3 rounded-xl bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('common.noData')}</p>}
         </article>
 
-        <article className="dashboard-list-card rounded-2xl bg-surface-container-lowest p-5 shadow-card">
+        <article className="dashboard-list-card dashboard-glass dashboard-glass-tint--green rounded-2xl p-5 shadow-card">
           <h2 className="font-display text-headline-md text-on-surface">{t('owner.bestSellers')} · {t(periodLabels[period])}</h2>
           <p className="mt-1 font-body text-body-sm text-on-surface-variant">Completed product sales for the selected period.</p>
           {bestSellers.length ? (
@@ -487,7 +488,7 @@ function OwnerDashboardContent() {
           ) : <p className="mt-3 rounded-xl bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('owner.noItemsSold')}</p>}
         </article>
 
-        <article className="dashboard-list-card rounded-2xl bg-surface-container-lowest p-5 shadow-card">
+        <article className="dashboard-list-card dashboard-glass dashboard-glass-tint--violet rounded-2xl p-5 shadow-card">
           <h2 className="font-display text-headline-md text-on-surface">{t('owner.slowSellers')} · {t(periodLabels[period])}</h2>
           <p className="mt-1 font-body text-body-sm text-on-surface-variant">Products with the fewest completed sales, including unsold items.</p>
           {slowSellers.length ? (
@@ -495,17 +496,17 @@ function OwnerDashboardContent() {
           ) : <p className="mt-3 rounded-xl bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('owner.noItemsSold')}</p>}
         </article>
 
-        <article className="dashboard-staff-chart rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+        <article className="dashboard-staff-chart dashboard-glass dashboard-glass-tint--teal rounded-2xl p-4 shadow-card">
           <h2 className="mb-3 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="group" className="text-primary" />Sales by staff member · {t(periodLabels[period])}</h2>
           {salesByStaff.length ? (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={salesByStaff} margin={{ left: 0, right: 12, top: 8, bottom: 8 }}>
-                  <CartesianGrid stroke="#E1ECEE" vertical={false} />
+                  <CartesianGrid stroke="#E6EBF7" vertical={false} />
                   <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} />
                   <YAxis tick={{ fontSize: 11 }} />
                   <Tooltip formatter={(value) => [`${formatTnd(Number(value))} DT`, 'Sales']} />
-                  <Bar dataKey="sales" name="Sales" fill="#2E7D6A" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="sales" name="Sales" fill="#2FA878" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -514,7 +515,7 @@ function OwnerDashboardContent() {
       </section>
 
       <CardGrid className="mobile-gap-3 mt-4">
-        <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+        <article className="dashboard-glass rounded-2xl p-4 shadow-card">
           <h2 className="mb-4 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="receipt_long" className="text-primary" />Recent orders</h2>
           <div className="flex flex-col gap-2">
             {recentOrders.map((order) => {
@@ -536,7 +537,7 @@ function OwnerDashboardContent() {
           </div>
         </article>
 
-        <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+        <article className="dashboard-glass rounded-2xl p-4 shadow-card">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="schedule" className="text-primary" />Shift overview</h2>
             <div className="flex gap-2">
@@ -556,21 +557,22 @@ function OwnerDashboardContent() {
 
       <section className="mt-4">
         <h2 className="mb-3 font-display text-headline-md text-on-surface">Quick access</h2>
-        <CardGrid columns={4} className="mobile-gap-3">
+        <CardGrid columns={4} className="mobile-gap-3 quick-access-grid">
           {[
-            { label: 'Orders', icon: 'receipt_long', to: '/orders' },
-            { label: 'Staff', icon: 'groups', to: '/owner/staff' },
-            { label: 'Products', icon: 'inventory_2', to: '/owner/catalog' },
-            { label: 'Inventory', icon: 'inventory', to: '/owner/inventory' },
-            { label: 'Reports', icon: 'analytics', to: '/owner/reports' },
+            { label: 'Orders', icon: 'receipt_long', to: '/orders', tone: 'blue' },
+            { label: 'Staff', icon: 'groups', to: '/owner/staff', tone: 'violet' },
+            { label: 'Products', icon: 'inventory_2', to: '/owner/catalog', tone: 'amber' },
+            { label: 'Inventory', icon: 'inventory', to: '/owner/inventory', tone: 'green' },
+            { label: 'Reports', icon: 'analytics', to: '/owner/reports', tone: 'teal' },
           ].map((item) => (
-            <button key={item.label} type="button" onClick={() => navigate(item.to)} className="flex min-h-24 w-full items-center gap-3 rounded-2xl bg-surface-container-lowest p-5 text-left shadow-card">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-fixed text-primary"><MaterialIcon name={item.icon} /></span>
+            <button key={item.label} type="button" onClick={() => navigate(item.to)} className={`quick-glass-tile dashboard-quick-tile dashboard-quick-tile--${item.tone} flex min-h-24 w-full items-center gap-3 rounded-2xl p-5 text-left`}>
+              <span className="dashboard-quick-tile__icon flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"><MaterialIcon name={item.icon} /></span>
               <span className="font-body text-label-lg text-on-surface">{item.label}</span>
             </button>
           ))}
         </CardGrid>
       </section>
+      </div>
     </WorkspaceLayout>
     {overdueStatement && (
       <TabStatementView
@@ -586,16 +588,15 @@ function OwnerDashboardContent() {
   );
 }
 
-function SummaryCard({ icon, label, value, tone }: { icon: string; label: string; value: string; tone: 'primary' | 'success' | 'warning' | 'error' }) {
-  const tones = {
-    primary: 'bg-primary-fixed/40 text-primary',
-    success: 'bg-success-container text-on-success-container',
-    warning: 'bg-warning-container text-on-warning-container',
-    error: 'bg-error-container text-on-error-container',
-  };
+function SummaryCard({ icon, label, value, tone }: {
+  icon: string;
+  label: string;
+  value: string;
+  tone: 'blue' | 'amber' | 'green' | 'rose' | 'teal' | 'violet';
+}) {
   return (
-    <article className="stat-card relative flex h-full min-w-0 flex-col rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-      <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${tones[tone]}`}><MaterialIcon name={icon} className="text-lg" /></span>
+    <article className={`stat-card dashboard-glass dashboard-glass-kpi dashboard-glass-tint--${tone} relative flex h-full min-w-0 flex-col rounded-3xl p-4`}>
+      <span className={`dashboard-icon-tile dashboard-icon-tile--${tone} flex h-10 w-10 items-center justify-center rounded-xl`}><MaterialIcon name={icon} className="text-lg" /></span>
       <p className="mt-3 flex items-center gap-1 font-body text-body-sm text-on-surface-variant">
         {label}
         {label.startsWith('Sales') && <span className="sales-help-tooltip">

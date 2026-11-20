@@ -95,31 +95,58 @@ export function SuperAdminOverviewScreen() {
   const activeStores = nonArchivedStores.filter((store) => !storeIsSuspended(store));
   const suspendedStores = nonArchivedStores.filter(storeIsSuspended);
   const newestStores = [...stores].sort((left, right) => right.createdAt.localeCompare(left.createdAt)).slice(0, 5);
+  const storesWithOpenShifts = Math.max(0, nonArchivedStores.length - stats.noOpenShifts);
+  const openShiftStorePercent = nonArchivedStores.length
+    ? Math.round((storesWithOpenShifts / nonArchivedStores.length) * 100)
+    : 0;
 
   return (
     <WorkspaceLayout title="Platform overview" links={adminWorkspaceLinks}>
-      <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
+      <div className="role-dashboard super-admin-dashboard">
+      <header className="dashboard-welcome mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="font-display text-headline-lg text-on-surface">Platform overview</h1>
           <p className="mt-1 font-body text-body-md text-on-surface-variant">All-store activity for {today}.</p>
         </div>
-        <Link to="/admin/stores" className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-primary px-4 font-body text-label-md text-on-primary">
+        <Link to="/admin/stores" className="dashboard-primary-action inline-flex min-h-11 items-center gap-2 rounded-xl px-4 font-body text-label-md">
           <MaterialIcon name="storefront" />Manage stores
         </Link>
       </header>
       {error && <p role="alert" className="mb-4 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       <section className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <OverviewMetric label="Total stores" value={nonArchivedStores.length.toLocaleString()} />
-        <OverviewMetric label="Active" value={activeStores.length.toLocaleString()} />
-        <OverviewMetric label="Suspended" value={suspendedStores.length.toLocaleString()} />
-        <OverviewMetric label="Orders today" value={stats.totalOrders.toLocaleString()} />
-        <OverviewMetric label="Sales today" value={`${formatTnd(stats.totalSales / 1000)} DT`} />
+        <OverviewMetric icon="storefront" tone="blue" label="Total stores" value={nonArchivedStores.length.toLocaleString()} />
+        <OverviewMetric icon="check_circle" tone="green" label="Active" value={activeStores.length.toLocaleString()} />
+        <OverviewMetric icon="pause_circle" tone="rose" label="Suspended" value={suspendedStores.length.toLocaleString()} />
+        <OverviewMetric icon="receipt_long" tone="amber" label="Orders today" value={stats.totalOrders.toLocaleString()} />
+        <OverviewMetric icon="payments" tone="purple" label="Sales today" value={`${formatTnd(stats.totalSales / 1000)} DT`} />
       </section>
-      <section className="mb-5 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-        <h2 className="font-display text-headline-md text-on-surface">Stores with no open shift</h2>
-        <p className="mt-1 font-display text-headline-lg tabular-nums text-primary">{stats.noOpenShifts} <span className="font-body text-body-sm text-on-surface-variant">of {nonArchivedStores.length} stores</span></p>
+      <section className="super-admin-shift-card mb-5 rounded-2xl p-4 shadow-card">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="font-body text-label-sm uppercase tracking-wide">Live operations</p>
+            <h2 className="mt-1 font-display text-headline-md">Stores with an open shift</h2>
+            <p className="mt-2 font-display text-headline-lg tabular-nums">
+              {storesWithOpenShifts}
+              <span className="ml-2 font-body text-body-sm">of {nonArchivedStores.length} stores</span>
+            </p>
+          </div>
+          <div className="super-admin-shift-summary">
+            <span className="font-display text-title-lg tabular-nums">{stats.noOpenShifts}</span>
+            <span className="font-body text-body-sm">without an open shift</span>
+          </div>
+        </div>
+        <div
+          className="super-admin-shift-track mt-4"
+          role="progressbar"
+          aria-label="Stores with an open shift"
+          aria-valuemin={0}
+          aria-valuemax={nonArchivedStores.length}
+          aria-valuenow={storesWithOpenShifts}
+        >
+          <span style={{ width: `${openShiftStorePercent}%` }} />
+        </div>
       </section>
-      <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+      <section className="dashboard-glass rounded-2xl p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 className="font-display text-headline-md text-on-surface">Newest stores</h2>
           <Link to="/admin/stores" className="font-body text-label-md text-primary underline">View all</Link>
@@ -140,13 +167,25 @@ export function SuperAdminOverviewScreen() {
           {!loading && !error && newestStores.length === 0 && <p className="font-body text-body-sm text-outline">{t('common.noData')}</p>}
         </div>
       </section>
+      </div>
     </WorkspaceLayout>
   );
 }
 
-function OverviewMetric({ label, value }: { label: string; value: string }) {
+function OverviewMetric({
+  icon,
+  tone,
+  label,
+  value,
+}: {
+  icon: string;
+  tone: 'blue' | 'green' | 'rose' | 'amber' | 'purple';
+  label: string;
+  value: string;
+}) {
   return (
-    <article className="min-w-0 rounded-xl bg-surface-container-lowest p-3 shadow-card sm:p-4">
+    <article className={`overview-metric overview-metric--${tone} dashboard-glass dashboard-glass-tint--${tone} min-w-0 rounded-2xl p-3 sm:p-4`}>
+      <span className="overview-metric__icon"><MaterialIcon name={icon} /></span>
       <p className="font-body text-body-sm text-outline">{label}</p>
       <p className="mt-1 truncate font-display text-title-lg tabular-nums text-primary">{value}</p>
     </article>

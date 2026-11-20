@@ -97,11 +97,11 @@ export function StaffDashboardScreen() {
   const dateLabel = new Intl.DateTimeFormat([], { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
 
   return (
-    <div className="min-h-screen bg-surface pb-24">
+    <div className="min-h-screen bg-surface pb-24 staff-dashboard">
       <TopBar title="Staff dashboard" storeName={store?.name} onProfileClick={() => navigate('/profile')} />
       <main className="mx-auto w-full p-0">
-        <PageContainer className="staff-dashboard-container">
-        <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
+      <PageContainer className="staff-dashboard-container role-dashboard staff-dashboard-content">
+        <header className="dashboard-welcome mb-5 flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="font-body text-label-md text-primary">Welcome back</p>
             <h1 className="mt-1 font-display text-headline-lg text-on-surface">{user?.name}</h1>
@@ -113,9 +113,9 @@ export function StaffDashboardScreen() {
         {error && <p role="alert" className="mb-4 rounded-xl bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
 
         {canManageShift && (
-          <CardGrid className="mb-4 mobile-gap-3">
+          <CardGrid className="mb-4 mobile-gap-3 staff-dashboard-actions">
             {openShift ? (
-              <button type="button" onClick={() => navigate('/shift')} className="flex min-h-24 items-center gap-3 rounded-2xl bg-surface-container-lowest p-4 text-left shadow-card transition active:scale-[0.99]">
+              <button type="button" onClick={() => navigate('/shift')} className="dashboard-glass dashboard-glass-tint--rose flex min-h-24 items-center gap-3 rounded-2xl p-4 text-left transition active:scale-[0.99]">
                 <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-error-container text-error-dark"><MaterialIcon name="lock" /></span>
                 <div>
                   <p className="font-display text-headline-sm text-on-surface">Close shift</p>
@@ -123,7 +123,7 @@ export function StaffDashboardScreen() {
                 </div>
               </button>
             ) : (
-              <button type="button" onClick={() => navigate('/shift')} className="flex min-h-24 items-center gap-3 rounded-2xl bg-surface-container-lowest p-4 text-left shadow-card transition active:scale-[0.99]">
+              <button type="button" onClick={() => navigate('/shift')} className="dashboard-glass dashboard-glass-tint--green flex min-h-24 items-center gap-3 rounded-2xl p-4 text-left transition active:scale-[0.99]">
                 <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-fixed text-primary"><MaterialIcon name="lock_open" /></span>
                 <div>
                   <p className="font-display text-headline-sm text-on-surface">Open shift</p>
@@ -132,11 +132,11 @@ export function StaffDashboardScreen() {
               </button>
             )}
             {canTakeOrders && (
-              <button type="button" onClick={() => navigate('/pos')} className="flex min-h-24 items-center gap-3 rounded-2xl bg-primary p-4 text-left text-on-primary shadow-card transition active:scale-[0.99]">
+              <button type="button" onClick={() => navigate('/pos')} className="dashboard-primary-action flex min-h-24 items-center gap-3 rounded-2xl p-4 text-left transition active:scale-[0.99]">
                 <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/15"><MaterialIcon name="point_of_sale" /></span>
                 <div>
                   <p className="font-display text-headline-sm">Open POS</p>
-                  <p className="mt-1 font-body text-body-sm text-on-primary/80">Take a new counter order</p>
+                  <p className="mt-1 font-body text-body-sm text-ink/70">Take a new counter order</p>
                 </div>
               </button>
             )}
@@ -145,24 +145,24 @@ export function StaffDashboardScreen() {
 
         {canTakeOrders && !canManageShift && (
           <section className="mb-4">
-            <button type="button" onClick={() => navigate('/pos')} className="flex min-h-24 w-full items-center gap-3 rounded-2xl bg-primary p-4 text-left text-on-primary shadow-card transition active:scale-[0.99]">
+            <button type="button" onClick={() => navigate('/pos')} className="dashboard-primary-action flex min-h-24 w-full items-center gap-3 rounded-2xl p-4 text-left transition active:scale-[0.99]">
               <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/15"><MaterialIcon name="point_of_sale" /></span>
               <div>
                 <p className="font-display text-headline-sm">Open POS</p>
-                <p className="mt-1 font-body text-body-sm text-on-primary/80">Take a new counter order</p>
+                <p className="mt-1 font-body text-body-sm text-ink/70">Take a new counter order</p>
               </div>
             </button>
           </section>
         )}
 
         {displayedSales !== null && (
-          <CardGrid className="mb-4 mobile-gap-3">
-            <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+          <CardGrid className="mb-4 mobile-gap-3 staff-dashboard-kpis">
+            <article className="dashboard-kpi dashboard-glass dashboard-glass-tint--blue rounded-2xl p-4">
               <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-fixed/40 text-primary"><MaterialIcon name="payments" /></span>
               <p className="mt-3 font-body text-body-sm text-on-surface-variant">Today's personal sales</p>
               <p className="mt-1 font-display text-headline-md tabular-nums text-on-surface">{formatTnd(displayedSales / 1000)} DT</p>
             </article>
-            <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+            <article className="dashboard-kpi dashboard-glass dashboard-glass-tint--green rounded-2xl p-4">
               <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-success-container text-on-success-container"><MaterialIcon name="receipt_long" /></span>
               <p className="mt-3 font-body text-body-sm text-on-surface-variant">Completed orders today</p>
               <p className="mt-1 font-display text-headline-md tabular-nums text-on-surface">{completedOrders.length}</p>
@@ -171,7 +171,7 @@ export function StaffDashboardScreen() {
         )}
 
         {canManageShift && shiftSummary && (
-          <section className="mb-4 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+          <section className="staff-shift-summary dashboard-glass mb-4 rounded-2xl p-4">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <p className="font-body text-label-sm uppercase text-outline">Personal shift summary</p>
@@ -199,7 +199,7 @@ export function StaffDashboardScreen() {
         )}
 
         {canRequestVoid && pendingVoidOrders.length > 0 && (
-          <section className="mb-4 rounded-2xl border border-warning-container bg-warning-container p-4">
+          <section className="dashboard-glass dashboard-glass-tint--amber mb-4 rounded-2xl p-4">
             <div className="flex items-start gap-3">
               <MaterialIcon name="notifications_active" className="mt-0.5 text-secondary" />
               <div>
@@ -213,7 +213,7 @@ export function StaffDashboardScreen() {
         )}
 
         {canViewHistory && (
-          <section>
+          <section className="staff-recent-orders">
             <div className="mb-3 flex items-center justify-between gap-3">
               <h2 className="font-display text-headline-md text-on-surface">Recent orders</h2>
               <Button variant="secondary" className="min-h-10 px-3" onClick={() => navigate('/orders')}>
@@ -224,7 +224,7 @@ export function StaffDashboardScreen() {
             {loading ? <ListSkeleton rows={2} label="Loading recent orders" /> : recentOrders.length > 0 ? (
               <CardGrid className="mobile-gap-2">
                 {recentOrders.map((order) => (
-                  <button key={order.id} type="button" onClick={() => navigate('/orders')} className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-lowest p-4 text-left shadow-card">
+                  <button key={order.id} type="button" onClick={() => navigate('/orders')} className="dashboard-glass-row flex items-center justify-between gap-3 rounded-xl p-4 text-left">
                     <div className="min-w-0">
                       <p className="font-display text-title-md text-on-surface">#{order.number}</p>
                       <p className="mt-1 truncate font-body text-body-sm text-on-surface-variant">

@@ -30,6 +30,7 @@ import {
   resolveVoid as resolveRemoteVoid,
   voidWithPin as voidRemoteOrder,
 } from '../data/repositories/orderRepository';
+import { listReports as listRemoteReports } from '../data/repositories/reportRepository';
 
 const getOrders = () => readData('orders', seedOrders);
 const saveOrders = (orders: OrderRecord[]) => writeData('orders', orders);
@@ -75,6 +76,25 @@ async function getCurrentBusinessDate(storeId: string): Promise<string> {
     .filter((shift) => shift.storeId === storeId && new Date(shift.openedAt).getTime() > lastZAt)
     .sort((left, right) => left.openedAt.localeCompare(right.openedAt))[0];
   return dateKeyInTimezone(new Date(firstShift?.openedAt ?? Date.now()), timeZone);
+}
+
+async function getCurrentReportPeriodStart(storeId: string): Promise<string | undefined> {
+  const [reports, shifts] = await Promise.all([
+    isSupabaseDriver()
+      ? listRemoteReports(storeId)
+      : Promise.resolve(readData<ReportRecord[]>('reports', seedReports)),
+    shiftService.listShifts(storeId),
+  ]);
+  const lastZ = reports
+    .filter((report) => report.storeId === storeId && report.type === 'Z')
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+  const lastZAt = lastZ
+    ? new Date(lastZ.periodTo ?? lastZ.createdAt).getTime()
+    : Number.NEGATIVE_INFINITY;
+  const firstShift = shifts
+    .filter((shift) => shift.storeId === storeId && new Date(shift.openedAt).getTime() > lastZAt)
+    .sort((left, right) => left.openedAt.localeCompare(right.openedAt))[0];
+  return firstShift?.openedAt ?? (lastZ ? lastZ.periodTo ?? lastZ.createdAt : undefined);
 }
 
 export class OrderServiceError extends Error {
@@ -259,8 +279,11 @@ export interface ShiftSalesBreakdown {
 
 export const orderService = {
   async listToday(storeId: string, staffId?: string): Promise<OrderRecord[]> {
-    const currentBusinessDate = await getCurrentBusinessDate(storeId);
-    if (isSupabaseDriver()) return listRemoteOrders(storeId, staffId, currentBusinessDate);
+    const [currentBusinessDate, periodStart] = await Promise.all([
+      getCurrentBusinessDate(storeId),
+      getCurrentReportPeriodStart(storeId),
+    ]);
+    if (isSupabaseDriver()) return listRemoteOrders(storeId, staffId, currentBusinessDate, periodStart);
     const shifts = await shiftService.listShifts(storeId);
     const shiftById = new Map(shifts.map((shift) => [shift.id, shift]));
     const store = await userService.getStore(storeId);
@@ -272,6 +295,7 @@ export const orderService = {
           new Date(shiftById.get(order.shiftId)?.openedAt ?? order.createdAt),
           timeZone,
         )) === currentBusinessDate &&
+        (!periodStart || new Date(order.createdAt).getTime() >= new Date(periodStart).getTime()) &&
         (!staffId || order.staffId === staffId))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },

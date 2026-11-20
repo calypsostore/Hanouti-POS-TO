@@ -84,7 +84,12 @@ function reportWorkflowError(error: { message: string; code?: string }, context:
   throw new Error(`${context}: ${error.message}`, { cause: error });
 }
 
-export async function listOrders(storeId: string, staffId?: string, businessDate?: string): Promise<OrderRecord[]> {
+export async function listOrders(
+  storeId: string,
+  staffId?: string,
+  businessDate?: string,
+  createdAfter?: string,
+): Promise<OrderRecord[]> {
   let query = getSupabaseClient()
     .from('orders')
     .select('*, items:order_lines(*)')
@@ -92,6 +97,7 @@ export async function listOrders(storeId: string, staffId?: string, businessDate
     .order('created_at', { ascending: false });
   if (staffId) query = query.eq('staff_id', staffId);
   if (businessDate) query = query.eq('business_date', businessDate);
+  if (createdAfter) query = query.gte('created_at', createdAfter);
   const { data, error } = await query;
   if (error) reportWorkflowError(error, 'Could not load orders');
   return (data ?? []).map((row) => mapJoinedOrder(row as JoinedOrderRow));

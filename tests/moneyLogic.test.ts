@@ -662,6 +662,7 @@ describe('local money logic', () => {
     const currentShift = await shiftService.openShift(storeId, staffId, 1_000);
     const currentOrder = makeOrder('order-current-period', currentShift.id, 'done', 'cash', 700);
     setLocalData('orders', [archivedOrder, currentOrder]);
+    await expect(orderService.listToday(storeId)).resolves.toEqual([currentOrder]);
     await shiftService.closeShift(currentShift.id, 1_700);
 
     const secondZ = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
@@ -670,6 +671,7 @@ describe('local money logic', () => {
     expect(secondZ.periodFrom).toBe(currentShift.openedAt);
     expect(secondZ.salesMillimes).toBe(700);
     expect(secondZ.shifts?.map((shift) => shift.shiftId)).toEqual([currentShift.id]);
+    await expect(orderService.listToday(storeId)).resolves.toEqual([]);
   });
 
   it('does not repeat same-day expenses already included in the previous Z report', async () => {

@@ -211,10 +211,7 @@ export async function getShiftBreakdown(shiftId: string): Promise<{
       result.voidsMillimes += Number(order.total_millimes);
       return result;
     }
-    if (order.status === 'pending_void') {
-      if (order.payment_method === 'cash') result.cashSalesMillimes += Number(order.total_millimes);
-      return result;
-    }
+    if (order.status === 'pending_void') return result;
     if (order.status !== 'done') return result;
     result.orderCount += 1;
     if (order.payment_method === 'cash') result.cashSalesMillimes += Number(order.total_millimes);

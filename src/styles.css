@@ -2,6 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
+@font-face {
+  font-family: "Roboto Mono";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: block;
+  src: url("/fonts/RobotoMono-Variable-Latin.woff2") format("woff2");
+}
+
 :root {
   color-scheme: light;
   --color-primary: 15 95 110;
@@ -204,7 +212,7 @@ button {
   background: #fff;
   color: #000;
   padding: 3mm;
-  font: 9px/1.35 "Courier New", Courier, monospace;
+  font: 9px/1.35 "Roboto Mono", monospace;
   overflow-wrap: anywhere;
 }
 
@@ -2624,8 +2632,18 @@ button {
     margin: 0 !important;
     padding: 3mm !important;
     background: #fff !important;
-    font-family: "Courier New", monospace !important;
+    font-family: "Roboto Mono", monospace !important;
     print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .receipt-print-target--active .receipt-line-bold,
+  .receipt-print-target--active .receipt-line-double {
+    font-weight: 700 !important;
+  }
+
+  .receipt-print-target--active .receipt-line-double {
+    font-size: 1.5em !important;
   }
 
   .no-print {

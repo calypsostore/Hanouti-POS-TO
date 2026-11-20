@@ -35,6 +35,7 @@ type ResultListener = (result: UpdateCheckResult) => void;
 const listeners = new Set<UpdateListener>();
 const resultListeners = new Set<ResultListener>();
 let registration: ServiceWorkerRegistration | undefined;
+let registrationUpdateListenerRegistered = false;
 let hasUpdate = false;
 let availableVersion: string | undefined;
 let availableBuild: string | undefined;
@@ -331,6 +332,21 @@ export const updateService = {
   async register(): Promise<void> {
     if (this.getMode() === 'bundled' || import.meta.env.DEV || !('serviceWorker' in navigator)) return;
     registration = await navigator.serviceWorker.register('/sw.js');
+    if (registrationUpdateListenerRegistered) return;
+    registrationUpdateListenerRegistered = true;
+    const announceWaitingWorker = () => {
+      if (registration?.waiting && navigator.serviceWorker.controller) {
+        setUpdateAvailable(__APP_VERSION__, `${__BUILD_ID__}-service-worker`);
+      }
+    };
+    registration.addEventListener('updatefound', () => {
+      const installing = registration?.installing;
+      if (!installing) return;
+      installing.addEventListener('statechange', () => {
+        if (installing.state === 'installed' && navigator.serviceWorker.controller) announceWaitingWorker();
+      });
+    });
+    announceWaitingWorker();
   },
 
   checkForUpdates,

@@ -116,7 +116,7 @@ describe('report document', () => {
     expect(text).toContain('Shift drink');
     expect(text).toContain('Coffee beans');
     expect(text).toContain('0.800 DT paid');
-    expect(text).toContain('Closed by owner');
+    expect(text).toContain('Closed by force');
     expect(text).toContain('BALANCED');
   });
 
@@ -171,6 +171,42 @@ describe('report document', () => {
     expect(document.sections.at(-1)?.title).toBe('CASH TO HAVE IN DRAWER (EXCLUDING FLOAT)');
     expect(document.sections.at(-1)?.lines.find((line) => line.label === 'EXPECTED CASH')?.size).toBe('double');
     expect(document.sections.at(-1)?.lines.some((line) => line.label === 'Not counted - X report is interim')).toBe(true);
+  });
+
+  it('keeps the final cash block last and renders its key figures double-size and bold for X and Z', () => {
+    for (const type of ['X', 'Z'] as const) {
+      const report = makeReport(type);
+      report.pendingVoids = {
+        count: 1,
+        totalMillimes: 2000,
+        orders: [{
+          ticketNumber: 14,
+          staffName: 'Cashier',
+          shiftId: 'shift-1',
+          amountMillimes: 2000,
+          paymentMethod: 'cash',
+          reason: 'Wrong item',
+          requestedAt: '2026-11-20T19:00:00.000Z',
+        }],
+      };
+      const document = buildReportDocument(report, { name: 'Test Store' });
+      const finalSection = document.sections.at(-1)!;
+      expect(finalSection.title).toBe('CASH TO HAVE IN DRAWER (EXCLUDING FLOAT)');
+      for (const label of ['EXPECTED CASH', ...(type === 'Z' ? ['COUNTED CASH', 'BALANCED'] : [])]) {
+        expect(finalSection.lines.find((line) => line.label === label)).toMatchObject({
+          size: 'double',
+          emphasized: true,
+        });
+        expect(document.lines.find((line) => line.text.includes(label))).toMatchObject({
+          size: 'double',
+          bold: true,
+        });
+      }
+      if (type === 'X') {
+        expect(document.sections.find((section) => section.title === 'PENDING VOIDS (EXCLUDED FROM SALES AND CASH)')?.lines)
+          .toEqual(expect.arrayContaining([expect.objectContaining({ label: '#14 · Cashier · Wrong item' })]));
+      }
+    }
   });
 
   it('prints an ex-float shortage with the double-size difference and supports old snapshots', () => {

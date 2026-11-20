@@ -226,7 +226,7 @@ describe('local money logic', () => {
     expect(report.cashDifferenceMillimes).toBe(-1_500);
   });
 
-  it('counts only cash tab settlements and subtracts cash reversals, including pending-void cash sales', async () => {
+  it('counts cash tab settlements and reversals but excludes pending-void cash sales', async () => {
     const shiftId = 'shift-tab-methods';
     setLocalData('orders', [
       makeOrder('pending-cash', shiftId, 'pending_void', 'cash', 3_000),
@@ -239,9 +239,160 @@ describe('local money logic', () => {
 
     await expect(orderService.getShiftSalesBreakdown(shiftId)).resolves.toMatchObject({
       orderCount: 0,
-      cashSalesMillimes: 3_000,
+      cashSalesMillimes: 0,
       tabPaymentsMillimes: 18_000,
     });
+  });
+
+  it('removes an open-shift cash void from expected cash and sales, then restores it on rejection', async () => {
+    const shiftId = 'shift-open-void';
+    const shift = makeShift(shiftId, 10_000);
+    setLocalData('shifts', [shift]);
+    setLocalData('orders', [makeOrder('open-void', shiftId, 'done', 'cash', 20_000)]);
+
+    await expect(shiftService.getExpectedCash(shiftId)).resolves.toBe(30_000);
+    await orderService.requestVoid('open-void', staffId, 'Wrong item');
+    await expect(shiftService.getExpectedCash(shiftId)).resolves.toBe(10_000);
+    await expect(orderService.getShiftSalesBreakdown(shiftId)).resolves.toMatchObject({
+      orderCount: 0,
+      cashSalesMillimes: 0,
+    });
+
+    await shiftService.closeShift(shiftId, 10_000);
+    await orderService.resolveVoidRequest('open-void', ownerId, 'reject');
+    await expect(shiftService.getExpectedCash(shiftId)).resolves.toBe(30_000);
+    await expect(shiftService.getShift(shiftId)).resolves.toMatchObject({ differenceMillimes: -20_000 });
+    await expect(orderService.getShiftSalesBreakdown(shiftId)).resolves.toMatchObject({
+      orderCount: 1,
+      cashSalesMillimes: 20_000,
+    });
+  });
+
+  it('records request and rejection ledger rows for a closed shift without double-deducting approval', async () => {
+    const shiftId = 'shift-closed-void';
+    const shift = { ...makeClosedShift(shiftId, 10_000), expectedCashMillimes: 30_000, countedCashMillimes: 10_000 };
+    const approvalShiftId = 'shift-closed-approve';
+    const approvalShift = {
+      ...makeClosedShift(approvalShiftId, 10_000),
+      expectedCashMillimes: 30_000,
+      countedCashMillimes: 10_000,
+    };
+    setLocalData('shifts', [shift, approvalShift]);
+    setLocalData('orders', [
+      makeOrder('closed-reject', shiftId, 'done', 'cash', 20_000),
+      makeOrder('closed-approve', approvalShiftId, 'done', 'cash', 20_000),
+    ]);
+
+    await orderService.requestVoid('closed-reject', staffId, 'Refunded');
+    await expect(shiftService.getExpectedCash(shiftId)).resolves.toBe(10_000);
+    await orderService.resolveVoidRequest('closed-reject', ownerId, 'reject');
+    await expect(shiftService.getExpectedCash(shiftId)).resolves.toBe(30_000);
+    await expect(shiftService.getShift(shiftId)).resolves.toMatchObject({ differenceMillimes: -20_000 });
+
+    await orderService.requestVoid('closed-approve', staffId, 'Wrong item');
+    await orderService.resolveVoidRequest('closed-approve', ownerId, 'approve', 'Wrong item');
+    const approvedShift = await shiftService.getShift(approvalShiftId);
+    expect(approvedShift?.voidAdjustments).toEqual(expect.arrayContaining([
+      expect.objectContaining({ orderId: 'closed-approve', kind: 'requested', amountMillimes: -20_000 }),
+    ]));
+    expect(approvedShift?.voidAdjustments?.some((adjustment) =>
+      adjustment.orderId === 'closed-approve' && adjustment.kind === 'approved',
+    )).toBe(false);
+    const rejectedShift = await shiftService.getShift(shiftId);
+    expect(rejectedShift?.voidAdjustments).toEqual(expect.arrayContaining([
+      expect.objectContaining({ orderId: 'closed-reject', kind: 'requested', amountMillimes: -20_000 }),
+      expect.objectContaining({ orderId: 'closed-reject', kind: 'rejected', amountMillimes: 20_000 }),
+    ]));
+    await expect(shiftService.getExpectedCash(approvalShiftId)).resolves.toBe(10_000);
+  });
+
+  it('adds a positive rejection adjustment when a shift closed with its void pending', async () => {
+    const shiftId = 'shift-pending-closed';
+    const shift = { ...makeClosedShift(shiftId, 10_000), expectedCashMillimes: 10_000, countedCashMillimes: 10_000 };
+    setLocalData('shifts', [shift]);
+    setLocalData('orders', [
+      { ...makeOrder('pending-closed', shiftId, 'pending_void', 'cash', 20_000), voidReason: 'Refunded' },
+    ]);
+
+    await orderService.resolveVoidRequest('pending-closed', ownerId, 'reject');
+    await expect(shiftService.getExpectedCash(shiftId)).resolves.toBe(30_000);
+    await expect(shiftService.getShift(shiftId)).resolves.toMatchObject({
+      differenceMillimes: -20_000,
+      voidAdjustments: [expect.objectContaining({ kind: 'rejected', amountMillimes: 20_000 })],
+    });
+  });
+
+  it('lists pending voids on X, blocks Z until resolved, then permits Z', async () => {
+    const shiftId = 'shift-z-pending-void';
+    prepareReportData([makeClosedShift(shiftId, 10_000)]);
+    setLocalData('orders', [
+      { ...makeOrder('z-pending-void', shiftId, 'pending_void', 'cash', 20_000), voidReason: 'Wrong item', voidRequestedAt: new Date().toISOString() },
+    ]);
+
+    const xReport = await reportService.createXReport(storeId, 'Owner');
+    expect(xReport.pendingVoids).toMatchObject({
+      count: 1,
+      totalMillimes: 20_000,
+      orders: [expect.objectContaining({
+        ticketNumber: 1,
+        staffName: 'Sarah',
+        shiftId,
+        amountMillimes: 20_000,
+        reason: 'Wrong item',
+      })],
+    });
+    await expect(reportService.closeDayWithZReport(storeId, ownerId, '1234', {
+      countedCashMillimes: 0,
+    })).rejects.toThrow('Resolve every void request before creating a Z report.');
+
+    await orderService.resolveVoidRequest('z-pending-void', ownerId, 'reject');
+    const summary = await reportService.getCurrentPeriodSummary(storeId);
+    const zReport = await reportService.closeDayWithZReport(storeId, ownerId, '1234', {
+      countedCashMillimes: summary.expectedCashExFloatMillimes,
+    });
+    expect(zReport.pendingVoids?.count).toBe(0);
+  });
+
+  it('force-closes all open shifts at zero, auto-approves pending voids, and records the Z tags', async () => {
+    const openShift = makeShift('force-open-shift', 10_000);
+    const closedShift = {
+      ...makeClosedShift('force-closed-shift', 10_000),
+      expectedCashMillimes: 10_000,
+      countedCashMillimes: 10_000,
+    };
+    prepareReportData([openShift, closedShift]);
+    setLocalData('orders', [
+      { ...makeOrder('force-open-void', openShift.id, 'pending_void', 'cash', 20_000), voidReason: 'Wrong item' },
+      { ...makeOrder('force-closed-void', closedShift.id, 'pending_void', 'cash', 30_000), voidReason: 'Refunded' },
+    ]);
+    setLocalData('auth-session', {
+      userId: ownerId,
+      expiresAt: Date.now() + 60_000,
+    });
+
+    const result = await shiftService.forceCloseDay('1234');
+    expect(result.shifts).toHaveLength(2);
+    expect(result.orders).toHaveLength(2);
+    expect(result.shifts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: 'closed', differenceMillimes: 0 }),
+    ]));
+    await expect(shiftService.listOpenShifts(storeId)).resolves.toHaveLength(0);
+    await expect(orderService.listAll(storeId)).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'force-open-void', status: 'voided', voidReason: 'Auto-approved at forced close' }),
+      expect.objectContaining({ id: 'force-closed-void', status: 'voided', voidReason: 'Auto-approved at forced close' }),
+    ]));
+
+    const summary = await reportService.getCurrentPeriodSummary(storeId);
+    const zReport = await reportService.closeDayWithZReport(storeId, ownerId, '1234', {
+      countedCashMillimes: summary.expectedCashExFloatMillimes,
+    });
+    expect(zReport.shifts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ shiftId: openShift.id, forceClosedByOwner: true, voidsAutoApprovedCount: 1 }),
+      expect.objectContaining({ shiftId: closedShift.id, forceClosedByOwner: false, voidsAutoApprovedCount: 1 }),
+    ]));
+    expect(zReport.voids?.orders).toEqual(expect.arrayContaining([
+      expect.objectContaining({ autoApprovedAtForcedClose: true }),
+    ]));
   });
 
   it('reports credit status at 79, 80, and over 100 percent and blocks an over-limit tab order', async () => {

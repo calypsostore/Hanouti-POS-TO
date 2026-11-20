@@ -122,6 +122,11 @@ function OwnerVoidRequestsContent() {
                 className="mt-1 min-h-24 w-full rounded-lg bg-surface-container-low p-3"
               />
             </label>
+            {activeRequest.paymentMethod === 'cash' && (
+              <p className="rounded-lg bg-surface-container-low p-3 font-body text-body-sm text-on-surface-variant">
+                Reject returns {formatTnd(activeRequest.totalMillimes / 1000)} DT to {staffNames[activeRequest.staffId] ?? 'the staff member'}'s expected cash.
+              </p>
+            )}
             <div className="sheet-action-bar grid grid-cols-2 gap-2">
               <Button variant="danger" onClick={() => { void resolve(activeRequest, 'reject'); }}>
                 <MaterialIcon name="close" />{t('voids.reject')}

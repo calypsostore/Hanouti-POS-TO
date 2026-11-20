@@ -2,14 +2,23 @@ import { Capacitor } from '@capacitor/core';
 import { Directory, Filesystem } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 
+async function waitForReceiptFonts(): Promise<void> {
+  await document.fonts.ready;
+  await Promise.all([
+    document.fonts.load('400 1em "Roboto Mono"'),
+    document.fonts.load('700 1em "Roboto Mono"'),
+  ]);
+}
+
 export async function printOrSharePdf(
   element: HTMLElement | null,
   filename: string,
   title: string,
   widthMillimetres: 58 | 80 = 80,
 ): Promise<void> {
+  if (!element) throw new Error('The printable receipt is not available.');
+  await waitForReceiptFonts();
   if (!Capacitor.isNativePlatform()) {
-    if (!element) throw new Error('The printable receipt is not available.');
     const printStyle = document.createElement('style');
     printStyle.dataset.receiptPrintStyle = 'true';
     printStyle.textContent = `@media print {
@@ -28,8 +37,6 @@ export async function printOrSharePdf(
     window.print();
     return;
   }
-  if (!element) throw new Error('The printable receipt is not available.');
-
   const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
     import('html2canvas'),
     import('jspdf'),
@@ -73,6 +80,7 @@ export async function shareThermalPdf(
 
 async function createThermalPdf(element: HTMLElement | null, widthMillimetres: 58 | 80) {
   if (!element) throw new Error('The receipt is not available for export.');
+  await waitForReceiptFonts();
   const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
     import('html2canvas'),
     import('jspdf'),
@@ -91,6 +99,7 @@ async function createThermalPdf(element: HTMLElement | null, widthMillimetres: 5
 
 export async function downloadOrSharePdf(element: HTMLElement | null, filename: string, title: string): Promise<void> {
   if (!element) throw new Error('The report is not available for export.');
+  await waitForReceiptFonts();
   const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
     import('html2canvas'),
     import('jspdf'),

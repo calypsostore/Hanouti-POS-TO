@@ -299,6 +299,7 @@ export function OrdersScreen() {
                 <div className="flex items-center gap-2 rounded-lg bg-warning-container/70 p-2.5 text-on-warning-container">
                   <MaterialIcon name="notifications_active" className="text-xl text-secondary" />
                   <div>
+                    <p className="font-body text-label-sm">Void pending - removed from your totals until the owner decides</p>
                     <p className="font-body text-label-sm">{t('orders.pushRequest')} ({order.voidRequestedAt ? new Date(order.voidRequestedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''})</p>
                     <p className="font-body text-body-sm">{t('orders.ownerNotified')}</p>
                   </div>

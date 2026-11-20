@@ -5,6 +5,7 @@ import type {
   ReportCustomerTabLine,
   ReportEmployeeLine,
   ReportExpenseLine,
+  ReportPendingVoidLine,
   ReportRecord,
   ReportShiftLine,
   ReportVoidAdjustmentLine,
@@ -97,6 +98,7 @@ async function summarize(storeId: string, from: number, to: number) {
       return timestamp >= from && timestamp <= to;
     });
   const orders = periodOrders.filter((order) => order.status === 'done');
+  const pendingVoidOrders = allOrders.filter((order) => order.status === 'pending_void');
   const voidedOrders = allOrders.filter((order) => {
     const voidedAt = new Date(order.voidedAt ?? order.createdAt).getTime();
     return order.status === 'voided' && voidedAt >= from && voidedAt <= to;
@@ -129,6 +131,7 @@ async function summarize(storeId: string, from: number, to: number) {
         shiftId: shift.id,
         staffName: staffById.get(shift.staffId)?.name ?? 'Staff',
         orderNumber: adjustment.orderNumber,
+        kind: adjustment.kind ?? 'approved',
         amountMillimes: adjustment.amountMillimes,
         createdAt: adjustment.createdAt,
       })),
@@ -142,6 +145,12 @@ async function summarize(storeId: string, from: number, to: number) {
     const inProgress = shift.status === 'open';
     const voidAdjustmentMillimes = periodVoidAdjustments
       .filter((adjustment) => adjustment.shiftId === shift.id)
+      .reduce((sum, adjustment) => sum + adjustment.amountMillimes, 0);
+    const voidRequestsMillimes = periodVoidAdjustments
+      .filter((adjustment) => adjustment.shiftId === shift.id && adjustment.kind === 'requested')
+      .reduce((sum, adjustment) => sum + adjustment.amountMillimes, 0);
+    const voidRejectionsMillimes = periodVoidAdjustments
+      .filter((adjustment) => adjustment.shiftId === shift.id && adjustment.kind === 'rejected')
       .reduce((sum, adjustment) => sum + adjustment.amountMillimes, 0);
     const [cashBreakdown, expectedCash] = await Promise.all([
       orderService.getShiftSalesBreakdown(shift.id),
@@ -182,7 +191,10 @@ async function summarize(storeId: string, from: number, to: number) {
       countedCashMillimes: inProgress ? undefined : counted,
       differenceMillimes: inProgress ? undefined : (counted ?? 0) - expected,
       forceClosedByOwner: shift.forceClosedByOwner ?? false,
+      voidsAutoApprovedCount: shift.voidsAutoApprovedCount ?? 0,
       voidAdjustmentMillimes: voidAdjustmentMillimes || undefined,
+      voidRequestsMillimes: voidRequestsMillimes || undefined,
+      voidRejectionsMillimes: voidRejectionsMillimes || undefined,
     };
   }));
   const itemIndex = new Map(catalogItems.map((item) => [item.id, item]));
@@ -373,9 +385,23 @@ async function summarize(storeId: string, from: number, to: number) {
         ticketNumber: order.number,
         reason: order.voidReason ?? '',
         totalMillimes: order.totalMillimes,
+        autoApprovedAtForcedClose: order.voidReason === 'Auto-approved at forced close',
         approvedBy: order.voidedByUserId
           ? staffById.get(order.voidedByUserId)?.name ?? 'Unknown'
           : order.voidedBy === 'owner' ? 'Owner' : order.voidedBy === 'pin' ? 'PIN authorized' : 'Unknown',
+      })),
+    },
+    pendingVoids: {
+      count: pendingVoidOrders.length,
+      totalMillimes: pendingVoidOrders.reduce((sum, order) => sum + order.totalMillimes, 0),
+      orders: pendingVoidOrders.map((order): ReportPendingVoidLine => ({
+        ticketNumber: order.number,
+        staffName: order.staffName ?? staffById.get(order.staffId)?.name ?? 'Staff',
+        shiftId: order.shiftId,
+        amountMillimes: order.totalMillimes,
+        paymentMethod: order.paymentMethod,
+        reason: order.voidReason ?? '',
+        requestedAt: order.voidRequestedAt ?? order.createdAt,
       })),
     },
     comps: {
@@ -432,9 +458,6 @@ async function createReport(
   if (dayStatus.dayIsClosed || !dayStatus.hasActivity) {
     throw new Error('The business day is closed. Open a new shift before creating another report.');
   }
-  if (type === 'Z' && dayStatus.openShiftCount > 0) {
-    throw new Error('Force-close or close every shift before creating a Z report.');
-  }
   const store = await userService.getStore(storeId);
   if (!store) throw new Error('The store could not be found.');
   const createdAt = new Date().toISOString();
@@ -442,6 +465,12 @@ async function createReport(
   const storeTimeZone = store.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
   const periodFrom = sinceLastZ(storeId, reports, storeTimeZone);
   const summary = await summarize(storeId, new Date(periodFrom).getTime(), new Date(createdAt).getTime());
+  if (type === 'Z' && summary.pendingVoids.count > 0) {
+    throw new Error('Resolve every void request before creating a Z report.');
+  }
+  if (type === 'Z' && dayStatus.openShiftCount > 0) {
+    throw new Error('Force-close or close every shift before creating a Z report.');
+  }
   if (type === 'Z' && !closeDetails) throw new Error('Counted cash is required to close the business day.');
   const cashDifference = closeDetails
     ? closeDetails.countedCashMillimes - summary.expectedCashExFloatMillimes
@@ -504,6 +533,7 @@ async function createReport(
     salesByCategory: summary.salesByCategory,
     itemsSold: summary.itemsSold,
     voids: summary.voids,
+    pendingVoids: summary.pendingVoids,
     voidAdjustments: summary.voidAdjustments,
     comps: summary.comps,
     expenseDetails: summary.expenseDetails,
@@ -768,6 +798,9 @@ export const reportService = {
     const store = await userService.getStore(storeId);
     if (!store) throw new Error('The store could not be found.');
     if (!isSupabaseDriver()) {
+      if ((await orderService.listAll(storeId)).some((order) => order.status === 'pending_void')) {
+        throw new Error('Resolve every void request before creating a Z report.');
+      }
       if (!await userService.verifyStorePin(storeId, ownerPin, 'z_report')) throw new Error('The owner PIN is incorrect.');
     }
     const report = await createReport(storeId, 'Z', generatedBy, ownerPin, closeDetails);

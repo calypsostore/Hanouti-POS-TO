@@ -5,10 +5,12 @@ import { userService } from './userService';
 import { orderService } from './orderService';
 import { notificationService } from './notificationService';
 import { activityService } from './activityService';
+import { authService } from './authService';
 import { isSupabaseDriver } from '../data/driver';
 import { requireOnlineForAction } from './offlineAvailability';
 import {
   closeShift as closeRemoteShift,
+  forceCloseDay as forceCloseRemoteDay,
   forceCloseShift as forceCloseRemoteShift,
   getExpectedCash as getRemoteExpectedCash,
   getOpenShiftForUser as getRemoteOpenShiftForUser,
@@ -65,7 +67,8 @@ export const shiftService = {
     const shift = await this.getShift(shiftId);
     if (!shift) throw new Error('Shift could not be found.');
     if (shift.status === 'closed' && shift.expectedCashMillimes !== undefined) {
-      return shift.expectedCashMillimes;
+      return shift.expectedCashMillimes + (shift.voidAdjustments ?? [])
+        .reduce((sum, adjustment) => sum + adjustment.amountMillimes, 0);
     }
     const [cashReceivedMillimes, movements] = await Promise.all([
       orderService.getCashSalesForShift(shiftId),
@@ -183,6 +186,7 @@ export const shiftService = {
     requireOnlineForAction('Closing a shift');
     if (!Number.isInteger(countedCashMillimes) || countedCashMillimes < 0) throw new Error('Counted cash must be a non-negative amount in millimes.');
     if (isSupabaseDriver()) return closeRemoteShift(shiftId, countedCashMillimes, validateDifferenceNote(0, differenceNote));
+    const pendingVoidCount = await orderService.getPendingVoidCountForShift(shiftId);
     const shifts = getShifts();
     const shift = shifts.find((candidate) => candidate.id === shiftId && candidate.status === 'open');
     if (!shift) throw new Error('Open shift could not be found.');
@@ -197,6 +201,7 @@ export const shiftService = {
       differenceMillimes,
       differenceNote: cleanedDifferenceNote,
       closedAt: new Date().toISOString(),
+      pendingVoidCount,
     };
     saveShifts(shifts.map((candidate) => candidate.id === shiftId ? updated : candidate));
     const actor = await userService.getUser(shift.staffId);
@@ -214,57 +219,147 @@ export const shiftService = {
     return updated;
   },
 
-  async forceCloseShift(shiftId: string, ownerId: string, countedCashMillimes: number, differenceNote?: string): Promise<ShiftRecord> {
+  async forceCloseShift(shiftId: string, ownerPin: string): Promise<ShiftRecord> {
     requireOnlineForAction('Closing a shift');
-    if (!Number.isInteger(countedCashMillimes) || countedCashMillimes < 0) throw new Error('Counted cash must be a non-negative amount in millimes.');
-    if (isSupabaseDriver()) return forceCloseRemoteShift(shiftId, countedCashMillimes, differenceNote?.trim());
+    if (isSupabaseDriver()) return forceCloseRemoteShift(shiftId, ownerPin);
     const shifts = getShifts();
     const shift = shifts.find((candidate) => candidate.id === shiftId && candidate.status === 'open');
     if (!shift) throw new Error('Open shift could not be found.');
     const store = await userService.getStore(shift.storeId);
-    if (!store || store.ownerId !== ownerId) throw new Error('Only this store owner can force-close the shift.');
+    const actor = await authService.getCurrentUser();
+    if (!store || !actor || actor.role !== 'owner' || actor.id !== store.ownerId || actor.storeId !== store.id) {
+      throw new Error('Only this store owner can force-close the shift.');
+    }
+    if (!await userService.verifyStorePin(store.id, ownerPin, 'z_report')) throw new Error('Incorrect owner PIN.');
+    const autoApproved = await orderService.autoApprovePendingVoids(store.id, actor.id, shift.id);
     const expectedCashMillimes = await this.getExpectedCash(shiftId);
-    const differenceMillimes = countedCashMillimes - expectedCashMillimes;
-    const cleanedDifferenceNote = validateDifferenceNote(differenceMillimes, differenceNote);
     const updated: ShiftRecord = {
       ...shift,
       status: 'closed',
-      countedCashMillimes,
+      countedCashMillimes: expectedCashMillimes,
       expectedCashMillimes,
-      differenceMillimes,
-      differenceNote: cleanedDifferenceNote,
+      differenceMillimes: 0,
+      differenceNote: undefined,
       closedAt: new Date().toISOString(),
       forceClosedByOwner: true,
-      closedByUserId: ownerId,
+      closedByUserId: actor.id,
+      voidsAutoApprovedCount: (shift.voidsAutoApprovedCount ?? 0) + autoApproved.length,
+      pendingVoidCount: 0,
     };
     saveShifts(shifts.map((candidate) => candidate.id === shiftId ? updated : candidate));
     await activityService.log({
       storeId: shift.storeId,
-      actorId: ownerId,
+      actorId: actor.id,
       action: 'shift.force_closed',
-      summary: `Force-closed ${shift.staffId}'s shift with a cash difference of ${differenceMillimes} millimes.`,
+      summary: `Force-closed ${shift.staffId}'s shift at zero difference.`,
       entityType: 'shift',
       entityId: shift.id,
       meta: { before: shift, after: updated },
     });
     const staff = await userService.getUser(shift.staffId);
-    await notificationService.notifyShiftClosed(shift.id, shift.storeId, staff?.name ?? 'A staff member', differenceMillimes);
+    await notificationService.notifyShiftClosed(shift.id, shift.storeId, staff?.name ?? 'A staff member', 0);
     return updated;
   },
 
-  async recordClosedShiftVoidAdjustment(input: { shiftId: string; orderId: string; orderNumber: number; amountMillimes: number; actorId?: string }): Promise<void> {
-    if (!Number.isInteger(input.amountMillimes) || input.amountMillimes <= 0) throw new Error('Void adjustment must be a positive amount in millimes.');
+  async forceCloseDay(ownerPin: string): Promise<{
+    shifts: ShiftRecord[];
+    orders: { id: string; ticketNumber: number; totalMillimes: number; shiftId: string }[];
+  }> {
+    requireOnlineForAction('Closing the business day');
+    if (isSupabaseDriver()) return forceCloseRemoteDay(ownerPin);
+    const actor = await authService.getCurrentUser();
+    const store = actor?.storeId ? await userService.getStore(actor.storeId) : undefined;
+    if (!actor || actor.role !== 'owner' || !store || store.ownerId !== actor.id) {
+      throw new Error('Only this store owner can force-close the business day.');
+    }
+    if (!await userService.verifyStorePin(store.id, ownerPin, 'z_report')) throw new Error('Incorrect owner PIN.');
+    const approvedOrders = await orderService.autoApprovePendingVoids(store.id, actor.id);
+    let storeShifts = getShifts();
+    const approvedCounts = new Map<string, number>();
+    for (const order of approvedOrders) approvedCounts.set(order.shiftId, (approvedCounts.get(order.shiftId) ?? 0) + 1);
+    storeShifts = storeShifts.map((shift) => shift.storeId === store.id && shift.status === 'closed' && approvedCounts.has(shift.id)
+      ? { ...shift, voidsAutoApprovedCount: (shift.voidsAutoApprovedCount ?? 0) + (approvedCounts.get(shift.id) ?? 0) }
+      : shift);
+    saveShifts(storeShifts);
+    const openShifts = storeShifts.filter((shift) => shift.storeId === store.id && shift.status === 'open');
+    const now = new Date().toISOString();
+    const closed: ShiftRecord[] = storeShifts.filter((shift) =>
+      shift.storeId === store.id && shift.status === 'closed' && approvedCounts.has(shift.id));
+    for (const shift of openShifts) {
+      const expectedCashMillimes = await this.getExpectedCash(shift.id);
+      const count = approvedCounts.get(shift.id) ?? 0;
+      const updated: ShiftRecord = {
+        ...shift,
+        status: 'closed',
+        countedCashMillimes: expectedCashMillimes,
+        expectedCashMillimes,
+        differenceMillimes: 0,
+        differenceNote: undefined,
+        closedAt: now,
+        forceClosedByOwner: true,
+        closedByUserId: actor.id,
+        voidsAutoApprovedCount: (shift.voidsAutoApprovedCount ?? 0) + count,
+        pendingVoidCount: 0,
+      };
+      saveShifts(getShifts().map((candidate) => candidate.id === shift.id ? updated : candidate));
+      closed.push(updated);
+      await activityService.log({
+        storeId: store.id,
+        actorId: actor.id,
+        action: 'shift.force_closed',
+        summary: `Force-closed ${shift.staffId}'s shift at zero difference.`,
+        entityType: 'shift',
+        entityId: shift.id,
+        meta: { before: shift, after: updated },
+      });
+      const staff = await userService.getUser(shift.staffId);
+      await notificationService.notifyShiftClosed(shift.id, store.id, staff?.name ?? 'A staff member', 0);
+    }
+    return {
+      shifts: closed,
+      orders: approvedOrders.map((order) => ({
+        id: order.id,
+        ticketNumber: order.number,
+        totalMillimes: order.totalMillimes,
+        shiftId: order.shiftId,
+      })),
+    };
+  },
+
+  async recordClosedShiftVoidAdjustment(input: {
+    shiftId: string;
+    orderId: string;
+    orderNumber: number;
+    kind: 'requested' | 'rejected' | 'approved';
+    amountMillimes: number;
+    actorId?: string;
+  }): Promise<void> {
+    if (!Number.isSafeInteger(input.amountMillimes) || input.amountMillimes === 0) {
+      throw new Error('Void adjustment must be a non-zero whole number of millimes.');
+    }
     if (isSupabaseDriver()) return;
     const shifts = getShifts();
     const shift = shifts.find((candidate) => candidate.id === input.shiftId && candidate.status === 'closed');
-    if (!shift || shift.voidAdjustments?.some((adjustment) => adjustment.orderId === input.orderId)) return;
+    if (!shift || shift.voidAdjustments?.some((adjustment) =>
+      adjustment.orderId === input.orderId && (adjustment.kind ?? 'approved') === input.kind)) return;
     const adjustment = {
       orderId: input.orderId,
       orderNumber: input.orderNumber,
-      amountMillimes: -input.amountMillimes,
+      kind: input.kind,
+      amountMillimes: input.amountMillimes,
       createdAt: new Date().toISOString(),
     };
-    const updatedShift = { ...shift, voidAdjustments: [...(shift.voidAdjustments ?? []), adjustment] };
+    const voidAdjustments = [...(shift.voidAdjustments ?? []), adjustment];
+    const adjustedExpected = shift.expectedCashMillimes === undefined
+      ? undefined
+      : shift.expectedCashMillimes + voidAdjustments.reduce((sum, row) => sum + row.amountMillimes, 0);
+    const updatedShift = {
+      ...shift,
+      voidAdjustments,
+      differenceMillimes: shift.countedCashMillimes !== undefined && adjustedExpected !== undefined
+        ? shift.countedCashMillimes - adjustedExpected
+        : shift.differenceMillimes,
+    };
     saveShifts(shifts.map((candidate) => candidate.id === input.shiftId
       ? updatedShift
       : candidate));
@@ -272,7 +367,7 @@ export const shiftService = {
       storeId: shift.storeId,
       actorId: input.actorId,
       action: 'shift.void_adjustment',
-      summary: `Applied a void adjustment for order #${input.orderNumber}.`,
+      summary: `Recorded a ${input.kind} void adjustment for order #${input.orderNumber}.`,
       entityType: 'shift',
       entityId: shift.id,
       meta: { before: shift.voidAdjustments ?? [], after: updatedShift.voidAdjustments },

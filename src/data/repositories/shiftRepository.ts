@@ -13,6 +13,7 @@ interface ShiftRow {
   opened_at: string;
   closed_at: string | null;
   force_closed_by_owner: boolean;
+  voids_auto_approved_count: number;
   closed_by_user_id: string | null;
   difference_note: string | null;
 }
@@ -33,6 +34,7 @@ interface AdjustmentRow {
   order_id: string;
   order_number: number;
   amount_millimes: number;
+  kind: ShiftVoidAdjustment['kind'];
   created_at: string;
 }
 
@@ -41,6 +43,7 @@ function mapShift(row: ShiftRow, adjustments: AdjustmentRow[] = []): ShiftRecord
     orderId: adjustment.order_id,
     orderNumber: adjustment.order_number,
     amountMillimes: Number(adjustment.amount_millimes),
+    kind: adjustment.kind,
     createdAt: adjustment.created_at,
   }));
   return {
@@ -55,6 +58,7 @@ function mapShift(row: ShiftRow, adjustments: AdjustmentRow[] = []): ShiftRecord
     openedAt: row.opened_at,
     closedAt: row.closed_at ?? undefined,
     forceClosedByOwner: row.force_closed_by_owner,
+    voidsAutoApprovedCount: Number(row.voids_auto_approved_count ?? 0),
     closedByUserId: row.closed_by_user_id ?? undefined,
     differenceNote: row.difference_note ?? undefined,
     voidAdjustments,
@@ -82,7 +86,7 @@ function workflowError(error: { message: string }, context: string): never {
 async function adjustmentsForShift(shiftId: string): Promise<AdjustmentRow[]> {
   const { data, error } = await getSupabaseClient()
     .from('shift_void_adjustments')
-    .select('order_id, order_number, amount_millimes, created_at')
+    .select('order_id, order_number, amount_millimes, kind, created_at')
     .eq('shift_id', shiftId)
     .order('created_at');
   if (error) workflowError(error, 'Could not load shift void adjustments');
@@ -150,17 +154,41 @@ export async function closeShift(shiftId: string, countedCashMillimes: number, d
     p_difference_note: differenceNote?.trim() || null,
   });
   if (error) workflowError(error, 'Could not close shift');
-  return mapShift(data as ShiftRow);
+  const result = data as { shift: ShiftRow; pendingVoidCount: number };
+  return { ...mapShift(result.shift), pendingVoidCount: result.pendingVoidCount };
 }
 
-export async function forceCloseShift(shiftId: string, countedCashMillimes: number, differenceNote?: string): Promise<ShiftRecord> {
+export async function forceCloseShift(shiftId: string, ownerPin: string): Promise<ShiftRecord> {
   const { data, error } = await getSupabaseClient().rpc('force_close_shift', {
     p_shift_id: shiftId,
-    p_counted_cash_millimes: countedCashMillimes,
-    p_difference_note: differenceNote?.trim() || null,
+    p_pin: ownerPin,
   });
   if (error) workflowError(error, 'Could not force-close shift');
-  return mapShift(data as ShiftRow);
+  const result = data as { shift: ShiftRow; voidsAutoApprovedCount: number };
+  return {
+    ...mapShift(result.shift),
+    voidsAutoApprovedCount: result.voidsAutoApprovedCount,
+  };
+}
+
+export async function forceCloseDay(ownerPin: string): Promise<{
+  shifts: ShiftRecord[];
+  orders: { id: string; ticketNumber: number; totalMillimes: number; shiftId: string }[];
+}> {
+  const { data, error } = await getSupabaseClient().rpc('force_close_day', { p_pin: ownerPin });
+  if (error) workflowError(error, 'Could not force-close the business day');
+  const result = data as {
+    shifts: ShiftRow[];
+    orders: { id: string; ticketNumber: number; totalMillimes: number; shiftId: string }[];
+  };
+  return {
+    shifts: result.shifts.map((shift) => mapShift(shift)),
+    orders: result.orders.map((order) => ({
+      ...order,
+      ticketNumber: Number(order.ticketNumber),
+      totalMillimes: Number(order.totalMillimes),
+    })),
+  };
 }
 
 export async function recordCashMovement(input: {

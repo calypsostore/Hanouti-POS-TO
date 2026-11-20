@@ -423,6 +423,16 @@ export const orderService = {
     if (!cleanedReason) throw new Error('A reason is required to request an order void.');
     const updated = { ...order, status: 'pending_void' as const, voidRequestedAt: new Date().toISOString(), voidReason: cleanedReason };
     saveOrders(orders.map((candidate) => candidate.id === orderId ? updated : candidate));
+    if (order.paymentMethod === 'cash' && (await shiftService.getShift(order.shiftId))?.status === 'closed') {
+      await shiftService.recordClosedShiftVoidAdjustment({
+        shiftId: order.shiftId,
+        orderId: order.id,
+        orderNumber: order.number,
+        kind: 'requested',
+        amountMillimes: -order.totalMillimes,
+        actorId: staffId,
+      });
+    }
     const actor = await userService.getUser(staffId);
     await activityService.log({
       storeId: order.storeId,
@@ -495,7 +505,8 @@ export const orderService = {
         shiftId: order.shiftId,
         orderId: order.id,
         orderNumber: order.number,
-        amountMillimes: order.totalMillimes,
+        kind: 'approved',
+        amountMillimes: -order.totalMillimes,
         actorId,
       });
     }
@@ -523,7 +534,7 @@ export const orderService = {
     }
     const cleanedReason = reason?.trim() || order.voidReason?.trim() || '';
     const updated: OrderRecord = decision === 'approve'
-      ? { ...order, status: 'voided', voidedAt: new Date().toISOString(), voidedBy: 'owner', voidedByUserId: ownerId, voidReason: cleanedReason }
+      ? { ...order, status: 'voided', voidRequestedAt: undefined, voidedAt: new Date().toISOString(), voidedBy: 'owner', voidedByUserId: ownerId, voidReason: cleanedReason }
       : { ...order, status: 'done', voidRequestedAt: undefined, voidReason: undefined };
     if (decision === 'approve' && !updated.voidReason) throw new Error('A reason is required to void an order.');
     saveOrders(orders.map((candidate) => candidate.id === orderId ? updated : candidate));
@@ -538,20 +549,61 @@ export const orderService = {
       entityId: order.id,
       meta: { before: { status: order.status, voidReason: order.voidReason }, after: { status: updated.status, voidReason: updated.voidReason } },
     });
-    await notificationService.notifyVoidResolved(updated, decision === 'approve');
     if (decision === 'approve') {
-      if (order.paymentMethod === 'cash') {
-        await shiftService.recordClosedShiftVoidAdjustment({
-          shiftId: order.shiftId,
-          orderId: order.id,
-          orderNumber: order.number,
-          amountMillimes: order.totalMillimes,
-          actorId: ownerId,
-        });
-      }
       await restoreOrderStock(order, ownerId);
+    } else if (order.paymentMethod === 'cash' && (await shiftService.getShift(order.shiftId))?.status === 'closed') {
+      await shiftService.recordClosedShiftVoidAdjustment({
+        shiftId: order.shiftId,
+        orderId: order.id,
+        orderNumber: order.number,
+        kind: 'rejected',
+        amountMillimes: order.totalMillimes,
+        actorId: ownerId,
+      });
     }
+    await notificationService.notifyVoidResolved(updated, decision === 'approve');
     return updated;
+  },
+
+  async autoApprovePendingVoids(storeId: string, ownerId: string, shiftId?: string): Promise<OrderRecord[]> {
+    if (isSupabaseDriver()) throw new Error('Pending void auto-approval is handled by the shift workflow.');
+    const store = await userService.getStore(storeId);
+    const owner = await userService.getUser(ownerId);
+    if (!store || store.ownerId !== ownerId || owner?.role !== 'owner' || owner.storeId !== storeId) {
+      throw new Error('Only this store owner can auto-approve pending voids.');
+    }
+    const orders = getOrders();
+    const pending = orders.filter((order) => order.storeId === storeId &&
+      order.status === 'pending_void' && (!shiftId || order.shiftId === shiftId));
+    const approvedAt = new Date().toISOString();
+    const approved = pending.map((order) => ({
+      ...order,
+      status: 'voided' as const,
+      voidRequestedAt: undefined,
+      voidedAt: approvedAt,
+      voidedBy: 'owner',
+      voidedByUserId: ownerId,
+      voidReason: 'Auto-approved at forced close',
+    }));
+    const approvedById = new Map(approved.map((order) => [order.id, order]));
+    saveOrders(orders.map((order) => approvedById.get(order.id) ?? order));
+    for (const order of approved) {
+      await activityService.log({
+        storeId,
+        actorId: ownerId,
+        action: 'order.voided',
+        summary: `Auto-approved void for order #${order.number} at forced close.`,
+        entityType: 'order',
+        entityId: order.id,
+        meta: {
+          before: { status: 'pending_void', voidReason: order.voidReason },
+          after: { status: 'voided', voidReason: order.voidReason },
+        },
+      });
+      await restoreOrderStock(order, ownerId);
+      await notificationService.notifyVoidResolved(order, true);
+    }
+    return approved;
   },
 
   async getCashSalesForShift(shiftId: string): Promise<number> {
@@ -576,7 +628,7 @@ export const orderService = {
     return {
       orderCount: completedOrders.length,
       cashSalesMillimes: shiftOrders
-        .filter((order) => order.status === 'done' || order.status === 'pending_void')
+        .filter((order) => order.status === 'done')
         .filter((order) => order.paymentMethod === 'cash')
         .reduce((sum, order) => sum + order.totalMillimes, 0),
       tabSalesMillimes: completedOrders

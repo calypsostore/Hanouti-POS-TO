@@ -196,8 +196,11 @@ export default function App() {
   const initializationError = useAuthStore((state) => state.initializationError);
   const hydrate = useAuthStore((state) => state.hydrate);
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(() => updateService.getLastResult());
+  const [serviceWorkerUpdateAvailable, setServiceWorkerUpdateAvailable] = useState(false);
+  const [updateReloadError, setUpdateReloadError] = useState('');
 
   useEffect(() => updateService.subscribeResults(setUpdateResult), []);
+  useEffect(() => updateService.subscribe(setServiceWorkerUpdateAvailable), []);
 
   useEffect(() => {
     void hydrate();
@@ -340,12 +343,30 @@ export default function App() {
     };
   }, [ready]);
 
+  async function reloadWithAvailableUpdate() {
+    setUpdateReloadError('');
+    try {
+      await updateService.applyUpdate();
+    } catch (error) {
+      setUpdateReloadError(error instanceof Error ? error.message : 'Unable to reload the update.');
+    }
+  }
+
   if (!ready) return <LoadingScreen message="Preparing your terminal..." />;
   if (initializationError) return <InitializationErrorScreen error={initializationError} onRetry={() => void hydrate()} />;
 
   return (
     <>
       <UpdateRequiredModal result={updateResult} />
+      {serviceWorkerUpdateAvailable && (
+        <div role="status" className="fixed inset-x-0 top-0 z-[120] flex items-center justify-between gap-3 bg-primary-dark px-4 py-3 text-white shadow-overlay">
+          <div>
+            <p className="font-body text-label-md">New version available - reload</p>
+            {updateReloadError && <p role="alert" className="mt-1 font-body text-body-sm text-white">{updateReloadError}</p>}
+          </div>
+          <Button variant="secondary" className="shrink-0" onClick={() => { void reloadWithAvailableUpdate(); }}>Reload</Button>
+        </div>
+      )}
       <PermissionsPrompt />
       {user && !locked && <NotificationsBridge />}
       <Suspense fallback={<LoadingScreen message={t('app.loading')} />}>

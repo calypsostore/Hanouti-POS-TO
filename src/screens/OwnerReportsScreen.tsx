@@ -28,6 +28,7 @@ const emptySummary: DashboardSummary = {
   salesMillimes: 0, orderCount: 0, cashDifferenceMillimes: 0, topItems: {}, shifts: [],
   salesCollectedMillimes: 0, expensesMillimes: 0, netProfitMillimes: 0, receivableMillimes: 0,
   tabsOutstandingMillimes: 0, salesByCategory: [], itemsSold: [], voids: { count: 0, totalMillimes: 0, orders: [] },
+  pendingVoids: { count: 0, totalMillimes: 0, orders: [] },
   voidAdjustments: [], expenseDetails: [],
   comps: { count: 0, quantity: 0, totalMillimes: 0, records: [] },
   shiftLines: [], paymentSplit: { cash: 0, card: 0, other: 0, tab: 0 }, totalExpectedCashMillimes: 0,

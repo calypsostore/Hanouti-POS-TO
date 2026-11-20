@@ -26,6 +26,8 @@ import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository
 import { reportService, type ReportDayStatus } from '../services/reportService';
 import { ReportView } from '../components/ReportView';
 import type { ReportRecord, ReportShiftLine } from '../types/domain';
+import type { OrderRecord } from '../types/domain';
+import { Link } from 'react-router-dom';
 
 type ShiftCloseBreakdown = ShiftSalesBreakdown & {
   pendingVoidCount: number;
@@ -87,8 +89,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const [store, setStore] = useState<Awaited<ReturnType<typeof userService.getStore>>>();
   const [breakdownsByShift, setBreakdownsByShift] = useState<Record<string, ShiftCloseBreakdown>>({});
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
-  const [forceCountedCash, setForceCountedCash] = useState<Record<string, string>>({});
-  const [forceDifferenceNotes, setForceDifferenceNotes] = useState<Record<string, string>>({});
+  const [pendingVoidOrders, setPendingVoidOrders] = useState<OrderRecord[]>([]);
   const [closedShiftSummary, setClosedShiftSummary] = useState<{ shift: ShiftRecord; breakdown: ShiftCloseBreakdown }>();
   const [cashMovements, setCashMovements] = useState<CashMovementRecord[]>([]);
   const [canCashInOut, setCanCashInOut] = useState(false);
@@ -106,10 +107,13 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     ownerMode && new URLSearchParams(window.location.search).get('tab') === 'reports' ? 'reports' : 'shifts',
   );
   const [ownerPin, setOwnerPin] = useState('');
+  const [forceShiftPin, setForceShiftPin] = useState('');
+  const [forceShiftConfirmed, setForceShiftConfirmed] = useState(false);
+  const [forceEverythingConfirmed, setForceEverythingConfirmed] = useState(false);
   const [zCountedCash, setZCountedCash] = useState('');
   const [zExpectedCash, setZExpectedCash] = useState(0);
   const [zShiftLines, setZShiftLines] = useState<ReportShiftLine[]>([]);
-  const [zStep, setZStep] = useState<1 | 2>(1);
+  const [zStep, setZStep] = useState<0 | 1 | 2>(1);
   const [zBusy, setZBusy] = useState(false);
   const [zNote, setZNote] = useState('');
   const [zSheetOpen, setZSheetOpen] = useState(false);
@@ -125,11 +129,12 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   useEffect(() => updateService.registerUnsavedState(() => startingCashEdited || countedCash.length > 0), [startingCashEdited, countedCash.length]);
 
   const refresh = useCallback(async () => {
-    const [nextShifts, nextOpenShift, nextStore, nextMovements, users, cashPermission, comps, nextReports, nextDayStatus] = await Promise.all([
+    const [nextShifts, nextOpenShift, nextStore, nextMovements, allOrders, users, cashPermission, comps, nextReports, nextDayStatus] = await Promise.all([
       shiftService.listShifts(storeId),
       user ? shiftService.getOpenShiftForUser(storeId, user.id) : Promise.resolve(undefined),
       userService.getStore(storeId),
       shiftService.listCashMovements(storeId),
+      orderService.listAll(storeId),
       userService.listUsers(storeId),
       user?.role === 'owner' ? Promise.resolve(true) : user ? userService.hasPermission(user.id, 'cash_in_out') : Promise.resolve(false),
       compService.listComps(storeId),
@@ -141,6 +146,8 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     setStore(nextStore);
     setCashMovements(nextMovements);
     setStaffNames(Object.fromEntries(users.map((member) => [member.id, member.name])));
+    setPendingVoidOrders(allOrders.filter((order) => order.status === 'pending_void' &&
+      (ownerMode || order.staffId === user?.id)));
     setCanCashInOut(cashPermission);
     setDayStatus(nextDayStatus);
     if (ownerMode) setArchiveReports(nextReports);
@@ -214,21 +221,20 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   async function forceCloseShift(event: FormEvent<HTMLFormElement>, shift: ShiftRecord) {
     event.preventDefault();
     if (!user || user.role !== 'owner') return;
+    if (!forceShiftConfirmed) {
+      setError('Confirm the zero-difference force close first.');
+      return;
+    }
     setError('');
     setNotice('');
     try {
-      const closedShift = await shiftService.forceCloseShift(
-        shift.id,
-        user.id,
-        parseTnd(forceCountedCash[shift.id] ?? ''),
-        forceDifferenceNotes[shift.id],
-      );
+      const closedShift = await shiftService.forceCloseShift(shift.id, forceShiftPin);
       setClosedShiftSummary({ shift: closedShift, breakdown: breakdownsByShift[shift.id] ?? emptyShiftBreakdown });
-      setForceCountedCash((current) => ({ ...current, [shift.id]: '' }));
-      setForceDifferenceNotes((current) => ({ ...current, [shift.id]: '' }));
+      setForceShiftPin('');
+      setForceShiftConfirmed(false);
       await refresh();
       setForceCloseShiftTarget(null);
-      setNotice(`${staffNames[shift.staffId] ?? 'Staff'}'s shift was force-closed by the owner.`);
+      setNotice(`Closed at zero difference, ${closedShift.voidsAutoApprovedCount ?? 0} voids auto-approved.`);
     } catch (closeError) {
       setError(closeError instanceof Error ? closeError.message : 'Unable to force-close this shift.');
     }
@@ -252,13 +258,6 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     setCountedCash((current) => appendDecimalAmount(current, value));
   }
 
-  function pressForceCountedCash(shiftId: string, value: string) {
-    setForceCountedCash((current) => ({
-      ...current,
-      [shiftId]: appendDecimalAmount(current[shiftId] ?? '', value),
-    }));
-  }
-
   async function createXReport() {
     if (!user) return;
     setError('');
@@ -271,7 +270,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     }
   }
 
-  function openZCloseDialog() {
+  async function openZCloseDialog(forceEverything = false) {
     setError('');
     setOwnerPin('');
     setZCountedCash('');
@@ -279,7 +278,55 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     setZShiftLines([]);
     setZStep(1);
     setZNote('');
+    if (forceEverything) {
+      setZStep(0);
+      setForceEverythingConfirmed(false);
+      setZSheetOpen(true);
+      return;
+    }
+    try {
+      const [nextShifts, allOrders, users] = await Promise.all([
+        shiftService.listShifts(storeId),
+        orderService.listAll(storeId),
+        userService.listUsers(storeId),
+      ]);
+      const nextOpenShifts = nextShifts.filter((shift) => shift.status === 'open');
+      const nextPendingVoids = allOrders.filter((order) => order.status === 'pending_void');
+      setShifts(nextShifts);
+      setStaffNames(Object.fromEntries(users.map((member) => [member.id, member.name])));
+      setPendingVoidOrders(nextPendingVoids);
+      if (nextOpenShifts.length || nextPendingVoids.length) {
+        setZStep(0);
+        setZSheetOpen(true);
+        return;
+      }
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Unable to check open shifts and pending voids.');
+      return;
+    }
     setZSheetOpen(true);
+  }
+
+  async function forceCloseEverything() {
+    if (!user || user.role !== 'owner') return;
+    if (!forceEverythingConfirmed) {
+      setError('Confirm that all pending voids will be approved and open shifts closed at zero difference.');
+      return;
+    }
+    setError('');
+    setZBusy(true);
+    try {
+      const result = await shiftService.forceCloseDay(ownerPin);
+      await refresh();
+      setOwnerPin('');
+      setForceEverythingConfirmed(false);
+      setZStep(1);
+      setNotice(`Closed ${result.shifts.length} shifts at zero difference; ${result.orders.length} voids auto-approved.`);
+    } catch (closeError) {
+      setError(closeError instanceof Error ? closeError.message : 'Unable to force-close everything.');
+    } finally {
+      setZBusy(false);
+    }
   }
 
   async function verifyZOwnerPin() {
@@ -392,7 +439,9 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     : !dayStatus.hasActivity
       ? 'No shift has been opened yet today.'
       : '';
-  const zDisabledReason = reportDisabledReason || (openCount > 0 ? 'Close every open shift before creating a Z report.' : '');
+  const zDisabledReason = reportDisabledReason ||
+    (openCount > 0 ? 'Close every open shift before creating a Z report.' : '') ||
+    (pendingVoidOrders.length > 0 ? 'Resolve every void request before creating a Z report.' : '');
   const isArchivePreview = reportPreview?.type === 'Z'
     ? reportPreview
     : archivePreviewDismissed
@@ -462,6 +511,30 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
             <h2 className="font-display text-headline-md">Close day: Z report</h2>
             <p className="mt-2 font-body text-body-sm text-outline">Every Z requires the owner PIN and every shift must be closed.</p>
+            {(openShifts.length > 0 || pendingVoidOrders.length > 0) && (
+              <div className="mt-4 space-y-3 rounded-xl bg-warning-container p-3 text-on-warning-container">
+                <h3 className="font-display text-title-sm">Resolve these before creating a Z report</h3>
+                {openShifts.map((shift) => (
+                  <p key={shift.id} className="font-body text-body-sm">
+                    Open shift · {staffNames[shift.staffId] ?? 'Staff'} · {new Date(shift.openedAt).toLocaleString()}
+                  </p>
+                ))}
+                {pendingVoidOrders.map((order) => (
+                  <p key={order.id} className="font-body text-body-sm">
+                    Void #{order.number} · {staffNames[order.staffId] ?? order.staffName ?? 'Staff'} ·
+                    {' '}{formatTnd(order.totalMillimes / 1000)} DT · {order.voidReason || 'Reason not recorded'}
+                  </p>
+                ))}
+                <div className="grid gap-2 tablet:grid-cols-2">
+                  <Link to="/owner/voids" className="flex min-h-12 items-center justify-center rounded-full border border-outline px-4 font-body text-label-md">
+                    Review voids
+                  </Link>
+                  <Button variant="danger" onClick={() => { void openZCloseDialog(true); }}>
+                    Force close everything
+                  </Button>
+                </div>
+              </div>
+            )}
             <Button disabled={Boolean(zDisabledReason)} variant="danger" className="mt-4 w-full" onClick={() => { void openZCloseDialog(); }}><MaterialIcon name="lock" />Close day: Z report</Button>
             {zDisabledReason && <p role="status" className="mt-2 rounded-lg bg-warning-container p-3 text-on-warning-container">{zDisabledReason}</p>}
           </article>
@@ -554,7 +627,13 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             { key: 'staff', label: 'Staff', sortValue: (shift) => staffNames[shift.staffId] ?? 'Staff', render: (shift) => staffNames[shift.staffId] ?? 'Staff' },
             { key: 'opened', label: 'Opened', sortValue: (shift) => shift.openedAt, render: (shift) => new Date(shift.openedAt).toLocaleString() },
             { key: 'closed', label: 'Closed', sortValue: (shift) => shift.closedAt ?? '', render: (shift) => shift.closedAt ? new Date(shift.closedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—' },
-            { key: 'status', label: 'Status', render: (shift) => shift.status === 'open' ? 'Open' : 'Closed' },
+            { key: 'status', label: 'Status', render: (shift) => (
+              <div className="flex flex-col items-start gap-1">
+                <StatusTag status={shift.status === 'open' ? 'started' : 'closed'}>{shift.status === 'open' ? 'Open' : 'Closed'}</StatusTag>
+                {shift.forceClosedByOwner && <span className="font-body text-label-sm text-warning">Closed by force</span>}
+                {(shift.voidsAutoApprovedCount ?? 0) > 0 && <span className="font-body text-label-sm text-warning">Voids auto-approved: {shift.voidsAutoApprovedCount}</span>}
+              </div>
+            ) },
             { key: 'difference', label: 'Difference', sortValue: (shift) => shift.differenceMillimes ?? 0, render: (shift) => shift.differenceMillimes === undefined ? '—' : `${formatTnd(shift.differenceMillimes / 1000)} DT` },
             { key: 'actions', label: 'Actions', render: (shift) => (
               <details className="shift-movements-disclosure">
@@ -570,7 +649,8 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
                 <p className="mt-1 font-body text-body-sm text-outline">
                   {new Date(shift.openedAt).toLocaleString()} {shift.closedAt ? ` • Closed ${new Date(shift.closedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
                 </p>
-                {shift.forceClosedByOwner && <p className="mt-1 font-body text-label-sm text-warning">Force closed by owner</p>}
+                {shift.forceClosedByOwner && <p className="mt-1 font-body text-label-sm text-warning">Closed by force</p>}
+                {(shift.voidsAutoApprovedCount ?? 0) > 0 && <p className="mt-1 font-body text-label-sm text-warning">Voids auto-approved: {shift.voidsAutoApprovedCount}</p>}
               </div>
               <div className="text-right">
                 <StatusTag status={shift.status === 'open' ? 'started' : 'closed'}>{shift.status === 'open' ? 'Started' : 'Closed'}</StatusTag>
@@ -584,7 +664,11 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
               )}
               <CashMovementList movements={movementsForShift(shift.id)} staffNames={staffNames} />
               {ownerMode && shift.status === 'open' && user?.role === 'owner' && (
-                <Button variant="danger" className="w-full" onClick={() => setForceCloseShiftTarget(shift)}>
+                <Button variant="danger" className="w-full" onClick={() => {
+                  setForceCloseShiftTarget(shift);
+                  setForceShiftPin('');
+                  setForceShiftConfirmed(false);
+                }}>
                   <MaterialIcon name="lock" />Force close shift
                 </Button>
               )}
@@ -610,7 +694,48 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
         onClose={() => { setZSheetOpen(false); setOwnerPin(''); setZCountedCash(''); setZNote(''); setZStep(1); }}
         title="Close day: Z report"
       >
-        {zStep === 1 ? (
+        {zStep === 0 ? (
+          <form onSubmit={(event) => { event.preventDefault(); void forceCloseEverything(); }} className="flex flex-col gap-3">
+            <p className="font-body text-body-sm text-on-surface-variant">
+              All pending voids will be approved and all open shifts closed with zero difference
+            </p>
+            <div className="space-y-2 rounded-xl bg-surface-container-low p-3">
+              {openShifts.map((shift) => (
+                <p key={shift.id} className="font-body text-body-sm">
+                  Open shift · {staffNames[shift.staffId] ?? 'Staff'} · {new Date(shift.openedAt).toLocaleString()}
+                </p>
+              ))}
+              {pendingVoidOrders.map((order) => (
+                <p key={order.id} className="font-body text-body-sm">
+                  Void #{order.number} · {staffNames[order.staffId] ?? order.staffName ?? 'Staff'} ·
+                  {' '}{formatTnd(order.totalMillimes / 1000)} DT · {order.voidReason || 'Reason not recorded'}
+                </p>
+              ))}
+              <Link to="/owner/voids" className="inline-flex min-h-10 items-center font-body text-label-md text-primary underline">
+                Review voids
+              </Link>
+            </div>
+            <label className="flex items-start gap-2 font-body text-body-sm text-on-surface">
+              <input
+                type="checkbox"
+                checked={forceEverythingConfirmed}
+                onChange={(event) => setForceEverythingConfirmed(event.target.checked)}
+              />
+              Confirm: all pending voids will be approved and all open shifts closed with zero difference.
+            </label>
+            <label className="font-body text-label-md">Owner PIN
+              <input readOnly value={ownerPin} placeholder="••••" className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 tracking-[0.5em]" />
+            </label>
+            <Keypad onPress={(digit) => setOwnerPin((current) => current.length < 4 ? `${current}${digit}` : current)} onClear={() => setOwnerPin('')} onBackspace={() => setOwnerPin((current) => current.slice(0, -1))} />
+            {error && <p role="alert" className="rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
+            <div className="sheet-action-bar grid grid-cols-2 gap-2">
+              <Button type="button" variant="ghost" onClick={() => setZSheetOpen(false)}>Cancel</Button>
+              <Button type="submit" variant="danger" disabled={zBusy || ownerPin.length !== 4 || !forceEverythingConfirmed}>
+                Force close everything
+              </Button>
+            </div>
+          </form>
+        ) : zStep === 1 ? (
           <form onSubmit={(event) => { event.preventDefault(); void verifyZOwnerPin(); }} className="flex flex-col gap-3">
             <p className="font-body text-body-sm text-on-surface-variant">Verify the owner PIN to continue with the Z close.</p>
             {error && <p role="alert" className="rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
@@ -637,6 +762,8 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
                   <Metric label="Cash in" amount={shift.cashInMillimes ?? 0} />
                   <Metric label="Cash out" amount={shift.cashOutMillimes ?? 0} />
                   <Metric label="Cash flow ex-float" amount={shift.cashFlowExFloatMillimes ?? 0} />
+                  {shift.forceClosedByOwner && <p className="font-body text-label-sm text-warning">Closed by force</p>}
+                  {(shift.voidsAutoApprovedCount ?? 0) > 0 && <p className="font-body text-label-sm text-warning">Voids auto-approved: {shift.voidsAutoApprovedCount}</p>}
                 </section>
               ))}
             </div>
@@ -694,24 +821,36 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           onNoteChange={setDifferenceNote}
           onSubmit={(event) => { void closeShift(event); }}
           submitLabel={t('shift.closeShift')}
+          pendingVoidOrders={pendingVoidOrders.filter((order) => order.shiftId === ownOpenShift.id)}
         />}
       </BottomSheet>
-      <BottomSheet open={forceCloseShiftTarget !== null} onClose={() => setForceCloseShiftTarget(null)} title="Force close shift">
-        {forceCloseShiftTarget && <ShiftCloseForm
-          key={forceCloseShiftTarget.id}
-          shift={forceCloseShiftTarget}
-          breakdown={breakdownsByShift[forceCloseShiftTarget.id] ?? emptyShiftBreakdown}
-          movements={cashMovements}
-          countedCash={forceCountedCash[forceCloseShiftTarget.id] ?? ''}
-          differenceNote={forceDifferenceNotes[forceCloseShiftTarget.id] ?? ''}
-          onCountPress={(value) => pressForceCountedCash(forceCloseShiftTarget.id, value)}
-          onCountClear={() => setForceCountedCash((current) => ({ ...current, [forceCloseShiftTarget.id]: '' }))}
-          onCountBackspace={() => setForceCountedCash((current) => ({ ...current, [forceCloseShiftTarget.id]: (current[forceCloseShiftTarget.id] ?? '').slice(0, -1) }))}
-          onNoteChange={(value) => setForceDifferenceNotes((current) => ({ ...current, [forceCloseShiftTarget.id]: value }))}
-          onSubmit={(event) => { void forceCloseShift(event, forceCloseShiftTarget); }}
-          submitLabel="Force close"
-          ownerMode
-        />}
+      <BottomSheet
+        open={forceCloseShiftTarget !== null}
+        onClose={() => { setForceCloseShiftTarget(null); setForceShiftPin(''); setForceShiftConfirmed(false); }}
+        title="Force close shift"
+      >
+        {forceCloseShiftTarget && (
+          <form onSubmit={(event) => { void forceCloseShift(event, forceCloseShiftTarget); }} className="flex flex-col gap-3">
+            <p className="font-body text-body-sm text-on-surface-variant">
+              Close {staffNames[forceCloseShiftTarget.staffId] ?? 'Staff'}'s shift at zero difference. Pending voids on this shift will be approved.
+            </p>
+            <label className="flex items-start gap-2 font-body text-body-sm text-on-surface">
+              <input type="checkbox" checked={forceShiftConfirmed} onChange={(event) => setForceShiftConfirmed(event.target.checked)} />
+              Confirm force close at zero difference.
+            </label>
+            <label className="font-body text-label-md">Owner PIN
+              <input readOnly value={forceShiftPin} placeholder="••••" className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 tracking-[0.5em]" />
+            </label>
+            <Keypad onPress={(digit) => setForceShiftPin((current) => current.length < 4 ? `${current}${digit}` : current)} onClear={() => setForceShiftPin('')} onBackspace={() => setForceShiftPin((current) => current.slice(0, -1))} />
+            {error && <p role="alert" className="rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
+            <div className="sheet-action-bar grid grid-cols-2 gap-2">
+              <Button type="button" variant="ghost" onClick={() => setForceCloseShiftTarget(null)}>Cancel</Button>
+              <Button type="submit" variant="danger" disabled={!forceShiftConfirmed || forceShiftPin.length !== 4}>
+                Force close
+              </Button>
+            </div>
+          </form>
+        )}
       </BottomSheet>
       <BottomSheet
         open={movementSheetOpen}
@@ -806,7 +945,7 @@ function ShiftCloseForm({
   onNoteChange,
   onSubmit,
   submitLabel,
-  ownerMode = false,
+  pendingVoidOrders,
 }: {
   shift: ShiftRecord;
   breakdown: ShiftCloseBreakdown;
@@ -819,7 +958,7 @@ function ShiftCloseForm({
   onNoteChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   submitLabel: string;
-  ownerMode?: boolean;
+  pendingVoidOrders: OrderRecord[];
 }) {
   const movementTotals = getCashMovementTotals(movements, shift.id);
   const expectedCash = getExpectedCash(shift, breakdown, movements);
@@ -831,11 +970,16 @@ function ShiftCloseForm({
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-      <h2 className="font-display text-headline-md text-on-surface">{ownerMode ? 'Owner force close' : t('shift.closeShift')}</h2>
+      <h2 className="font-display text-headline-md text-on-surface">{t('shift.closeShift')}</h2>
       {breakdown.pendingVoidCount > 0 && (
-        <p role="alert" className="rounded-lg bg-warning-container p-3 font-body text-body-sm text-on-warning-container">
-          {t('shift.pendingVoidWarning', { count: breakdown.pendingVoidCount })}
-        </p>
+        <section className="space-y-2 rounded-lg bg-warning-container p-3 text-on-warning-container">
+          <h3 className="font-body text-label-md">Pending voids (excluded from expected cash)</h3>
+          {pendingVoidOrders.map((order) => (
+            <p key={order.id} className="font-body text-body-sm">
+              #{order.number} · {formatTnd(order.totalMillimes / 1000)} DT · {order.voidReason || 'Reason not recorded'}
+            </p>
+          ))}
+        </section>
       )}
       <div className="space-y-2 rounded-xl bg-surface-container-low p-3">
         <Metric label="Starting cash (float)" amount={shift.startingCashMillimes} />

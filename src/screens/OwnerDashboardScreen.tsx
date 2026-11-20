@@ -50,6 +50,7 @@ const emptySummary: DashboardSummary = {
   salesByCategory: [],
   itemsSold: [],
   voids: { count: 0, totalMillimes: 0, orders: [] },
+  pendingVoids: { count: 0, totalMillimes: 0, orders: [] },
   voidAdjustments: [],
   expenseDetails: [],
   comps: { count: 0, quantity: 0, totalMillimes: 0, records: [] },
@@ -355,7 +356,9 @@ function OwnerDashboardContent() {
           </div>
           {pendingVoidOrders.length > 0 ? (
             <p className="mt-2 font-body text-body-sm text-on-surface-variant">
-              {pendingVoidOrders.slice(0, 3).map((order) => `#${order.number}`).join(' · ')}
+              {pendingVoidOrders.slice(0, 3).map((order) =>
+                `#${order.number} · ${formatTnd(order.totalMillimes / 1000)} DT${order.voidReason ? ` · ${order.voidReason}` : ''}`,
+              ).join(' · ')}
             </p>
           ) : <p className="mt-2 font-body text-body-sm text-on-surface-variant">No requests awaiting review.</p>}
         </button>

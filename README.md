@@ -25,6 +25,8 @@ credentials. All three require a password change at first login. Staff must
 also set a personal PIN before entering the workspace. Production builds
 require `VITE_DATA_DRIVER=supabase` and replace demo seed data with empty
 fixtures; a local-driver production build is rejected.
+`npm run dev` uses the local demo driver by default. Existing saved reports
+keep their frozen store and print settings when settings later change.
 
 ## First-time Supabase setup
 
@@ -129,6 +131,19 @@ npm run preview
 Production builds must be made with `VITE_DATA_DRIVER=supabase` and valid
 Supabase URL/anon-key build variables. For example, configure those variables
 in the deployment environment before running `npm run build`.
+
+To test the production-mode Supabase bundle locally, put the production-safe
+client values and `VITE_DATA_DRIVER=supabase` in an ignored
+`.env.production.local` file (never use a service-role key), then run:
+
+```sh
+npm run build:prod-local
+npm run preview:prod
+```
+
+`build:prod-local` runs the typecheck and creates the same production-mode
+bundle as the deployment build. `preview:prod` serves that `dist` output for
+local verification.
 
 ## Daily backups and restore
 

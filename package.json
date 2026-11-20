@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:prod-local": "npm run typecheck && vite build --mode production",
     "preview": "vite preview",
+    "preview:prod": "vite preview",
     "lint": "eslint .",
     "test": "vitest run",
     "typecheck": "tsc -b --pretty",

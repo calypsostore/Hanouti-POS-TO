@@ -285,6 +285,8 @@ export interface ShiftRecord {
   openedAt: string;
   closedAt?: string;
   forceClosedByOwner?: boolean;
+  voidsAutoApprovedCount?: number;
+  pendingVoidCount?: number;
   closedByUserId?: string;
   differenceNote?: string;
   voidAdjustments?: ShiftVoidAdjustment[];
@@ -377,6 +379,7 @@ export interface NotificationRecord {
 export interface ShiftVoidAdjustment {
   orderId: string;
   orderNumber: number;
+  kind: 'requested' | 'rejected' | 'approved';
   amountMillimes: number;
   createdAt: string;
 }
@@ -403,14 +406,26 @@ export interface ReportVoidLine {
   reason: string;
   totalMillimes: number;
   approvedBy?: string;
+  autoApprovedAtForcedClose?: boolean;
 }
 
 export interface ReportVoidAdjustmentLine {
   shiftId: string;
   staffName: string;
   orderNumber: number;
+  kind: 'requested' | 'rejected' | 'approved';
   amountMillimes: number;
   createdAt: string;
+}
+
+export interface ReportPendingVoidLine {
+  ticketNumber: number;
+  staffName: string;
+  shiftId: string;
+  amountMillimes: number;
+  paymentMethod: PaymentMethod;
+  reason: string;
+  requestedAt: string;
 }
 
 export interface ReportCompLine {
@@ -488,7 +503,10 @@ export interface ReportShiftLine {
   countedCashMillimes?: number;
   differenceMillimes?: number;
   forceClosedByOwner: boolean;
+  voidsAutoApprovedCount?: number;
   voidAdjustmentMillimes?: number;
+  voidRequestsMillimes?: number;
+  voidRejectionsMillimes?: number;
 }
 
 export interface ReportRecord {
@@ -532,6 +550,7 @@ export interface ReportRecord {
   salesByCategory?: ReportCategoryLine[];
   itemsSold?: ReportItemLine[];
   voids?: { count: number; totalMillimes: number; orders: ReportVoidLine[] };
+  pendingVoids?: { count: number; totalMillimes: number; orders: ReportPendingVoidLine[] };
   voidAdjustments?: ReportVoidAdjustmentLine[];
   expenseDetails?: ReportExpenseLine[];
   comps?: { count: number; quantity: number; totalMillimes: number; records: ReportCompLine[] };

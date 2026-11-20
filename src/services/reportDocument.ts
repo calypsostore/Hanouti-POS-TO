@@ -149,8 +149,21 @@ export function buildReportDocument(
       { label: 'Voided order count', value: String(report.voids.count), emphasized: true },
       { label: 'Voided order total', value: money(report.voids.totalMillimes) },
       ...report.voids.orders.map((item) => ({
-      label: `#${item.ticketNumber} ${item.reason || 'Reason not recorded'} · ${item.approvedBy ?? 'Unknown'}`,
-      value: money(item.totalMillimes),
+        label: item.autoApprovedAtForcedClose
+          ? `#${item.ticketNumber} auto-approved at forced close`
+          : `#${item.ticketNumber} ${item.reason || 'Reason not recorded'} · ${item.approvedBy ?? 'Unknown'}`,
+        value: money(item.totalMillimes),
+      })),
+    ]);
+  }
+
+  if (report.type === 'X') {
+    appendSection(sections, 'PENDING VOIDS (EXCLUDED FROM SALES AND CASH)', [
+      { label: 'Pending void count', value: report.pendingVoids ? String(report.pendingVoids.count) : 'Not recorded', emphasized: true },
+      { label: 'Pending void total', value: report.pendingVoids ? money(report.pendingVoids.totalMillimes) : 'Not recorded' },
+      ...(report.pendingVoids?.orders ?? []).map((item) => ({
+        label: `#${item.ticketNumber} · ${item.staffName} · ${item.reason || 'Reason not recorded'}`,
+        value: money(item.amountMillimes),
       })),
     ]);
   }
@@ -227,7 +240,10 @@ export function buildReportDocument(
         { label: 'Shift ID', value: shift.shiftId },
         { label: 'Opened', value: localDateTime(shift.openedAt) },
         ...(shift.closedAt ? [{ label: 'Closed', value: localDateTime(shift.closedAt) }] : []),
-        { label: 'Closed by owner', value: shift.forceClosedByOwner ? 'Yes' : 'No' },
+        { label: 'Closed by force', value: shift.forceClosedByOwner ? 'Yes' : 'No' },
+        ...(shift.voidsAutoApprovedCount
+          ? [{ label: 'Voids auto-approved', value: String(shift.voidsAutoApprovedCount) }]
+          : []),
       ];
       const paymentAmounts = [
         shift.cashSalesMillimes,
@@ -244,6 +260,24 @@ export function buildReportDocument(
       if (shift.tabPaymentsMillimes !== undefined) lines.push({ label: 'Tab payments', value: money(shift.tabPaymentsMillimes) });
       if (shift.voidAdjustmentMillimes !== undefined) {
         lines.push({ label: 'Post-close void adjustments', value: money(shift.voidAdjustmentMillimes) });
+      }
+      if (shift.voidRequestsMillimes !== undefined) {
+        lines.push({ label: 'Void requests', value: `${shift.voidRequestsMillimes < 0 ? '-' : '+'}${money(Math.abs(shift.voidRequestsMillimes))}` });
+      }
+      if (shift.voidRejectionsMillimes !== undefined) {
+        lines.push({ label: 'Void rejections', value: `${shift.voidRejectionsMillimes < 0 ? '-' : '+'}${money(Math.abs(shift.voidRejectionsMillimes))}` });
+      }
+      if (report.type === 'Z' && shift.differenceMillimes !== undefined) {
+        const difference = shift.differenceMillimes;
+        lines.push({
+          label: 'Cash difference',
+          value: difference < 0
+            ? `SHORT ${money(Math.abs(difference))}`
+            : difference > 0
+              ? `OVER ${money(difference)}`
+              : 'BALANCED',
+          emphasized: true,
+        });
       }
       if (shift.cashInMillimes !== undefined || shift.cashOutMillimes !== undefined) {
         lines.push({

@@ -6,6 +6,29 @@ import { getSupabaseClient } from '../supabaseClient';
 const SESSION_LOCK_KEY = '7anouti-pos:auth-locked-user';
 const SESSION_VERSION_KEY = '7anouti-pos:supabase-session-version';
 const PIN_LOCK_KEY = '7anouti-pos:supabase-pin-lock-until';
+const CACHED_USER_DISPLAY_KEY = '7anouti-pos:cached-user-display';
+
+export interface CachedUserDisplay {
+  name: string;
+}
+
+function cacheUserDisplay(user: UserSummary): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(CACHED_USER_DISPLAY_KEY, JSON.stringify({ name: user.name }));
+  } catch (error) {
+    console.warn('[startup] Could not cache the user display.', error);
+  }
+}
+
+function clearCachedUserDisplay(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.removeItem(CACHED_USER_DISPLAY_KEY);
+  } catch (error) {
+    console.warn('[startup] Could not clear the cached user display.', error);
+  }
+}
 
 function clearSessionLock(): void {
   if (typeof window !== 'undefined') window.sessionStorage.removeItem(SESSION_LOCK_KEY);
@@ -51,7 +74,10 @@ async function currentUser(): Promise<UserSummary | null> {
   const client = getSupabaseClient();
   const { data: authData, error: authError } = await client.auth.getUser();
   if (authError && authError.name !== 'AuthSessionMissingError') throwSupabaseError(authError, 'Could not restore the sign-in session');
-  if (!authData.user) return null;
+  if (!authData.user) {
+    clearCachedUserDisplay();
+    return null;
+  }
   let profile: UserSummary | undefined;
   try {
     profile = await getProfile(authData.user.id);
@@ -62,16 +88,19 @@ async function currentUser(): Promise<UserSummary | null> {
     const { error: signOutError } = await client.auth.signOut();
     if (signOutError) throwSupabaseError(signOutError, 'Could not clear the expired sign-in session');
     clearSessionLock();
+    clearCachedUserDisplay();
     return null;
   }
   if (!profile || !profile.isActive) {
     await client.auth.signOut();
+    clearCachedUserDisplay();
     return null;
   }
   const storedVersion = typeof window === 'undefined' ? null : window.localStorage.getItem(SESSION_VERSION_KEY);
   if (storedVersion !== null && Number(storedVersion) !== (profile.sessionVersion ?? 0)) {
     await client.auth.signOut();
     clearSessionLock();
+    clearCachedUserDisplay();
     return null;
   }
   if (profile.storeId) {
@@ -79,10 +108,12 @@ async function currentUser(): Promise<UserSummary | null> {
     if (!store?.isActive || store.archivedAt) {
       await client.auth.signOut();
       clearSessionLock();
+      clearCachedUserDisplay();
       return null;
     }
     if (isSubscriptionExpired(store)) throw new Error('Subscription expired, contact 7anouti');
   }
+  cacheUserDisplay(profile);
   return profile;
 }
 
@@ -103,6 +134,7 @@ export const authRepository = {
     const user = await currentUser();
     if (!user || (acceptedRoles && !acceptedRoles.includes(user.role))) {
       await client.auth.signOut();
+      clearCachedUserDisplay();
       throw new Error('The username/email or password is incorrect.');
     }
     if (typeof window !== 'undefined') {
@@ -115,6 +147,22 @@ export const authRepository = {
   },
 
   currentUser,
+
+  getCachedUserDisplay(): CachedUserDisplay | null {
+    if (typeof window === 'undefined') return null;
+    try {
+      const cached: unknown = JSON.parse(window.sessionStorage.getItem(CACHED_USER_DISPLAY_KEY) ?? 'null');
+      if (typeof cached === 'object' && cached !== null && 'name' in cached && typeof cached.name === 'string') {
+        return { name: cached.name };
+      }
+      clearCachedUserDisplay();
+      return null;
+    } catch (error) {
+      clearCachedUserDisplay();
+      console.error('[startup] Could not read the cached user display.', error);
+      return null;
+    }
+  },
 
   async isSessionLocked(userId: string): Promise<boolean> {
     return typeof window !== 'undefined' && window.sessionStorage.getItem(SESSION_LOCK_KEY) === userId;
@@ -235,6 +283,7 @@ export const authRepository = {
       window.localStorage.removeItem(SESSION_VERSION_KEY);
       window.sessionStorage.removeItem(PIN_LOCK_KEY);
     }
+    clearCachedUserDisplay();
     if (revokeError) throwSupabaseError(revokeError, 'Could not revoke the sign-in session');
   },
 

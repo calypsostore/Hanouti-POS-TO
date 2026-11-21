@@ -16,6 +16,7 @@ import { LockScreen } from './components/LockScreen';
 import { permissionService } from './services/permissionService';
 import { classifyInitializationError } from './services/serverErrorService';
 import { PullToRefresh } from './components/PullToRefresh';
+import { ActionFeedbackToast } from './components/ActionFeedbackToast';
 
 const SetNewPasswordScreen = lazy(() => import('./screens/SetNewPasswordScreen').then((module) => ({ default: module.SetNewPasswordScreen })));
 const PosScreen = lazy(() => import('./screens/PosScreen').then((module) => ({ default: module.PosScreen })));
@@ -47,12 +48,28 @@ function homeForRole(role: UserRole): string {
   return role === 'owner' ? '/owner/dashboard' : '/admin/overview';
 }
 
-function LoadingScreen({ message }: { message: string }) {
+function LoadingScreen({ message, cachedUserName }: { message: string; cachedUserName?: string }) {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-surface p-6 text-center">
-      <div>
-        <MaterialIcon name="local_cafe" className="text-5xl text-primary" />
-        <p className="mt-3 font-body text-body-md text-on-surface-variant">{message}</p>
+    <main className="login-main loading-screen">
+      <div className="login-decoration login-decoration--northwest" aria-hidden="true" />
+      <div className="login-decoration login-decoration--northeast" aria-hidden="true" />
+      <div className="login-decoration login-decoration--southeast" aria-hidden="true" />
+      <div className="login-decoration login-decoration--southwest" aria-hidden="true" />
+      <span className="login-bubble login-bubble--one" aria-hidden="true" />
+      <span className="login-bubble login-bubble--two" aria-hidden="true" />
+      <span className="login-bubble login-bubble--three" aria-hidden="true" />
+
+      <div className="login-content">
+        <header className="login-brand">
+          <div className="login-logo-orbit">
+            <div className="login-logo-frame loading-logo">
+              <img src="/logo2.png" alt="" />
+            </div>
+          </div>
+          <h1 className="login-title">7anouti<span>-POS</span></h1>
+          <p className="login-tagline" role="status" aria-live="polite">{message}</p>
+          {cachedUserName && <p className="login-tagline">Welcome back, {cachedUserName}</p>}
+        </header>
       </div>
     </main>
   );
@@ -104,42 +121,30 @@ interface ProtectedRouteProps {
 
 function ProtectedRoute({ roles, children, permission }: ProtectedRouteProps) {
   const user = useAuthStore((state) => state.user);
+  const permissions = useAuthStore((state) => state.permissions);
+  const permissionsReady = useAuthStore((state) => state.permissionsReady);
+  const refreshPermissions = useAuthStore((state) => state.refreshPermissions);
   const locked = useAuthStore((state) => state.locked);
   const location = useLocation();
-  const [permissionAllowed, setPermissionAllowed] = useState<boolean | null>(null);
   const permissionKey = Array.isArray(permission) ? permission.join('|') : permission ?? '';
 
   useEffect(() => {
     if (!permissionKey || user?.role !== 'staff') return;
-    let active = true;
-    let requestId = 0;
-    const checkPermission = () => {
-      const currentRequestId = ++requestId;
-      setPermissionAllowed(null);
-      void userService.getEffectivePermissions(user.id).then((permissionIds) => {
-        if (active && currentRequestId === requestId) {
-          setPermissionAllowed(permissionKey.split('|').some((permissionId) => permissionIds.includes(permissionId)));
-        }
-      }).catch((error: unknown) => {
-        console.error('Could not verify staff permission.', error);
-        if (active && currentRequestId === requestId) setPermissionAllowed(false);
-      });
-    };
-    checkPermission();
+    const checkPermission = () => { void refreshPermissions(); };
     window.addEventListener('focus', checkPermission);
     window.addEventListener(PERMISSIONS_CHANGED_EVENT, checkPermission);
     return () => {
-      active = false;
       window.removeEventListener('focus', checkPermission);
       window.removeEventListener(PERMISSIONS_CHANGED_EVENT, checkPermission);
     };
-  }, [permissionKey, user]);
+  }, [permissionKey, refreshPermissions, user?.id, user?.role]);
 
   if (!user) return <Navigate to="/" replace state={{ from: location.pathname }} />;
   if (locked) return <Navigate to="/lock" replace />;
   if (user.mustChangePassword || user.mustSetPin) return <Navigate to="/set-password" replace />;
   if (!roles.includes(user.role)) return <Navigate to={homeForRole(user.role)} replace />;
-  if (permission && user.role === 'staff' && permissionAllowed === null) return <LoadingScreen message={t('app.loading')} />;
+  const permissionAllowed = permissionKey.split('|').some((permissionId) => permissions.includes(permissionId));
+  if (permission && user.role === 'staff' && !permissionsReady) return <LoadingScreen message={t('app.loading')} />;
   if (permission && user.role === 'staff' && !permissionAllowed) return <AccessDenied />;
 
   return children;
@@ -195,6 +200,7 @@ function RolePlaceholder({ title }: { title: string }) {
 export default function App() {
   const ready = useAuthStore((state) => state.ready);
   const user = useAuthStore((state) => state.user);
+  const cachedUserDisplay = useAuthStore((state) => state.cachedUserDisplay);
   const locked = useAuthStore((state) => state.locked);
   const initializationError = useAuthStore((state) => state.initializationError);
   const hydrate = useAuthStore((state) => state.hydrate);
@@ -353,12 +359,13 @@ export default function App() {
     }
   }
 
-  if (!ready) return <LoadingScreen message="Preparing your terminal..." />;
+  if (!ready) return <LoadingScreen message="Preparing your terminal..." cachedUserName={cachedUserDisplay?.name} />;
   if (initializationError) return <InitializationErrorScreen error={initializationError} onRetry={() => void hydrate()} />;
 
   return (
     <>
       <UpdateRequiredModal result={updateResult} />
+      <ActionFeedbackToast />
       {updateReloadError && (
         <div role="status" className="fixed inset-x-0 top-0 z-[120] flex items-center justify-between gap-3 bg-primary-dark px-4 py-3 text-white shadow-overlay">
           <div>

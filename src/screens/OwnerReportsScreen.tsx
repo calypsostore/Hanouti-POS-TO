@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react';
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { StatusTag } from '../components/StatusTag';
@@ -19,6 +18,8 @@ type DashboardSummary = Awaited<ReturnType<typeof reportService.getDashboard>>;
 type InsightsData = Awaited<ReturnType<typeof reportService.getInsights>>;
 type Period = 'day' | 'week' | 'month' | 'year';
 type InsightRange = 'today' | 'yesterday' | 'week' | 'month' | 'custom';
+const ReportSalesByDayChart = lazy(() => import('../components/PerformanceCharts').then((module) => ({ default: module.ReportSalesByDayChart })));
+const ReportSalesByHourChart = lazy(() => import('../components/PerformanceCharts').then((module) => ({ default: module.ReportSalesByHourChart })));
 const periodLabels: Record<Period, TranslationKey> = {
   day: 'owner.today',
   week: 'owner.week',
@@ -41,6 +42,7 @@ const emptySummary: DashboardSummary = {
   cashRefundsMillimes: 0,
   cashMovements: [], employeeBreakdown: [],
   tabsIssuedMillimes: 0, tabsSettledMillimes: 0,
+  salesByDay: [], salesByHour: [], salesTodayMillimes: 0, salesLastWeekMillimes: 0, recentOrders: [],
 };
 
 function dateKey(date: Date): string {
@@ -183,19 +185,13 @@ function OwnerReportsContent() {
             <article className="rounded-xl bg-surface-container-low p-3">
               <h3 className="font-display text-title-md text-on-surface">Sales by day</h3>
               <div className="mt-3 h-56 min-w-0">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={insights.salesByDay.map((day) => ({
+                <Suspense fallback={<div className="h-full" aria-hidden="true" />}>
+                  <ReportSalesByDayChart data={insights.salesByDay.map((day) => ({
                     ...day,
                     label: new Date(`${day.date}T00:00:00`).toLocaleDateString([], { month: 'short', day: 'numeric' }),
                     sales: day.salesMillimes / 1000,
-                  }))} margin={{ left: 0, right: 8, top: 8, bottom: 4 }}>
-                    <CartesianGrid stroke="#E1ECEE" vertical={false} />
-                    <XAxis dataKey="label" tick={{ fontSize: 10 }} minTickGap={20} />
-                    <YAxis width={42} tick={{ fontSize: 10 }} />
-                    <Tooltip formatter={(value) => [`${formatTnd(Number(value))} DT`, 'Sales']} />
-                    <Line type="monotone" dataKey="sales" name="Sales" stroke="#0F5F6E" strokeWidth={2} dot={{ r: 2 }} />
-                  </LineChart>
-                </ResponsiveContainer>
+                  }))} />
+                </Suspense>
               </div>
             </article>
 
@@ -203,15 +199,12 @@ function OwnerReportsContent() {
               <article className="min-w-0 rounded-xl bg-surface-container-low p-3">
                 <h3 className="font-display text-title-md text-on-surface">Sales by hour</h3>
                 <div className="mt-3 h-56">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={insights.salesByHour.map((hour) => ({ ...hour, sales: hour.salesMillimes / 1000 }))} margin={{ left: 0, right: 4, top: 8, bottom: 4 }}>
-                      <CartesianGrid stroke="#E1ECEE" vertical={false} />
-                      <XAxis dataKey="hour" tick={{ fontSize: 9 }} interval={2} tickFormatter={formatHour} />
-                      <YAxis width={42} tick={{ fontSize: 10 }} />
-                      <Tooltip labelFormatter={(hour) => formatHour(Number(hour))} formatter={(value) => [`${formatTnd(Number(value))} DT`, 'Sales']} />
-                      <Bar dataKey="sales" name="Sales" fill="#0F5F6E" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  <Suspense fallback={<div className="h-full" aria-hidden="true" />}>
+                    <ReportSalesByHourChart data={insights.salesByHour.map((hour) => ({
+                      hour: hour.hour,
+                      sales: hour.salesMillimes / 1000,
+                    }))} />
+                  </Suspense>
                 </div>
               </article>
               <RankedSales title="Sales by staff" items={insights.salesByStaff.map((member) => ({ name: member.name, salesMillimes: member.salesMillimes }))} />
@@ -312,11 +305,6 @@ function FinanceSummary({ summary }: { summary: DashboardSummary }) {
       ))}
     </div>
   );
-}
-
-function formatHour(hour: number): string {
-  const suffix = hour < 12 ? 'AM' : 'PM';
-  return `${hour % 12 || 12} ${suffix}`;
 }
 
 function formatSignedTnd(amountMillimes: number): string {

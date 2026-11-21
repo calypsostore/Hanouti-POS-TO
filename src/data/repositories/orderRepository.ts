@@ -129,18 +129,18 @@ function orderQuery(storeId: string, options: OrderListOptions, includeItems: bo
 }
 
 export async function listOrders(storeId: string, options: OrderListOptions = {}): Promise<OrderRecord[]> {
-  const { data, error } = await orderQuery(storeId, options, true);
+  const { data, error } = await orderQuery(storeId, options, true).returns<JoinedOrderRow[]>();
   if (error) reportWorkflowError(error, 'Could not load orders');
-  return (data ?? []).map((row) => mapJoinedOrder(row as JoinedOrderRow));
+  return (data ?? []).map(mapJoinedOrder);
 }
 
 export async function listOrderSummaries(
   storeId: string,
   options: OrderListOptions = {},
 ): Promise<OrderSummaryRecord[]> {
-  const { data, error } = await orderQuery(storeId, options, false);
+  const { data, error } = await orderQuery(storeId, options, false).returns<OrderRow[]>();
   if (error) reportWorkflowError(error, 'Could not load order summaries');
-  return (data ?? []).map((row) => mapOrderSummary(row as OrderRow));
+  return (data ?? []).map(mapOrderSummary);
 }
 
 export async function getOrder(orderId: string): Promise<OrderRecord | undefined> {

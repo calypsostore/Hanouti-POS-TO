@@ -135,6 +135,8 @@ export function NotificationsBridge() {
     let disposed = false;
     let retry = 0;
     let retryTimer = 0;
+    let catchUpTimer = 0;
+    let catchUpInProgress = false;
     let channel = getSupabaseClient().channel(`notifications-app-shell:${user.storeId}:${user.id}`);
 
     const handleAcceptedInsert = async (row: NotificationRecord) => {
@@ -186,25 +188,38 @@ export function NotificationsBridge() {
     };
 
     const catchUp = async () => {
-      if (disposed) return;
-      const before = useNotificationStore.getState().lastSeenCreatedAt;
-      const query = getSupabaseClient()
-        .from('notifications')
-        .select('*')
-        .eq('store_id', user.storeId!)
-        .or(`user_id.eq.${user.id},and(user_id.is.null,target_role.eq.${user.role})`)
-        .order('created_at', { ascending: false })
-        .limit(50);
-      const { data, error } = before
-        ? await query.gt('created_at', before)
-        : await query;
-      if (error) {
+      if (disposed || catchUpInProgress) return;
+      catchUpInProgress = true;
+      let hasMore = false;
+      try {
+        let pages = 0;
+        do {
+          const before = useNotificationStore.getState().lastSeenCreatedAt;
+          let query = getSupabaseClient()
+            .from('notifications')
+            .select('*')
+            .eq('store_id', user.storeId!)
+            .or(`user_id.eq.${user.id},and(user_id.is.null,target_role.eq.${user.role})`)
+            .order('created_at', { ascending: Boolean(before) })
+            .limit(50);
+          if (before) query = query.gt('created_at', before);
+          const { data, error } = await query;
+          if (error) {
+            console.error('[notifications] Realtime catch-up failed.', error);
+            return;
+          }
+          const rows = (data ?? []).map((item) => mapNotificationRow(item as unknown as Record<string, unknown>));
+          if (!before) rows.reverse();
+          for (const row of rows) await handleAcceptedInsert(row);
+          hasMore = Boolean(before) && rows.length === 50;
+          pages += 1;
+        } while (!disposed && hasMore && pages < 3);
+      } catch (error) {
         console.error('[notifications] Realtime catch-up failed.', error);
-        return;
+      } finally {
+        catchUpInProgress = false;
       }
-      for (const row of (data ?? []).map((item) => mapNotificationRow(item as unknown as Record<string, unknown>)).reverse()) {
-        await handleAcceptedInsert(row);
-      }
+      if (!disposed && hasMore) catchUpTimer = window.setTimeout(() => { void catchUp(); }, 1000);
     };
 
     subscribe();
@@ -228,14 +243,15 @@ export function NotificationsBridge() {
     const localEvent = () => {
       if (disposed) return;
       void notificationService.listFor(user).then((items) => {
-        acceptInsert(items[0] as NotificationRecord);
-      }).catch(() => undefined);
+        if (items[0]) acceptInsert(items[0]);
+      }).catch((error: unknown) => console.error('[notifications] Could not refresh after a local change.', error));
     };
     window.addEventListener(OWNER_NOTIFICATIONS_CHANGED_EVENT, localEvent);
 
     return () => {
       disposed = true;
       window.clearTimeout(retryTimer);
+      window.clearTimeout(catchUpTimer);
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener(OWNER_NOTIFICATIONS_CHANGED_EVENT, localEvent);

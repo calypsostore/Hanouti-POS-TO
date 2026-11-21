@@ -7,6 +7,7 @@ import { getLogoDefinition } from '../data/logoCatalog';
 import { authService } from './authService';
 import { getSupabaseClient } from '../data/supabaseClient';
 import { isSupabaseDriver } from '../data/driver';
+import { fetchCachedQuery, invalidateQueryCache } from '../lib/queryCache';
 import { createOwnerAccount, createStaff, resetPassword } from '../data/repositories/accountRepository';
 import { getPermissionOverrides, getProfile, listProfiles } from '../data/repositories/profileRepository';
 import { getStore as getRemoteStore, listStores as listRemoteStores } from '../data/repositories/storeRepository';
@@ -200,7 +201,9 @@ export const userService = {
   },
 
   async getStore(storeId: string): Promise<StoreRecord | undefined> {
-    if (isSupabaseDriver()) return getRemoteStore(storeId);
+    if (isSupabaseDriver()) {
+      return fetchCachedQuery(`store:${storeId}`, ['stores', 'store_settings'], 15_000, () => getRemoteStore(storeId));
+    }
     return getStores().find((store) => store.id === storeId);
   },
 
@@ -212,6 +215,7 @@ export const userService = {
       notificationPreferences?: Partial<StoreSettings['notificationPreferences']>;
       quickPickMode?: StoreSettings['quickPickMode'];
       quickPickItemIds?: StoreSettings['quickPickItemIds'];
+      storeType?: StoreSettings['storeType'];
       ticketHeaderText?: string[];
       ticketFooterText?: string[];
       reportFooterText?: string[];
@@ -224,6 +228,10 @@ export const userService = {
       paperWidth?: 58 | 80;
     },
   ): Promise<StoreRecord> {
+    if (changes.storeType !== undefined &&
+      !['general', 'coffee', 'restaurant', 'bakery', 'grocery'].includes(changes.storeType)) {
+      throw new Error('Choose a valid store type.');
+    }
     if (changes.quickPickMode !== undefined && !['auto', 'manual'].includes(changes.quickPickMode)) {
       throw new Error('Choose automatic or manual Quick Picks.');
     }
@@ -258,6 +266,7 @@ export const userService = {
       };
       const { error } = await getSupabaseClient().from('store_settings').upsert({ store_id: storeId, settings });
       if (error) throw new Error(`Could not save store settings: ${error.message}`, { cause: error });
+      invalidateQueryCache(['stores', 'store_settings']);
       await activityService.log({
         storeId,
         action: 'store.settings_changed',
@@ -1261,6 +1270,7 @@ export const userService = {
         ...(changes.taxId !== undefined ? { tax_id: changes.taxId.trim() || null } : {}),
       }).eq('store_id', storeId);
       if (error) throw new Error(`Could not update store information: ${error.message}`, { cause: error });
+      invalidateQueryCache(['stores', 'store_settings']);
       const updated = { ...store, ...changes, name: changes.name?.trim() ?? store.name };
       await activityService.log({
         storeId,
@@ -1308,6 +1318,7 @@ export const userService = {
       if (!store || store.ownerId !== ownerId) throw new Error('Only this store owner can change customer credit settings.');
       const { error } = await getSupabaseClient().from('stores').update({ allow_customer_credit_balance: allowed }).eq('store_id', storeId);
       if (error) throw new Error(`Could not update customer credit settings: ${error.message}`, { cause: error });
+      invalidateQueryCache(['stores']);
       const updated = { ...store, allowCustomerCreditBalance: allowed };
       await activityService.log({
         storeId,
@@ -1353,6 +1364,7 @@ export const userService = {
         ...(changes.allowOtherPayments !== undefined ? { allow_other_payments: changes.allowOtherPayments } : {}),
       }).eq('store_id', storeId);
       if (error) throw new Error(`Could not update payment settings: ${error.message}`, { cause: error });
+      invalidateQueryCache(['stores']);
       const updated = { ...store, ...changes };
       await activityService.log({
         storeId,
@@ -1398,6 +1410,7 @@ export const userService = {
       if (!store || store.ownerId !== ownerId) throw new Error('Only this store owner can change the staff auto-lock timeout.');
       const { error } = await getSupabaseClient().from('stores').update({ staff_auto_lock_minutes: minutes }).eq('store_id', storeId);
       if (error) throw new Error(`Could not update auto-lock timeout: ${error.message}`, { cause: error });
+      invalidateQueryCache(['stores']);
       const updated = { ...store, staffAutoLockMinutes: minutes };
       await activityService.log({
         storeId,
@@ -1440,6 +1453,7 @@ export const userService = {
       if (!store || store.ownerId !== ownerId) throw new Error('Only this store owner can change the cash-out alert threshold.');
       const { error } = await getSupabaseClient().from('stores').update({ cash_out_alert_threshold_millimes: thresholdMillimes }).eq('store_id', storeId);
       if (error) throw new Error(`Could not update cash-out threshold: ${error.message}`, { cause: error });
+      invalidateQueryCache(['stores']);
       const updated = { ...store, cashOutAlertThresholdMillimes: thresholdMillimes };
       await activityService.log({
         storeId,

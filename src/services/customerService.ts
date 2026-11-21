@@ -436,11 +436,11 @@ export const customerService = {
         creditStatusFromBalance(ledgerBalance(customer.id), customer.creditLimitMillimes),
       ] as const)));
     }
-    const useOfflineSnapshot = async () => Object.fromEntries(await Promise.all(customers.map(async (customer) => [
+    const readOfflineSnapshot = async () => Object.fromEntries(await Promise.all(customers.map(async (customer) => [
       customer.id,
       await getCachedCreditStatus(customer.id, 0),
     ] as const)));
-    if (typeof navigator !== 'undefined' && !navigator.onLine) return useOfflineSnapshot();
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return readOfflineSnapshot();
     try {
       const balances = await listRemoteCreditBalances(storeId);
       const balancesByCustomer = new Map(balances.map((entry) => [entry.customerId, entry]));
@@ -453,7 +453,7 @@ export const customerService = {
         ];
       }));
     } catch (error) {
-      if (offlineOrderQueue.isNetworkFailure(error)) return useOfflineSnapshot();
+      if (offlineOrderQueue.isNetworkFailure(error)) return readOfflineSnapshot();
       throw error;
     }
   },

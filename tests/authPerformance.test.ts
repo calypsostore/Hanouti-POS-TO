@@ -54,4 +54,13 @@ describe('startup and permission request batching', () => {
     expect(getItem).toHaveBeenCalledWith('7anouti-pos:auth-locked-user');
     expect(mocks.getSupabaseClient).not.toHaveBeenCalled();
   });
+
+  it('reads only the cached user display data while startup is pending', () => {
+    const getItem = vi.fn(() => JSON.stringify({ name: 'Sarah' }));
+    vi.stubGlobal('window', { sessionStorage: { getItem, removeItem: vi.fn() } });
+
+    expect(authRepository.getCachedUserDisplay()).toEqual({ name: 'Sarah' });
+    expect(getItem).toHaveBeenCalledWith('7anouti-pos:cached-user-display');
+    expect(mocks.getSupabaseClient).not.toHaveBeenCalled();
+  });
 });

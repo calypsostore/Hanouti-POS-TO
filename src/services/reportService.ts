@@ -10,7 +10,6 @@ import type {
   ReportShiftLine,
   ReportVoidAdjustmentLine,
   OrderSummaryRecord,
-  ShiftRecord,
   TabRecord,
 } from '../types/domain';
 import { resolveStoreSettings } from '../types/domain';
@@ -536,6 +535,10 @@ async function summarizeLocal(
 
 type ReportSummary = Awaited<ReturnType<typeof summarizeLocal>>;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 async function summarizeRemote(
   storeId: string,
   from: number,
@@ -578,11 +581,10 @@ async function summarizeRemote(
     ['comps', 'records'],
   ]) {
     const collection = summary[key];
-    if (typeof collection !== 'object' || collection === null || !Array.isArray(collection[arrayKey])) {
+    if (!isRecord(collection) || !Array.isArray(collection[arrayKey])) {
       throw new Error(`Dashboard summary is missing a valid ${key}.`);
     }
   }
-  const shiftLines = summary.shiftLines;
   return {
     ...summary,
     shifts: shifts.filter((shift) => {
@@ -1027,10 +1029,24 @@ export const reportService = {
           throw new Error(`Shift summary is missing a valid ${key}.`);
         }
       }
+      const getNumber = (key: string): number => {
+        const value = summary[key];
+        if (typeof value !== 'number' || !Number.isFinite(value)) {
+          throw new Error(`Shift summary is missing a valid ${key}.`);
+        }
+        return value;
+      };
       const split = summary.paymentSplit;
-      if (typeof split !== 'object' || split === null || Array.isArray(split)
-        || !['cash', 'card', 'other', 'tab'].every((key) =>
-          typeof split[key] === 'number' && Number.isFinite(split[key]))) {
+      if (!isRecord(split)) {
+        throw new Error('Shift summary is missing a valid paymentSplit.');
+      }
+      const paymentSplit: Record<PaymentMethod, number> = {
+        cash: typeof split.cash === 'number' && Number.isFinite(split.cash) ? split.cash : NaN,
+        card: typeof split.card === 'number' && Number.isFinite(split.card) ? split.card : NaN,
+        other: typeof split.other === 'number' && Number.isFinite(split.other) ? split.other : NaN,
+        tab: typeof split.tab === 'number' && Number.isFinite(split.tab) ? split.tab : NaN,
+      };
+      if (!Object.values(paymentSplit).every(Number.isFinite)) {
         throw new Error('Shift summary is missing a valid paymentSplit.');
       }
       for (const key of ['cashMovements', 'cashOuts']) {
@@ -1042,29 +1058,28 @@ export const reportService = {
         ['comps', 'records'],
       ]) {
         const collection = summary[key];
-        if (typeof collection !== 'object' || collection === null || !Array.isArray(collection[arrayKey])) {
+        if (!isRecord(collection) || !Array.isArray(collection[arrayKey])) {
           throw new Error(`Shift summary is missing a valid ${key}.`);
         }
       }
-      const paymentSplit = split as Record<PaymentMethod, number>;
-      const expectedCashMillimes = summary.expectedCashMillimes;
-      const cashInMillimes = summary.cashInMillimes;
-      const cashOutMillimes = summary.cashOutMillimes;
-      const tabPaymentsMillimes = summary.tabPaymentsMillimes;
+      const expectedCashMillimes = getNumber('expectedCashMillimes');
+      const cashInMillimes = getNumber('cashInMillimes');
+      const cashOutMillimes = getNumber('cashOutMillimes');
+      const tabPaymentsMillimes = getNumber('tabPaymentsMillimes');
       const staffName = typeof summary.staffName === 'string' ? summary.staffName : generatedBy;
       const timeZone = remoteStore.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
       const dateParts = datePartsInTimezone(now, timeZone);
       const shiftLine: ReportShiftLine = {
         shiftId: shift.id,
         staffName,
-        orderCount: Number(summary.orderCount),
+        orderCount: getNumber('orderCount'),
         status: 'in_progress',
         openedAt: shift.openedAt,
         startingCashMillimes: shift.startingCashMillimes,
-        cashSalesMillimes: Number(summary.cashSalesMillimes),
-        cardSalesMillimes: Number(summary.cardSalesMillimes),
-        otherSalesMillimes: Number(summary.otherSalesMillimes),
-        tabSalesMillimes: Number(summary.tabSalesMillimes),
+        cashSalesMillimes: getNumber('cashSalesMillimes'),
+        cardSalesMillimes: getNumber('cardSalesMillimes'),
+        otherSalesMillimes: getNumber('otherSalesMillimes'),
+        tabSalesMillimes: getNumber('tabSalesMillimes'),
         tabPaymentsMillimes,
         cashInMillimes,
         cashOutMillimes,
@@ -1082,12 +1097,12 @@ export const reportService = {
         periodTo: now.toISOString(),
         generatedBy,
         reportNumber: `X-SHIFT-${shift.id.slice(-6).toUpperCase()}`,
-        salesMillimes: Number(summary.salesMillimes),
+        salesMillimes: getNumber('salesMillimes'),
         salesCollectedMillimes: paymentSplit.cash + paymentSplit.card + paymentSplit.other + tabPaymentsMillimes,
         expensesMillimes: 0,
         netProfitMillimes: paymentSplit.cash + paymentSplit.card + paymentSplit.other + tabPaymentsMillimes,
         receivableMillimes: 0,
-        orderCount: Number(summary.orderCount),
+        orderCount: getNumber('orderCount'),
         cashDifferenceMillimes: 0,
         cashSalesMillimes: Number(summary.cashSalesMillimes),
         tabSalesMillimes: Number(summary.tabSalesMillimes),

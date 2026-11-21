@@ -14,6 +14,7 @@ describe('orderRepository list queries', () => {
     lte: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
     range: vi.fn().mockReturnThis(),
+    returns: vi.fn().mockReturnThis(),
     then: vi.fn((resolve: (result: { data: never[]; error: null }) => unknown) =>
       Promise.resolve({ data: [] as never[], error: null }).then(resolve)),
   };

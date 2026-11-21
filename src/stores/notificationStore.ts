@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import type { NotificationRecord, UserSummary } from '../types/domain';
 import { notificationService } from '../services/notificationService';
 
+const MAX_NOTIFICATION_ITEMS = 200;
+
 interface NotificationState {
   items: NotificationRecord[];
   unreadCount: number;
@@ -22,7 +24,9 @@ function mergeItems(current: NotificationRecord[], incoming: NotificationRecord[
     const existing = byId.get(item.id);
     if (!existing || !existing.readAt || item.readAt) byId.set(item.id, item);
   }
-  return [...byId.values()].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  return [...byId.values()]
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .slice(0, MAX_NOTIFICATION_ITEMS);
 }
 
 export const useNotificationStore = create<NotificationState>((set, get) => ({

@@ -139,6 +139,11 @@ export const authService = {
     return withoutPassword(user);
   },
 
+  getCachedUserDisplay() {
+    if (isSupabaseDriver()) return authRepository.getCachedUserDisplay();
+    return null;
+  },
+
   async isSessionLocked(userId: string): Promise<boolean> {
     if (isSupabaseDriver()) return authRepository.isSessionLocked(userId);
     const session = readData<AuthSession | null>(SESSION_KEY, null);
@@ -158,7 +163,7 @@ export const authService = {
     if (!session) throw new Error('You must sign in before locking the terminal.');
     const user = getUsers().find((candidate) => candidate.id === session.userId);
     if (!user || user.role !== 'staff' || !user.storeId) throw new Error('Only staff sessions can be locked.');
-    if (await this.isSessionLocked()) return;
+    if (await this.isSessionLocked(user.id)) return;
     if (typeof window !== 'undefined') window.sessionStorage.setItem(SESSION_LOCK_KEY, user.id);
     writeData(SESSION_KEY, { ...session, locked: true });
     await activityService.log({

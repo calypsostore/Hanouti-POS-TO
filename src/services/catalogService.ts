@@ -4,6 +4,7 @@ import { seedCatalogItems, seedCategories } from './seedData';
 import { activityService } from './activityService';
 import { notificationService } from './notificationService';
 import { isSupabaseDriver } from '../data/driver';
+import { fetchCachedQuery, invalidateQueryCache } from '../lib/queryCache';
 import {
   createCategory as createRemoteCategory,
   createItem as createRemoteItem,
@@ -74,6 +75,7 @@ async function updateCatalogItem(
     } else if (outOfStock !== undefined && outOfStock !== item.outOfStock) {
       updated = await setRemoteAvailability(itemId, outOfStock);
     }
+    invalidateQueryCache(['catalog_items']);
     return updated;
   }
   const items = getItems();
@@ -228,14 +230,28 @@ async function updateCatalogItem(
 
 export const catalogService = {
   async listCategories(storeId: string, includeInactive = false): Promise<CategoryRecord[]> {
-    if (isSupabaseDriver()) return listRemoteCategories(storeId, includeInactive);
+    if (isSupabaseDriver()) {
+      return fetchCachedQuery(
+        `categories:${storeId}:${includeInactive}`,
+        ['categories'],
+        15_000,
+        () => listRemoteCategories(storeId, includeInactive),
+      );
+    }
     return getCategories()
       .filter((category) => category.storeId === storeId && (includeInactive || category.isActive))
       .sort((a, b) => a.sortOrder - b.sortOrder);
   },
 
   async listItems(storeId: string, categoryId?: string, search = '', includeInactive = false): Promise<CatalogItemRecord[]> {
-    if (isSupabaseDriver()) return listRemoteItems(storeId, categoryId, search, includeInactive);
+    if (isSupabaseDriver()) {
+      return fetchCachedQuery(
+        `catalog-items:${storeId}:${categoryId ?? ''}:${search.trim().toLocaleLowerCase()}:${includeInactive}`,
+        ['catalog_items'],
+        15_000,
+        () => listRemoteItems(storeId, categoryId, search, includeInactive),
+      );
+    }
     const normalizedSearch = search.trim().toLocaleLowerCase();
     return getItems().filter((item) =>
       item.storeId === storeId &&
@@ -256,6 +272,7 @@ export const catalogService = {
     if (!input.name.trim()) throw new Error('Category name is required.');
     if (isSupabaseDriver()) {
       const category = await createRemoteCategory({ ...input, name: input.name.trim() });
+      invalidateQueryCache(['categories']);
       await activityService.log({
         storeId: category.storeId,
         action: 'catalog.category_created',
@@ -282,6 +299,7 @@ export const catalogService = {
   async updateCategory(categoryId: string, changes: Partial<Pick<CategoryRecord, 'name' | 'icon' | 'sortOrder' | 'isActive'>>): Promise<CategoryRecord> {
     if (isSupabaseDriver()) {
       const updated = await updateRemoteCategory(categoryId, changes);
+      invalidateQueryCache(['categories']);
       await activityService.log({
         storeId: updated.storeId,
         action: 'catalog.category_updated',
@@ -316,6 +334,7 @@ export const catalogService = {
     }
     if (isSupabaseDriver()) {
       const item = await createRemoteItem({ ...input, name: input.name.trim() });
+      invalidateQueryCache(['catalog_items']);
       await activityService.log({
         storeId: item.storeId,
         action: 'catalog.item_created',

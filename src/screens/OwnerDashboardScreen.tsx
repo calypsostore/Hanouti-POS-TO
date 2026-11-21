@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { CardGrid, PageHeader, StatGrid } from '../components/layout';
 import { MaterialIcon } from '../components/MaterialIcon';
@@ -12,6 +11,7 @@ import { TabStatementView } from '../components/TabStatementView';
 import { ownerWorkspaceLinks } from '../app/navigation';
 import { t, type TranslationKey } from '../i18n/translations';
 import { formatTnd } from '../lib/format';
+import { useQueryCacheRefresh } from '../lib/useQueryCacheRefresh';
 import { reportService, type ReportDayStatus } from '../services/reportService';
 import { shiftService } from '../services/shiftService';
 import { userService } from '../services/userService';
@@ -34,6 +34,10 @@ const periodLabels: Record<Period, TranslationKey> = {
 };
 
 type DashboardSummary = Awaited<ReturnType<typeof reportService.getDashboard>>;
+
+const PeakHoursChart = lazy(() => import('../components/PerformanceCharts').then((module) => ({ default: module.PeakHoursChart })));
+const DashboardSalesByDateChart = lazy(() => import('../components/PerformanceCharts').then((module) => ({ default: module.DashboardSalesByDateChart })));
+const DashboardSalesByStaffChart = lazy(() => import('../components/PerformanceCharts').then((module) => ({ default: module.DashboardSalesByStaffChart })));
 
 const emptySummary: DashboardSummary = {
   salesMillimes: 0,
@@ -88,6 +92,7 @@ function OwnerDashboardContent() {
   const user = useAuthStore((state) => state.user);
   const navigate = useNavigate();
   const storeId = user?.storeId ?? '';
+  const cacheRevision = useQueryCacheRefresh(['catalog_items', 'categories', 'stores', 'store_settings']);
   const [store, setStore] = useState<StoreRecord>();
   const [period, setPeriod] = useState<Period>('day');
   const [summary, setSummary] = useState<DashboardSummary>(emptySummary);
@@ -158,13 +163,13 @@ function OwnerDashboardContent() {
       });
     };
     window.addEventListener('focus', refresh);
-    const unsubscribe = subscribeToStoreChanges(storeId, ['orders', 'shifts', 'notifications', 'catalog_items'], refresh);
+    const unsubscribe = subscribeToStoreChanges(storeId, ['orders', 'shifts', 'notifications', 'catalog_items', 'categories', 'stores', 'store_settings'], refresh);
     return () => {
       active = false;
       unsubscribe();
       window.removeEventListener('focus', refresh);
     };
-  }, [period, storeId, user]);
+  }, [cacheRevision, period, storeId, user]);
 
   async function openOverdueStatement(customer: OverdueCustomerRecord['customer']) {
     setOverdueAction({ customerId: customer.id, action: 'statement' });
@@ -431,15 +436,9 @@ function OwnerDashboardContent() {
           <h2 className="font-display text-headline-md text-on-surface">{t('owner.peakHours')} · {t(periodLabels[period])}</h2>
           <p className="mt-1 font-body text-body-sm text-on-surface-variant">Completed orders by hour of day.</p>
           <div className="mt-3 h-64 min-w-0">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={peakHours} margin={{ left: 0, right: 8, top: 8, bottom: 8 }}>
-                <CartesianGrid stroke="#E6EBF7" vertical={false} />
-                <XAxis dataKey="hour" tick={{ fontSize: 10 }} interval={2} tickFormatter={formatHour} />
-                <YAxis allowDecimals={false} width={28} tick={{ fontSize: 10 }} />
-                <Tooltip labelFormatter={(hour) => formatHour(Number(hour))} />
-                <Bar dataKey="orders" name="Orders" fill="#3B82F6" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <Suspense fallback={<div className="h-full" aria-hidden="true" />}>
+              <PeakHoursChart data={peakHours} />
+            </Suspense>
           </div>
         </article>
 
@@ -448,15 +447,9 @@ function OwnerDashboardContent() {
           <p className="mt-1 font-body text-body-sm text-on-surface-variant">Completed order sales by day.</p>
           {salesByDate.length ? (
             <div className="mt-3 h-64 min-w-0">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={salesByDate} margin={{ left: 0, right: 12, top: 8, bottom: 8 }}>
-                  <CartesianGrid stroke="#E6EBF7" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fontSize: 10 }} minTickGap={20} />
-                  <YAxis width={48} tick={{ fontSize: 10 }} />
-                  <Tooltip formatter={(value) => [`${formatTnd(Number(value))} DT`, 'Sales']} />
-                  <Bar dataKey="sales" name="Sales" fill="#F8A81A" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              <Suspense fallback={<div className="h-full" aria-hidden="true" />}>
+                <DashboardSalesByDateChart data={salesByDate} />
+              </Suspense>
             </div>
           ) : <p className="mt-3 rounded-xl bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('common.noData')}</p>}
         </article>
@@ -481,15 +474,9 @@ function OwnerDashboardContent() {
           <h2 className="mb-3 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="group" className="text-primary" />Sales by staff member · {t(periodLabels[period])}</h2>
           {salesByStaff.length ? (
             <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={salesByStaff} margin={{ left: 0, right: 12, top: 8, bottom: 8 }}>
-                  <CartesianGrid stroke="#E6EBF7" vertical={false} />
-                  <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} />
-                  <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={(value) => [`${formatTnd(Number(value))} DT`, 'Sales']} />
-                  <Bar dataKey="sales" name="Sales" fill="#2FA878" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              <Suspense fallback={<div className="h-full" aria-hidden="true" />}>
+                <DashboardSalesByStaffChart data={salesByStaff} />
+              </Suspense>
             </div>
           ) : <p className="rounded-xl bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('common.noData')}</p>}
         </article>
@@ -609,12 +596,6 @@ function ShiftSummary({ shift }: { shift: ShiftRecord }) {
       </div>
     </div>
   );
-}
-
-function formatHour(hour: number) {
-  const suffix = hour < 12 ? 'AM' : 'PM';
-  const clockHour = hour % 12 || 12;
-  return `${clockHour} ${suffix}`;
 }
 
 function formatSignedAmount(amountMillimes: number) {

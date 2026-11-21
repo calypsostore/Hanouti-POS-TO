@@ -9,14 +9,19 @@ import { assertExpectedSchemaVersion } from '../services/schemaVersionService';
 import { userService } from '../services/userService';
 
 let authStateSubscription: { unsubscribe: () => void } | undefined;
+let permissionRefreshGeneration = 0;
 
 interface AuthState {
   user: UserSummary | null;
+  cachedUserDisplay: { name: string } | null;
+  permissions: string[];
+  permissionsReady: boolean;
   locked: boolean;
   ready: boolean;
   initializationError: Error | null;
   hydrate: () => Promise<void>;
   refreshCurrentUser: () => Promise<void>;
+  refreshPermissions: () => Promise<void>;
   login: (identifier: string, password: string, roles?: UserRole[]) => Promise<UserSummary>;
   setInitialPassword: (password: string) => Promise<UserSummary>;
   setInitialPin: (pin: string) => Promise<void>;
@@ -36,6 +41,9 @@ function normalizeError(error: unknown): Error {
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
+  cachedUserDisplay: authService.getCachedUserDisplay(),
+  permissions: [],
+  permissionsReady: false,
   locked: false,
   ready: false,
   initializationError: null,
@@ -44,15 +52,28 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       await Promise.all([assertExpectedSchemaVersion(), initializeMockData()]);
       const user = await authService.getCurrentUser();
-      const locked = user ? await authService.isSessionLocked(user.id) : false;
-      set({ user, locked, ready: true, initializationError: null });
+      const requestGeneration = ++permissionRefreshGeneration;
+      const [locked, permissions] = await Promise.all([
+        user ? authService.isSessionLocked(user.id) : Promise.resolve(false),
+        user?.role === 'staff' ? userService.getEffectivePermissions(user.id) : Promise.resolve([]),
+      ]);
+      if (requestGeneration !== permissionRefreshGeneration) return;
+      set({
+        user,
+        cachedUserDisplay: user ? { name: user.name } : null,
+        locked,
+        permissions,
+        permissionsReady: true,
+        ready: true,
+        initializationError: null,
+      });
       if (isSupabaseDriver() && !authStateSubscription) {
         const { data } = getSupabaseClient().auth.onAuthStateChange((event, session) => {
           if (event === 'INITIAL_SESSION') return;
           window.setTimeout(() => {
             if (!session) {
               useCartStore.getState().clearOrder();
-              set({ user: null, locked: false });
+              set({ user: null, cachedUserDisplay: null, permissions: [], permissionsReady: true, locked: false });
               return;
             }
             void get().refreshCurrentUser();
@@ -62,49 +83,75 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
     } catch (error) {
       console.error('[startup] Could not initialize the application.', error);
-      set({ ready: true, initializationError: normalizeError(error) });
+      set({ permissions: [], permissionsReady: true, ready: true, initializationError: normalizeError(error) });
     }
   },
   refreshCurrentUser: async () => {
     try {
       const user = await authService.getCurrentUser();
-      const locked = user ? await authService.isSessionLocked(user.id) : false;
-      set({ user, locked, initializationError: null });
+      const requestGeneration = ++permissionRefreshGeneration;
+      const [locked, permissions] = await Promise.all([
+        user ? authService.isSessionLocked(user.id) : Promise.resolve(false),
+        user?.role === 'staff' ? userService.getEffectivePermissions(user.id) : Promise.resolve([]),
+      ]);
+      if (requestGeneration !== permissionRefreshGeneration) return;
+      set({ user, cachedUserDisplay: user ? { name: user.name } : null, locked, permissions, permissionsReady: true, initializationError: null });
     } catch (error) {
       console.error('[startup] Could not refresh the signed-in user.', error);
       set({ initializationError: normalizeError(error) });
     }
   },
+  refreshPermissions: async () => {
+    const user = get().user;
+    const requestGeneration = ++permissionRefreshGeneration;
+    if (!user || user.role !== 'staff') {
+      set({ permissions: [], permissionsReady: true });
+      return;
+    }
+    try {
+      const permissions = await userService.getEffectivePermissions(user.id);
+      if (requestGeneration === permissionRefreshGeneration && get().user?.id === user.id) {
+        set({ permissions, permissionsReady: true });
+      }
+    } catch (error) {
+      console.error('[permissions] Could not refresh effective permissions.', error);
+      if (requestGeneration === permissionRefreshGeneration && get().user?.id === user.id) {
+        set({ permissions: [], permissionsReady: true });
+      }
+    }
+  },
   login: async (identifier, password, roles) => {
     const user = await authService.login(identifier, password, roles);
-    set({ user, locked: false });
+    permissionRefreshGeneration += 1;
+    set({ user, cachedUserDisplay: { name: user.name }, permissions: [], permissionsReady: user.role !== 'staff', locked: false });
+    if (user.role === 'staff') await get().refreshPermissions();
     return user;
   },
   setInitialPassword: async (password) => {
     const user = get().user;
     if (!user) throw new Error('You must sign in before setting a password.');
     const updatedUser = await authService.setInitialPassword(user.id, password);
-    set({ user: updatedUser });
+    set({ user: updatedUser, cachedUserDisplay: { name: updatedUser.name } });
     return updatedUser;
   },
   setInitialPin: async (pin) => {
     const user = get().user;
     if (!user) throw new Error('You must sign in before setting a PIN.');
     const updatedUser = await authService.setPersonalPin(user.id, pin);
-    set({ user: updatedUser });
+    set({ user: updatedUser, cachedUserDisplay: { name: updatedUser.name } });
   },
   updateOwnerProfile: async (changes) => {
     const user = get().user;
     if (!user || user.role !== 'owner') throw new Error('Only a signed-in store owner can update this profile.');
     const updatedUser = await userService.updateOwnerProfile(user.id, changes);
-    set({ user: updatedUser });
+    set({ user: updatedUser, cachedUserDisplay: { name: updatedUser.name } });
     return updatedUser;
   },
   updateProfileAvatar: async (avatarId) => {
     const user = get().user;
     if (!user) throw new Error('You must sign in before choosing an avatar.');
     const updatedUser = await userService.updateProfileAvatar(user.id, avatarId);
-    set({ user: updatedUser });
+    set({ user: updatedUser, cachedUserDisplay: { name: updatedUser.name } });
     return updatedUser;
   },
   lock: async () => {
@@ -131,7 +178,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
     }
     await authService.logout();
+    permissionRefreshGeneration += 1;
     useCartStore.getState().clearOrder();
-    set({ user: null, locked: false });
+    set({ user: null, cachedUserDisplay: null, permissions: [], permissionsReady: true, locked: false });
   },
 }));

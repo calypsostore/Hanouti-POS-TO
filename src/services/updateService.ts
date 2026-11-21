@@ -371,8 +371,7 @@ function checkForUpdates(options: { automatic?: boolean } = {}): Promise<UpdateC
     ) return Promise.resolve(currentResult);
   }
 
-  let trackedCheck: Promise<UpdateCheckResult>;
-  trackedCheck = performUpdateCheck().finally(() => {
+  const trackedCheck = performUpdateCheck().finally(() => {
     if (inFlightCheck === trackedCheck) inFlightCheck = null;
   });
   inFlightCheck = trackedCheck;
@@ -382,22 +381,34 @@ function checkForUpdates(options: { automatic?: boolean } = {}): Promise<UpdateC
 async function activateWaitingWorker(worker: ServiceWorker): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     let settled = false;
+    const cleanup = () => {
+      window.clearTimeout(timeoutId);
+      worker.removeEventListener('statechange', finish);
+    };
     const finish = () => {
+      if (worker.state !== 'activated') return;
       if (settled) return;
       settled = true;
-      window.clearTimeout(timeoutId);
-      navigator.serviceWorker.removeEventListener('controllerchange', finish);
+      cleanup();
       resolve();
     };
-    const timeoutId = window.setTimeout(finish, SERVICE_WORKER_ACTIVATION_TIMEOUT_MS);
-    navigator.serviceWorker.addEventListener('controllerchange', finish, { once: true });
+    const timeoutId = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error('The waiting service worker did not activate in time.'));
+    }, SERVICE_WORKER_ACTIVATION_TIMEOUT_MS);
+    if (worker.state === 'activated') {
+      finish();
+      return;
+    }
+    worker.addEventListener('statechange', finish);
     try {
       worker.postMessage({ type: 'SKIP_WAITING' });
     } catch (error) {
       if (!settled) {
         settled = true;
-        window.clearTimeout(timeoutId);
-        navigator.serviceWorker.removeEventListener('controllerchange', finish);
+        cleanup();
       }
       reject(new Error('Could not activate the waiting service worker.', { cause: error }));
     }

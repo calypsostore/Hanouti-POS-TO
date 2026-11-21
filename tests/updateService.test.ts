@@ -167,9 +167,17 @@ describe('updateService.checkForUpdates', () => {
   });
 
   it('activates a waiting worker and cache-busts the update reload', async () => {
-    let controllerChangeListener: (() => void) | undefined;
+    let stateChangeListener: (() => void) | undefined;
     const waiting = {
-      postMessage: vi.fn(() => controllerChangeListener?.()),
+      state: 'installed',
+      addEventListener: vi.fn((_type: string, listener: () => void) => {
+        stateChangeListener = listener;
+      }),
+      removeEventListener: vi.fn(),
+      postMessage: vi.fn(() => {
+        waiting.state = 'activated';
+        stateChangeListener?.();
+      }),
     };
     const workerRegistration = {
       waiting,
@@ -180,10 +188,6 @@ describe('updateService.checkForUpdates', () => {
       serviceWorker: {
         getRegistration: vi.fn().mockResolvedValue(workerRegistration),
         getRegistrations: vi.fn().mockResolvedValue([workerRegistration]),
-        addEventListener: vi.fn((_type: string, listener: () => void) => {
-          controllerChangeListener = listener;
-        }),
-        removeEventListener: vi.fn(),
       },
     });
     vi.mocked(fetch).mockResolvedValue(new Response(
@@ -198,6 +202,40 @@ describe('updateService.checkForUpdates', () => {
     expect(workerRegistration.unregister).toHaveBeenCalledOnce();
     expect(localStorage.getItem('7anouti-pos:updating-to')).toBe('deployed-build');
     expect(window.location.replace).toHaveBeenCalledWith('https://hanoutipos.vercel.app/?v=deployed-build');
+  });
+
+  it('does not reload or unregister workers if the waiting worker fails to activate', async () => {
+    vi.useFakeTimers();
+    const waiting = {
+      state: 'installed',
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      postMessage: vi.fn(),
+    };
+    const workerRegistration = {
+      waiting,
+      update: vi.fn().mockResolvedValue(undefined),
+      unregister: vi.fn().mockResolvedValue(true),
+    };
+    vi.stubGlobal('navigator', {
+      serviceWorker: {
+        getRegistration: vi.fn().mockResolvedValue(workerRegistration),
+        getRegistrations: vi.fn().mockResolvedValue([workerRegistration]),
+      },
+    });
+    vi.mocked(fetch).mockResolvedValue(new Response(
+      JSON.stringify({ version: '1.1.0', buildId: 'deployed-build' }),
+      { status: 200 },
+    ));
+
+    await updateService.checkForUpdates();
+    const refresh = updateService.forceRefresh();
+    const refreshResult = expect(refresh).rejects.toThrow('The waiting service worker did not activate in time.');
+    await vi.advanceTimersByTimeAsync(3000);
+
+    await refreshResult;
+    expect(workerRegistration.unregister).not.toHaveBeenCalled();
+    expect(window.location.replace).not.toHaveBeenCalled();
   });
 
   it('reports an APK requirement when the release manifest has a newer APK version code', async () => {

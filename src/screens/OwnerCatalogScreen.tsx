@@ -56,7 +56,7 @@ const emptyDraft = (categoryId = ''): ProductDraft => ({
   categoryId,
   icon: 'espresso',
   stockCount: '',
-  lowStockThreshold: '5',
+  lowStockThreshold: '',
   availability: 'available',
   isActive: true,
   quickPick: false,
@@ -71,11 +71,11 @@ function draftFromItem(item: CatalogItemRecord, isQuickPick: boolean): ProductDr
     name: item.name,
     description: item.description ?? '',
     sku: item.sku ?? '',
-    price: String(item.priceMillimes),
+    price: '',
     categoryId: item.categoryId,
     icon: item.icon,
-    stockCount: item.stockCount === null ? '' : String(item.stockCount),
-    lowStockThreshold: String(item.lowStockThreshold ?? 5),
+    stockCount: '',
+    lowStockThreshold: '',
     availability: item.stockCount === 0 ? 'out' : item.outOfStock ? '86' : 'available',
     isActive: item.isActive,
     quickPick: isQuickPick,
@@ -85,7 +85,7 @@ function draftFromItem(item: CatalogItemRecord, isQuickPick: boolean): ProductDr
     modifiers: (item.modifiers ?? []).map((modifier) => ({
       id: modifier.id,
       name: modifier.name,
-      price: String(modifier.priceMillimes),
+      price: '',
     })),
   };
 }
@@ -152,7 +152,7 @@ function OwnerCatalogContent() {
   const [deleteTarget, setDeleteTarget] = useState<CatalogItemRecord | null>(null);
   const [draft, setDraft] = useState<ProductDraft>(emptyDraft());
   const [categoryName, setCategoryName] = useState('');
-  const [categoryPosition, setCategoryPosition] = useState('1');
+  const [categoryPosition, setCategoryPosition] = useState('');
   const [categoryError, setCategoryError] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -185,7 +185,7 @@ function OwnerCatalogContent() {
     });
   }, [refresh, refreshKey, storeId]);
 
-  useEffect(() => subscribeToStoreChanges(storeId, ['catalog_items'], () => {
+  useEffect(() => subscribeToStoreChanges(storeId, ['catalog_items', 'categories'], () => {
     void refresh().catch((loadError: unknown) => {
       console.error('Unable to refresh the catalog after a live update.', loadError);
       setError(t('common.refreshFailed'));
@@ -205,7 +205,7 @@ function OwnerCatalogContent() {
     setEditingCategory(null);
     setCategoryIcon('');
     setCategoryName('');
-    setCategoryPosition(String(Math.max(-1, ...categories.map((category) => category.sortOrder)) + 2));
+    setCategoryPosition('');
     setSheet('category');
   }
 
@@ -214,7 +214,7 @@ function OwnerCatalogContent() {
     setEditingCategory(category);
     setCategoryName(category.name);
     setCategoryIcon(category.icon);
-    setCategoryPosition(String(category.sortOrder + 1));
+    setCategoryPosition('');
     setCategoryManagerOpen(false);
     setSheet('category');
   }
@@ -267,10 +267,11 @@ function OwnerCatalogContent() {
         const rawPrice = modifier.price.trim();
         if (!name && !rawPrice) continue;
         if (!name) throw new Error('Give every modifier option a name.');
+        if (!rawPrice) throw new Error('Enter a price for each modifier option.');
         const normalizedName = name.toLocaleLowerCase();
         if (names.has(normalizedName)) throw new Error('Modifier option names must be unique.');
         names.add(normalizedName);
-        const modifierPriceMillimes = rawPrice ? parseNonNegativeMillimes(rawPrice) : 0;
+        const modifierPriceMillimes = parseNonNegativeMillimes(rawPrice);
         if (modifierPriceMillimes === undefined) throw new Error('Enter a non-negative whole number of millimes for each modifier price.');
         modifiers.push({ id: modifier.id, name, priceMillimes: modifierPriceMillimes });
       }
@@ -610,10 +611,10 @@ function OwnerCatalogContent() {
           )}
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="font-body text-label-md">Product name<input required value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
-            <label className="font-body text-label-md">{t('catalog.priceMillimes')}<input required type="number" min="0" step="1" inputMode="numeric" placeholder="e.g. 1800" value={draft.price} onChange={(event) => setDraft((current) => ({ ...current, price: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /><span className="mt-1 block text-body-sm text-outline">Enter whole millimes, e.g. 200 or 1800.</span></label>
+            <label className="font-body text-label-md">{t('catalog.priceMillimes')}<input required type="number" min="0" step="1" inputMode="numeric" value={draft.price} onChange={(event) => setDraft((current) => ({ ...current, price: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /><span className="mt-1 block text-body-sm text-outline">Enter a whole number of millimes.</span></label>
             <label className="font-body text-label-md">SKU / barcode<input value={draft.sku} onChange={(event) => setDraft((current) => ({ ...current, sku: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
             <label className="font-body text-label-md">Category<select required value={draft.categoryId} onChange={(event) => setDraft((current) => ({ ...current, categoryId: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary"><option value="">Select a category</option>{activeCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
-            <label className="font-body text-label-md">Stock count <span className="text-outline">(leave blank for untracked)</span><input type="number" min="0" step="1" value={draft.availability === 'out' ? '0' : draft.stockCount} onChange={(event) => setDraft((current) => ({ ...current, stockCount: event.target.value, availability: event.target.value === '0' ? 'out' : current.availability === 'out' ? 'available' : current.availability }))} placeholder="Not tracked" className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
+            <label className="font-body text-label-md">Stock count <span className="text-outline">(leave blank for untracked)</span><input type="number" min="0" step="1" required={Boolean(editingItem && editingItem.stockCount !== null && draft.availability !== 'out')} value={draft.stockCount} onChange={(event) => setDraft((current) => ({ ...current, stockCount: event.target.value, availability: event.target.value === '0' ? 'out' : current.availability === 'out' ? 'available' : current.availability }))} placeholder="Not tracked" className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
             <label className="font-body text-label-md">{t('catalog.lowStockThreshold')}<input type="number" min="0" step="1" required value={draft.lowStockThreshold} onChange={(event) => setDraft((current) => ({ ...current, lowStockThreshold: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
           </div>
           <label className="font-body text-label-md">Description<textarea value={draft.description} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} rows={3} className="mt-1 w-full rounded-lg bg-surface-container-low px-3 py-2 outline-none focus:ring-2 focus:ring-primary" /></label>
@@ -622,7 +623,7 @@ function OwnerCatalogContent() {
             <legend className="font-body text-label-md">Availability</legend>
             <div className="mt-2 grid grid-cols-3 gap-2">
               {(['available', '86', 'out'] as const).map((status) => (
-                <button key={status} type="button" aria-pressed={draft.availability === status} onClick={() => setDraft((current) => ({ ...current, availability: status, stockCount: status === 'out' ? '0' : current.stockCount === '0' ? '' : current.stockCount }))} className={`min-h-11 rounded-lg px-2 font-body text-label-md ${draft.availability === status ? availabilityStyle(status) + ' ring-2 ring-primary' : 'bg-surface-container text-on-surface-variant'}`}>{availabilityLabel(status)}</button>
+                <button key={status} type="button" aria-pressed={draft.availability === status} onClick={() => setDraft((current) => ({ ...current, availability: status }))} className={`min-h-11 rounded-lg px-2 font-body text-label-md ${draft.availability === status ? availabilityStyle(status) + ' ring-2 ring-primary' : 'bg-surface-container text-on-surface-variant'}`}>{availabilityLabel(status)}</button>
               ))}
             </div>
           </fieldset>
@@ -644,7 +645,7 @@ function OwnerCatalogContent() {
                   <label className="sr-only" htmlFor={`modifier-name-${modifier.id}`}>Option name</label>
                   <input id={`modifier-name-${modifier.id}`} value={modifier.name} onChange={(event) => setDraft((current) => ({ ...current, modifiers: current.modifiers.map((option, optionIndex) => optionIndex === index ? { ...option, name: event.target.value } : option) }))} placeholder="Option name" className="h-11 min-w-0 flex-1 rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" />
                   <label className="sr-only" htmlFor={`modifier-price-${modifier.id}`}>Option price in millimes</label>
-                  <div className="relative w-40 shrink-0"><input id={`modifier-price-${modifier.id}`} type="number" min="0" step="1" inputMode="numeric" value={modifier.price} onChange={(event) => setDraft((current) => ({ ...current, modifiers: current.modifiers.map((option, optionIndex) => optionIndex === index ? { ...option, price: event.target.value } : option) }))} placeholder="0" className="h-11 w-full rounded-lg bg-surface-container-low px-3 pr-16 text-right outline-none focus:ring-2 focus:ring-primary" /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-body-sm text-outline">millimes</span></div>
+                  <div className="relative w-40 shrink-0"><input id={`modifier-price-${modifier.id}`} type="number" min="0" step="1" inputMode="numeric" value={modifier.price} onChange={(event) => setDraft((current) => ({ ...current, modifiers: current.modifiers.map((option, optionIndex) => optionIndex === index ? { ...option, price: event.target.value } : option) }))} className="h-11 w-full rounded-lg bg-surface-container-low px-3 pr-16 text-right outline-none focus:ring-2 focus:ring-primary" /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-body-sm text-outline">millimes</span></div>
                   <button type="button" aria-label={`Remove ${modifier.name || 'modifier option'}`} onClick={() => setDraft((current) => ({ ...current, modifiers: current.modifiers.filter((_, optionIndex) => optionIndex !== index) }))} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-error-dark hover:bg-error-container"><MaterialIcon name="delete" /></button>
                 </div>
               ))}

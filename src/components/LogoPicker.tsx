@@ -7,19 +7,23 @@ import { ItemLogo } from './ItemLogo';
 interface LogoPickerProps {
   open: boolean;
   value: string;
+  allowedGroups?: string[];
   onChange: (logoId: string) => void;
   onClose: () => void;
 }
 
-export function LogoPicker({ open, value, onChange, onClose }: LogoPickerProps) {
+export function LogoPicker({ open, value, allowedGroups, onChange, onClose }: LogoPickerProps) {
   const [group, setGroup] = useState(logoGroupsList[0] ?? '');
   const [search, setSearch] = useState('');
+  const availableGroups = allowedGroups?.length ? allowedGroups : logoGroupsList;
+  const selectedGroup = availableGroups.includes(group) ? group : availableGroups[0] ?? '';
   const normalizedSearch = search.trim().toLocaleLowerCase();
   const visibleLogos = useMemo(() => logoCatalog.filter((logo) =>
-    (normalizedSearch
-      ? `${logo.label} ${logo.keywords.join(' ')}`.toLocaleLowerCase().includes(normalizedSearch)
-      : logo.group === group),
-  ), [group, normalizedSearch]);
+    availableGroups.includes(logo.group)
+      && (normalizedSearch
+        ? `${logo.label} ${logo.keywords.join(' ')}`.toLocaleLowerCase().includes(normalizedSearch)
+        : logo.group === selectedGroup),
+  ), [selectedGroup, normalizedSearch, availableGroups]);
 
   function chooseLogo(id: string) {
     onChange(id);
@@ -40,7 +44,7 @@ export function LogoPicker({ open, value, onChange, onClose }: LogoPickerProps) 
       </label>
 
       <div className="scrollbar-hidden -mx-1 mb-3 flex gap-2 overflow-x-auto px-1 pb-1" role="tablist" aria-label={t('logo.groupTabs')}>
-        {logoGroupsList.map((groupName) => (
+        {availableGroups.map((groupName) => (
           <button
             key={groupName}
             type="button"

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { MaterialIcon } from '../components/MaterialIcon';
@@ -8,6 +8,14 @@ import { updateService } from '../services/updateService';
 import { useAuthStore } from '../stores/authStore';
 
 type LoginRole = 'staff' | 'admin';
+
+interface LoginLogoMotion {
+  x: number;
+  y: number;
+  size: number;
+  rotation: number;
+  dragging: boolean;
+}
 
 export function LoginScreen() {
   const navigate = useNavigate();
@@ -19,6 +27,153 @@ export function LoginScreen() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const login = useAuthStore((state) => state.login);
+  const [logoMotion, setLogoMotion] = useState<LoginLogoMotion | null>(null);
+  const logoPhysics = useRef({
+    x: 0,
+    y: 0,
+    size: 0,
+    rotation: 0,
+    velocityX: 0,
+    velocityY: 0,
+    dragOffsetX: 0,
+    dragOffsetY: 0,
+    startX: 0,
+    startY: 0,
+    lastPointerX: 0,
+    lastPointerY: 0,
+    lastPointerTime: 0,
+    lastFrameTime: 0,
+    pointerId: null as number | null,
+    dragging: false,
+    moved: false,
+    animationFrame: 0,
+  });
+
+  useEffect(() => () => cancelAnimationFrame(logoPhysics.current.animationFrame), []);
+
+  function publishLogoMotion(dragging: boolean) {
+    const motion = logoPhysics.current;
+    setLogoMotion({
+      x: motion.x,
+      y: motion.y,
+      size: motion.size,
+      rotation: motion.rotation,
+      dragging,
+    });
+  }
+
+  function handleLogoPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!event.isPrimary || event.button !== 0) return;
+    event.preventDefault();
+    const motion = logoPhysics.current;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const alreadyMoving = logoMotion !== null;
+    if (motion.animationFrame) cancelAnimationFrame(motion.animationFrame);
+    motion.animationFrame = 0;
+    motion.x = alreadyMoving ? motion.x : bounds.left;
+    motion.y = alreadyMoving ? motion.y : bounds.top;
+    motion.size = alreadyMoving ? motion.size : Number.parseFloat(window.getComputedStyle(event.currentTarget).width);
+    motion.startX = motion.x;
+    motion.startY = motion.y;
+    motion.dragOffsetX = event.clientX - motion.x;
+    motion.dragOffsetY = event.clientY - motion.y;
+    motion.lastPointerX = event.clientX;
+    motion.lastPointerY = event.clientY;
+    motion.lastPointerTime = performance.now();
+    motion.velocityX = 0;
+    motion.velocityY = 0;
+    motion.pointerId = event.pointerId;
+    motion.dragging = true;
+    motion.moved = false;
+    publishLogoMotion(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleLogoPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const motion = logoPhysics.current;
+    if (!motion.dragging || motion.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const now = performance.now();
+    const elapsed = Math.max(1, now - motion.lastPointerTime);
+    const deltaX = event.clientX - motion.lastPointerX;
+    const deltaY = event.clientY - motion.lastPointerY;
+    motion.velocityX = deltaX / elapsed;
+    motion.velocityY = deltaY / elapsed;
+    motion.x = Math.min(Math.max(0, event.clientX - motion.dragOffsetX), Math.max(0, window.innerWidth - motion.size));
+    motion.y = Math.min(Math.max(0, event.clientY - motion.dragOffsetY), Math.max(0, window.innerHeight - motion.size));
+    motion.moved ||= Math.hypot(motion.x - motion.startX, motion.y - motion.startY) > 3;
+    motion.lastPointerX = event.clientX;
+    motion.lastPointerY = event.clientY;
+    motion.lastPointerTime = now;
+    publishLogoMotion(true);
+  }
+
+  function handleLogoPointerEnd(event: ReactPointerEvent<HTMLDivElement>) {
+    const motion = logoPhysics.current;
+    if (!motion.dragging || motion.pointerId !== event.pointerId) return;
+    motion.dragging = false;
+    motion.pointerId = null;
+
+    if (motion.moved) {
+      motion.velocityX = Math.max(-2.8, Math.min(2.8, motion.velocityX * 1.35));
+      motion.velocityY = Math.max(-2.8, Math.min(2.8, motion.velocityY * 1.35));
+      if (Math.hypot(motion.velocityX, motion.velocityY) < 0.5) {
+        const travelX = motion.x - motion.startX;
+        const travelY = motion.y - motion.startY;
+        const distance = Math.hypot(travelX, travelY);
+        if (distance > 0) {
+          motion.velocityX = travelX / distance * 0.85;
+          motion.velocityY = travelY / distance * 0.85;
+        }
+      }
+    } else {
+      motion.velocityX = 0;
+      motion.velocityY = 0;
+    }
+    motion.lastFrameTime = performance.now();
+
+    const bounce = (timestamp: number) => {
+      const delta = Math.min(32, Math.max(0, timestamp - motion.lastFrameTime));
+      motion.lastFrameTime = timestamp;
+      motion.velocityY = Math.min(3.2, motion.velocityY + 0.0015 * delta);
+      motion.x += motion.velocityX * delta;
+      motion.y += motion.velocityY * delta;
+
+      const maxX = Math.max(0, window.innerWidth - motion.size);
+      const maxY = Math.max(0, window.innerHeight - motion.size);
+      if (maxX === 0) {
+        motion.x = 0;
+        motion.velocityX = 0;
+      } else if (motion.x <= 0 || motion.x >= maxX) {
+        motion.x = Math.min(maxX, Math.max(0, motion.x));
+        motion.velocityX *= -0.82;
+      }
+      if (motion.y <= 0) {
+        motion.y = 0;
+        motion.velocityY = Math.abs(motion.velocityY) * 0.82;
+      } else if (motion.y >= maxY) {
+        motion.y = Math.min(maxY, Math.max(0, motion.y));
+        motion.velocityY = motion.velocityY > 0.28 ? -motion.velocityY * 0.62 : 0;
+      }
+
+      const onGround = motion.y >= maxY && motion.velocityY === 0;
+      motion.velocityX *= Math.pow(onGround ? 0.999 : 0.9997, delta);
+      motion.velocityY *= Math.pow(0.9995, delta);
+      motion.rotation += (motion.velocityX - motion.velocityY) * delta * 0.12;
+      publishLogoMotion(false);
+
+      if (onGround && Math.abs(motion.velocityX) < 0.025) {
+        motion.velocityX = 0;
+        motion.animationFrame = 0;
+        publishLogoMotion(false);
+        return;
+      }
+      motion.animationFrame = requestAnimationFrame(bounce);
+    };
+
+    publishLogoMotion(false);
+    motion.animationFrame = requestAnimationFrame(bounce);
+  }
 
   function chooseRole(nextRole: LoginRole) {
     setRole(nextRole);
@@ -51,14 +206,30 @@ export function LoginScreen() {
       <span className="login-bubble login-bubble--two" aria-hidden="true" />
       <span className="login-bubble login-bubble--three" aria-hidden="true" />
 
-      <div className="login-content">
+      <div className={`login-content${logoMotion ? ' login-content--logo-playing' : ''}`}>
         <header className="login-brand">
           <span className="login-version">
             {t('login.versionLabel', { version: updateService.getCurrentVersion() })}
           </span>
-          <div className="login-logo-orbit">
-            <div className="login-logo-frame">
-              <img src="/logo1.png" alt="7anouti" />
+          <div className={`login-logo-orbit${logoMotion ? ' login-logo-orbit--playing' : ''}`}>
+            <div
+              className={`login-logo-frame${logoMotion ? ' login-logo-frame--active' : ''}${logoMotion?.dragging ? ' is-dragging' : ''}`}
+              style={logoMotion ? {
+                position: 'fixed',
+                left: logoMotion.x,
+                top: logoMotion.y,
+                width: logoMotion.size,
+                height: logoMotion.size,
+                zIndex: 100,
+                transform: `rotate(${logoMotion.rotation}deg)`,
+              } : undefined}
+              onPointerDown={handleLogoPointerDown}
+              onPointerMove={handleLogoPointerMove}
+              onPointerUp={handleLogoPointerEnd}
+              onPointerCancel={handleLogoPointerEnd}
+              onDragStart={(event) => event.preventDefault()}
+            >
+              <img src="/logo1.png" alt="7anouti" draggable={false} />
             </div>
           </div>
           <h1 className="login-title">

@@ -37,7 +37,7 @@ export function FirstRunHint({ id, title, message }: FirstRunHintProps) {
 
   return (
     <aside role="note" className="mx-3 mb-3 flex items-start gap-3 rounded-xl border border-primary/20 bg-primary-fixed p-3 text-on-surface">
-      <MaterialIcon name="lightbulb" className="mt-0.5 text-xl text-primary" />
+      <MaterialIcon name="lightbulb" className="mt-0.5 text-xl" />
       <div className="min-w-0 flex-1">
         <p className="font-body text-label-md">{title}</p>
         <p className="mt-1 font-body text-body-sm text-on-surface-variant">{message}</p>

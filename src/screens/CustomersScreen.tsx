@@ -14,6 +14,7 @@ import { TabStatementView } from '../components/TabStatementView';
 import { TopBar } from '../components/TopBar';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { formatTnd } from '../lib/format';
+import { getCustomerCreditTone } from '../lib/customerCredit';
 import { parseNonNegativeMillimes } from '../lib/millimes';
 import { customerService } from '../services/customerService';
 import { shareCustomerStatement } from '../services/customerStatementShare';
@@ -102,6 +103,7 @@ export function CustomersScreen() {
   const [creditAlerts, setCreditAlerts] = useState<CustomerCreditAlert[]>([]);
   const [summary, setSummary] = useState({ totalOutstandingMillimes: 0, customersOwing: 0, overdueCount: 0 });
   const [selected, setSelected] = useState<CustomerRecord | null>(null);
+  const [loadedCustomerId, setLoadedCustomerId] = useState<string>();
   const [ledger, setLedger] = useState<CustomerLedgerEntry[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [transactions, setTransactions] = useState<TabRecord[]>([]);
@@ -124,6 +126,7 @@ export function CustomersScreen() {
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [draft, setDraft] = useState<CustomerDraft>(EMPTY_DRAFT);
   const [editDraft, setEditDraft] = useState<CustomerDraft>(EMPTY_DRAFT);
+  const [clearCreditLimit, setClearCreditLimit] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentNote, setPaymentNote] = useState('');
   const [paymentShiftOpen, setPaymentShiftOpen] = useState<boolean | null>(null);
@@ -152,6 +155,7 @@ export function CustomersScreen() {
     if (!storeId) {
       setCustomers([]);
       setSelected(null);
+      setLoadedCustomerId(customerId);
       setSummary({ totalOutstandingMillimes: 0, customersOwing: 0, overdueCount: 0 });
       return;
     }
@@ -193,17 +197,20 @@ export function CustomersScreen() {
         setLedger(nextLedger);
         setOrders(nextOrders);
         setTransactions(nextTransactions);
+        setLoadedCustomerId(customerId);
       } else {
         setSelected(null);
         setLedger([]);
         setOrders([]);
         setTransactions([]);
+        setLoadedCustomerId(customerId);
       }
     } else {
       setSelected(null);
       setLedger([]);
       setOrders([]);
       setTransactions([]);
+      setLoadedCustomerId(undefined);
     }
 
     if (user?.role === 'staff') {
@@ -231,7 +238,10 @@ export function CustomersScreen() {
     void refresh()
       .catch((loadError: unknown) => {
         console.error('Unable to load customers.', loadError);
-        if (active) setError('Unable to load customers. Please try again.');
+        if (active) {
+          setError('Unable to load customers. Please try again.');
+          if (customerId) setLoadedCustomerId(customerId);
+        }
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -239,7 +249,10 @@ export function CustomersScreen() {
     const refreshOnFocus = () => {
       void refresh().catch((loadError: unknown) => {
         console.error('Unable to refresh customers.', loadError);
-        if (active) setError('Unable to load customers. Please try again.');
+        if (active) {
+          setError('Unable to load customers. Please try again.');
+          if (customerId) setLoadedCustomerId(customerId);
+        }
       });
     };
     window.addEventListener('focus', refreshOnFocus);
@@ -249,7 +262,7 @@ export function CustomersScreen() {
       window.removeEventListener('focus', refreshOnFocus);
       window.removeEventListener(PERMISSIONS_CHANGED_EVENT, refreshOnFocus);
     };
-  }, [refresh]);
+  }, [customerId, refresh]);
 
   const filteredCustomers = useMemo(() => {
     const normalizedSearch = search.trim().toLocaleLowerCase();
@@ -352,11 +365,12 @@ export function CustomersScreen() {
 
   function beginEdit() {
     if (!selected) return;
+    setClearCreditLimit(false);
     setEditDraft({
       name: selected.name,
       phone: selected.phone ?? '',
       email: selected.email ?? '',
-      creditLimit: selected.creditLimitMillimes === undefined ? '' : String(selected.creditLimitMillimes),
+      creditLimit: '',
       settlementTerms: selected.settlementTerms,
       notes: selected.notes ?? '',
     });
@@ -375,7 +389,9 @@ export function CustomersScreen() {
         name: editDraft.name,
         phone: editDraft.phone,
         email: editDraft.email,
-        creditLimitMillimes: parseMillimes(editDraft.creditLimit, false),
+        creditLimitMillimes: editDraft.creditLimit.trim()
+          ? parseMillimes(editDraft.creditLimit, false)
+          : clearCreditLimit ? undefined : selected.creditLimitMillimes,
         settlementTerms: editDraft.settlementTerms,
         notes: editDraft.notes,
       }, user.id);
@@ -628,10 +644,10 @@ export function CustomersScreen() {
       </Button>
       {error && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       {notice && <p role="status" className="mb-3 rounded-lg bg-success-container p-3 font-body text-body-sm text-on-success-container">{notice}</p>}
-      {loading ? (
+      {loading || (isDetail && loadedCustomerId !== customerId) ? (
         <p role="status" className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">Loading customer…</p>
       ) : !selected ? (
-        <p role="alert" className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">Customer not found.</p>
+        error ? null : <p role="alert" className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">Customer not found.</p>
       ) : (
         <>
           <header className="mb-4 flex items-center gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
@@ -769,7 +785,20 @@ export function CustomersScreen() {
       </BottomSheet>
       <BottomSheet open={editOpen} onClose={() => setEditOpen(false)} title="Edit customer">
         {error && <FormError message={error} />}
-        <CustomerForm draft={editDraft} setDraft={setEditDraft} onSubmit={saveCustomer} submitLabel="Save changes" />
+        <CustomerForm
+          draft={editDraft}
+          setDraft={setEditDraft}
+          onSubmit={saveCustomer}
+          submitLabel="Save changes"
+          isEditing
+          hasExistingCreditLimit={selected?.creditLimitMillimes !== undefined}
+          clearCreditLimit={clearCreditLimit}
+          onClearCreditLimit={() => {
+            setClearCreditLimit(true);
+            setEditDraft((current) => ({ ...current, creditLimit: '' }));
+          }}
+          onCreditLimitChange={() => setClearCreditLimit(false)}
+        />
       </BottomSheet>
       <BottomSheet open={paymentOpen} onClose={() => setPaymentOpen(false)} title="Take payment">
         {error && <FormError message={error} />}
@@ -807,7 +836,6 @@ export function CustomersScreen() {
               disabled={paymentShiftOpen !== true}
               value={paymentAmount}
               onChange={(event) => setPaymentAmount(event.target.value)}
-              placeholder="0"
               className="h-12 w-full rounded-lg bg-surface-container-low px-3 font-display text-title-md tabular-nums"
             />
             <p className="font-body text-label-md text-on-surface">Balance after payment</p>
@@ -920,11 +948,16 @@ export function CustomersScreen() {
   );
 }
 
-function CustomerForm({ draft, setDraft, onSubmit, submitLabel }: {
+function CustomerForm({ draft, setDraft, onSubmit, submitLabel, isEditing = false, hasExistingCreditLimit = false, clearCreditLimit = false, onClearCreditLimit, onCreditLimitChange }: {
   draft: CustomerDraft;
   setDraft: (value: CustomerDraft | ((current: CustomerDraft) => CustomerDraft)) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   submitLabel: string;
+  isEditing?: boolean;
+  hasExistingCreditLimit?: boolean;
+  clearCreditLimit?: boolean;
+  onClearCreditLimit?: () => void;
+  onCreditLimitChange?: () => void;
 }) {
   function update<K extends keyof CustomerDraft>(key: K, value: CustomerDraft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -935,7 +968,22 @@ function CustomerForm({ draft, setDraft, onSubmit, submitLabel }: {
       <label className="font-body text-label-md text-on-surface">Name<input required value={draft.name} onChange={(event) => update('name', event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
       <label className="font-body text-label-md text-on-surface">Phone<input value={draft.phone} onChange={(event) => update('phone', event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
       <label className="font-body text-label-md text-on-surface">Email (optional)<input type="email" value={draft.email} onChange={(event) => update('email', event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
-      <label className="font-body text-label-md text-on-surface">Monthly credit limit (millimes)<input type="number" min="0" step="1" inputMode="numeric" value={draft.creditLimit} onChange={(event) => update('creditLimit', event.target.value)} placeholder="No limit" className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
+      <label className="font-body text-label-md text-on-surface">Monthly credit limit (millimes)<input type="number" min="0" step="1" inputMode="numeric" value={draft.creditLimit} onChange={(event) => { update('creditLimit', event.target.value); onCreditLimitChange?.(); }} placeholder={isEditing && hasExistingCreditLimit ? 'Blank keeps saved limit' : 'No limit'} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
+      {isEditing && hasExistingCreditLimit && (
+        <button
+          type="button"
+          onClick={() => {
+            if (clearCreditLimit) {
+              onCreditLimitChange?.();
+            } else {
+              onClearCreditLimit?.();
+            }
+          }}
+          className="self-start font-body text-label-md text-primary"
+        >
+          {clearCreditLimit ? 'Keep saved limit' : 'Remove saved limit'}
+        </button>
+      )}
       <label className="font-body text-label-md text-on-surface">Settlement terms
         <select value={draft.settlementTerms} onChange={(event) => update('settlementTerms', event.target.value as CustomerRecord['settlementTerms'])} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3">
           <option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="anytime">Anytime</option>
@@ -982,6 +1030,7 @@ function CustomerCard({ customer, status, overdue, onClick }: {
   const used = Math.max(0, balance);
   const percent = status?.percentUsed ?? 0;
   const progress = Math.min(100, Math.max(0, percent));
+  const progressTone = status ? getCustomerCreditTone(status.state, progress).barClass : 'bg-surface-container-high';
   return (
     <button type="button" onClick={onClick} className="w-full rounded-2xl bg-surface-container-lowest p-4 text-left shadow-card transition active:scale-[0.995]">
       <div className="flex items-start gap-3">
@@ -1000,11 +1049,16 @@ function CustomerCard({ customer, status, overdue, onClick }: {
       </div>
       {status?.limit !== undefined ? (
         <span className="mt-3 block">
-          <span className="customer-credit-progress-track relative block h-2 overflow-hidden rounded-full">
-            <span aria-hidden="true" className="absolute inset-y-0 right-0 block bg-surface-container-high" style={{ width: `${100 - progress}%` }} />
+          <span className="mb-1 flex items-center justify-between font-body text-label-sm">
+            <span className="text-on-surface-variant">Credit used</span>
+            <strong className="tabular-nums text-on-surface">{Math.round(progress)}%</strong>
           </span>
-          <span className="mt-1.5 block font-body text-body-sm text-on-surface-variant">
-            {formatTnd(used / 1000)} of {formatTnd(status.limit / 1000)} DT used • {formatTnd((status.remaining ?? 0) / 1000)} DT left
+          <span className="customer-credit-progress-track relative block h-2.5 overflow-hidden rounded-full" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label={`${Math.round(progress)} percent of credit limit used`}>
+            <span aria-hidden="true" className={`customer-credit-progress-fill ${progressTone}`} style={{ width: `${progress}%` }} />
+          </span>
+          <span className="mt-1.5 flex items-center justify-between gap-2 font-body text-label-sm text-on-surface-variant">
+            <span>{formatTnd(used / 1000)} / {formatTnd(status.limit / 1000)} DT</span>
+            <span>{formatTnd((status.remaining ?? 0) / 1000)} DT left</span>
           </span>
         </span>
       ) : (

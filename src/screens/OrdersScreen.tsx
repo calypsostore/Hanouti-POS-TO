@@ -67,11 +67,24 @@ async function toOrderView(order: OrderRecord): Promise<OrderView> {
 }
 
 const filterOptions: { value: OrderFilter; label: TranslationKey }[] = [
-  { value: 'all', label: 'orders.allToday' },
+  { value: 'all', label: 'orders.all' },
   { value: 'done', label: 'orders.completed' },
   { value: 'pending', label: 'orders.pendingVoid' },
   { value: 'voided', label: 'orders.voided' },
 ];
+
+function localDateKey(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function formatBusinessDate(value: string) {
+  return new Date(`${value}T12:00:00`).toLocaleDateString([], {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
 
 export function OrdersScreen() {
   const user = useAuthStore((state) => state.user);
@@ -80,6 +93,7 @@ export function OrdersScreen() {
   const staffFilter = user?.role === 'staff' ? user.id : undefined;
   const [canRequestVoid, setCanRequestVoid] = useState(false);
   const [orders, setOrders] = useState<OrderView[]>([]);
+  const [businessDate, setBusinessDate] = useState(() => localDateKey());
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [filter, setFilter] = useState<OrderFilter>('all');
@@ -106,13 +120,13 @@ export function OrdersScreen() {
     if (initialLoad) setLoading(true);
     setLoadError('');
     try {
-      const records = await orderService.listToday(storeId, staffFilter);
+      const records = await orderService.listByBusinessDate(storeId, businessDate, staffFilter);
       setOrders(await Promise.all(records.map(toOrderView)));
       hasLoadedOrdersRef.current = true;
     } finally {
       if (initialLoad) setLoading(false);
     }
-  }, [storeId, staffFilter]);
+  }, [storeId, staffFilter, businessDate]);
 
   useEffect(() => {
     void refreshOrders().catch(() => setLoadError(t('common.loadFailed')));
@@ -227,19 +241,35 @@ export function OrdersScreen() {
       {user?.role === 'staff' && <TopBar title={t('orders.title')} storeName={store?.name} />}
       <main className="orders-page-content mx-auto flex w-full max-w-none flex-col">
         <section className="orders-toolbar flex flex-col gap-3 px-4 pb-2 pt-4">
-          <div className="flex items-center justify-between gap-2">
-            <span className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-surface-container-high px-3 font-body text-label-sm text-primary">
-              <MaterialIcon name="badge" className="text-base" filled />
-              {t('orders.staffToday', { name: user?.name ?? t('common.staff') })}
-            </span>
-            <span className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-surface-container px-3 font-body text-label-sm text-on-surface-variant">
-              <MaterialIcon name="query_stats" className="text-base text-success-dark" />
-              {t('orders.shiftCount', { count: doneCount })}
-            </span>
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+            <label className="flex min-w-0 items-center gap-3 rounded-2xl border border-outline-variant/70 bg-surface-container-lowest px-3 py-2.5 shadow-card">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-fixed/50 text-primary">
+                <MaterialIcon name="calendar_month" className="text-xl" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-body text-label-sm text-outline">Business day</span>
+                <span className="block truncate font-display text-label-lg text-on-surface">{formatBusinessDate(businessDate)}</span>
+              </span>
+              <input
+                aria-label="Business date"
+                type="date"
+                value={businessDate}
+                max={localDateKey()}
+                onChange={(event) => {
+                  if (/^\d{4}-\d{2}-\d{2}$/.test(event.target.value)) setBusinessDate(event.target.value);
+                }}
+                className="absolute h-px w-px opacity-0"
+              />
+              <MaterialIcon name="expand_more" className="shrink-0 text-on-surface-variant" />
+            </label>
+            <div className="flex min-w-20 flex-col items-center justify-center rounded-2xl border border-outline-variant/70 bg-surface-container-lowest px-3 py-2 shadow-card">
+              <span className="font-display text-headline-md text-primary">{doneCount}</span>
+              <span className="font-body text-label-sm text-outline">Completed</span>
+            </div>
           </div>
           <div className="flex items-center justify-between rounded-xl bg-surface-container-lowest p-4 shadow-card">
             <div>
-              <span className="font-body text-label-sm uppercase tracking-wider text-outline">{t('orders.shiftTotal')}</span>
+              <span className="font-body text-label-sm uppercase tracking-wider text-outline">Selected Day Total</span>
               <p className="mt-0.5 font-display text-currency-display-mobile text-primary">{formatTnd(doneTotal)} <small className="font-body text-label-md">DT</small></p>
             </div>
             <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-fixed/40 text-primary"><MaterialIcon name="coffee" className="text-2xl" /></span>
@@ -266,7 +296,7 @@ export function OrdersScreen() {
           <div className="flex items-center justify-between">
             <h2 className="flex items-center gap-1.5 font-body text-label-md uppercase tracking-wider text-outline">
               <MaterialIcon name="schedule" className="text-base" />
-              {t('orders.recent')}
+              Orders for {businessDate}
             </h2>
             <span className="font-body text-label-sm text-outline">{t('orders.sortedNewest')}</span>
           </div>

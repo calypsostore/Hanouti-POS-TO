@@ -5,6 +5,7 @@ import { Button } from '../components/Button';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { LazyBatch } from '../components/LazyBatch';
+import { ProfileAvatar } from '../components/ProfileAvatar';
 import { StatusTag } from '../components/StatusTag';
 import { ToggleSwitch } from '../components/ToggleSwitch';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
@@ -62,7 +63,7 @@ function OwnerStaffContent() {
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>([]);
   const [selfServiceItemIds, setSelfServiceItemIds] = useState<string[]>([]);
   const [selfServiceCategoryIds, setSelfServiceCategoryIds] = useState<string[]>([]);
-  const [maxStaffDrinkQuantity, setMaxStaffDrinkQuantity] = useState('0');
+  const [maxStaffDrinkQuantity, setMaxStaffDrinkQuantity] = useState('');
   const [editing, setEditing] = useState<UserSummary | null>(null);
   const [editingPosition, setEditingPosition] = useState<PositionRecord | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PositionRecord | null>(null);
@@ -263,7 +264,7 @@ function OwnerStaffContent() {
       setSelectedPermissions([]);
       setSelfServiceItemIds([]);
       setSelfServiceCategoryIds([]);
-      setMaxStaffDrinkQuantity('0');
+      setMaxStaffDrinkQuantity('');
       setSheet(null);
       setNotice('Position created.');
       try {
@@ -281,7 +282,7 @@ function OwnerStaffContent() {
     setSelectedPermissions([]);
     setSelfServiceItemIds([]);
     setSelfServiceCategoryIds([]);
-    setMaxStaffDrinkQuantity('0');
+    setMaxStaffDrinkQuantity('');
     setError('');
     setNotice('');
     setSheet('new-position');
@@ -293,7 +294,7 @@ function OwnerStaffContent() {
     setSelectedPermissions([...position.permissionIds]);
     setSelfServiceItemIds([...(position.selfServiceItemIds ?? [])]);
     setSelfServiceCategoryIds([...(position.selfServiceCategoryIds ?? [])]);
-    setMaxStaffDrinkQuantity(String(position.maxStaffDrinkQuantityPerShift ?? 0));
+    setMaxStaffDrinkQuantity('');
     setError('');
     setNotice('');
     setSheet('edit-position');
@@ -389,7 +390,7 @@ function OwnerStaffContent() {
 
   function positionCompRules() {
     const maximum = Number(maxStaffDrinkQuantity);
-    if (!Number.isInteger(maximum) || maximum < 0) {
+    if (!maxStaffDrinkQuantity.trim() || !Number.isInteger(maximum) || maximum < 0) {
       throw new Error('Staff drink limit must be a non-negative whole number.');
     }
     return {
@@ -572,7 +573,6 @@ function OwnerStaffContent() {
         {loading ? <ListSkeleton label="Loading staff" /> : <LazyBatch items={visibleStaff} resetKey={`${statusFilter}-${positionFilter}-${sortBy}-${searchQuery}`} renderItem={(staffMember) => {
           const currentShift = openShiftFor(staffMember);
           const lastShift = lastShiftFor(staffMember);
-          const initials = staffMember.name.trim().split(/\s+/).slice(0, 2).map((part) => Array.from(part)[0] ?? '').join('').toLocaleUpperCase();
           return (
             <article key={staffMember.id} className="flex items-start gap-2 rounded-xl bg-surface-container-lowest p-3 shadow-card sm:p-4">
               <button
@@ -580,8 +580,8 @@ function OwnerStaffContent() {
                 onClick={() => { setOpenMenuId(null); navigate(`/owner/staff/${staffMember.id}`); }}
                 className="flex min-h-20 min-w-0 flex-1 items-start gap-3 rounded-lg text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
               >
-                <span aria-hidden="true" className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary-fixed font-body text-label-lg text-primary">
-                  {initials || '?'}
+                <span className="h-12 w-12 shrink-0 overflow-hidden rounded-full">
+                  <ProfileAvatar avatarId={staffMember.avatarId} className="h-full w-full" />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="flex flex-wrap items-center gap-2">

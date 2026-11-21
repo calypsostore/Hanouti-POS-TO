@@ -200,7 +200,7 @@ export function OwnerExpensesScreen() {
           )}
           <label className="flex flex-col gap-1 font-body text-label-md text-on-surface">
             Amount (millimes)
-            <input type="number" min="1" step="1" inputMode="numeric" required value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0" className="h-14 rounded-lg bg-surface-container-low px-4 font-display text-title-lg tabular-nums" />
+            <input type="number" min="1" step="1" inputMode="numeric" required value={amount} onChange={(event) => setAmount(event.target.value)} className="h-14 rounded-lg bg-surface-container-low px-4 font-display text-title-lg tabular-nums" />
           </label>
           <label className="flex flex-col gap-1 font-body text-label-md text-on-surface">
             Date
@@ -424,7 +424,7 @@ export function OwnerSuppliersScreen() {
               <form onSubmit={(event) => { void recordPayment(event); }} className="flex flex-col gap-3 rounded-xl bg-surface-container-low p-3">
                 <h3 className="font-body text-label-lg text-on-surface">Record payment</h3>
                 <label className="flex flex-col gap-1 font-body text-label-md text-on-surface">Amount (millimes)
-                  <input type="number" min="1" step="1" inputMode="numeric" required value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} placeholder="0" className="h-14 rounded-lg bg-surface px-4 font-display text-title-lg tabular-nums" />
+                  <input type="number" min="1" step="1" inputMode="numeric" required value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} className="h-14 rounded-lg bg-surface px-4 font-display text-title-lg tabular-nums" />
                 </label>
                 <label className="flex flex-col gap-1 font-body text-label-md text-on-surface">Allocate to purchase (optional)
                   <select value={paymentExpenseId} onChange={(event) => setPaymentExpenseId(event.target.value)} className="min-h-11 rounded-lg border border-outline-variant bg-surface px-3">

@@ -164,6 +164,7 @@ const en = {
   'orders.shiftCount': 'Shift: {count} ord.',
   'orders.shiftTotal': "Today's Shift Total",
   'orders.allToday': 'All Today',
+  'orders.all': 'All',
   'orders.completed': 'Completed',
   'orders.pendingVoid': 'Pending Void',
   'orders.voided': 'Voided',

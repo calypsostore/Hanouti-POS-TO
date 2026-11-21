@@ -90,7 +90,7 @@ function OwnerInventoryContent() {
   async function saveThreshold(item: CatalogItemRecord) {
     setError('');
     setNotice('');
-    const rawThreshold = thresholds[item.id] ?? String(item.lowStockThreshold ?? 5);
+    const rawThreshold = thresholds[item.id] ?? '';
     const threshold = Number(rawThreshold);
     if (!rawThreshold.trim() || !Number.isInteger(threshold) || threshold < 0) {
       setError('Enter a non-negative whole-number low-stock threshold.');
@@ -100,7 +100,11 @@ function OwnerInventoryContent() {
       if (!user) throw new Error('Your account could not be loaded.');
       await catalogService.updateItem(item.id, { lowStockThreshold: threshold }, { id: user.id, name: user.name });
       await refreshItems();
-      setThresholds((current) => ({ ...current, [item.id]: String(threshold) }));
+      setThresholds((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
       setNotice(`${item.name} low-stock threshold saved.`);
     } catch (updateError) {
       setError(updateError instanceof Error ? updateError.message : 'Unable to save the low-stock threshold.');
@@ -206,7 +210,7 @@ function OwnerInventoryContent() {
             { key: 'stock', label: 'Stock', sortValue: (item) => item.stockCount ?? -1, render: (item) => item.stockCount === null ? 'Not tracked' : item.outOfStock ? 'Out of stock' : `${item.stockCount} in stock` },
             { key: 'threshold', label: 'Low-stock threshold', sortValue: (item) => item.lowStockThreshold ?? 5, render: (item) => (
               <div className="flex items-center gap-2">
-                <input type="number" min="0" step="1" aria-label={`Threshold for ${item.name}`} value={thresholds[item.id] ?? String(item.lowStockThreshold ?? 5)} onChange={(event) => setThresholds((current) => ({ ...current, [item.id]: event.target.value }))} className="h-9 w-20 rounded-md bg-surface-container-low px-2" />
+                <input type="number" min="0" step="1" aria-label={`Threshold for ${item.name}`} value={thresholds[item.id] ?? ''} onChange={(event) => setThresholds((current) => ({ ...current, [item.id]: event.target.value }))} className="h-9 w-20 rounded-md bg-surface-container-low px-2" />
                 <Button variant="secondary" className="min-h-9 min-w-0 px-2 text-label-sm" onClick={() => { void saveThreshold(item); }}>Save</Button>
               </div>
             ) },
@@ -267,7 +271,7 @@ function OwnerInventoryContent() {
                     min="0"
                     step="1"
                     inputMode="numeric"
-                    value={thresholds[item.id] ?? String(threshold)}
+                    value={thresholds[item.id] ?? ''}
                     onChange={(event) => setThresholds((current) => ({ ...current, [item.id]: event.target.value }))}
                     className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary"
                   />
@@ -322,7 +326,7 @@ function OwnerInventoryContent() {
                 autoFocus
                 value={adjustmentAmount}
                 onChange={(event) => setAdjustmentAmount(event.target.value)}
-                placeholder={adjustmentReason === 'correction' ? String(adjustTarget.stockCount ?? 0) : 'Enter quantity'}
+                placeholder={adjustmentReason === 'correction' ? 'Enter stock count' : 'Enter quantity'}
                 className="mt-1 h-14 w-full rounded-lg bg-surface-container-low px-4 text-lg tabular-nums outline-none focus:ring-2 focus:ring-primary"
               />
             </label>

@@ -5,6 +5,7 @@ import { Button } from '../components/Button';
 import { Keypad } from '../components/Keypad';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { MaterialIcon } from '../components/MaterialIcon';
+import { ProfileAvatar } from '../components/ProfileAvatar';
 import { StatusTag } from '../components/StatusTag';
 import { ToggleSwitch } from '../components/ToggleSwitch';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
@@ -72,10 +73,6 @@ function formatHours(milliseconds: number): string {
 
 function formatShiftTime(value: string): string {
   return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-}
-
-function initialsFor(name: string): string {
-  return name.trim().split(/\s+/).slice(0, 2).map((part) => Array.from(part)[0] ?? '').join('').toLocaleUpperCase() || '?';
 }
 
 function overridesFor(user: UserSummary): PermissionOverrides {
@@ -426,7 +423,9 @@ function ProfileContent() {
           <section className="mb-5 rounded-2xl bg-surface-container-lowest p-4 shadow-card sm:p-6">
             <div className="flex flex-col gap-4">
               <div className="flex items-start gap-3">
-                <span aria-hidden="true" className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-primary-fixed font-body text-title-lg text-primary">{initialsFor(staff.name)}</span>
+                <span className="h-14 w-14 shrink-0 overflow-hidden rounded-full">
+                  <ProfileAvatar avatarId={staff.avatarId} className="h-full w-full" />
+                </span>
                 <div className="min-w-0 flex-1">
                   <h1 className="break-words font-display text-headline-lg text-on-surface">{staff.name}</h1>
                   <p className="mt-1 break-all font-body text-body-sm text-outline">{staff.username ?? 'No username'}</p>

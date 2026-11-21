@@ -50,8 +50,8 @@ export function ItemCard({ item, quantity = 0, onAdd, onRemove, canToggleStock =
             )}
           </span>
           {quantity > 0 && (
-            <span className={`rounded-full bg-primary-fixed px-2 py-0.5 font-body text-label-sm text-on-surface ${canToggleStock ? 'mr-11' : ''}`}>
-              {t('pos.itemAddedToCart', { count: quantity })}
+            <span className={`pos-cart-count-badge ${canToggleStock ? 'mr-11' : ''}`}>
+              {quantity}
             </span>
           )}
         </div>
@@ -94,12 +94,12 @@ export function ItemCard({ item, quantity = 0, onAdd, onRemove, canToggleStock =
         </div>
       )}
       {quantity > 0 && onRemove && !item.outOfStock && (
-        <div className="mt-1 flex items-center justify-between rounded-lg bg-surface-container-low p-0.5">
-          <button type="button" aria-label={t('pos.removeItem', { item: item.name })} onClick={onRemove} className={`flex ${largeButtons ? 'h-14 w-14' : 'h-8 w-8'} items-center justify-center rounded-lg bg-surface-container-lowest text-primary`}>
+        <div className={`pos-quantity-controls mt-1 flex items-center justify-between rounded-lg bg-surface-container-low p-0.5 ${largeButtons ? 'pos-quantity-controls--large' : ''}`}>
+          <button type="button" aria-label={t('pos.removeItem', { item: item.name })} onClick={onRemove} className={`flex ${largeButtons ? 'h-14 w-14' : 'h-7 w-7'} items-center justify-center rounded-lg bg-surface-container-lowest text-primary`}>
             <MaterialIcon name={quantity === 1 ? 'delete' : 'remove'} className="text-sm" />
           </button>
           <span className="font-display text-label-lg text-primary">{quantity}</span>
-          <button type="button" aria-label={t('pos.addItem', { item: item.name })} onClick={onAdd} className={`flex ${largeButtons ? 'h-14 w-14' : 'h-8 w-8'} items-center justify-center rounded-lg bg-primary text-on-primary`}>
+          <button type="button" aria-label={t('pos.addItem', { item: item.name })} onClick={onAdd} className={`flex ${largeButtons ? 'h-14 w-14' : 'h-7 w-7'} items-center justify-center rounded-lg bg-primary text-on-primary`}>
             <MaterialIcon name="add" className="text-sm" />
           </button>
         </div>

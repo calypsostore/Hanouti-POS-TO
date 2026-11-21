@@ -89,7 +89,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const [shifts, setShifts] = useState<ShiftRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [ownOpenShift, setOwnOpenShift] = useState<ShiftRecord>();
-  const [startingCash, setStartingCash] = useState('50000');
+  const [startingCash, setStartingCash] = useState('');
   const [startingCashEdited, setStartingCashEdited] = useState(false);
   const [countedCash, setCountedCash] = useState('');
   const [differenceNote, setDifferenceNote] = useState('');
@@ -212,6 +212,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     setNotice('');
     try {
       await shiftService.openShift(storeId, user.id, parseMillimes(startingCash));
+      setStartingCash('');
       setStartingCashEdited(false);
       await refresh();
       setOpenShiftSheetOpen(false);
@@ -219,6 +220,30 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     } catch (openError) {
       setError(openError instanceof Error ? openError.message : 'Unable to open the shift.');
     }
+  }
+
+  function openStartingCashSheet() {
+    setStartingCash('');
+    setStartingCashEdited(false);
+    setOpenShiftSheetOpen(true);
+  }
+
+  function closeStartingCashSheet() {
+    setStartingCash('');
+    setStartingCashEdited(false);
+    setOpenShiftSheetOpen(false);
+  }
+
+  function openCountedCashSheet() {
+    setCountedCash('');
+    setDifferenceNote('');
+    setCloseShiftSheetOpen(true);
+  }
+
+  function closeCountedCashSheet() {
+    setCountedCash('');
+    setDifferenceNote('');
+    setCloseShiftSheetOpen(false);
   }
 
   async function closeShift(event: FormEvent<HTMLFormElement>) {
@@ -524,21 +549,21 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           <p className="mt-1 font-body text-body-md text-on-surface-variant">{store?.name}</p>
         </div>
         {ownerMode && !ownOpenShift
-          ? <Button onClick={() => setOpenShiftSheetOpen(true)}><MaterialIcon name="lock_open" />Open my shift</Button>
+          ? <Button onClick={openStartingCashSheet}><MaterialIcon name="lock_open" />Open my shift</Button>
           : ownerMode
             ? <StatusTag status="started">{`${openCount} open`}</StatusTag>
             : canOpenCloseShift && !ownOpenShift && (!closedShiftSummary || dayStatus.dayIsClosed)
-              ? <Button onClick={() => setOpenShiftSheetOpen(true)}><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
+              ? <Button onClick={openStartingCashSheet}><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
               : null}
       </div>
       <PageHeader className="hidden lg:flex" title={pageTitle} subtitle={store?.name} actions={
         ownerMode
           ? <div className="flex items-center gap-2">
             <StatusTag status="started">{`${openCount} open`}</StatusTag>
-            {!ownOpenShift && <Button onClick={() => setOpenShiftSheetOpen(true)}><MaterialIcon name="lock_open" />Open my shift</Button>}
+            {!ownOpenShift && <Button onClick={openStartingCashSheet}><MaterialIcon name="lock_open" />Open my shift</Button>}
           </div>
           : canOpenCloseShift && !ownOpenShift && (!closedShiftSummary || dayStatus.dayIsClosed)
-            ? <Button className="w-full lg:w-auto lg:min-w-[160px]" onClick={() => setOpenShiftSheetOpen(true)}><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
+            ? <Button className="w-full lg:w-auto lg:min-w-[160px]" onClick={openStartingCashSheet}><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
             : undefined
       } />
       {(ownerMode || (dayStatus.dayIsClosed && !ownOpenShift)) && (
@@ -672,13 +697,13 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             {canPrintOwnX && <Button variant="secondary" onClick={() => { void createXReport(); }}>
               <MaterialIcon name="summarize" />Print X for my shift
             </Button>}
-            {canOpenCloseShift && <Button className="w-full lg:w-auto" onClick={() => setCloseShiftSheetOpen(true)}>
+            {canOpenCloseShift && <Button className="w-full lg:w-auto" onClick={openCountedCashSheet}>
               <MaterialIcon name="lock" />{t('shift.closeShift')}
             </Button>}
           </div>
         </div>
       ) : canOpenCloseShift && (!closedShiftSummary || ownerMode || dayStatus.dayIsClosed) ? (
-        <Button className="w-full max-w-xl" onClick={() => setOpenShiftSheetOpen(true)}>
+        <Button className="w-full max-w-xl" onClick={openStartingCashSheet}>
           <MaterialIcon name="lock_open" />{ownerMode ? 'Open my shift' : t('shift.openShift')}
         </Button>
       ) : null)}
@@ -748,13 +773,13 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           empty={!loading && !error ? <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">{t('common.noData')}</p> : undefined}
         />}
       </section>}
-      <BottomSheet open={openShiftSheetOpen} onClose={() => setOpenShiftSheetOpen(false)} title={t('shift.openShift')}>
+      <BottomSheet open={openShiftSheetOpen} onClose={closeStartingCashSheet} title={t('shift.openShift')}>
         <form onSubmit={(event) => { void openShift(event); }} className="flex flex-col gap-3">
           <p className="font-body text-body-sm text-on-surface-variant">Count the cash drawer before taking orders.</p>
           <label htmlFor="starting-cash" className="block font-body text-label-md">{t('shift.startingCash')} (millimes)</label>
           <input id="starting-cash" type="number" min="0" step="1" inputMode="numeric" required value={startingCash} onChange={(event) => { setStartingCash(event.target.value); setStartingCashEdited(true); }} className="h-14 w-full rounded-xl bg-surface-container-low px-4 font-body text-title-md tabular-nums outline-none focus:ring-2 focus:ring-primary" />
           <div className="sheet-action-bar grid grid-cols-2 gap-2">
-            <Button type="button" variant="ghost" onClick={() => setOpenShiftSheetOpen(false)}>{t('common.cancel')}</Button>
+            <Button type="button" variant="ghost" onClick={closeStartingCashSheet}>{t('common.cancel')}</Button>
             <Button type="submit"><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
           </div>
         </form>
@@ -867,14 +892,14 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
               ))}
             </div>
             <label className="font-body text-label-md">Total cash for the day, excluding opening floats (millimes)
-              <input type="number" min="0" step="1" inputMode="numeric" required value={zCountedCash} onChange={(event) => setZCountedCash(event.target.value)} placeholder="0" className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
+              <input type="number" min="0" step="1" inputMode="numeric" required value={zCountedCash} onChange={(event) => setZCountedCash(event.target.value)} className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
             </label>
             <label className="font-body text-label-md">Total card payments in period (millimes)
-              <input type="number" min="0" step="1" inputMode="numeric" required value={zCountedCard} onChange={(event) => setZCountedCard(event.target.value)} placeholder="0" className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
+              <input type="number" min="0" step="1" inputMode="numeric" required value={zCountedCard} onChange={(event) => setZCountedCard(event.target.value)} className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
             </label>
             {store?.allowOtherPayments && <>
               <label className="font-body text-label-md">Total other payments in period (millimes)
-                <input type="number" min="0" step="1" inputMode="numeric" required value={zCountedOther} onChange={(event) => setZCountedOther(event.target.value)} placeholder="0" className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
+                <input type="number" min="0" step="1" inputMode="numeric" required value={zCountedOther} onChange={(event) => setZCountedOther(event.target.value)} className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
               </label>
             </>}
             {zReviewed && zDifference !== undefined && (
@@ -927,7 +952,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           </form>
         )}
       </BottomSheet>
-      <BottomSheet open={closeShiftSheetOpen && Boolean(ownOpenShift)} onClose={() => setCloseShiftSheetOpen(false)} title={t('shift.closeShift')}>
+      <BottomSheet open={closeShiftSheetOpen && Boolean(ownOpenShift)} onClose={closeCountedCashSheet} title={t('shift.closeShift')}>
         {ownOpenShift && <ShiftCloseForm
           shift={ownOpenShift}
           breakdown={ownBreakdown}
@@ -985,7 +1010,6 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             required
             value={movementAmount}
             onChange={(event) => setMovementAmount(event.target.value)}
-            placeholder="0"
             className="h-12 w-full rounded-lg bg-surface-container-low px-3 font-display text-title-md tabular-nums"
           />
           <div>
@@ -1115,7 +1139,6 @@ function ShiftCloseForm({
         required
         value={countedCash}
         onChange={(event) => onCountChange(event.target.value)}
-        placeholder="0"
         className="h-14 rounded-xl bg-surface-container-low px-4 font-body text-title-md tabular-nums outline-none focus:ring-2 focus:ring-primary"
       />
       {reviewed && difference !== undefined && (

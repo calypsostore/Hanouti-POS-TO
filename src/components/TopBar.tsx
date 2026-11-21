@@ -7,7 +7,7 @@ import { t } from '../i18n/translations';
 import { useAuthStore } from '../stores/authStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { notificationPath } from '../lib/notificationPath';
-import type { NotificationRecord, ProfileAvatarId } from '../types/domain';
+import type { NotificationRecord, ProfileAvatarId, StoreType } from '../types/domain';
 import { getLogoDefinition } from '../data/logoCatalog';
 import { DEFAULT_PROFILE_AVATAR_ID, PROFILE_AVATARS } from '../data/profileAvatars';
 
@@ -15,12 +15,13 @@ interface TopBarProps {
   title: string;
   storeName?: string;
   storeLogoId?: string;
+  storeType?: StoreType;
   onProfileClick?: () => void;
   onDashboardClick?: () => void;
   onLockClick?: () => void;
 }
 
-export function TopBar({ title, storeName, storeLogoId, onProfileClick, onDashboardClick, onLockClick }: TopBarProps) {
+export function TopBar({ title, storeName, storeLogoId, storeType = 'general', onProfileClick, onDashboardClick, onLockClick }: TopBarProps) {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
@@ -31,6 +32,7 @@ export function TopBar({ title, storeName, storeLogoId, onProfileClick, onDashbo
   const recentNotifications = useMemo(() => notificationItems.slice(0, 6), [notificationItems]);
   const notificationsLoading = useNotificationStore((state) => state.status === 'loading');
   const markRead = useNotificationStore((state) => state.markRead);
+  const markAllReadStore = useNotificationStore((state) => state.markAllRead);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notificationsError, setNotificationsError] = useState('');
   const [activeNotificationId, setActiveNotificationId] = useState('');
@@ -84,6 +86,16 @@ export function TopBar({ title, storeName, storeLogoId, onProfileClick, onDashbo
       setNotificationsError('Unable to mark this notification as read. Please try again.');
     } finally {
       setActiveNotificationId('');
+    }
+  }
+
+  async function markAllNotificationsRead() {
+    if (!user) return;
+    try {
+      await markAllReadStore(user);
+    } catch (error) {
+      console.error('Unable to mark notifications as read.', error);
+      setNotificationsError('Unable to mark notifications as read. Please try again.');
     }
   }
 
@@ -160,7 +172,10 @@ export function TopBar({ title, storeName, storeLogoId, onProfileClick, onDashbo
             {storeLogo ? (
               <img src={storeLogo.src} alt="" className="h-8 w-8 object-contain" />
             ) : (
-              <MaterialIcon name="local_cafe" className="text-2xl" />
+              <MaterialIcon
+                name={storeType === 'coffee' ? 'local_cafe' : storeType === 'restaurant' ? 'restaurant' : storeType === 'bakery' ? 'bakery_dining' : storeType === 'grocery' ? 'local_mall' : 'storefront'}
+                className="text-2xl"
+              />
             )}
           </span>
           <div className="min-w-0">
@@ -175,14 +190,14 @@ export function TopBar({ title, storeName, storeLogoId, onProfileClick, onDashbo
               aria-label={t('nav.dashboard')}
               title={t('nav.dashboard')}
               onClick={onDashboardClick}
-              className="flex h-10 items-center justify-center gap-1.5 rounded-full bg-surface-container px-2 text-primary tablet:px-3"
+              className="flex h-8 items-center justify-center gap-1.5 rounded-full bg-surface-container px-2 text-primary tablet:px-2.5"
             >
               <MaterialIcon name="dashboard" />
               <span className="hidden tablet:inline">{t('nav.dashboard')}</span>
             </button>
           )}
           {onLockClick && (
-            <button type="button" aria-label="Lock terminal" onClick={onLockClick} className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-container text-primary">
+            <button type="button" aria-label="Lock terminal" onClick={onLockClick} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-container text-primary">
               <MaterialIcon name="lock" />
             </button>
           )}
@@ -195,7 +210,7 @@ export function TopBar({ title, storeName, storeLogoId, onProfileClick, onDashbo
               aria-controls="notifications-popover"
               aria-expanded={notificationsOpen}
               onClick={openNotifications}
-              className="relative flex h-10 w-10 items-center justify-center rounded-full bg-surface-container text-primary"
+              className="relative flex h-8 w-8 items-center justify-center rounded-full bg-surface-container text-primary"
             >
               <MaterialIcon name="notifications" />
               {unreadCount > 0 && (
@@ -213,7 +228,7 @@ export function TopBar({ title, storeName, storeLogoId, onProfileClick, onDashbo
             aria-controls="profile-popover"
             aria-expanded={profileOpen}
             onClick={openProfile}
-            className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2 border-surface p-0 shadow-card"
+            className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border-2 border-surface p-0 shadow-card"
           >
             <ProfileAvatar avatarId={user?.avatarId} className="h-full w-full" />
           </button>
@@ -239,6 +254,15 @@ export function TopBar({ title, storeName, storeLogoId, onProfileClick, onDashbo
           <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
             <h2 className="font-display text-title-md text-on-surface">{t('nav.notifications')}</h2>
             <div className="flex shrink-0 items-center gap-1">
+              {unreadCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => { void markAllNotificationsRead(); }}
+                  className="!min-h-0 !min-w-0 rounded-md px-2 py-1 font-body text-label-md text-primary hover:bg-primary-fixed"
+                >
+                  Read all
+                </button>
+              )}
               <Link
                 to="/notifications"
                 onClick={() => setNotificationsOpen(false)}

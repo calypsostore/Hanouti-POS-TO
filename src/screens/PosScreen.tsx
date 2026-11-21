@@ -15,14 +15,16 @@ import { TicketRow } from '../components/TicketRow';
 import { TopBar } from '../components/TopBar';
 import { TicketView } from '../components/TicketView';
 import { formatTnd } from '../lib/format';
+import { getCustomerCreditTone } from '../lib/customerCredit';
 import { useDisplaySettings } from '../lib/displaySettings';
+import { useQueryCacheRefresh } from '../lib/useQueryCacheRefresh';
 import { t } from '../i18n/translations';
 import { catalogService } from '../services/catalogService';
 import { compService, type StaffDrinkAllowance } from '../services/compService';
 import { OrderNotificationError, OrderServiceError, orderService } from '../services/orderService';
 import { shiftService } from '../services/shiftService';
 import { reportService, type ReportDayStatus } from '../services/reportService';
-import { PERMISSIONS_CHANGED_EVENT, userService } from '../services/userService';
+import { userService } from '../services/userService';
 import { updateService } from '../services/updateService';
 import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
 import { resolveStoreSettings } from '../types/domain';
@@ -81,9 +83,11 @@ export function PosScreen() {
   const location = useLocation();
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
+  const permissions = useAuthStore((state) => state.permissions);
   const { largeButtons } = useDisplaySettings();
   const lock = useAuthStore((state) => state.lock);
   const storeId = user?.storeId ?? '';
+  const cacheRevision = useQueryCacheRefresh(['catalog_items', 'categories', 'stores', 'store_settings']);
   const preselectedCustomerId = new URLSearchParams(location.search).get('customer')?.trim() || customerIdFromState(location.state);
   const cart = useCartStore((state) => state.cart);
   const note = useCartStore((state) => state.note);
@@ -135,7 +139,7 @@ export function PosScreen() {
   const [completedOrderNotice, setCompletedOrderNotice] = useState('');
   const [compOpen, setCompOpen] = useState(false);
   const [compItemId, setCompItemId] = useState('');
-  const [compQuantity, setCompQuantity] = useState('1');
+  const [compQuantity, setCompQuantity] = useState('');
   const [compReason, setCompReason] = useState<CompReason>('dropped');
   const [compNote, setCompNote] = useState('');
   const [compSubmitting, setCompSubmitting] = useState(false);
@@ -177,17 +181,16 @@ export function PosScreen() {
       setCatalogLoading(true);
       setCatalogError('');
       try {
-        const [items, categories, shift, currentStore, todaysOrders, effectivePermissionIds, customerList, nextDayStatus] = await Promise.all([
+        const [items, categories, shift, currentStore, todaysOrders, customerList, nextDayStatus] = await Promise.all([
           catalogService.listItems(storeId),
           catalogService.listCategories(storeId),
           user ? shiftService.getOpenShiftForUser(storeId, user.id) : Promise.resolve(undefined),
           storeId ? userService.getStore(storeId) : Promise.resolve(undefined),
           orderService.listTodaySummaries(storeId),
-          user ? userService.getEffectivePermissions(user.id) : Promise.resolve([]),
           storeId ? customerService.listCustomers(storeId) : Promise.resolve([]),
           reportService.getDayStatus(storeId),
         ]);
-        const permissionSet = new Set(effectivePermissionIds);
+        const permissionSet = new Set(permissions);
         const permission = user?.role === 'owner' || permissionSet.has('86_items');
         const compPermission = user?.role === 'owner' || permissionSet.has('comp_items');
         const tabsPermission = permissionSet.has('use_tabs');
@@ -295,9 +298,8 @@ export function PosScreen() {
     window.addEventListener('online', onFocus);
     window.addEventListener(OFFLINE_QUEUE_CHANGED_EVENT, onQueueChanged);
     window.addEventListener(OFFLINE_ORDER_SYNCED_EVENT, onOrderSynced);
-    window.addEventListener(PERMISSIONS_CHANGED_EVENT, onFocus);
-    const unsubscribe = subscribeToStoreChanges(storeId, ['orders', 'shifts', 'notifications', 'catalog_items'], onFocus);
-    const unsubscribeStoreSettings = subscribeToStoreChanges(storeId, ['store_settings'], () => {
+    const unsubscribe = subscribeToStoreChanges(storeId, ['orders', 'shifts', 'notifications', 'catalog_items', 'categories'], onFocus);
+    const unsubscribeStoreSettings = subscribeToStoreChanges(storeId, ['stores', 'store_settings'], () => {
       void userService.getStore(storeId).then(setStore).catch((error: unknown) => {
         console.error('Unable to refresh store settings after a live update.', error);
       });
@@ -309,9 +311,8 @@ export function PosScreen() {
       window.removeEventListener('online', onFocus);
       window.removeEventListener(OFFLINE_QUEUE_CHANGED_EVENT, onQueueChanged);
       window.removeEventListener(OFFLINE_ORDER_SYNCED_EVENT, onOrderSynced);
-      window.removeEventListener(PERMISSIONS_CHANGED_EVENT, onFocus);
     };
-  }, [storeId, user, location.pathname]);
+  }, [cacheRevision, location.pathname, permissions, storeId, user]);
 
   useEffect(() => {
     if (!compOpen || compReason !== 'staff_drink' || !user?.id || !openShift || !compItemId) {
@@ -499,7 +500,7 @@ export function PosScreen() {
 
   function openCompForm() {
     setCompItemId(catalogRecords.find((item) => item.stockCount !== 0)?.id ?? catalogRecords[0]?.id ?? '');
-    setCompQuantity('1');
+    setCompQuantity('');
     setCompReason('dropped');
     setCompNote('');
     setCompError('');
@@ -803,7 +804,7 @@ export function PosScreen() {
             ) : (
               <>
                 <div className="customer-credit-progress-track relative mt-2 h-2 overflow-hidden rounded-full" role="progressbar" aria-valuenow={Math.min(100, Math.max(0, creditStatus.percentUsed ?? 0))} aria-valuemin={0} aria-valuemax={100} aria-label={`${Math.round(creditStatus.percentUsed ?? 0)} percent of credit limit used`}>
-                  <span aria-hidden="true" className="absolute inset-y-0 right-0 block bg-surface-container-highest" style={{ width: `${100 - Math.min(100, Math.max(0, creditStatus.percentUsed ?? 0))}%` }} />
+                  <span aria-hidden="true" className={`customer-credit-progress-fill ${getCustomerCreditTone(creditStatus.state, creditStatus.percentUsed).barClass}`} style={{ width: `${Math.min(100, Math.max(0, creditStatus.percentUsed ?? 0))}%` }} />
                 </div>
                 <p className="mt-1">{Math.round(creditStatus.percentUsed ?? 0)}% used · {formatTnd((creditStatus.remaining ?? 0) / 1000)} DT remaining</p>
               </>
@@ -827,7 +828,7 @@ export function PosScreen() {
         )}
         {creditStatusPending && <p role="status" className="mb-3 font-body text-body-sm text-outline">Checking customer credit…</p>}
         <Button onClick={() => { void finishOrder(); }} disabled={!cart.length || tabCheckoutBlocked} className="min-h-[54px] w-full rounded-xl text-body-lg">
-          <MaterialIcon name="check_circle" className="text-xl" />
+          <MaterialIcon name="check_circle" className="text-xl text-white" />
           {paymentMethod === 'tab' && selectedCustomer ? `Charge to ${selectedCustomer.name}` : t('common.done')}
           <span className="ml-auto font-display tabular-nums">{formatTnd(totalMillimes / 1000)} DT</span>
         </Button>
@@ -841,6 +842,8 @@ export function PosScreen() {
       <TopBar
         title={t('pos.terminal')}
         storeName={store?.name}
+        storeLogoId={resolveStoreSettings(store?.settings).storeLogoId}
+        storeType={resolveStoreSettings(store?.settings).storeType}
         onDashboardClick={() => navigate(user?.role === 'owner' ? '/owner/dashboard' : '/dashboard')}
         onLockClick={user?.role === 'staff' ? () => { void lockTerminal(); } : undefined}
       />
@@ -934,7 +937,7 @@ export function PosScreen() {
                     <button type="button" aria-label={t('pos.addItem', { item: item.name })} onClick={() => addItem(item)} className="flex min-h-0 flex-1 flex-col justify-between text-left active:scale-[0.98]">
                       <div className="flex items-start justify-between">
                         <ItemLogo id={item.icon} size="sm" />
-                        {quantity > 0 && <span className="rounded-full bg-primary-fixed px-2 py-0.5 font-body text-label-sm text-on-surface">{t('pos.itemAddedToCart', { count: quantity })}</span>}
+                        {quantity > 0 && <span className="pos-cart-count-badge">{quantity}</span>}
                       </div>
                       <div className="mt-2">
                         <p className="truncate font-body text-label-md text-on-surface">{item.name}</p>
@@ -942,12 +945,12 @@ export function PosScreen() {
                       </div>
                     </button>
                     {quantity > 0 && !item.outOfStock && (
-                      <div className="mt-1 flex items-center justify-between rounded-lg bg-surface-container-low p-0.5">
-                        <button type="button" aria-label={t('pos.removeItem', { item: item.name })} onClick={() => changeProductQuantity(item.id, -1)} className={`flex ${largeButtons ? 'h-14 w-14' : 'h-8 w-8'} items-center justify-center rounded-lg bg-surface-container-lowest text-primary`}>
+                      <div className={`pos-quantity-controls mt-1 flex items-center justify-between rounded-lg bg-surface-container-low p-0.5 ${largeButtons ? 'pos-quantity-controls--large' : ''}`}>
+                        <button type="button" aria-label={t('pos.removeItem', { item: item.name })} onClick={() => changeProductQuantity(item.id, -1)} className={`flex ${largeButtons ? 'h-14 w-14' : 'h-7 w-7'} items-center justify-center rounded-lg bg-surface-container-lowest text-primary`}>
                           <MaterialIcon name={quantity === 1 ? 'delete' : 'remove'} className="text-sm" />
                         </button>
                         <span className="font-display text-label-lg text-primary">{quantity}</span>
-                        <button type="button" aria-label={t('pos.addItem', { item: item.name })} onClick={() => addItem(item)} className={`flex ${largeButtons ? 'h-14 w-14' : 'h-8 w-8'} items-center justify-center rounded-lg bg-primary text-on-primary`}>
+                        <button type="button" aria-label={t('pos.addItem', { item: item.name })} onClick={() => addItem(item)} className={`flex ${largeButtons ? 'h-14 w-14' : 'h-7 w-7'} items-center justify-center rounded-lg bg-primary text-on-primary`}>
                           <MaterialIcon name="add" className="text-sm" />
                         </button>
                       </div>
@@ -1013,7 +1016,7 @@ export function PosScreen() {
               aria-label="Cancel customer order"
               className="!bg-red-600 !text-white hover:!bg-red-700 active:!bg-red-800 !h-[52px] !min-h-[52px] !w-[52px] !min-w-[52px] !p-0 rounded-full"
             >
-              <MaterialIcon name="close" className="text-3xl" />
+              <MaterialIcon name="close" className="text-3xl !text-white" />
             </Button>
           ) : (
             <Button
@@ -1026,7 +1029,7 @@ export function PosScreen() {
             </Button>
           ))}
           <Button variant="success" onClick={() => { void finishOrder(); }} disabled={!cart.length || tabCheckoutBlocked} className="min-h-[52px] rounded-2xl px-3 text-label-sm">
-            <MaterialIcon name="check_circle" className="text-lg" />
+            <MaterialIcon name="check_circle" className="text-lg text-white" />
             <span className="max-w-[38vw] truncate">{paymentMethod === 'tab' && selectedCustomer ? `Charge to ${selectedCustomer.name}` : t('common.done')}</span>
           </Button>
         </div>
@@ -1164,7 +1167,7 @@ export function PosScreen() {
             </select>
           </label>
           <label className="font-body text-label-md text-on-surface">Quantity
-            <input type="number" min="1" step="1" value={compQuantity} onChange={(event) => { setCompQuantity(event.target.value); setCompError(''); }} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" />
+            <input type="number" min="1" step="1" required value={compQuantity} onChange={(event) => { setCompQuantity(event.target.value); setCompError(''); }} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" />
           </label>
           <label className="font-body text-label-md text-on-surface">Reason
             <select value={compReason} onChange={(event) => { setCompReason(event.target.value as CompReason); setCompError(''); }} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3">
@@ -1247,6 +1250,7 @@ function CustomerCreditOption({ customer, status, selected, canOverrideCreditLim
   onSelect: () => void;
 }) {
   const percent = Math.min(100, Math.max(0, status?.percentUsed ?? 0));
+  const progressTone = status ? getCustomerCreditTone(status.state, percent).barClass : 'bg-surface-container-high';
   const overLimit = status?.limit !== undefined && status.balance > status.limit;
   return (
     <button
@@ -1272,7 +1276,7 @@ function CustomerCreditOption({ customer, status, selected, canOverrideCreditLim
         </span>
       </span>
       <span className="customer-credit-progress-track relative mt-2 block h-1.5 overflow-hidden rounded-full" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label={`${customer.name} credit used`}>
-        <span aria-hidden="true" className="absolute inset-y-0 right-0 block bg-surface-container-high" style={{ width: `${100 - percent}%` }} />
+        <span aria-hidden="true" className={`customer-credit-progress-fill ${progressTone}`} style={{ width: `${percent}%` }} />
       </span>
       {overLimit && <span className="mt-1 block font-body text-label-sm text-error-dark">Over credit limit</span>}
     </button>

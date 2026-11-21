@@ -6,7 +6,7 @@
   font-family: "Roboto Mono";
   font-style: normal;
   font-weight: 400 700;
-  font-display: block;
+  font-display: swap;
   src: url("/fonts/RobotoMono-Variable-Latin.woff2") format("woff2");
 }
 
@@ -150,6 +150,24 @@ button {
   font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
 }
 
+.loading-logo {
+  animation: loading-logo-jump 900ms ease-in-out infinite;
+}
+
+@keyframes loading-logo-jump {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+
+  45% {
+    transform: translateY(-12px) scale(1.04, 0.96);
+  }
+
+  60% {
+    transform: translateY(0) scale(0.96, 1.04);
+  }
+}
+
 .safe-top {
   padding-top: env(safe-area-inset-top, 0px);
 }
@@ -195,6 +213,114 @@ button {
   padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
 }
 
+.action-feedback-toast-position {
+  position: fixed;
+  z-index: 140;
+  top: calc(env(safe-area-inset-top, 0px) + 0.75rem);
+  right: 0;
+  left: 0;
+  display: flex;
+  justify-content: center;
+  padding: 0 0.75rem;
+  pointer-events: none;
+}
+
+.action-feedback-toast {
+  --action-toast-drag-y: 0px;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  width: min(100%, 28rem);
+  padding: 0.75rem 1rem;
+  border-radius: 1rem;
+  color: #fff;
+  font-family: Inter, sans-serif;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgb(16 27 32 / 22%);
+  pointer-events: auto;
+  touch-action: pan-y;
+  translate: 0 var(--action-toast-drag-y);
+  animation: action-feedback-toast-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.action-feedback-toast-content {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.action-feedback-toast-message-content,
+.action-feedback-toast-error-details {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.action-feedback-toast-error-details {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.action-feedback-toast-message {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.action-feedback-toast-message--expanded {
+  display: block;
+  overflow: visible;
+}
+
+.action-feedback-toast-pinned {
+  flex: 0 0 auto;
+  opacity: 0.8;
+  font-size: 0.75rem;
+}
+
+.action-feedback-toast--exit {
+  animation: action-feedback-toast-out 180ms ease-in both;
+}
+
+@keyframes action-feedback-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-1rem) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes action-feedback-toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(-0.75rem) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action-feedback-toast,
+  .action-feedback-toast--exit {
+    animation-duration: 1ms;
+  }
+}
+
 @keyframes notification-popover-backdrop-in {
   from {
     opacity: 0;
@@ -231,6 +357,24 @@ button {
   min-height: 4rem !important;
 }
 
+.pos-quantity-controls:not(.pos-quantity-controls--large) > button {
+  min-width: 28px;
+  min-height: 28px;
+}
+
+.pos-cart-count-badge {
+  display: inline-flex;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  padding: 0 0.25rem;
+  background: rgb(var(--color-secondary-container));
+  color: rgb(var(--color-on-surface));
+  font: 700 10px/14px Inter, sans-serif;
+}
+
 .scrollbar-hidden {
   scrollbar-width: none;
 }
@@ -240,15 +384,16 @@ button {
 }
 
 .customer-credit-progress-track {
-  background: linear-gradient(
-    to right,
-    rgb(var(--color-success-dark)) 0%,
-    rgb(var(--color-success-dark)) 45%,
-    rgb(var(--color-warning)) 45%,
-    rgb(var(--color-warning)) 55%,
-    rgb(var(--color-error)) 55%,
-    rgb(var(--color-error)) 100%
-  );
+  background-color: rgb(var(--color-surface-container-high));
+}
+
+.customer-credit-progress-fill {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  display: block;
+  border-radius: inherit;
+  transition: width 180ms ease-out;
 }
 
 .receipt-overlay {
@@ -619,6 +764,11 @@ button {
 
   button {
     min-width: 48px;
+  }
+
+  .pos-quantity-controls:not(.pos-quantity-controls--large) > button {
+    min-width: 36px !important;
+    min-height: 36px !important;
   }
 
   a {
@@ -2168,6 +2318,10 @@ button {
   animation: login-enter 720ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
 }
 
+.login-content--logo-playing {
+  animation: none;
+}
+
 .login-brand {
   display: flex;
   flex-direction: column;
@@ -2205,7 +2359,14 @@ button {
   border-radius: 50%;
   background: radial-gradient(circle, rgb(255 255 255 / 76%) 42%, rgb(255 255 255 / 28%) 68%, transparent 71%);
   box-shadow: 0 12px 30px rgb(71 111 164 / 14%), inset 0 1px 2px rgb(255 255 255 / 88%);
-  animation: login-logo-float 7s ease-in-out 1s infinite;
+  animation: login-logo-float 3.2s ease-in-out 1s infinite;
+}
+
+.login-logo-orbit--playing {
+  animation: none;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
 }
 
 .login-logo-frame {
@@ -2221,7 +2382,18 @@ button {
     0 9px 24px rgb(28 54 100 / 24%),
     0 0 0 3px rgb(24 208 208 / 62%),
     inset 0 0 0 1px rgb(255 255 255 / 30%);
-  animation: login-logo-glow 6s ease-in-out infinite alternate;
+  animation: login-logo-glow 2.8s ease-in-out infinite alternate;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.login-logo-frame--active {
+  will-change: transform;
+}
+
+.login-logo-frame.is-dragging {
+  cursor: grabbing;
 }
 
 .login-logo-frame img {
@@ -2229,6 +2401,12 @@ button {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.loading-screen .login-logo-frame.loading-logo {
+  animation: login-logo-glow 6s ease-in-out infinite alternate, loading-logo-jump 900ms ease-in-out infinite;
 }
 
 .login-title {
@@ -2759,6 +2937,10 @@ button {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .loading-logo {
+    animation: none;
+  }
+
   .list-skeleton__row {
     animation: none;
   }

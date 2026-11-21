@@ -10,7 +10,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { PageContainer } from './layout/PageContainer';
 import { userService } from '../services/userService';
-import { resolveStoreSettings } from '../types/domain';
+import { resolveStoreSettings, type StoreType } from '../types/domain';
 import { getLogoDefinition } from '../data/logoCatalog';
 
 export interface WorkspaceLink {
@@ -38,6 +38,7 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
   const unreadNotificationCount = useNotificationStore((state) => state.unreadCount);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('hanouti.sidebar-collapsed.v1') === 'true');
   const [storeLogoId, setStoreLogoId] = useState('');
+  const [storeType, setStoreType] = useState<StoreType>('general');
   const storeLogo = getLogoDefinition(storeLogoId);
 
   useEffect(() => {
@@ -46,7 +47,11 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
     let active = true;
     const refreshLogo = () => {
       void userService.getStore(storeId).then((store) => {
-        if (active) setStoreLogoId(resolveStoreSettings(store?.settings).storeLogoId);
+        if (active) {
+          const storeSettings = resolveStoreSettings(store?.settings);
+          setStoreLogoId(storeSettings.storeLogoId);
+          setStoreType(storeSettings.storeType);
+        }
       }).catch((error: unknown) => console.error('Unable to load the store logo.', error));
     };
     refreshLogo();
@@ -107,11 +112,13 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
 
   return (
     <div className={`workspace-layout min-h-screen bg-surface pb-6${isOwnerWorkspace ? ' owner-workspace' : ''}${isDashboardWorkspace ? ' dashboard-workspace' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
-      <TopBar title={title} storeName={storeName} storeLogoId={storeLogoId} onProfileClick={() => navigate('/settings')} />
+      <TopBar title={title} storeName={storeName} storeLogoId={storeLogoId} storeType={storeType} onProfileClick={() => navigate('/settings')} />
       <aside className="desktop-sidebar" aria-label={t('common.workspaceNavigation')}>
         <div className="desktop-sidebar__brand">
           <span className="desktop-sidebar__logo">
-            {storeLogo ? <img src={storeLogo.src} alt="" className="h-8 w-8 object-contain" /> : <MaterialIcon name="local_cafe" />}
+            {storeLogo ? <img src={storeLogo.src} alt="" className="h-8 w-8 object-contain" /> : (
+              <MaterialIcon name={storeType === 'coffee' ? 'local_cafe' : storeType === 'restaurant' ? 'restaurant' : storeType === 'bakery' ? 'bakery_dining' : storeType === 'grocery' ? 'local_mall' : 'storefront'} />
+            )}
           </span>
           {!sidebarCollapsed && <span className="desktop-sidebar__app-name">{t('common.appName')}</span>}
         </div>

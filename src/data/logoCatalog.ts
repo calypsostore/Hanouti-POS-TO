@@ -1,4 +1,5 @@
-import { t } from '../i18n/translations';
+import { t, type TranslationKey } from '../i18n/translations';
+import type { StoreType } from '../types/domain';
 
 export interface LogoDefinition {
   id: string;
@@ -110,4 +111,18 @@ export function getLogoDefinition(id: string): LogoDefinition | undefined {
 
 export function getLogoSrc(id: string): string | undefined {
   return id ? getLogoDefinition(id)?.src : undefined;
+}
+
+export function getStoreLogoGroups(storeType: StoreType): string[] {
+  const groupKeys: Record<StoreType, string[]> = {
+    coffee: ['hotCoffee', 'coldDrinks', 'teaInfusions', 'pastryBakery', 'desserts', 'misc'],
+    restaurant: ['food', 'coldDrinks', 'waterBottles', 'desserts', 'misc'],
+    bakery: ['pastryBakery', 'desserts', 'coldDrinks', 'hotCoffee', 'misc'],
+    grocery: ['coldDrinks', 'waterBottles', 'food', 'desserts', 'misc'],
+    general: [],
+  };
+
+  return storeType === 'general'
+    ? logoGroupsList
+    : groupKeys[storeType].map((key) => t(`logo.group.${key}` as TranslationKey));
 }

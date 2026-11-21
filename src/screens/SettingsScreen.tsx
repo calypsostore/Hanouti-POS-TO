@@ -27,7 +27,8 @@ import { updateDisplaySettings, useDisplaySettings, type DisplayTheme } from '..
 import { parseNonNegativeMillimes } from '../lib/millimes';
 import { t, type TranslationKey } from '../i18n/translations';
 import { adminWorkspaceLinks, ownerWorkspaceLinks } from '../app/navigation';
-import { DEFAULT_NOTIFICATION_PREFERENCES, resolveStoreSettings, type CatalogItemRecord, type CategoryRecord, type NotificationRecord, type NotificationType, type OrderRecord, type PositionRecord, type ReportRecord, type ScheduleShiftRecord, type SettlementTerms } from '../types/domain';
+import { DEFAULT_NOTIFICATION_PREFERENCES, resolveStoreSettings, type CatalogItemRecord, type CategoryRecord, type NotificationRecord, type NotificationType, type OrderRecord, type PositionRecord, type ReportRecord, type ScheduleShiftRecord, type SettlementTerms, type StoreType } from '../types/domain';
+import { getStoreLogoGroups } from '../data/logoCatalog';
 
 const notificationOptions: { type: NotificationType; label: string; description: string }[] = [
   { type: 'void_requested', label: 'Void request received', description: 'Notify the owner when staff request an order void.' },
@@ -272,10 +273,10 @@ export function SettingsScreen() {
   const [storeName, setStoreName] = useState(store?.name ?? '');
   const [ownerName, setOwnerName] = useState(user?.name ?? '');
   const [ownerPhone, setOwnerPhone] = useState(user?.phone ?? '');
-  const [dailySalesTarget, setDailySalesTarget] = useState('0');
+  const [dailySalesTarget, setDailySalesTarget] = useState('');
   const [adminPin, setAdminPin] = useState('');
-  const [staffAutoLockMinutes, setStaffAutoLockMinutes] = useState('5');
-  const [cashOutAlertThreshold, setCashOutAlertThreshold] = useState('50000');
+  const [staffAutoLockMinutes, setStaffAutoLockMinutes] = useState('');
+  const [cashOutAlertThreshold, setCashOutAlertThreshold] = useState('');
   const [storeAddress, setStoreAddress] = useState('');
   const [storePhone, setStorePhone] = useState('');
   const [storeTaxId, setStoreTaxId] = useState('');
@@ -283,6 +284,7 @@ export function SettingsScreen() {
   const [ticketFooterText, setTicketFooterText] = useState<string[]>(['Thank you']);
   const [reportFooterText, setReportFooterText] = useState<string[]>([]);
   const [storeLogoId, setStoreLogoId] = useState('');
+  const [storeType, setStoreType] = useState<StoreType>('general');
   const [logoPickerOpen, setLogoPickerOpen] = useState(false);
   const [showLogo, setShowLogo] = useState(true);
   const [showAddress, setShowAddress] = useState(true);
@@ -343,9 +345,9 @@ export function SettingsScreen() {
       ]).then(([nextStore, nextPositions, nextCategories, nextItems]) => {
         setStore(nextStore);
         setStoreName(nextStore?.name ?? '');
-        setDailySalesTarget(String(nextStore?.dailySalesTargetMillimes ?? 0));
-        setStaffAutoLockMinutes(String(nextStore?.staffAutoLockMinutes ?? 5));
-        setCashOutAlertThreshold(String(nextStore?.cashOutAlertThresholdMillimes ?? 50_000));
+        setDailySalesTarget('');
+        setStaffAutoLockMinutes('');
+        setCashOutAlertThreshold('');
         setStoreAddress(nextStore?.address ?? '');
         setStorePhone(nextStore?.phone ?? '');
         setStoreTaxId(nextStore?.taxId ?? '');
@@ -356,6 +358,7 @@ export function SettingsScreen() {
         setTicketFooterText(storeSettings.ticketFooterText);
         setReportFooterText(storeSettings.reportFooterText);
         setStoreLogoId(storeSettings.storeLogoId);
+        setStoreType(storeSettings.storeType);
         setShowLogo(storeSettings.showLogo);
         setShowAddress(storeSettings.showAddress);
         setShowPhone(storeSettings.showPhone);
@@ -366,7 +369,7 @@ export function SettingsScreen() {
         setCategories(nextCategories);
         setCatalogItems(nextItems);
         setStaffRuleDrafts(Object.fromEntries(nextPositions.map((position) => [position.id, {
-          maxQuantity: String(position.maxStaffDrinkQuantityPerShift ?? 0),
+          maxQuantity: '',
           categoryIds: [...(position.selfServiceCategoryIds ?? [])],
           itemIds: [...(position.selfServiceItemIds ?? [])],
           compItemsEnabled: position.permissionIds.includes('comp_items'),
@@ -447,6 +450,7 @@ export function SettingsScreen() {
         ticketFooterText: ticketFooterText.map((line) => line.trim().slice(0, 60)).slice(0, 2),
         reportFooterText: reportFooterText.map((line) => line.trim().slice(0, 60)).slice(0, 2),
         storeLogoId,
+        storeType,
         showLogo,
         showAddress,
         showPhone,
@@ -943,6 +947,15 @@ export function SettingsScreen() {
             <h2 id="store-settings-heading" className="font-display text-headline-md text-on-surface">Store</h2>
             <form id="store-settings-form" onSubmit={(event) => { void saveStoreInfo(event); }} className="flex flex-col gap-3">
               <label className="font-body text-label-md">{t('settings.storeName')}<input required value={storeName} onChange={(event) => setStoreName(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
+              <label className="font-body text-label-md">Store type
+                <select value={storeType} onChange={(event) => setStoreType(event.target.value as StoreType)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3">
+                  <option value="general">General store</option>
+                  <option value="coffee">Coffee shop / Café</option>
+                  <option value="restaurant">Restaurant / Food</option>
+                  <option value="bakery">Bakery / Patisserie</option>
+                  <option value="grocery">Grocery / Mini-market</option>
+                </select>
+              </label>
               <div className="flex flex-col gap-2">
                 <span className="font-body text-label-md">Store logo</span>
                 <button
@@ -1229,6 +1242,7 @@ export function SettingsScreen() {
         <LogoPicker
           open={logoPickerOpen}
           value={storeLogoId}
+          allowedGroups={getStoreLogoGroups(storeType)}
           onChange={setStoreLogoId}
           onClose={() => setLogoPickerOpen(false)}
         />

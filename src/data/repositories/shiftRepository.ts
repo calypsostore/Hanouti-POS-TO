@@ -31,6 +31,7 @@ interface CashMovementRow {
 }
 
 interface AdjustmentRow {
+  shift_id?: string;
   order_id: string;
   order_number: number;
   amount_millimes: number;
@@ -101,8 +102,21 @@ export async function listShifts(storeId: string): Promise<ShiftRecord[]> {
     .order('opened_at', { ascending: false });
   if (error) workflowError(error, 'Could not load shifts');
   const rows = (data ?? []) as ShiftRow[];
-  const adjustmentRows = await Promise.all(rows.map((row) => adjustmentsForShift(row.id)));
-  return rows.map((row, index) => mapShift(row, adjustmentRows[index]));
+  if (rows.length === 0) return [];
+  const { data: adjustments, error: adjustmentError } = await getSupabaseClient()
+    .from('shift_void_adjustments')
+    .select('shift_id, order_id, order_number, amount_millimes, kind, created_at')
+    .in('shift_id', rows.map((row) => row.id))
+    .order('created_at');
+  if (adjustmentError) workflowError(adjustmentError, 'Could not load shift void adjustments');
+  const adjustmentsByShift = new Map<string, AdjustmentRow[]>();
+  for (const adjustment of (adjustments ?? []) as AdjustmentRow[]) {
+    if (!adjustment.shift_id) continue;
+    const records = adjustmentsByShift.get(adjustment.shift_id) ?? [];
+    records.push(adjustment);
+    adjustmentsByShift.set(adjustment.shift_id, records);
+  }
+  return rows.map((row) => mapShift(row, adjustmentsByShift.get(row.id)));
 }
 
 export async function getShift(shiftId: string): Promise<ShiftRecord | undefined> {

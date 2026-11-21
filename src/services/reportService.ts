@@ -9,6 +9,8 @@ import type {
   ReportRecord,
   ReportShiftLine,
   ReportVoidAdjustmentLine,
+  OrderSummaryRecord,
+  ShiftRecord,
   TabRecord,
 } from '../types/domain';
 import { resolveStoreSettings } from '../types/domain';
@@ -25,7 +27,12 @@ import { expenseService } from './expenseService';
 import { notificationService } from './notificationService';
 import { isSupabaseDriver } from '../data/driver';
 import { getSupabaseClient } from '../data/supabaseClient';
-import { listReports as listRemoteReports, saveReport as saveRemoteReport } from '../data/repositories/reportRepository';
+import {
+  getDashboardSummary as getRemoteDashboardSummary,
+  getShiftSummary as getRemoteShiftSummary,
+  listReports as listRemoteReports,
+  saveReport as saveRemoteReport,
+} from '../data/repositories/reportRepository';
 
 const getReports = () => readData('reports', seedReports);
 
@@ -105,7 +112,7 @@ function expensesIncludedInZReports(storeId: string, reports: ReportRecord[]): S
     .flatMap((report) => report.expenseDetails?.map((expense) => expense.expenseId) ?? []));
 }
 
-async function summarize(
+async function summarizeLocal(
   storeId: string,
   from: number,
   to: number,
@@ -197,7 +204,9 @@ async function summarize(
     const cashOutMillimes = shiftMovements
       .filter((movement) => movement.kind === 'out')
       .reduce((sum, movement) => sum + movement.amountMillimes, 0);
-    const expected = expectedCash + voidAdjustmentMillimes;
+    const expected = !inProgress && shift.expectedCashMillimes !== undefined
+      ? expectedCash + voidAdjustmentMillimes
+      : expectedCash;
     const counted = shift.countedCashMillimes;
     const staffName = staff.find((user) => user.id === shift.staffId)?.name ?? 'Staff';
     const shiftOrders = orders.filter((order) => order.shiftId === shift.id);
@@ -375,6 +384,30 @@ async function summarize(
       note: movement.note,
       createdAt: movement.createdAt,
     }));
+  const salesByDayMap = new Map<string, number>();
+  const salesByHour = Array.from({ length: 24 }, (_, hour) => ({ hour, orders: 0 }));
+  for (const order of orders) {
+    const date = new Date(order.createdAt);
+    const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    salesByDayMap.set(dateKey, (salesByDayMap.get(dateKey) ?? 0) + order.totalMillimes);
+    salesByHour[date.getHours()].orders += 1;
+  }
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const lastWeekStart = new Date(todayStart);
+  lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+  const lastWeekEnd = new Date(lastWeekStart);
+  lastWeekEnd.setDate(lastWeekEnd.getDate() + 1);
+  const salesBetween = (start: number, end: number) => allOrders
+    .filter((order) => {
+      const timestamp = new Date(order.createdAt).getTime();
+      return order.status === 'done' && timestamp >= start && timestamp < end;
+    })
+    .reduce((sum, order) => sum + order.totalMillimes, 0);
+  const recentOrders: OrderSummaryRecord[] = [...periodOrders]
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .slice(0, 6)
+    .map(({ items: _items, ...order }) => order);
   const reportCashMovements: ReportCashMovementLine[] = periodCashMovements.map((movement) => ({
     shiftId: movement.shiftId,
     staffName: staffById.get(movement.staffId)?.name ?? 'Staff',
@@ -492,7 +525,82 @@ async function summarize(
     cardTabPaymentsMillimes,
     otherTabPaymentsMillimes,
     tabsOutstandingMillimes,
+    salesByDay: [...salesByDayMap].sort(([left], [right]) => left.localeCompare(right))
+      .map(([date, salesMillimes]) => ({ date, salesMillimes })),
+    salesByHour,
+    salesTodayMillimes: salesBetween(todayStart.getTime(), Date.now()),
+    salesLastWeekMillimes: salesBetween(lastWeekStart.getTime(), lastWeekEnd.getTime()),
+    recentOrders,
   };
+}
+
+type ReportSummary = Awaited<ReturnType<typeof summarizeLocal>>;
+
+async function summarizeRemote(
+  storeId: string,
+  from: number,
+  to: number,
+  useExpenseCreationPeriod: boolean,
+): Promise<ReportSummary> {
+  const [summary, shifts] = await Promise.all([
+    getRemoteDashboardSummary(
+      storeId,
+      new Date(from).toISOString(),
+      new Date(to).toISOString(),
+      useExpenseCreationPeriod,
+    ),
+    shiftService.listShifts(storeId),
+  ]);
+  const requiredNumbers = [
+    'salesMillimes', 'salesCollectedMillimes', 'expensesMillimes', 'netProfitMillimes',
+    'receivableMillimes', 'orderCount', 'cashDifferenceMillimes', 'totalExpectedCashMillimes',
+    'expectedCashExFloatMillimes', 'totalCountedMillimes', 'totalDifferenceMillimes',
+    'cashSalesMillimes', 'tabSalesMillimes', 'tabPaymentsReceivedMillimes', 'cashFloatMillimes',
+    'cashInMillimes', 'cashOutMillimes', 'cashRefundsMillimes', 'tabsIssuedMillimes',
+    'tabsSettledMillimes', 'nonCashTabPaymentsMillimes', 'cardTabPaymentsMillimes',
+    'otherTabPaymentsMillimes', 'tabsOutstandingMillimes', 'salesTodayMillimes', 'salesLastWeekMillimes',
+  ];
+  for (const key of requiredNumbers) {
+    if (typeof summary[key] !== 'number' || !Number.isFinite(summary[key])) {
+      throw new Error(`Dashboard summary is missing a valid ${key}.`);
+    }
+  }
+  const requiredArrays = [
+    'shiftLines', 'itemsSold', 'salesByCategory', 'salesByDay', 'salesByHour', 'recentOrders',
+    'employeeBreakdown', 'cashMovements', 'cashOuts', 'voidAdjustments', 'expenseDetails', 'customerTabs',
+  ];
+  for (const key of requiredArrays) {
+    if (!Array.isArray(summary[key])) throw new Error(`Dashboard summary is missing a valid ${key}.`);
+  }
+  for (const [key, arrayKey] of [
+    ['voids', 'orders'],
+    ['pendingVoids', 'orders'],
+    ['comps', 'records'],
+  ]) {
+    const collection = summary[key];
+    if (typeof collection !== 'object' || collection === null || !Array.isArray(collection[arrayKey])) {
+      throw new Error(`Dashboard summary is missing a valid ${key}.`);
+    }
+  }
+  const shiftLines = summary.shiftLines;
+  return {
+    ...summary,
+    shifts: shifts.filter((shift) => {
+      const opened = new Date(shift.openedAt).getTime();
+      return opened >= from && opened <= to;
+    }),
+  } as unknown as ReportSummary;
+}
+
+async function summarize(
+  storeId: string,
+  from: number,
+  to: number,
+  excludedExpenseIds = new Set<string>(),
+  useExpenseCreationPeriod = false,
+): Promise<ReportSummary> {
+  if (isSupabaseDriver()) return summarizeRemote(storeId, from, to, useExpenseCreationPeriod);
+  return summarizeLocal(storeId, from, to, excludedExpenseIds, useExpenseCreationPeriod);
 }
 
 async function createReport(
@@ -904,6 +1012,102 @@ export const reportService = {
     const now = new Date();
     const periodFrom = new Date(shift.openedAt).getTime();
     const periodTo = now.getTime();
+    if (isSupabaseDriver()) {
+      const [summary, remoteStore] = await Promise.all([
+        getRemoteShiftSummary(shift.id),
+        userService.getStore(storeId),
+      ]);
+      if (!remoteStore) throw new Error('The store could not be found.');
+      const requiredNumbers = [
+        'orderCount', 'salesMillimes', 'expectedCashMillimes', 'cashInMillimes', 'cashOutMillimes',
+        'tabPaymentsMillimes', 'cashSalesMillimes', 'cardSalesMillimes', 'otherSalesMillimes', 'tabSalesMillimes',
+      ];
+      for (const key of requiredNumbers) {
+        if (typeof summary[key] !== 'number' || !Number.isFinite(summary[key])) {
+          throw new Error(`Shift summary is missing a valid ${key}.`);
+        }
+      }
+      const split = summary.paymentSplit;
+      if (typeof split !== 'object' || split === null || Array.isArray(split)
+        || !['cash', 'card', 'other', 'tab'].every((key) =>
+          typeof split[key] === 'number' && Number.isFinite(split[key]))) {
+        throw new Error('Shift summary is missing a valid paymentSplit.');
+      }
+      for (const key of ['cashMovements', 'cashOuts']) {
+        if (!Array.isArray(summary[key])) throw new Error(`Shift summary is missing a valid ${key}.`);
+      }
+      for (const [key, arrayKey] of [
+        ['voids', 'orders'],
+        ['pendingVoids', 'orders'],
+        ['comps', 'records'],
+      ]) {
+        const collection = summary[key];
+        if (typeof collection !== 'object' || collection === null || !Array.isArray(collection[arrayKey])) {
+          throw new Error(`Shift summary is missing a valid ${key}.`);
+        }
+      }
+      const paymentSplit = split as Record<PaymentMethod, number>;
+      const expectedCashMillimes = summary.expectedCashMillimes;
+      const cashInMillimes = summary.cashInMillimes;
+      const cashOutMillimes = summary.cashOutMillimes;
+      const tabPaymentsMillimes = summary.tabPaymentsMillimes;
+      const staffName = typeof summary.staffName === 'string' ? summary.staffName : generatedBy;
+      const timeZone = remoteStore.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const dateParts = datePartsInTimezone(now, timeZone);
+      const shiftLine: ReportShiftLine = {
+        shiftId: shift.id,
+        staffName,
+        orderCount: Number(summary.orderCount),
+        status: 'in_progress',
+        openedAt: shift.openedAt,
+        startingCashMillimes: shift.startingCashMillimes,
+        cashSalesMillimes: Number(summary.cashSalesMillimes),
+        cardSalesMillimes: Number(summary.cardSalesMillimes),
+        otherSalesMillimes: Number(summary.otherSalesMillimes),
+        tabSalesMillimes: Number(summary.tabSalesMillimes),
+        tabPaymentsMillimes,
+        cashInMillimes,
+        cashOutMillimes,
+        expectedCashMillimes,
+        cashFlowExFloatMillimes: expectedCashMillimes - shift.startingCashMillimes,
+        forceClosedByOwner: false,
+      };
+      return {
+        id: `x-own-${crypto.randomUUID()}`,
+        storeId,
+        type: 'X',
+        businessDate: `${dateParts.year}-${dateParts.month}-${dateParts.day}`,
+        createdAt: now.toISOString(),
+        periodFrom: shift.openedAt,
+        periodTo: now.toISOString(),
+        generatedBy,
+        reportNumber: `X-SHIFT-${shift.id.slice(-6).toUpperCase()}`,
+        salesMillimes: Number(summary.salesMillimes),
+        salesCollectedMillimes: paymentSplit.cash + paymentSplit.card + paymentSplit.other + tabPaymentsMillimes,
+        expensesMillimes: 0,
+        netProfitMillimes: paymentSplit.cash + paymentSplit.card + paymentSplit.other + tabPaymentsMillimes,
+        receivableMillimes: 0,
+        orderCount: Number(summary.orderCount),
+        cashDifferenceMillimes: 0,
+        cashSalesMillimes: Number(summary.cashSalesMillimes),
+        tabSalesMillimes: Number(summary.tabSalesMillimes),
+        tabPaymentsReceivedMillimes: tabPaymentsMillimes,
+        cashFloatMillimes: shift.startingCashMillimes,
+        expectedCashExFloatMillimes: expectedCashMillimes - shift.startingCashMillimes,
+        totalExpectedCashMillimes: expectedCashMillimes,
+        cashInMillimes,
+        cashOutMillimes,
+        paymentSplit,
+        shifts: [shiftLine],
+        cashMovements: summary.cashMovements as ReportRecord['cashMovements'],
+        cashOuts: summary.cashOuts as ReportRecord['cashOuts'],
+        voids: summary.voids as ReportRecord['voids'],
+        pendingVoids: summary.pendingVoids as ReportRecord['pendingVoids'],
+        comps: summary.comps as ReportRecord['comps'],
+        firstTicketNumber: typeof summary.firstTicketNumber === 'number' ? summary.firstTicketNumber : undefined,
+        lastTicketNumber: typeof summary.lastTicketNumber === 'number' ? summary.lastTicketNumber : undefined,
+      };
+    }
     const [allOrders, movements, users, allComps, store, breakdown] = await Promise.all([
       orderService.listAll(storeId),
       shiftService.listCashMovements(storeId),

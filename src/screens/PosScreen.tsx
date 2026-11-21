@@ -28,7 +28,7 @@ import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository
 import { resolveStoreSettings } from '../types/domain';
 import { useAuthStore } from '../stores/authStore';
 import { useCartStore, type CartLine, type CartSnapshot } from '../stores/cartStore';
-import type { CatalogItemRecord, CatalogModifierRecord, CategoryRecord, CompReason, CustomerRecord, OrderLineRecord, OrderRecord, PaymentMethod, ShiftRecord, StoreRecord } from '../types/domain';
+import type { CatalogItemRecord, CatalogModifierRecord, CategoryRecord, CompReason, CustomerRecord, OrderLineRecord, OrderRecord, OrderSummaryRecord, PaymentMethod, ShiftRecord, StoreRecord } from '../types/domain';
 import { customerService } from '../services/customerService';
 import type { CustomerCreditStatus } from '../services/customerService';
 import {
@@ -110,7 +110,7 @@ export function PosScreen() {
     hasActivity: false,
     openShiftCount: 0,
   });
-  const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [orders, setOrders] = useState<(OrderRecord | OrderSummaryRecord)[]>([]);
   const [needsAttentionOrders, setNeedsAttentionOrders] = useState<Array<{ order: OrderRecord; message: string }>>([]);
   const [selectedItem, setSelectedItem] = useState<ProductView | null>(null);
   const [markedOutOfStockItem, setMarkedOutOfStockItem] = useState<ProductView | null>(null);
@@ -182,7 +182,7 @@ export function PosScreen() {
           catalogService.listCategories(storeId),
           user ? shiftService.getOpenShiftForUser(storeId, user.id) : Promise.resolve(undefined),
           storeId ? userService.getStore(storeId) : Promise.resolve(undefined),
-          orderService.listAll(storeId),
+          orderService.listTodaySummaries(storeId),
           user ? userService.hasPermission(user.id, '86_items') : Promise.resolve(false),
           user?.role === 'owner' ? Promise.resolve(true) : user ? userService.hasPermission(user.id, 'comp_items') : Promise.resolve(false),
           user && user.role === 'staff' ? userService.hasPermission(user.id, 'use_tabs') : Promise.resolve(false),
@@ -190,10 +190,7 @@ export function PosScreen() {
           storeId ? customerService.listCustomers(storeId) : Promise.resolve([]),
           reportService.getDayStatus(storeId),
         ]);
-        const creditStatusEntries = await Promise.all(customerList.map(async (customer) =>
-          [customer.id, await customerService.getCreditStatus(customer.id)] as const,
-        ));
-        const creditStatuses = Object.fromEntries(creditStatusEntries);
+        const creditStatuses = await customerService.getCreditStatuses(storeId, customerList);
         const queuedOrders = await offlineOrderQueue.pendingOrders(storeId);
         const attentionOrders = await offlineOrderQueue.needsAttention(storeId);
         setCatalogRecords(items);
@@ -373,6 +370,7 @@ export function PosScreen() {
     const quantities = new Map<string, number>();
     for (const order of orders) {
       if (order.status !== 'done') continue;
+      if (!('items' in order)) continue;
       for (const line of order.items) quantities.set(line.itemId, (quantities.get(line.itemId) ?? 0) + line.quantity);
     }
     const soldItems = [...allProducts]
@@ -673,13 +671,11 @@ export function PosScreen() {
     } else {
       try {
         setCatalogRecords(await catalogService.listItems(storeId));
-        setOrders(await orderService.listAll(storeId));
+        setOrders(await orderService.listTodaySummaries(storeId));
         const customerList = await customerService.listCustomers(storeId);
-        const creditStatusEntries = await Promise.all(customerList.map(async (customer) =>
-          [customer.id, await customerService.getCreditStatus(customer.id)] as const,
-        ));
+        const creditStatuses = await customerService.getCreditStatuses(storeId, customerList);
         setCustomers(customerList);
-        setCustomerCreditStatuses(Object.fromEntries(creditStatusEntries));
+        setCustomerCreditStatuses(creditStatuses);
       } catch (refreshError) {
         orderNotice ||= `Order created, but the POS could not refresh: ${refreshError instanceof Error ? refreshError.message : 'Please reload the page.'}`;
       }

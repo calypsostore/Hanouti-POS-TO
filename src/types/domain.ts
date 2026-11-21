@@ -66,6 +66,7 @@ export interface UserRecord {
 export type UserSummary = Omit<UserRecord, 'password' | 'passwordHash' | 'pinHash'>;
 
 export type SettlementTerms = 'weekly' | 'monthly' | 'anytime';
+export type StoreType = 'general' | 'coffee' | 'restaurant' | 'bakery' | 'grocery';
 export type NotificationType =
   | 'void_requested'
   | 'void_approved'
@@ -90,6 +91,7 @@ export interface StoreSettings {
   notificationPreferences: Partial<Record<NotificationType, boolean>>;
   quickPickMode: QuickPickMode;
   quickPickItemIds: string[];
+  storeType: StoreType;
   ticketHeaderText: string[];
   ticketFooterText: string[];
   reportFooterText: string[];
@@ -143,6 +145,9 @@ export function resolveStoreSettings(settings?: Partial<StoreSettings>): StoreSe
     quickPickItemIds: Array.isArray(settings?.quickPickItemIds)
       ? [...new Set(settings.quickPickItemIds.filter((id) => typeof id === 'string' && id.trim()))]
       : [],
+    storeType: ['general', 'coffee', 'restaurant', 'bakery', 'grocery'].includes(settings?.storeType ?? '')
+      ? settings!.storeType!
+      : 'general',
     ticketHeaderText: settings?.ticketHeaderText?.slice(0, 2).map((line) => line.slice(0, 60)) ?? [],
     ticketFooterText: settings?.ticketFooterText?.slice(0, 2).map((line) => line.slice(0, 60)) ?? ['Thank you'],
     reportFooterText: settings?.reportFooterText?.slice(0, 2).map((line) => line.slice(0, 60)) ?? [],
@@ -275,6 +280,8 @@ export interface OrderRecord {
   voidedByUserId?: string;
   voidReason?: string;
 }
+
+export type OrderSummaryRecord = Omit<OrderRecord, 'items'>;
 
 export interface ShiftRecord {
   id: string;

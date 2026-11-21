@@ -1,4 +1,4 @@
-import type { OrderLineRecord, OrderRecord, PaymentMethod, ShiftRecord } from '../../types/domain';
+import type { OrderLineRecord, OrderRecord, OrderSummaryRecord, PaymentMethod, ShiftRecord } from '../../types/domain';
 import { getSupabaseClient } from '../supabaseClient';
 
 interface OrderRow {
@@ -80,27 +80,67 @@ function mapJoinedOrder(row: JoinedOrderRow): OrderRecord {
   return mapOrder(row, row.items ?? []);
 }
 
+function mapOrderSummary(row: OrderRow): OrderSummaryRecord {
+  const { items: _items, ...summary } = mapOrder(row);
+  return summary;
+}
+
+export interface OrderListOptions {
+  staffId?: string;
+  businessDate?: string;
+  createdAfter?: string;
+  createdBefore?: string;
+  shiftId?: string;
+  status?: OrderRecord['status'];
+  limit?: number;
+  range?: { from: number; to: number };
+}
+
 function reportWorkflowError(error: { message: string; code?: string }, context: string): never {
   throw new Error(`${context}: ${error.message}`, { cause: error });
 }
 
-export async function listOrders(
-  storeId: string,
-  staffId?: string,
-  businessDate?: string,
-  createdAfter?: string,
-): Promise<OrderRecord[]> {
+function orderQuery(storeId: string, options: OrderListOptions, includeItems: boolean) {
+  const limit = options.limit ?? 200;
+  if (!Number.isSafeInteger(limit) || limit < 1) throw new Error('Order page size must be a positive whole number.');
+  const from = options.range?.from ?? 0;
+  const requestedTo = options.range?.to ?? from + limit - 1;
+  if (!Number.isSafeInteger(from) || from < 0 || !Number.isSafeInteger(requestedTo) || requestedTo < from) {
+    throw new Error('Order page range is invalid.');
+  }
+  const to = Math.min(requestedTo, from + limit - 1);
   let query = getSupabaseClient()
     .from('orders')
-    .select('*, items:order_lines(*)')
+    .select(includeItems ? '*, items:order_lines(*)' : [
+      'id', 'number', 'store_id', 'business_date', 'staff_id', 'shift_id', 'location', 'status',
+      'payment_method', 'customer_id', 'note', 'total_millimes', 'created_at',
+      'void_requested_at', 'voided_at', 'voided_by', 'voided_by_user_id', 'void_reason',
+    ].join(', '))
     .eq('store_id', storeId)
-    .order('created_at', { ascending: false });
-  if (staffId) query = query.eq('staff_id', staffId);
-  if (businessDate) query = query.eq('business_date', businessDate);
-  if (createdAfter) query = query.gte('created_at', createdAfter);
-  const { data, error } = await query;
+    .order('created_at', { ascending: false })
+    .range(from, to);
+  if (options.staffId) query = query.eq('staff_id', options.staffId);
+  if (options.businessDate) query = query.eq('business_date', options.businessDate);
+  if (options.createdAfter) query = query.gte('created_at', options.createdAfter);
+  if (options.createdBefore) query = query.lte('created_at', options.createdBefore);
+  if (options.shiftId) query = query.eq('shift_id', options.shiftId);
+  if (options.status) query = query.eq('status', options.status);
+  return query;
+}
+
+export async function listOrders(storeId: string, options: OrderListOptions = {}): Promise<OrderRecord[]> {
+  const { data, error } = await orderQuery(storeId, options, true);
   if (error) reportWorkflowError(error, 'Could not load orders');
   return (data ?? []).map((row) => mapJoinedOrder(row as JoinedOrderRow));
+}
+
+export async function listOrderSummaries(
+  storeId: string,
+  options: OrderListOptions = {},
+): Promise<OrderSummaryRecord[]> {
+  const { data, error } = await orderQuery(storeId, options, false);
+  if (error) reportWorkflowError(error, 'Could not load order summaries');
+  return (data ?? []).map((row) => mapOrderSummary(row as OrderRow));
 }
 
 export async function getOrder(orderId: string): Promise<OrderRecord | undefined> {

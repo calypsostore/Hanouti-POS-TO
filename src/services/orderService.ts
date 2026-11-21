@@ -2,6 +2,7 @@ import type {
   CatalogItemRecord,
   OrderLineRecord,
   OrderRecord,
+  OrderSummaryRecord,
   PaymentMethod,
   ReportRecord,
   TabRecord,
@@ -25,15 +26,22 @@ import {
   getNextOrderNumber as getRemoteNextOrderNumber,
   getOrder as getRemoteOrder,
   getShiftBreakdown as getRemoteShiftBreakdown,
+  listOrderSummaries as listRemoteOrderSummaries,
   listOrders as listRemoteOrders,
   requestVoid as requestRemoteVoid,
   resolveVoid as resolveRemoteVoid,
   voidWithPin as voidRemoteOrder,
 } from '../data/repositories/orderRepository';
+import type { OrderListOptions } from '../data/repositories/orderRepository';
 import { listReports as listRemoteReports } from '../data/repositories/reportRepository';
 
 const getOrders = () => readData('orders', seedOrders);
 const saveOrders = (orders: OrderRecord[]) => writeData('orders', orders);
+
+function toOrderSummary(order: OrderRecord): OrderSummaryRecord {
+  const { items: _items, ...summary } = order;
+  return summary;
+}
 
 function assertOrderNotArchivedInZ(order: OrderRecord): void {
   const reports = readData<ReportRecord[]>('reports', seedReports);
@@ -283,7 +291,9 @@ export const orderService = {
       getCurrentBusinessDate(storeId),
       getCurrentReportPeriodStart(storeId),
     ]);
-    if (isSupabaseDriver()) return listRemoteOrders(storeId, staffId, currentBusinessDate, periodStart);
+    if (isSupabaseDriver()) {
+      return listRemoteOrders(storeId, { staffId, businessDate: currentBusinessDate, createdAfter: periodStart });
+    }
     const shifts = await shiftService.listShifts(storeId);
     const shiftById = new Map(shifts.map((shift) => [shift.id, shift]));
     const store = await userService.getStore(storeId);
@@ -300,9 +310,69 @@ export const orderService = {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },
 
+  async listTodaySummaries(storeId: string, staffId?: string): Promise<OrderSummaryRecord[]> {
+    const businessDate = await getCurrentBusinessDate(storeId);
+    if (isSupabaseDriver()) return listRemoteOrderSummaries(storeId, { staffId, businessDate });
+    return (await this.listByBusinessDate(storeId, businessDate, staffId)).map(toOrderSummary);
+  },
+
+  async listByBusinessDate(storeId: string, businessDate: string, staffId?: string): Promise<OrderRecord[]> {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) {
+      throw new Error('Choose a valid business date.');
+    }
+    if (isSupabaseDriver()) {
+      return listRemoteOrders(storeId, { staffId, businessDate });
+    }
+    const [shifts, store] = await Promise.all([
+      shiftService.listShifts(storeId),
+      userService.getStore(storeId),
+    ]);
+    if (!store) throw new Error('The store could not be found.');
+    const shiftById = new Map(shifts.map((shift) => [shift.id, shift]));
+    const timeZone = store.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return getOrders()
+      .filter((order) => {
+        if (order.storeId !== storeId || (staffId && order.staffId !== staffId)) return false;
+        if (order.businessDate) return order.businessDate === businessDate;
+        return dateKeyInTimezone(
+          new Date(shiftById.get(order.shiftId)?.openedAt ?? order.createdAt),
+          timeZone,
+        ) === businessDate;
+      })
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  },
+
   async listAll(storeId: string): Promise<OrderRecord[]> {
-    if (isSupabaseDriver()) return listRemoteOrders(storeId);
+    if (isSupabaseDriver()) return listRemoteOrders(storeId, { limit: 200 });
     return getOrders().filter((order) => order.storeId === storeId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  },
+
+  async listOrderSummaries(storeId: string, options: OrderListOptions = {}): Promise<OrderSummaryRecord[]> {
+    if (isSupabaseDriver()) return listRemoteOrderSummaries(storeId, options);
+    const limit = options.limit ?? 200;
+    if (!Number.isSafeInteger(limit) || limit < 1) throw new Error('Order page size must be a positive whole number.');
+    const from = options.range?.from ?? 0;
+    const to = options.range?.to ?? from + limit - 1;
+    if (!Number.isSafeInteger(from) || from < 0 || !Number.isSafeInteger(to) || to < from) {
+      throw new Error('Order page range is invalid.');
+    }
+    return getOrders()
+      .filter((order) =>
+        order.storeId === storeId
+        && (!options.staffId || order.staffId === options.staffId)
+        && (!options.businessDate || order.businessDate === options.businessDate)
+        && (!options.createdAfter || order.createdAt >= options.createdAfter)
+        && (!options.createdBefore || order.createdAt <= options.createdBefore)
+        && (!options.shiftId || order.shiftId === options.shiftId)
+        && (!options.status || order.status === options.status))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .slice(from, Math.min(to + 1, from + limit))
+      .map(toOrderSummary);
+  },
+
+  async getOrder(orderId: string): Promise<OrderRecord | undefined> {
+    if (isSupabaseDriver()) return getRemoteOrder(orderId);
+    return getOrders().find((order) => order.id === orderId);
   },
 
   async createOrder(input: { storeId: string; staffId: string; items: OrderLineRecord[]; paymentMethod?: PaymentMethod; customerId?: string; location?: string; adminPin?: string; note?: string; idempotencyKey?: string }): Promise<OrderRecord> {

@@ -10,6 +10,7 @@ import {
   createCustomer as createRemoteCustomer,
   getBalance as getRemoteBalance,
   getCustomer as getRemoteCustomer,
+  listCreditBalances as listRemoteCreditBalances,
   listCustomerOrders,
   listCustomers as listRemoteCustomers,
   listTransactions as listRemoteTransactions,
@@ -106,6 +107,21 @@ function validateCreditLimit(creditLimitMillimes: number | undefined): void {
   if (creditLimitMillimes !== undefined && (!Number.isInteger(creditLimitMillimes) || creditLimitMillimes < 0)) {
     throw new Error('Credit limit must be a non-negative amount in millimes.');
   }
+}
+
+function creditStatusFromBalance(balance: number, creditLimitMillimes: number | undefined): CustomerCreditStatus {
+  validateCreditLimit(creditLimitMillimes);
+  if (creditLimitMillimes === undefined) return { balance, state: 'no_limit' };
+  const limit = creditLimitMillimes;
+  const percentUsed = limit === 0 ? (balance > 0 ? 100 : 0) : Math.max(0, balance / limit * 100);
+  const state = balance > limit ? 'over' : limit > 0 && percentUsed >= 80 ? 'near' : 'ok';
+  return {
+    balance,
+    limit,
+    remaining: Math.max(0, limit - Math.max(0, balance)),
+    percentUsed,
+    state,
+  };
 }
 
 function validateSettlementTerms(value: string): asserts value is CustomerRecord['settlementTerms'] {
@@ -407,6 +423,41 @@ export const customerService = {
     return ledgerBalance(customerId);
   },
 
+  async getCreditStatuses(
+    storeId: string,
+    customers: CustomerRecord[],
+  ): Promise<Record<string, CustomerCreditStatus>> {
+    if (customers.some((customer) => customer.storeId !== storeId)) {
+      throw new Error('Customer credit status request contains a customer from another store.');
+    }
+    if (!isSupabaseDriver()) {
+      return Object.fromEntries(await Promise.all(customers.map(async (customer) => [
+        customer.id,
+        creditStatusFromBalance(ledgerBalance(customer.id), customer.creditLimitMillimes),
+      ] as const)));
+    }
+    const useOfflineSnapshot = async () => Object.fromEntries(await Promise.all(customers.map(async (customer) => [
+      customer.id,
+      await getCachedCreditStatus(customer.id, 0),
+    ] as const)));
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return useOfflineSnapshot();
+    try {
+      const balances = await listRemoteCreditBalances(storeId);
+      const balancesByCustomer = new Map(balances.map((entry) => [entry.customerId, entry]));
+      return Object.fromEntries(customers.map((customer) => {
+        const balance = balancesByCustomer.get(customer.id);
+        if (!balance) throw new Error(`Credit status is missing for customer "${customer.id}".`);
+        return [
+          customer.id,
+          creditStatusFromBalance(balance.balanceMillimes, balance.creditLimitMillimes ?? undefined),
+        ];
+      }));
+    } catch (error) {
+      if (offlineOrderQueue.isNetworkFailure(error)) return useOfflineSnapshot();
+      throw error;
+    }
+  },
+
   async getCreditStatus(customerId: string, additionalMillimes = 0): Promise<CustomerCreditStatus> {
     if (!Number.isInteger(additionalMillimes) || additionalMillimes < 0) {
       throw new Error('Additional credit must be a non-negative amount in millimes.');
@@ -416,19 +467,8 @@ export const customerService = {
       try {
         const customer = await this.getCustomer(customerId);
         if (!customer) throw new Error('Customer could not be found.');
-        validateCreditLimit(customer.creditLimitMillimes);
         const balance = (await getRemoteBalance(customerId)) + additionalMillimes;
-        if (customer.creditLimitMillimes === undefined) return { balance, state: 'no_limit' };
-        const limit = customer.creditLimitMillimes;
-        const percentUsed = limit === 0 ? (balance > 0 ? 100 : 0) : Math.max(0, balance / limit * 100);
-        const state = balance > limit ? 'over' : limit > 0 && percentUsed >= 80 ? 'near' : 'ok';
-        return {
-          balance,
-          limit,
-          remaining: Math.max(0, limit - Math.max(0, balance)),
-          percentUsed,
-          state,
-        };
+        return creditStatusFromBalance(balance, customer.creditLimitMillimes);
       } catch (error) {
         if (offlineOrderQueue.isNetworkFailure(error)) return getCachedCreditStatus(customerId, additionalMillimes);
         throw error;

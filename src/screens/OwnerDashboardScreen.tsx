@@ -15,7 +15,6 @@ import { formatTnd } from '../lib/format';
 import { reportService, type ReportDayStatus } from '../services/reportService';
 import { shiftService } from '../services/shiftService';
 import { userService } from '../services/userService';
-import { orderService } from '../services/orderService';
 import { customerService } from '../services/customerService';
 import { notificationService } from '../services/notificationService';
 import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
@@ -23,7 +22,7 @@ import { shareCustomerStatement } from '../services/customerStatementShare';
 import { catalogService } from '../services/catalogService';
 import { useAuthStore } from '../stores/authStore';
 import type { CustomerStatementData, OverdueCustomerRecord } from '../services/customerService';
-import type { CatalogItemRecord, NotificationRecord, OrderRecord, ShiftRecord, StoreRecord, UserSummary } from '../types/domain';
+import type { CatalogItemRecord, NotificationRecord, ShiftRecord, StoreRecord, UserSummary } from '../types/domain';
 
 type Period = 'day' | 'week' | 'month' | 'year';
 
@@ -75,6 +74,11 @@ const emptySummary: DashboardSummary = {
   cashRefundsMillimes: 0,
   cashMovements: [],
   employeeBreakdown: [],
+  salesByDay: [],
+  salesByHour: Array.from({ length: 24 }, (_, hour) => ({ hour, orders: 0 })),
+  salesTodayMillimes: 0,
+  salesLastWeekMillimes: 0,
+  recentOrders: [],
   customerTabs: [],
   tabsIssuedMillimes: 0,
   tabsSettledMillimes: 0,
@@ -93,12 +97,8 @@ function OwnerDashboardContent() {
     openShiftCount: 0,
   });
   const [runningShifts, setRunningShifts] = useState<ShiftRecord[]>([]);
-  const [periodOrders, setPeriodOrders] = useState<OrderRecord[]>([]);
-  const [todaySalesMillimes, setTodaySalesMillimes] = useState(0);
-  const [lastWeekSalesMillimes, setLastWeekSalesMillimes] = useState(0);
   const [staff, setStaff] = useState<UserSummary[]>([]);
   const [catalogItems, setCatalogItems] = useState<CatalogItemRecord[]>([]);
-  const [pendingVoidOrders, setPendingVoidOrders] = useState<OrderRecord[]>([]);
   const [overdueCustomers, setOverdueCustomers] = useState<OverdueCustomerRecord[]>([]);
   const [ownerNotifications, setOwnerNotifications] = useState<NotificationRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -113,27 +113,21 @@ function OwnerDashboardContent() {
       setLoading(true);
       setLoadError('');
       try {
-        const [nextSummary, allOrders, allUsers, nextStore, nextOverdueCustomers, nextCatalogItems, nextDayStatus, nextOpenShifts] = await Promise.all([
-        reportService.getDashboard(storeId, period),
-        orderService.listAll(storeId),
-        userService.listUsers(storeId),
-        userService.getStore(storeId),
-        customerService.listOverdueCustomers(storeId),
-        catalogService.listItems(storeId),
-        reportService.getDayStatus(storeId),
-        shiftService.listOpenShifts(storeId),
+        const [nextSummary, allUsers, nextStore, nextOverdueCustomers, nextCatalogItems, nextDayStatus, nextOpenShifts] = await Promise.all([
+          reportService.getDashboard(storeId, period),
+          userService.listUsers(storeId),
+          userService.getStore(storeId),
+          customerService.listOverdueCustomers(storeId),
+          catalogService.listItems(storeId),
+          reportService.getDayStatus(storeId),
+          shiftService.listOpenShifts(storeId),
         ]);
         if (!active) return;
         setSummary(nextSummary);
         setDayStatus(nextDayStatus);
         setRunningShifts(nextOpenShifts);
-        setPeriodOrders(filterOrdersForPeriod(allOrders, period));
-        const salesComparison = getTodaySalesComparison(allOrders);
-        setTodaySalesMillimes(salesComparison.today);
-        setLastWeekSalesMillimes(salesComparison.lastWeek);
         setStaff(allUsers.filter((member) => member.role === 'staff'));
         setCatalogItems(nextCatalogItems);
-        setPendingVoidOrders(allOrders.filter((order) => order.status === 'pending_void'));
         setStore(nextStore);
         setOverdueCustomers(nextOverdueCustomers);
 
@@ -201,13 +195,8 @@ function OwnerDashboardContent() {
 
   async function selectPeriod(nextPeriod: Period) {
     try {
-      const [nextSummary, allOrders] = await Promise.all([
-        reportService.getDashboard(storeId, nextPeriod),
-        orderService.listAll(storeId),
-      ]);
+      const nextSummary = await reportService.getDashboard(storeId, nextPeriod);
       setSummary(nextSummary);
-      setPeriodOrders(filterOrdersForPeriod(allOrders, nextPeriod));
-      setPendingVoidOrders(allOrders.filter((order) => order.status === 'pending_void'));
       setPeriod(nextPeriod);
       setOverdueActionError('');
     } catch (loadError) {
@@ -237,32 +226,24 @@ function OwnerDashboardContent() {
     all.findIndex((candidate) => candidate.staffId === shift.staffId) === index,
   );
   const salesByStaff = useMemo(() => {
-    const totals = new Map<string, { name: string; sales: number; orders: number }>();
-    for (const order of periodOrders.filter((candidate) => candidate.status === 'done')) {
-      const name = staff.find((member) => member.id === order.staffId)?.name ?? order.staffName ?? 'Staff';
-      const current = totals.get(order.staffId) ?? { name, sales: 0, orders: 0 };
-      current.sales += order.totalMillimes / 1000;
-      current.orders += 1;
-      totals.set(order.staffId, current);
-    }
-    return [...totals.values()].sort((a, b) => b.sales - a.sales);
-  }, [periodOrders, staff]);
-  const salesByDate = useMemo(() => {
-    const totals = new Map<string, number>();
-    for (const order of periodOrders) {
-      if (order.status !== 'done') continue;
-      const date = new Date(order.createdAt);
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-      totals.set(key, (totals.get(key) ?? 0) + order.totalMillimes / 1000);
-    }
-    return [...totals].sort(([left], [right]) => left.localeCompare(right)).map(([date, sales]) => ({
-      date,
-      label: new Date(`${date}T00:00:00`).toLocaleDateString([], { month: 'short', day: 'numeric' }),
-      sales,
-    }));
-  }, [periodOrders]);
-  const recentOrders = periodOrders.slice(0, 6);
-  const peakHours = useMemo(() => getOrdersPerHour(periodOrders), [periodOrders]);
+    return summary.employeeBreakdown
+      .map((employee) => ({
+        name: employee.name,
+        sales: employee.salesMillimes / 1000,
+        orders: employee.orderCount,
+      }))
+      .sort((left, right) => right.sales - left.sales);
+  }, [summary.employeeBreakdown]);
+  const salesByDate = summary.salesByDay.map(({ date, salesMillimes }) => ({
+    date,
+    label: new Date(`${date}T00:00:00`).toLocaleDateString([], { month: 'short', day: 'numeric' }),
+    sales: salesMillimes / 1000,
+  }));
+  const recentOrders = summary.recentOrders;
+  const peakHours = summary.salesByHour;
+  const todaySalesMillimes = summary.salesTodayMillimes;
+  const lastWeekSalesMillimes = summary.salesLastWeekMillimes;
+  const pendingVoidOrders = summary.pendingVoids.orders;
   const targetMillimes = store?.dailySalesTargetMillimes ?? 0;
   const targetProgress = targetMillimes > 0 ? Math.round(todaySalesMillimes / targetMillimes * 100) : 0;
   const targetProgressWidth = Math.min(100, targetProgress);
@@ -361,7 +342,7 @@ function OwnerDashboardContent() {
           {pendingVoidOrders.length > 0 ? (
             <p className="mt-2 font-body text-body-sm text-on-surface-variant">
               {pendingVoidOrders.slice(0, 3).map((order) =>
-                `#${order.number} · ${formatTnd(order.totalMillimes / 1000)} DT${order.voidReason ? ` · ${order.voidReason}` : ''}`,
+                `#${order.ticketNumber} · ${formatTnd(order.amountMillimes / 1000)} DT${order.reason ? ` · ${order.reason}` : ''}`,
               ).join(' · ')}
             </p>
           ) : <p className="mt-2 font-body text-body-sm text-on-surface-variant">No requests awaiting review.</p>}
@@ -519,7 +500,7 @@ function OwnerDashboardContent() {
           <h2 className="mb-4 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="receipt_long" className="text-primary" />Recent orders</h2>
           <div className="flex flex-col gap-2">
             {recentOrders.map((order) => {
-              const staffName = staff.find((member) => member.id === order.staffId)?.name ?? order.staffName ?? 'Staff';
+              const staffName = order.staffName ?? 'Staff';
               return (
                 <button key={order.id} type="button" onClick={() => navigate('/orders')} className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-low p-3 text-left">
                   <div className="min-w-0">
@@ -630,34 +611,6 @@ function ShiftSummary({ shift }: { shift: ShiftRecord }) {
   );
 }
 
-function getTodaySalesComparison(orders: OrderRecord[]) {
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const todayEnd = Date.now();
-  const previousWeekStart = new Date(todayStart);
-  previousWeekStart.setDate(previousWeekStart.getDate() - 7);
-  const previousWeekEnd = new Date(previousWeekStart);
-  previousWeekEnd.setDate(previousWeekEnd.getDate() + 1);
-  const salesBetween = (start: number, end: number) => orders
-    .filter((order) => {
-      const timestamp = new Date(order.createdAt).getTime();
-      return order.status === 'done' && timestamp >= start && timestamp < end;
-    })
-    .reduce((sum, order) => sum + order.totalMillimes, 0);
-  return {
-    today: salesBetween(todayStart.getTime(), todayEnd),
-    lastWeek: salesBetween(previousWeekStart.getTime(), previousWeekEnd.getTime()),
-  };
-}
-
-function getOrdersPerHour(orders: OrderRecord[]) {
-  const counts = Array.from({ length: 24 }, () => 0);
-  for (const order of orders) {
-    if (order.status === 'done') counts[new Date(order.createdAt).getHours()] += 1;
-  }
-  return counts.map((count, hour) => ({ hour, orders: count }));
-}
-
 function formatHour(hour: number) {
   const suffix = hour < 12 ? 'AM' : 'PM';
   const clockHour = hour % 12 || 12;
@@ -688,21 +641,6 @@ function ItemRankingList({ items }: {
       ))}
     </ol>
   );
-}
-
-function filterOrdersForPeriod(orders: OrderRecord[], period: Period) {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  if (period === 'week') start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
-  else if (period === 'month') start.setDate(1);
-  else if (period === 'year') start.setMonth(0, 1);
-  const end = Date.now();
-  return orders
-    .filter((order) => {
-      const timestamp = new Date(order.createdAt).getTime();
-      return timestamp >= start.getTime() && timestamp <= end;
-    })
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export function OwnerDashboardScreen() {

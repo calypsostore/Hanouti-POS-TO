@@ -4,6 +4,7 @@ import type {
   CustomerRecord,
   OrderLineRecord,
   OrderRecord,
+  OrderSummaryRecord,
   PaymentMethod,
   ShiftRecord,
   StoreRecord,
@@ -29,7 +30,7 @@ export interface PosOfflineSnapshot {
   creditStatuses: Record<string, CustomerCreditStatus>;
   shift?: ShiftRecord;
   store?: StoreRecord;
-  orders: OrderRecord[];
+  orders: OrderSummaryRecord[];
   permissions: {
     can86Items: boolean;
     canCompItems: boolean;

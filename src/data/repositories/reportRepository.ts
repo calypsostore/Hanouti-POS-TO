@@ -47,6 +47,37 @@ function fail(error: { message: string }, context: string): never {
   throw new Error(`${context}: ${error.message}`, { cause: error });
 }
 
+function requireSummary(value: unknown, context: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(`${context} returned an invalid response.`);
+  }
+  return value as Record<string, unknown>;
+}
+
+export async function getDashboardSummary(
+  storeId: string,
+  from: string,
+  to: string,
+  useExpenseCreationPeriod = false,
+): Promise<Record<string, unknown>> {
+  const { data, error } = await getSupabaseClient().rpc('get_dashboard_summary', {
+    p_store_id: storeId,
+    p_from: from,
+    p_to: to,
+    p_use_expense_creation_period: useExpenseCreationPeriod,
+  });
+  if (error) fail(error, 'Could not load dashboard summary');
+  return requireSummary(data, 'Dashboard summary');
+}
+
+export async function getShiftSummary(shiftId: string): Promise<Record<string, unknown>> {
+  const { data, error } = await getSupabaseClient().rpc('get_shift_summary', {
+    p_shift_id: shiftId,
+  });
+  if (error) fail(error, 'Could not load shift summary');
+  return requireSummary(data, 'Shift summary');
+}
+
 export async function listReports(storeId: string): Promise<ReportRecord[]> {
   const { data, error } = await getSupabaseClient().from('reports').select('*')
     .eq('store_id', storeId).order('created_at', { ascending: false });

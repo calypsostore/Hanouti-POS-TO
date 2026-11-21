@@ -31,6 +31,12 @@ interface TabRow {
   created_at: string;
 }
 
+export interface CustomerCreditBalance {
+  customerId: string;
+  balanceMillimes: number;
+  creditLimitMillimes: number | null;
+}
+
 function mapCustomer(row: CustomerRow): CustomerRecord {
   return {
     id: row.id,
@@ -117,6 +123,22 @@ export async function getBalance(customerId: string): Promise<number> {
   const { data, error } = await getSupabaseClient().rpc('get_customer_balance', { p_customer_id: customerId });
   if (error) repositoryError(error, 'Could not load customer balance');
   return Number(data);
+}
+
+export async function listCreditBalances(storeId: string): Promise<CustomerCreditBalance[]> {
+  const { data, error } = await getSupabaseClient().rpc('get_customers_credit_status', {
+    p_store_id: storeId,
+  });
+  if (error) repositoryError(error, 'Could not load customer credit statuses');
+  return ((data ?? []) as {
+    customer_id: string;
+    balance_millimes: number | string;
+    credit_limit_millimes: number | string | null;
+  }[]).map((row) => ({
+    customerId: row.customer_id,
+    balanceMillimes: Number(row.balance_millimes),
+    creditLimitMillimes: row.credit_limit_millimes === null ? null : Number(row.credit_limit_millimes),
+  }));
 }
 
 export async function listTransactions(customerId: string): Promise<TabRecord[]> {

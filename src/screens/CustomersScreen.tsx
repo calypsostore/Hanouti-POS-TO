@@ -7,12 +7,14 @@ import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
 import { Keypad } from '../components/Keypad';
 import { ListSkeleton } from '../components/ListSkeleton';
+import { LazyBatch } from '../components/LazyBatch';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { OverdueCustomerRow } from '../components/OverdueCustomerRow';
 import { TabStatementView } from '../components/TabStatementView';
 import { TopBar } from '../components/TopBar';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { formatTnd } from '../lib/format';
+import { parseNonNegativeMillimes } from '../lib/millimes';
 import { customerService } from '../services/customerService';
 import { shareCustomerStatement } from '../services/customerStatementShare';
 import { shareTextAsPdf } from '../services/receiptExport';
@@ -66,13 +68,13 @@ function balanceMoney(millimes: number): string {
   return millimes < 0 ? `Credit ${money(millimes)}` : money(millimes);
 }
 
-function parseMoney(value: string, required: boolean): number | undefined {
+function parseMillimes(value: string, required: boolean): number | undefined {
   if (!value.trim() && !required) return undefined;
-  const parsed = Number(value.trim().replace(',', '.'));
-  if (!Number.isFinite(parsed) || parsed < 0 || (required && parsed === 0)) {
-    throw new Error(required ? 'Enter a payment greater than zero.' : 'Enter a non-negative amount.');
+  const millimes = parseNonNegativeMillimes(value);
+  if (millimes === undefined || (required && millimes === 0)) {
+    throw new Error(required ? 'Enter a payment greater than zero millime.' : 'Enter a non-negative whole number of millimes.');
   }
-  return Math.round(parsed * 1000);
+  return millimes;
 }
 
 function initials(name: string): string {
@@ -312,10 +314,7 @@ export function CustomersScreen() {
   }), [ledger, ledgerFrom, ledgerTo]);
   const selectedStatus = selected ? creditStatuses[selected.id] : undefined;
   const selectedDue = selected ? dueInfos[selected.id] : undefined;
-  const paymentAmountNumber = Number(paymentAmount.trim().replace(',', '.'));
-  const paymentAmountMillimes = paymentAmount.trim() && Number.isFinite(paymentAmountNumber) && paymentAmountNumber >= 0
-    ? Math.round(paymentAmountNumber * 1000)
-    : 0;
+  const paymentAmountMillimes = parseNonNegativeMillimes(paymentAmount) ?? 0;
   const paymentBalance = selectedStatus?.balance ?? 0;
   const paymentExceedsBalance = paymentAmountMillimes > paymentBalance;
 
@@ -338,7 +337,7 @@ export function CustomersScreen() {
         phone: draft.phone,
         email: draft.email,
         notes: draft.notes,
-        creditLimitMillimes: parseMoney(draft.creditLimit, false),
+        creditLimitMillimes: parseMillimes(draft.creditLimit, false),
         settlementTerms: draft.settlementTerms,
       });
       setDraft(EMPTY_DRAFT);
@@ -357,7 +356,7 @@ export function CustomersScreen() {
       name: selected.name,
       phone: selected.phone ?? '',
       email: selected.email ?? '',
-      creditLimit: selected.creditLimitMillimes === undefined ? '' : (selected.creditLimitMillimes / 1000).toFixed(3),
+      creditLimit: selected.creditLimitMillimes === undefined ? '' : String(selected.creditLimitMillimes),
       settlementTerms: selected.settlementTerms,
       notes: selected.notes ?? '',
     });
@@ -376,7 +375,7 @@ export function CustomersScreen() {
         name: editDraft.name,
         phone: editDraft.phone,
         email: editDraft.email,
-        creditLimitMillimes: parseMoney(editDraft.creditLimit, false),
+        creditLimitMillimes: parseMillimes(editDraft.creditLimit, false),
         settlementTerms: editDraft.settlementTerms,
         notes: editDraft.notes,
       }, user.id);
@@ -401,17 +400,6 @@ export function CustomersScreen() {
       setPaymentOpen(false);
       setError(shiftError instanceof Error ? shiftError.message : 'Unable to check your shift.');
     }
-  }
-
-  function pressPaymentAmount(value: string) {
-    setPaymentAmount((current) => {
-      if (value === '.') {
-        return current.includes('.') ? current : `${current || '0'}.`;
-      }
-      const fraction = current.split('.')[1];
-      if (fraction !== undefined && fraction.length >= 3) return current;
-      return `${current}${value}`;
-    });
   }
 
   async function sharePaymentReceipt() {
@@ -446,7 +434,7 @@ export function CustomersScreen() {
         storeId,
         customerId: selected.id,
         staffId: user.id,
-        amountMillimes: parseMoney(paymentAmount, true) ?? 0,
+        amountMillimes: parseMillimes(paymentAmount, true) ?? 0,
         note: paymentNote,
       });
       setPaymentAmount('');
@@ -592,7 +580,7 @@ export function CustomersScreen() {
         <ListSkeleton label="Loading customers" />
       ) : filteredCustomers.length > 0 ? (
         <CardGrid className="mobile-card-list customer-card-list">
-          {filteredCustomers.map((customer) => {
+          <LazyBatch items={filteredCustomers} resetKey={`${filter}-${search}`} renderItem={(customer) => {
             const dueInfo = dueInfos[customer.id];
             if (isOwner && filter === 'overdue' && dueInfo?.overdue) {
               return (
@@ -614,7 +602,7 @@ export function CustomersScreen() {
                 onClick={() => navigate(`/customers/${customer.id}`)}
               />
             );
-          })}
+          }} />
         </CardGrid>
       ) : (
         <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">
@@ -802,28 +790,25 @@ export function CustomersScreen() {
           <div className="flex flex-col gap-3">
             <p className="font-body text-label-md text-on-surface">Quick amount</p>
             <div className="grid grid-cols-2 gap-2">
-              <Button type="button" variant="secondary" disabled={paymentShiftOpen !== true || paymentBalance <= 0} onClick={() => setPaymentAmount((paymentBalance / 1000).toFixed(3))}>
+              <Button type="button" variant="secondary" disabled={paymentShiftOpen !== true || paymentBalance <= 0} onClick={() => setPaymentAmount(String(paymentBalance))}>
                 Full balance
               </Button>
-              <Button type="button" variant="secondary" disabled={paymentShiftOpen !== true || paymentBalance <= 0} onClick={() => setPaymentAmount((Math.round(paymentBalance / 2) / 1000).toFixed(3))}>
+              <Button type="button" variant="secondary" disabled={paymentShiftOpen !== true || paymentBalance <= 0} onClick={() => setPaymentAmount(String(Math.round(paymentBalance / 2)))}>
                 Half
               </Button>
             </div>
-            <label htmlFor="customer-payment-amount" className="font-body text-label-md text-on-surface">Custom amount (TND)</label>
+            <label htmlFor="customer-payment-amount" className="font-body text-label-md text-on-surface">Custom amount (millimes)</label>
             <input
               id="customer-payment-amount"
-              readOnly
-              inputMode="none"
-              value={paymentAmount}
-              placeholder="0.000"
-              className="h-12 w-full rounded-lg bg-surface-container-low px-3 font-display text-title-md tabular-nums"
-            />
-            <Keypad
-              decimal
+              type="number"
+              min="0"
+              step="1"
+              inputMode="numeric"
               disabled={paymentShiftOpen !== true}
-              onPress={pressPaymentAmount}
-              onClear={() => setPaymentAmount('')}
-              onBackspace={() => setPaymentAmount((value) => value.slice(0, -1))}
+              value={paymentAmount}
+              onChange={(event) => setPaymentAmount(event.target.value)}
+              placeholder="0"
+              className="h-12 w-full rounded-lg bg-surface-container-low px-3 font-display text-title-md tabular-nums"
             />
             <p className="font-body text-label-md text-on-surface">Balance after payment</p>
             <p className={`rounded-lg bg-surface-container-low p-3 font-display text-title-md tabular-nums ${paymentBalance - paymentAmountMillimes < 0 ? 'text-error-dark' : 'text-on-surface'}`}>
@@ -950,7 +935,7 @@ function CustomerForm({ draft, setDraft, onSubmit, submitLabel }: {
       <label className="font-body text-label-md text-on-surface">Name<input required value={draft.name} onChange={(event) => update('name', event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
       <label className="font-body text-label-md text-on-surface">Phone<input value={draft.phone} onChange={(event) => update('phone', event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
       <label className="font-body text-label-md text-on-surface">Email (optional)<input type="email" value={draft.email} onChange={(event) => update('email', event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
-      <label className="font-body text-label-md text-on-surface">Monthly credit limit (TND)<input min="0" step="0.001" inputMode="decimal" value={draft.creditLimit} onChange={(event) => update('creditLimit', event.target.value)} placeholder="No limit" className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
+      <label className="font-body text-label-md text-on-surface">Monthly credit limit (millimes)<input type="number" min="0" step="1" inputMode="numeric" value={draft.creditLimit} onChange={(event) => update('creditLimit', event.target.value)} placeholder="No limit" className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
       <label className="font-body text-label-md text-on-surface">Settlement terms
         <select value={draft.settlementTerms} onChange={(event) => update('settlementTerms', event.target.value as CustomerRecord['settlementTerms'])} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3">
           <option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="anytime">Anytime</option>

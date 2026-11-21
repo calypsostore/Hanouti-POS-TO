@@ -22,7 +22,7 @@ export function ItemLogo({ id, size = 'md', className = '' }: ItemLogoProps) {
   return (
     <span aria-hidden="true" className={`flex shrink-0 items-center justify-center overflow-hidden bg-surface-container text-primary ${classes.tile} ${className}`}>
       {logo ? (
-        <img src={logo.src} alt="" className={`${classes.image} object-contain`} />
+        <img src={logo.src} alt="" loading="lazy" decoding="async" className={`${classes.image} object-contain`} />
       ) : id ? (
         <MaterialIcon name={id} className={classes.icon} />
       ) : null}

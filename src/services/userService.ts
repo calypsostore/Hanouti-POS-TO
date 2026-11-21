@@ -1,4 +1,4 @@
-import { resolveStoreSettings, type PermissionDefinition, type PermissionOverrides, type PositionRecord, type StoreRecord, type StoreSettings, type StoreSubscription, type UserRecord, type UserSummary } from '../types/domain';
+import { resolveStoreSettings, type PermissionDefinition, type PermissionOverrides, type PositionRecord, type ProfileAvatarId, type StoreRecord, type StoreSettings, type StoreSubscription, type UserRecord, type UserSummary } from '../types/domain';
 import { readData, removeData, writeData } from './storage';
 import { seedPositions, seedStores, seedUsers } from './seedData';
 import { hashSecret, verifySecret } from './secretService';
@@ -11,6 +11,7 @@ import { createOwnerAccount, createStaff, resetPassword } from '../data/reposito
 import { getPermissionOverrides, getProfile, listProfiles } from '../data/repositories/profileRepository';
 import { getStore as getRemoteStore, listStores as listRemoteStores } from '../data/repositories/storeRepository';
 import { formatStaffUsername, generateStoreCode, migrateLegacyDemoStoreIdentity } from './accountIdentity';
+import { isProfileAvatarId } from '../data/profileAvatars';
 
 const PERMISSIONS: PermissionDefinition[] = [
   { id: 'take_orders', group: 'Orders', label: 'Take orders' },
@@ -1215,6 +1216,27 @@ export const userService = {
       });
     }
     return withoutPassword(updatedOwner);
+  },
+
+  async updateProfileAvatar(userId: string, avatarId: ProfileAvatarId): Promise<UserSummary> {
+    if (!isProfileAvatarId(avatarId)) throw new Error('Choose one of the available profile avatars.');
+    const currentUser = await authService.getCurrentUser();
+    if (!currentUser || currentUser.id !== userId) {
+      throw new Error('Only the signed-in user can update this profile avatar.');
+    }
+    if (isSupabaseDriver()) {
+      const { error } = await getSupabaseClient().rpc('update_profile_avatar', { p_avatar_id: avatarId });
+      if (error) throw new Error(`Could not update profile avatar: ${error.message}`, { cause: error });
+      const updatedUser = await getProfile(userId);
+      if (!updatedUser) throw new Error('The updated profile could not be loaded.');
+      return updatedUser;
+    }
+    const users = getUsers();
+    const profile = users.find((candidate) => candidate.id === userId);
+    if (!profile) throw new Error('The profile could not be found.');
+    const updatedUser = { ...profile, avatarId };
+    saveUsers(users.map((candidate) => candidate.id === userId ? updatedUser : candidate));
+    return withoutPassword(updatedUser);
   },
 
   async updateStoreInfo(

@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
+import { LazyBatch } from '../LazyBatch';
 
 export interface DataTableColumn<T> {
   key: string;
@@ -37,7 +38,11 @@ export function DataTable<T>({ rows, columns, getRowKey, mobileCards, empty, row
   return (
     <>
       <div className="data-table-mobile flex flex-col gap-3 lg:hidden">
-        {sortedRows.map((row) => <div key={getRowKey(row)}>{mobileCards(row)}</div>)}
+        <LazyBatch
+          items={sortedRows}
+          resetKey={sortKey + String(descending)}
+          renderItem={(row) => <div key={getRowKey(row)}>{mobileCards(row)}</div>}
+        />
       </div>
       <div className="data-table-desktop hidden overflow-x-auto rounded-xl border border-outline-variant bg-surface-container-lowest lg:block">
         <table className="w-full border-separate border-spacing-0 text-left font-body text-body-sm">

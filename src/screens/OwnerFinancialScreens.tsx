@@ -2,7 +2,6 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useAuthStore } from '../stores/authStore';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
-import { Keypad } from '../components/Keypad';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
@@ -10,6 +9,7 @@ import { ownerWorkspaceLinks } from '../app/navigation';
 import { CardGrid, PageHeader } from '../components/layout';
 import { t } from '../i18n/translations';
 import { formatTnd } from '../lib/format';
+import { parseNonNegativeMillimes } from '../lib/millimes';
 import { expenseService } from '../services/expenseService';
 import { supplierService, type SupplierDetails, type SupplierBalanceRecord } from '../services/supplierService';
 import { userService } from '../services/userService';
@@ -31,22 +31,9 @@ function todayKey(): string {
 }
 
 function amountToMillimes(value: string): number {
-  const parsed = Number(value.trim().replace(',', '.'));
-  const millimes = Math.round(parsed * 1000);
-  if (!Number.isFinite(parsed) || parsed <= 0 || !Number.isSafeInteger(millimes)) {
-    throw new Error('Enter a positive expense amount.');
-  }
+  const millimes = parseNonNegativeMillimes(value);
+  if (millimes === undefined || millimes <= 0) throw new Error('Enter a positive whole number of millimes.');
   return millimes;
-}
-
-function appendAmount(current: string, value: string): string {
-  if (value === '.') {
-    if (current.includes('.')) return current;
-    return current ? `${current}.` : '0.';
-  }
-  const [whole, fraction] = current.split('.');
-  if (whole.length >= 9 || (fraction !== undefined && fraction.length >= 3)) return current;
-  return current + value;
 }
 
 function money(amountMillimes: number): string {
@@ -135,8 +122,8 @@ export function OwnerExpensesScreen() {
   }
 
   const supplierNames = new Map(suppliers.map((supplier) => [supplier.id, supplier.name]));
-  const enteredAmount = Number(amount.replace(',', '.'));
-  const canSave = Number.isFinite(enteredAmount) && enteredAmount > 0 &&
+  const enteredAmount = parseNonNegativeMillimes(amount);
+  const canSave = enteredAmount !== undefined && enteredAmount > 0 &&
     (newCategory !== 'supplier' || Boolean(supplierId));
 
   return (
@@ -212,10 +199,9 @@ export function OwnerExpensesScreen() {
             </label>
           )}
           <label className="flex flex-col gap-1 font-body text-label-md text-on-surface">
-            Amount (TND)
-            <input readOnly inputMode="none" value={amount} placeholder="0.000" className="h-14 rounded-lg bg-surface-container-low px-4 font-display text-title-lg tabular-nums" />
+            Amount (millimes)
+            <input type="number" min="1" step="1" inputMode="numeric" required value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0" className="h-14 rounded-lg bg-surface-container-low px-4 font-display text-title-lg tabular-nums" />
           </label>
-          <Keypad decimal onPress={(value) => setAmount((current) => appendAmount(current, value))} onClear={() => setAmount('')} onBackspace={() => setAmount((current) => current.slice(0, -1))} disabled={busy} />
           <label className="flex flex-col gap-1 font-body text-label-md text-on-surface">
             Date
             <input required type="date" value={date} onChange={(event) => setDate(event.target.value)} className="min-h-11 rounded-lg border border-outline-variant bg-surface px-3" />
@@ -365,9 +351,9 @@ export function OwnerSuppliersScreen() {
     }
   }
 
-  const enteredPayment = Number(paymentAmount.replace(',', '.'));
-  const canPay = Boolean(details) && Number.isFinite(enteredPayment) && enteredPayment > 0 &&
-    enteredPayment * 1000 <= (details?.amountOwedMillimes ?? 0);
+  const enteredPayment = parseNonNegativeMillimes(paymentAmount);
+  const canPay = Boolean(details) && enteredPayment !== undefined && enteredPayment > 0 &&
+    enteredPayment <= (details?.amountOwedMillimes ?? 0);
 
   return (
     <WorkspaceLayout title={t('nav.suppliers')} storeName={storeName} links={ownerWorkspaceLinks}>
@@ -437,10 +423,9 @@ export function OwnerSuppliersScreen() {
             ) : (
               <form onSubmit={(event) => { void recordPayment(event); }} className="flex flex-col gap-3 rounded-xl bg-surface-container-low p-3">
                 <h3 className="font-body text-label-lg text-on-surface">Record payment</h3>
-                <label className="flex flex-col gap-1 font-body text-label-md text-on-surface">Amount (TND)
-                  <input readOnly inputMode="none" value={paymentAmount} placeholder="0.000" className="h-14 rounded-lg bg-surface px-4 font-display text-title-lg tabular-nums" />
+                <label className="flex flex-col gap-1 font-body text-label-md text-on-surface">Amount (millimes)
+                  <input type="number" min="1" step="1" inputMode="numeric" required value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} placeholder="0" className="h-14 rounded-lg bg-surface px-4 font-display text-title-lg tabular-nums" />
                 </label>
-                <Keypad decimal onPress={(value) => setPaymentAmount((current) => appendAmount(current, value))} onClear={() => setPaymentAmount('')} onBackspace={() => setPaymentAmount((current) => current.slice(0, -1))} disabled={busy} />
                 <label className="flex flex-col gap-1 font-body text-label-md text-on-surface">Allocate to purchase (optional)
                   <select value={paymentExpenseId} onChange={(event) => setPaymentExpenseId(event.target.value)} className="min-h-11 rounded-lg border border-outline-variant bg-surface px-3">
                     <option value="">Unallocated supplier payment</option>

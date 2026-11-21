@@ -11,7 +11,7 @@ export const ReceiptDocumentView = forwardRef<HTMLElement, {
       className={`receipt-print-target receipt-document-view receipt-width-${document.width} ${className}`.trim()}
       data-receipt-width={document.width}
     >
-      {document.logoSrc && <img className="receipt-logo" src={document.logoSrc} alt="" />}
+      {document.logoSrc && <img className="receipt-logo" src={document.logoSrc} alt="" loading="lazy" decoding="async" />}
       <div className="receipt-document-lines">
         {document.lines.map((line, index) => (
           <div

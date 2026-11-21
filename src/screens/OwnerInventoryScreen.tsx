@@ -5,6 +5,7 @@ import { Chip } from '../components/Chip';
 import { ItemLogo } from '../components/ItemLogo';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { ListSkeleton } from '../components/ListSkeleton';
+import { LazyBatch } from '../components/LazyBatch';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
@@ -14,6 +15,7 @@ import { catalogService } from '../services/catalogService';
 import { useAuthStore } from '../stores/authStore';
 import type { CatalogItemRecord, CategoryRecord, ItemHistoryRecord, StockAdjustmentReason } from '../types/domain';
 import { userService } from '../services/userService';
+import { useFocusRefreshKey } from '../lib/useFocusRefreshKey';
 
 const adjustmentReasons: { value: StockAdjustmentReason; label: string }[] = [
   { value: 'restock', label: 'Restock' },
@@ -28,6 +30,7 @@ function historyCount(value: ItemHistoryRecord['oldValue']): string {
 function OwnerInventoryContent() {
   const user = useAuthStore((state) => state.user);
   const storeId = user?.storeId ?? '';
+  const refreshKey = useFocusRefreshKey();
   const [items, setItems] = useState<CatalogItemRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<CategoryRecord[]>([]);
@@ -65,7 +68,7 @@ function OwnerInventoryContent() {
       if (active) setLoading(false);
     });
     return () => { active = false; };
-  }, [storeId]);
+  }, [refreshKey, storeId]);
 
   async function refreshItems() {
     setItems(await catalogService.listItems(storeId));
@@ -220,7 +223,7 @@ function OwnerInventoryContent() {
       </div>
 
       <section className="flex flex-col gap-3 lg:hidden">
-        {loading ? <ListSkeleton label="Loading inventory" /> : visibleItems.map((item) => {
+        {loading ? <ListSkeleton label="Loading inventory" /> : <LazyBatch items={visibleItems} resetKey={`${categoryFilter}-${search}-${lowStockOnly}`} renderItem={(item) => {
           const tracked = item.stockCount !== null;
           const threshold = item.lowStockThreshold ?? 5;
           const isLow = tracked && (item.stockCount ?? 0) <= threshold;
@@ -284,7 +287,7 @@ function OwnerInventoryContent() {
               </div>
             </article>
           );
-        })}
+        }} />}
         {!loading && !error && visibleItems.length === 0 && (
           <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">
             {items.length === 0 ? t('common.noData') : 'No items match these filters.'}

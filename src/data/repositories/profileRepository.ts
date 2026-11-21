@@ -1,11 +1,13 @@
 import type { PermissionOverrides, UserRole, UserSummary } from '../../types/domain';
 import { getSupabaseClient } from '../supabaseClient';
+import { DEFAULT_PROFILE_AVATAR_ID, isProfileAvatarId } from '../profileAvatars';
 
 interface ProfileRow {
   id: string;
   store_id: string | null;
   role: UserRole;
   name: string;
+  avatar_id: string | null;
   email: string | null;
   username: string | null;
   phone: string | null;
@@ -24,6 +26,7 @@ export function profileFromRow(row: ProfileRow): UserSummary {
     storeId: row.store_id ?? undefined,
     role: row.role,
     name: row.name,
+    avatarId: isProfileAvatarId(row.avatar_id) ? row.avatar_id : DEFAULT_PROFILE_AVATAR_ID,
     email: row.email ?? undefined,
     username: row.username ?? undefined,
     phone: row.phone ?? undefined,
@@ -40,7 +43,7 @@ export function profileFromRow(row: ProfileRow): UserSummary {
 export async function getProfile(userId: string): Promise<UserSummary | undefined> {
   const { data, error } = await getSupabaseClient()
     .from('profiles')
-    .select('id, store_id, role, name, email, username, phone, notes, position_id, must_change_password, must_set_pin, is_active, session_version, created_at')
+    .select('id, store_id, role, name, avatar_id, email, username, phone, notes, position_id, must_change_password, must_set_pin, is_active, session_version, created_at')
     .eq('id', userId)
     .maybeSingle();
   if (error) throw new Error(`Could not load the signed-in profile: ${error.message}`, { cause: error });
@@ -50,7 +53,7 @@ export async function getProfile(userId: string): Promise<UserSummary | undefine
 export async function listProfiles(storeId?: string): Promise<UserSummary[]> {
   let query = getSupabaseClient()
     .from('profiles')
-    .select('id, store_id, role, name, email, username, phone, notes, position_id, must_change_password, must_set_pin, is_active, session_version, created_at')
+    .select('id, store_id, role, name, avatar_id, email, username, phone, notes, position_id, must_change_password, must_set_pin, is_active, session_version, created_at')
     .order('created_at');
   if (storeId) query = query.eq('store_id', storeId);
   const { data, error } = await query;

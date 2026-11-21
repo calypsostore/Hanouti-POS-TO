@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
 import { Chip } from '../components/Chip';
@@ -11,11 +11,13 @@ import { CardGrid, PageHeader } from '../components/layout';
 import { ownerWorkspaceLinks } from '../app/navigation';
 import { t } from '../i18n/translations';
 import { formatTnd } from '../lib/format';
+import { parseNonNegativeMillimes } from '../lib/millimes';
 import { catalogService } from '../services/catalogService';
 import { useAuthStore } from '../stores/authStore';
 import { resolveStoreSettings, type CatalogItemRecord, type CatalogModifierRecord, type CategoryRecord, type ItemHistoryRecord, type QuickPickMode, type StoreRecord } from '../types/domain';
 import { userService } from '../services/userService';
 import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
+import { useFocusRefreshKey } from '../lib/useFocusRefreshKey';
 
 type CatalogSheet = 'item' | 'category' | null;
 type Availability = 'available' | '86' | 'out';
@@ -69,7 +71,7 @@ function draftFromItem(item: CatalogItemRecord, isQuickPick: boolean): ProductDr
     name: item.name,
     description: item.description ?? '',
     sku: item.sku ?? '',
-    price: String(item.priceMillimes / 1000),
+    price: String(item.priceMillimes),
     categoryId: item.categoryId,
     icon: item.icon,
     stockCount: item.stockCount === null ? '' : String(item.stockCount),
@@ -83,7 +85,7 @@ function draftFromItem(item: CatalogItemRecord, isQuickPick: boolean): ProductDr
     modifiers: (item.modifiers ?? []).map((modifier) => ({
       id: modifier.id,
       name: modifier.name,
-      price: String(modifier.priceMillimes / 1000),
+      price: String(modifier.priceMillimes),
     })),
   };
 }
@@ -121,6 +123,9 @@ function historyFieldLabel(field: ItemHistoryRecord['field']): string {
 function OwnerCatalogContent() {
   const user = useAuthStore((state) => state.user);
   const storeId = user?.storeId ?? '';
+  const refreshKey = useFocusRefreshKey();
+  const catalogLoadSentinel = useRef<HTMLDivElement>(null);
+  const [renderLimit, setRenderLimit] = useState(6);
   const [store, setStore] = useState<StoreRecord>();
   const [categories, setCategories] = useState<CategoryRecord[]>([]);
   const [items, setItems] = useState<CatalogItemRecord[]>([]);
@@ -178,7 +183,7 @@ function OwnerCatalogContent() {
       console.error('Unable to load store information for the catalog.', loadError);
       setError(t('common.storeLoadFailed'));
     });
-  }, [refresh, storeId]);
+  }, [refresh, refreshKey, storeId]);
 
   useEffect(() => subscribeToStoreChanges(storeId, ['catalog_items'], () => {
     void refresh().catch((loadError: unknown) => {
@@ -245,9 +250,8 @@ function OwnerCatalogContent() {
         throw new Error('Choose a category for this product.');
       }
       if (!draft.price.trim()) throw new Error('Enter a product price.');
-      const price = Number(draft.price.trim().replace(',', '.'));
-      const priceMillimes = Math.round(price * 1000);
-      if (!Number.isFinite(price) || price < 0 || !Number.isSafeInteger(priceMillimes)) throw new Error('Enter a valid non-negative TND price.');
+      const priceMillimes = parseNonNegativeMillimes(draft.price);
+      if (priceMillimes === undefined) throw new Error('Enter a non-negative whole number of millimes for the product price.');
 
       const stockCount = draft.availability === 'out' ? 0 : draft.stockCount.trim() ? Number(draft.stockCount) : null;
       if (stockCount !== null && (!Number.isInteger(stockCount) || stockCount < 0)) throw new Error('Stock count must be a non-negative whole number.');
@@ -260,15 +264,14 @@ function OwnerCatalogContent() {
       const names = new Set<string>();
       for (const modifier of draft.modifiers) {
         const name = modifier.name.trim();
-        const rawPrice = modifier.price.trim().replace(',', '.');
+        const rawPrice = modifier.price.trim();
         if (!name && !rawPrice) continue;
         if (!name) throw new Error('Give every modifier option a name.');
         const normalizedName = name.toLocaleLowerCase();
         if (names.has(normalizedName)) throw new Error('Modifier option names must be unique.');
         names.add(normalizedName);
-        const amount = rawPrice ? Number(rawPrice) : 0;
-        const modifierPriceMillimes = Math.round(amount * 1000);
-        if (!Number.isFinite(amount) || amount < 0 || !Number.isSafeInteger(modifierPriceMillimes)) throw new Error('Enter a valid non-negative modifier price.');
+        const modifierPriceMillimes = rawPrice ? parseNonNegativeMillimes(rawPrice) : 0;
+        if (modifierPriceMillimes === undefined) throw new Error('Enter a non-negative whole number of millimes for each modifier price.');
         modifiers.push({ id: modifier.id, name, priceMillimes: modifierPriceMillimes });
       }
       if (draft.modifiersRequired && modifiers.length === 0) throw new Error('Add at least one modifier option for a required group.');
@@ -472,6 +475,24 @@ function OwnerCatalogContent() {
     return matchesProductState && matchesCategory && matchesSearch && matchesStatus;
   });
 
+  useEffect(() => {
+    setRenderLimit(6);
+  }, [categoryId, search, statusFilter, productStateFilter]);
+
+  useEffect(() => {
+    const sentinel = catalogLoadSentinel.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setRenderLimit((current) => Math.min(current + 6, visibleItems.length));
+      }
+    }, { rootMargin: '300px 0px' });
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [visibleItems.length, loading]);
+
   return (
     <WorkspaceLayout title={t('catalog.title')} storeName={store?.name} links={ownerWorkspaceLinks}>
       <PageHeader title={t('catalog.title')} subtitle="Manage products, categories, prices, and availability." actions={
@@ -482,21 +503,21 @@ function OwnerCatalogContent() {
         </>
       } />
 
-      <section aria-labelledby="quick-picks-settings-title" className="mb-5 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-        <div className="mb-3">
+      <section aria-labelledby="quick-picks-settings-title" className="mb-5 rounded-2xl bg-surface-container-lowest p-3 shadow-card sm:p-4">
+        <div className="mb-2">
           <h2 id="quick-picks-settings-title" className="font-display text-headline-sm text-on-surface">POS Quick Picks</h2>
-          <p className="mt-1 font-body text-body-sm text-on-surface-variant">Choose automatic top sellers, or add products to Quick Picks from each product’s add/edit form.</p>
+          <p className="mt-1 font-body text-body-sm text-on-surface-variant">Automatic shows top sellers. Manual picks are selected per product.</p>
         </div>
         <fieldset>
           <legend className="sr-only">Quick Picks mode</legend>
-          <div className="flex flex-wrap gap-3">
-            <label className="flex min-h-11 items-center gap-2 rounded-lg bg-surface-container-low px-3 font-body text-body-sm">
+          <div className="grid grid-cols-2 gap-2">
+            <label className="flex min-h-11 min-w-0 items-center gap-2 rounded-lg bg-surface-container-low px-2 font-body text-body-sm">
               <input type="radio" name="quick-pick-mode" value="auto" checked={quickPickMode === 'auto'} onChange={() => { setQuickPickMode('auto'); setQuickPicksError(''); setQuickPicksNotice(''); }} className="h-4 w-4 accent-primary" />
-              Automatic · top sellers
+              Automatic
             </label>
-            <label className="flex min-h-11 items-center gap-2 rounded-lg bg-surface-container-low px-3 font-body text-body-sm">
+            <label className="flex min-h-11 min-w-0 items-center gap-2 rounded-lg bg-surface-container-low px-2 font-body text-body-sm">
               <input type="radio" name="quick-pick-mode" value="manual" checked={quickPickMode === 'manual'} onChange={() => { setQuickPickMode('manual'); setQuickPicksError(''); setQuickPicksNotice(''); }} className="h-4 w-4 accent-primary" />
-              Choose products manually
+              Manual
             </label>
           </div>
         </fieldset>
@@ -504,7 +525,7 @@ function OwnerCatalogContent() {
         {quickPicksNotice && <p role="status" className="mt-3 rounded-lg bg-success-container p-3 font-body text-body-sm text-on-success-container">{quickPicksNotice}</p>}
         <Button
           type="button"
-          className="mt-3"
+          className="mt-2"
           onClick={() => { void saveQuickPicks(); }}
           disabled={savingQuickPicks}
         >
@@ -518,19 +539,19 @@ function OwnerCatalogContent() {
           <MaterialIcon name="search" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xl text-outline" />
           <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search products, descriptions, or SKU" aria-label="Search products" className="h-12 w-full rounded-xl bg-surface-container-lowest pl-11 pr-4 font-body outline-none ring-1 ring-outline-variant focus:ring-2 focus:ring-primary" />
         </label>
-        <div className="scrollbar-hidden flex gap-2 overflow-x-auto py-1">
-          <Chip selected={categoryId === 'all'} onClick={() => setCategoryId('all')}>{t('catalog.items')}</Chip>
-          {activeCategories.map((category) => <Chip key={category.id} selected={categoryId === category.id} onClick={() => setCategoryId(category.id)}><ItemLogo id={category.icon} size="sm" />{category.name}</Chip>)}
+        <div className="scrollbar-hidden flex gap-2 overflow-x-auto">
+          <Chip compact selected={categoryId === 'all'} onClick={() => setCategoryId('all')}>{t('catalog.items')}</Chip>
+          {activeCategories.map((category) => <Chip compact key={category.id} selected={categoryId === category.id} onClick={() => setCategoryId(category.id)}><ItemLogo id={category.icon} size="sm" />{category.name}</Chip>)}
         </div>
-        <div className="scrollbar-hidden flex gap-2 overflow-x-auto py-1">
+        <div className="scrollbar-hidden flex gap-2 overflow-x-auto">
           {(['active', 'archived'] as const).map((state) => {
             const count = items.filter((item) => item.isActive === (state === 'active')).length;
-            return <Chip key={state} selected={productStateFilter === state} onClick={() => setProductStateFilter(state)}>{state === 'active' ? 'Active products' : 'Archived products'} · {count}</Chip>;
+            return <Chip compact key={state} selected={productStateFilter === state} onClick={() => setProductStateFilter(state)}>{state === 'active' ? 'Active products' : 'Archived products'} · {count}</Chip>;
           })}
         </div>
-        <div className="scrollbar-hidden flex gap-2 overflow-x-auto py-1">
+        <div className="scrollbar-hidden flex gap-2 overflow-x-auto">
           {(['all', 'available', '86', 'out'] as const).map((status) => (
-            <Chip key={status} selected={statusFilter === status} onClick={() => setStatusFilter(status)}>
+            <Chip compact key={status} selected={statusFilter === status} onClick={() => setStatusFilter(status)}>
               {status === 'all' ? 'All statuses' : availabilityLabel(status)}
             </Chip>
           ))}
@@ -541,19 +562,24 @@ function OwnerCatalogContent() {
       {(error || notice) && <p role={error ? 'alert' : 'status'} className={`mb-4 rounded-lg p-3 font-body text-body-sm ${error ? 'bg-error-container text-on-error-container' : 'bg-success-container text-on-success-container'}`}>{error || notice}</p>}
 
       {loading ? <ListSkeleton label="Loading catalog" /> : visibleItems.length > 0 ? (
-        <CardGrid className="mobile-gap-3">
-          {visibleItems.map((item) => (
-            <CatalogItemCard
-              key={item.id}
-              item={item}
-              category={categories.find((value) => value.id === item.categoryId)}
-              onToggle={() => { void toggleAvailability(item); }}
-              onEdit={() => openEditItem(item)}
-              onDelete={() => setDeleteTarget(item)}
-              onRestore={() => { void restoreProduct(item); }}
-            />
-          ))}
-        </CardGrid>
+        <>
+          <CardGrid className="mobile-gap-3">
+            {visibleItems.slice(0, renderLimit).map((item) => (
+              <CatalogItemCard
+                key={item.id}
+                item={item}
+                category={categories.find((value) => value.id === item.categoryId)}
+                onToggle={() => { void toggleAvailability(item); }}
+                onEdit={() => openEditItem(item)}
+                onDelete={() => setDeleteTarget(item)}
+                onRestore={() => { void restoreProduct(item); }}
+              />
+            ))}
+          </CardGrid>
+          {renderLimit < visibleItems.length && (
+            <div ref={catalogLoadSentinel} className="h-1" aria-hidden="true" />
+          )}
+        </>
       ) : (
         <section className="flex min-h-64 flex-col items-center justify-center rounded-2xl border border-dashed border-outline-variant bg-surface-container-lowest p-8 text-center">
           <span className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-surface-container text-primary"><MaterialIcon name={search || categoryId !== 'all' || statusFilter !== 'all' ? 'search_off' : 'inventory_2'} className="text-2xl" /></span>
@@ -584,7 +610,7 @@ function OwnerCatalogContent() {
           )}
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="font-body text-label-md">Product name<input required value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
-            <label className="font-body text-label-md">{t('catalog.priceTnd')}<input required inputMode="decimal" value={draft.price} onChange={(event) => setDraft((current) => ({ ...current, price: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
+            <label className="font-body text-label-md">{t('catalog.priceMillimes')}<input required type="number" min="0" step="1" inputMode="numeric" placeholder="e.g. 1800" value={draft.price} onChange={(event) => setDraft((current) => ({ ...current, price: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /><span className="mt-1 block text-body-sm text-outline">Enter whole millimes, e.g. 200 or 1800.</span></label>
             <label className="font-body text-label-md">SKU / barcode<input value={draft.sku} onChange={(event) => setDraft((current) => ({ ...current, sku: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
             <label className="font-body text-label-md">Category<select required value={draft.categoryId} onChange={(event) => setDraft((current) => ({ ...current, categoryId: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary"><option value="">Select a category</option>{activeCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
             <label className="font-body text-label-md">Stock count <span className="text-outline">(leave blank for untracked)</span><input type="number" min="0" step="1" value={draft.availability === 'out' ? '0' : draft.stockCount} onChange={(event) => setDraft((current) => ({ ...current, stockCount: event.target.value, availability: event.target.value === '0' ? 'out' : current.availability === 'out' ? 'available' : current.availability }))} placeholder="Not tracked" className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
@@ -617,14 +643,14 @@ function OwnerCatalogContent() {
                 <div key={modifier.id} className="flex items-center gap-2">
                   <label className="sr-only" htmlFor={`modifier-name-${modifier.id}`}>Option name</label>
                   <input id={`modifier-name-${modifier.id}`} value={modifier.name} onChange={(event) => setDraft((current) => ({ ...current, modifiers: current.modifiers.map((option, optionIndex) => optionIndex === index ? { ...option, name: event.target.value } : option) }))} placeholder="Option name" className="h-11 min-w-0 flex-1 rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" />
-                  <label className="sr-only" htmlFor={`modifier-price-${modifier.id}`}>Option price in TND</label>
-                  <div className="relative w-32 shrink-0"><input id={`modifier-price-${modifier.id}`} inputMode="decimal" value={modifier.price} onChange={(event) => setDraft((current) => ({ ...current, modifiers: current.modifiers.map((option, optionIndex) => optionIndex === index ? { ...option, price: event.target.value } : option) }))} placeholder="0.000" className="h-11 w-full rounded-lg bg-surface-container-low px-3 pr-10 text-right outline-none focus:ring-2 focus:ring-primary" /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-body-sm text-outline">TND</span></div>
+                  <label className="sr-only" htmlFor={`modifier-price-${modifier.id}`}>Option price in millimes</label>
+                  <div className="relative w-40 shrink-0"><input id={`modifier-price-${modifier.id}`} type="number" min="0" step="1" inputMode="numeric" value={modifier.price} onChange={(event) => setDraft((current) => ({ ...current, modifiers: current.modifiers.map((option, optionIndex) => optionIndex === index ? { ...option, price: event.target.value } : option) }))} placeholder="0" className="h-11 w-full rounded-lg bg-surface-container-low px-3 pr-16 text-right outline-none focus:ring-2 focus:ring-primary" /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-body-sm text-outline">millimes</span></div>
                   <button type="button" aria-label={`Remove ${modifier.name || 'modifier option'}`} onClick={() => setDraft((current) => ({ ...current, modifiers: current.modifiers.filter((_, optionIndex) => optionIndex !== index) }))} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-error-dark hover:bg-error-container"><MaterialIcon name="delete" /></button>
                 </div>
               ))}
               <Button type="button" variant="secondary" className="self-start" onClick={() => setDraft((current) => ({ ...current, modifiers: [...current.modifiers, { id: crypto.randomUUID(), name: '', price: '' }] }))}><MaterialIcon name="add" />Add option</Button>
             </div>
-            <p className="mt-2 font-body text-body-sm text-outline">Each option can have its own TND add-on price.</p>
+            <p className="mt-2 font-body text-body-sm text-outline">Enter each option add-on as a whole number of millimes.</p>
           </fieldset>
 
           <label className="flex items-center gap-2 font-body text-label-md"><input type="checkbox" checked={draft.isActive} onChange={(event) => setDraft((current) => ({ ...current, isActive: event.target.checked }))} className="h-4 w-4 accent-primary" />Product is active in the POS</label>

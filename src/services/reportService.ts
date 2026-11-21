@@ -746,13 +746,25 @@ export const reportService = {
     ]);
     if (!store) throw new Error('The store could not be found.');
     const timeZone = store.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
-    return await summarize(
+    const periodFrom = new Date(sinceLastZ(storeId, reports, timeZone, shifts)).getTime();
+    const periodTo = Date.now();
+    const summary = await summarize(
       storeId,
-      new Date(sinceLastZ(storeId, reports, timeZone, shifts)).getTime(),
-      Date.now(),
+      periodFrom,
+      periodTo,
       expensesIncludedInZReports(storeId, reports),
       true,
     );
+    return {
+      ...summary,
+      shiftLines: summary.shiftLines.filter((shift) => {
+        const openedAt = new Date(shift.openedAt).getTime();
+        const closedAt = shift.closedAt ? new Date(shift.closedAt).getTime() : undefined;
+        return openedAt >= periodFrom && openedAt <= periodTo &&
+          (shift.status === 'in_progress' ||
+            (closedAt !== undefined && closedAt >= periodFrom && closedAt <= periodTo));
+      }),
+    };
   },
 
   async getInsights(storeId: string, from: number, to: number) {

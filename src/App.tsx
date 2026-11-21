@@ -15,6 +15,7 @@ import { t } from './i18n/translations';
 import { LockScreen } from './components/LockScreen';
 import { permissionService } from './services/permissionService';
 import { classifyInitializationError } from './services/serverErrorService';
+import { PullToRefresh } from './components/PullToRefresh';
 
 const SetNewPasswordScreen = lazy(() => import('./screens/SetNewPasswordScreen').then((module) => ({ default: module.SetNewPasswordScreen })));
 const PosScreen = lazy(() => import('./screens/PosScreen').then((module) => ({ default: module.PosScreen })));
@@ -369,8 +370,9 @@ export default function App() {
       )}
       <PermissionsPrompt />
       {user && !locked && <NotificationsBridge />}
-      <Suspense fallback={<LoadingScreen message={t('app.loading')} />}>
-        <Routes>
+      <PullToRefresh enabled={Boolean(user && !locked && !user.mustChangePassword && !user.mustSetPin)}>
+        <Suspense fallback={<LoadingScreen message={t('app.loading')} />}>
+          <Routes>
           <Route path="/" element={<GuestRoute />} />
           <Route path="/set-password" element={<SetPasswordRoute />} />
           <Route path="/lock" element={<LockRoute />} />
@@ -407,8 +409,9 @@ export default function App() {
           <Route path="/admin/settings" element={<ProtectedRoute roles={['super_admin']}><SettingsScreen /></ProtectedRoute>} />
           <Route path="/admin/*" element={<ProtectedRoute roles={['super_admin']}><RolePlaceholder title="Super Admin workspace" /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Suspense>
+          </Routes>
+        </Suspense>
+      </PullToRefresh>
     </>
   );
 }

@@ -24,6 +24,7 @@ import { buildTicketDocument } from '../services/ticketDocument';
 import { downloadThermalPdf, printOrSharePdf, shareThermalPdf } from '../services/receiptExport';
 import { useAuthStore } from '../stores/authStore';
 import { updateDisplaySettings, useDisplaySettings, type DisplayTheme } from '../lib/displaySettings';
+import { parseNonNegativeMillimes } from '../lib/millimes';
 import { t, type TranslationKey } from '../i18n/translations';
 import { adminWorkspaceLinks, ownerWorkspaceLinks } from '../app/navigation';
 import { DEFAULT_NOTIFICATION_PREFERENCES, resolveStoreSettings, type CatalogItemRecord, type CategoryRecord, type NotificationRecord, type NotificationType, type OrderRecord, type PositionRecord, type ReportRecord, type ScheduleShiftRecord, type SettlementTerms } from '../types/domain';
@@ -88,12 +89,9 @@ function localDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-function parseTndAmount(value: string): number {
-  const parsed = Number(value.trim().replace(',', '.'));
-  const millimes = Math.round(parsed * 1000);
-  if (!Number.isFinite(parsed) || parsed < 0 || !Number.isSafeInteger(millimes)) {
-    throw new Error('Enter a non-negative cash amount.');
-  }
+function parseMillimesAmount(value: string): number {
+  const millimes = parseNonNegativeMillimes(value);
+  if (millimes === undefined) throw new Error('Enter a non-negative whole number of millimes.');
   return millimes;
 }
 
@@ -274,10 +272,10 @@ export function SettingsScreen() {
   const [storeName, setStoreName] = useState(store?.name ?? '');
   const [ownerName, setOwnerName] = useState(user?.name ?? '');
   const [ownerPhone, setOwnerPhone] = useState(user?.phone ?? '');
-  const [dailySalesTarget, setDailySalesTarget] = useState('0.000');
+  const [dailySalesTarget, setDailySalesTarget] = useState('0');
   const [adminPin, setAdminPin] = useState('');
   const [staffAutoLockMinutes, setStaffAutoLockMinutes] = useState('5');
-  const [cashOutAlertThreshold, setCashOutAlertThreshold] = useState('50.000');
+  const [cashOutAlertThreshold, setCashOutAlertThreshold] = useState('50000');
   const [storeAddress, setStoreAddress] = useState('');
   const [storePhone, setStorePhone] = useState('');
   const [storeTaxId, setStoreTaxId] = useState('');
@@ -345,9 +343,9 @@ export function SettingsScreen() {
       ]).then(([nextStore, nextPositions, nextCategories, nextItems]) => {
         setStore(nextStore);
         setStoreName(nextStore?.name ?? '');
-        setDailySalesTarget(((nextStore?.dailySalesTargetMillimes ?? 0) / 1000).toFixed(3));
+        setDailySalesTarget(String(nextStore?.dailySalesTargetMillimes ?? 0));
         setStaffAutoLockMinutes(String(nextStore?.staffAutoLockMinutes ?? 5));
-        setCashOutAlertThreshold(((nextStore?.cashOutAlertThresholdMillimes ?? 50_000) / 1000).toFixed(3));
+        setCashOutAlertThreshold(String(nextStore?.cashOutAlertThresholdMillimes ?? 50_000));
         setStoreAddress(nextStore?.address ?? '');
         setStorePhone(nextStore?.phone ?? '');
         setStoreTaxId(nextStore?.taxId ?? '');
@@ -439,7 +437,7 @@ export function SettingsScreen() {
     try {
       setStore(await userService.updateStoreInfo(store.id, user.id, {
         name: storeName,
-        dailySalesTargetMillimes: parseTndAmount(dailySalesTarget),
+        dailySalesTargetMillimes: parseMillimesAmount(dailySalesTarget),
         address: storeAddress,
         phone: storePhone,
         taxId: storeTaxId,
@@ -584,7 +582,7 @@ export function SettingsScreen() {
       setStore(await userService.updateCashOutAlertThreshold(
         store.id,
         user.id,
-        parseTndAmount(cashOutAlertThreshold),
+        parseMillimesAmount(cashOutAlertThreshold),
       ));
       setNotice('Cash-out alert threshold saved.');
     } catch (settingsError) {
@@ -963,7 +961,7 @@ export function SettingsScreen() {
               <label className="font-body text-label-md">Store phone<input value={storePhone} maxLength={50} onChange={(event) => setStorePhone(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
               <label className="font-body text-label-md">Tax ID<input value={storeTaxId} maxLength={50} onChange={(event) => setStoreTaxId(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
               <label className="font-body text-label-md">Store ID<input readOnly value={store.code.toUpperCase()} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 text-on-surface-variant" /></label>
-              <label className="font-body text-label-md">{t('settings.dailySalesTarget')} (DT)<input required type="number" min="0" step="0.001" inputMode="decimal" value={dailySalesTarget} onChange={(event) => setDailySalesTarget(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
+              <label className="font-body text-label-md">{t('settings.dailySalesTarget')} (millimes)<input required type="number" min="0" step="1" inputMode="numeric" value={dailySalesTarget} onChange={(event) => setDailySalesTarget(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
               <p className="-mt-2 font-body text-body-sm text-outline">{t('settings.dailySalesTargetHelp')}</p>
               <Button type="submit" variant="secondary">{t('common.save')}</Button>
             </form>
@@ -1142,8 +1140,8 @@ export function SettingsScreen() {
                 <h3 className="font-body text-label-lg text-on-surface">Large cash-out threshold</h3>
                 <p className="mt-1 font-body text-body-sm text-on-surface-variant">Notify the owner when a cash-out is greater than this amount. Set to 0 to alert for every cash-out. Default: 50.000 DT.</p>
               </div>
-              <label htmlFor="cash-out-alert-threshold" className="font-body text-label-md text-on-surface">Alert threshold (DT)</label>
-              <input id="cash-out-alert-threshold" type="number" min="0" step="0.001" inputMode="decimal" required value={cashOutAlertThreshold} onChange={(event) => setCashOutAlertThreshold(event.target.value)} className="h-12 rounded-lg bg-surface-container-lowest px-3 outline-none focus:ring-2 focus:ring-primary" />
+              <label htmlFor="cash-out-alert-threshold" className="font-body text-label-md text-on-surface">Alert threshold (millimes)</label>
+              <input id="cash-out-alert-threshold" type="number" min="0" step="1" inputMode="numeric" required value={cashOutAlertThreshold} onChange={(event) => setCashOutAlertThreshold(event.target.value)} className="h-12 rounded-lg bg-surface-container-lowest px-3 outline-none focus:ring-2 focus:ring-primary" />
               <Button type="submit" variant="secondary" disabled={savingCashOutThreshold}>{savingCashOutThreshold ? 'Saving…' : t('common.save')}</Button>
             </form>
           </section>

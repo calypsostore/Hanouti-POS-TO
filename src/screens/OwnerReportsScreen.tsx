@@ -13,6 +13,7 @@ import { useAuthStore } from '../stores/authStore';
 import { userService } from '../services/userService';
 import type { ReportRecord, StoreRecord } from '../types/domain';
 import { ReportView } from '../components/ReportView';
+import { useFocusRefreshKey } from '../lib/useFocusRefreshKey';
 
 type DashboardSummary = Awaited<ReturnType<typeof reportService.getDashboard>>;
 type InsightsData = Awaited<ReturnType<typeof reportService.getInsights>>;
@@ -68,6 +69,7 @@ function getInsightRange(range: InsightRange, customFrom: string, customTo: stri
 function OwnerReportsContent() {
   const user = useAuthStore((state) => state.user);
   const storeId = user?.storeId ?? '';
+  const refreshKey = useFocusRefreshKey();
   const [store, setStore] = useState<StoreRecord>();
   const [reports, setReports] = useState<ReportRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -114,7 +116,7 @@ function OwnerReportsContent() {
       if (active) setLoading(false);
     });
     return () => { active = false; };
-  }, [customFrom, customTo, insightFrom, insightTo, insightRangeType, period, storeId]);
+  }, [customFrom, customTo, insightFrom, insightTo, insightRangeType, period, refreshKey, storeId]);
 
   return (
     <WorkspaceLayout title={t('reports.title')} storeName={store?.name} links={ownerWorkspaceLinks}>

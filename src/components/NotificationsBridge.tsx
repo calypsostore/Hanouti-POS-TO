@@ -15,6 +15,7 @@ import {
 import { permissionService } from '../services/permissionService';
 import { useAuthStore } from '../stores/authStore';
 import { useNotificationStore } from '../stores/notificationStore';
+import { useFocusRefreshKey } from '../lib/useFocusRefreshKey';
 import { notificationPath } from '../lib/notificationPath';
 import type { NotificationRecord } from '../types/domain';
 
@@ -51,6 +52,7 @@ export function NotificationsBridge() {
   const [banner, setBanner] = useState<NotificationRecord | null>(null);
   const appActive = useRef(true);
   const listenerRegistered = useRef(false);
+  const refreshKey = useFocusRefreshKey();
 
   useEffect(() => {
     if (!user || locked) {
@@ -60,7 +62,7 @@ export function NotificationsBridge() {
     void load(user).catch((error: unknown) => {
       console.error('[notifications] Could not load shared notification state.', error);
     });
-  }, [locked, load, reset, user]);
+  }, [locked, load, refreshKey, reset, user]);
 
   useEffect(() => {
     if (!listenerRegistered.current) {

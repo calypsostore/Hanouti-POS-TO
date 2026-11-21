@@ -14,11 +14,13 @@ import { useAuthStore } from '../stores/authStore';
 import { userService } from '../services/userService';
 import type { OrderRecord } from '../types/domain';
 import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
+import { useFocusRefreshKey } from '../lib/useFocusRefreshKey';
 
 function OwnerVoidRequestsContent() {
   const user = useAuthStore((state) => state.user);
   const storeId = user?.storeId ?? '';
   const ownerId = user?.id ?? '';
+  const refreshKey = useFocusRefreshKey();
   const [requests, setRequests] = useState<OrderRecord[]>([]);
   const [storeName, setStoreName] = useState<string>();
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
@@ -49,7 +51,7 @@ function OwnerVoidRequestsContent() {
       console.error('Unable to load store information for void requests.', loadError);
       setError(t('common.storeLoadFailed'));
     });
-  }, [refreshRequests, storeId, user?.storeId]);
+  }, [refreshKey, refreshRequests, storeId, user?.storeId]);
 
   useEffect(() => subscribeToStoreChanges(storeId, ['orders'], () => {
     void refreshRequests().catch((loadError: unknown) => {

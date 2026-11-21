@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { UserRole, UserSummary } from '../types/domain';
+import type { ProfileAvatarId, UserRole, UserSummary } from '../types/domain';
 import { authService } from '../services/authService';
 import { initializeMockData } from '../services/mockDataService';
 import { useCartStore } from './cartStore';
@@ -21,6 +21,7 @@ interface AuthState {
   setInitialPassword: (password: string) => Promise<UserSummary>;
   setInitialPin: (pin: string) => Promise<void>;
   updateOwnerProfile: (changes: { name: string; phone: string }) => Promise<UserSummary>;
+  updateProfileAvatar: (avatarId: ProfileAvatarId) => Promise<UserSummary>;
   lock: () => Promise<void>;
   unlockWithPin: (pin: string) => Promise<void>;
   unlockWithPassword: (password: string) => Promise<void>;
@@ -96,6 +97,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const user = get().user;
     if (!user || user.role !== 'owner') throw new Error('Only a signed-in store owner can update this profile.');
     const updatedUser = await userService.updateOwnerProfile(user.id, changes);
+    set({ user: updatedUser });
+    return updatedUser;
+  },
+  updateProfileAvatar: async (avatarId) => {
+    const user = get().user;
+    if (!user) throw new Error('You must sign in before choosing an avatar.');
+    const updatedUser = await userService.updateProfileAvatar(user.id, avatarId);
     set({ user: updatedUser });
     return updatedUser;
   },

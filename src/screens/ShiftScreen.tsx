@@ -23,11 +23,13 @@ import { PageContainer } from '../components/layout';
 import { updateService } from '../services/updateService';
 import type { ShiftSalesBreakdown } from '../services/orderService';
 import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
+import { useFocusRefreshKey } from '../lib/useFocusRefreshKey';
 import { reportService, type ReportDayStatus } from '../services/reportService';
 import { ReportView } from '../components/ReportView';
 import type { ReportRecord, ReportShiftLine } from '../types/domain';
 import type { OrderRecord } from '../types/domain';
 import { Link } from 'react-router-dom';
+import { parseNonNegativeMillimes } from '../lib/millimes';
 
 type ShiftCloseBreakdown = ShiftSalesBreakdown & {
   pendingVoidCount: number;
@@ -46,10 +48,9 @@ const emptyShiftBreakdown: ShiftCloseBreakdown = {
   compsMillimes: 0,
 };
 
-function parseTnd(value: string): number {
-  const parsed = Number(value.trim().replace(',', '.'));
-  const millimes = Math.round(parsed * 1000);
-  if (!Number.isFinite(parsed) || parsed < 0 || !Number.isSafeInteger(millimes)) throw new Error('Enter a non-negative cash amount.');
+function parseMillimes(value: string): number {
+  const millimes = parseNonNegativeMillimes(value);
+  if (millimes === undefined) throw new Error('Enter a non-negative whole number of millimes.');
   return millimes;
 }
 
@@ -84,10 +85,11 @@ const cashMovementReasons: { reason: CashMovementReason; label: string }[] = [
 function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const user = useAuthStore((state) => state.user);
   const storeId = user?.storeId ?? '';
+  const refreshKey = useFocusRefreshKey();
   const [shifts, setShifts] = useState<ShiftRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [ownOpenShift, setOwnOpenShift] = useState<ShiftRecord>();
-  const [startingCash, setStartingCash] = useState('50.000');
+  const [startingCash, setStartingCash] = useState('50000');
   const [startingCashEdited, setStartingCashEdited] = useState(false);
   const [countedCash, setCountedCash] = useState('');
   const [differenceNote, setDifferenceNote] = useState('');
@@ -194,7 +196,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       console.error('Unable to load shifts.', loadError);
       setError(t('common.loadFailed'));
     }).finally(() => setLoading(false));
-  }, [refresh]);
+  }, [refresh, refreshKey]);
 
   useEffect(() => subscribeToStoreChanges(storeId, ['orders', 'shifts', 'notifications'], () => {
     void refresh().catch((loadError: unknown) => {
@@ -209,7 +211,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     setError('');
     setNotice('');
     try {
-      await shiftService.openShift(storeId, user.id, parseTnd(startingCash));
+      await shiftService.openShift(storeId, user.id, parseMillimes(startingCash));
       setStartingCashEdited(false);
       await refresh();
       setOpenShiftSheetOpen(false);
@@ -227,7 +229,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     try {
       const shift = await shiftService.closeShift(
         ownOpenShift.id,
-        parseTnd(countedCash),
+        parseMillimes(countedCash),
         differenceNote,
       );
       setClosedShiftSummary({ shift, breakdown: breakdownsByShift[shift.id] ?? emptyShiftBreakdown });
@@ -271,14 +273,6 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     setMovementNote('');
     setError('');
     setMovementSheetOpen(true);
-  }
-
-  function pressMovementAmount(value: string) {
-    setMovementAmount((current) => appendDecimalAmount(current, value));
-  }
-
-  function pressCountedCash(value: string) {
-    setCountedCash((current) => appendDecimalAmount(current, value));
   }
 
   async function createXReport() {
@@ -404,9 +398,9 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     setZBusy(true);
     try {
       if (!ownerPin || !/^\d{4}$/.test(ownerPin)) throw new Error('Owner PIN is required for every Z report.');
-      const countedCashMillimes = parseTnd(zCountedCash);
-      const countedCardMillimes = parseTnd(zCountedCard);
-      const countedOtherMillimes = store?.allowOtherPayments ? parseTnd(zCountedOther) : 0;
+      const countedCashMillimes = parseMillimes(zCountedCash);
+      const countedCardMillimes = parseMillimes(zCountedCard);
+      const countedOtherMillimes = store?.allowOtherPayments ? parseMillimes(zCountedOther) : 0;
       const differenceMillimes = countedCashMillimes - zExpectedCash;
       const cardDifferenceMillimes = countedCardMillimes - zExpectedCard;
       const otherDifferenceMillimes = countedOtherMillimes - zExpectedOther;
@@ -449,7 +443,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
         shiftId: movementShiftId,
         actorId: user.id,
         kind: movementKind,
-        amountMillimes: parseTnd(movementAmount),
+        amountMillimes: parseMillimes(movementAmount),
         reason: movementReason,
         note: movementNote,
       });
@@ -475,7 +469,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   }
 
   const openCount = shifts.filter((shift) => shift.status === 'open').length;
-  const enteredMovementMillimes = Math.round(Number(movementAmount.replace(',', '.')) * 1000);
+  const enteredMovementMillimes = parseNonNegativeMillimes(movementAmount);
   const ownBreakdown = ownOpenShift ? breakdownsByShift[ownOpenShift.id] ?? emptyShiftBreakdown : emptyShiftBreakdown;
   const ownMovementTotals = ownOpenShift
     ? getCashMovementTotals(cashMovements, ownOpenShift.id)
@@ -507,15 +501,10 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       ? undefined
       : archiveReports.filter((report) => report.type === 'Z')
         .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
-  const parsedZAmount = Number(zCountedCash.replace(',', '.'));
-  const parsedZMillimes = Math.round(parsedZAmount * 1000);
-  const parsedZCountedCash = zCountedCash.trim() && Number.isFinite(parsedZAmount) &&
-    parsedZAmount >= 0 && Number.isSafeInteger(parsedZMillimes)
-    ? parsedZMillimes
-    : undefined;
+  const parsedZCountedCash = parseNonNegativeMillimes(zCountedCash);
   const zDifference = parsedZCountedCash === undefined ? undefined : parsedZCountedCash - zExpectedCash;
-  const parsedZCardMillimes = zCountedCard.trim() ? Math.round(Number(zCountedCard.replace(',', '.')) * 1000) : undefined;
-  const parsedZOtherMillimes = zCountedOther.trim() ? Math.round(Number(zCountedOther.replace(',', '.')) * 1000) : undefined;
+  const parsedZCardMillimes = parseNonNegativeMillimes(zCountedCard);
+  const parsedZOtherMillimes = parseNonNegativeMillimes(zCountedOther);
   const zCardDifference = parsedZCardMillimes === undefined ? undefined : parsedZCardMillimes - zExpectedCard;
   const zOtherDifference = store?.allowOtherPayments
     ? parsedZOtherMillimes === undefined ? undefined : parsedZOtherMillimes - zExpectedOther
@@ -762,9 +751,8 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       <BottomSheet open={openShiftSheetOpen} onClose={() => setOpenShiftSheetOpen(false)} title={t('shift.openShift')}>
         <form onSubmit={(event) => { void openShift(event); }} className="flex flex-col gap-3">
           <p className="font-body text-body-sm text-on-surface-variant">Count the cash drawer before taking orders.</p>
-          <label htmlFor="starting-cash" className="block font-body text-label-md">{t('shift.startingCash')} (TND)</label>
-          <input id="starting-cash" inputMode="decimal" required value={startingCash} onChange={(event) => { setStartingCash(event.target.value); setStartingCashEdited(true); }} className="h-14 w-full rounded-xl bg-surface-container-low px-4 font-body text-title-md tabular-nums outline-none focus:ring-2 focus:ring-primary" />
-          <Keypad decimal onPress={(value) => { setStartingCash((current) => appendDecimalAmount(current, value)); setStartingCashEdited(true); }} onClear={() => { setStartingCash(''); setStartingCashEdited(true); }} onBackspace={() => { setStartingCash((current) => current.slice(0, -1)); setStartingCashEdited(true); }} />
+          <label htmlFor="starting-cash" className="block font-body text-label-md">{t('shift.startingCash')} (millimes)</label>
+          <input id="starting-cash" type="number" min="0" step="1" inputMode="numeric" required value={startingCash} onChange={(event) => { setStartingCash(event.target.value); setStartingCashEdited(true); }} className="h-14 w-full rounded-xl bg-surface-container-low px-4 font-body text-title-md tabular-nums outline-none focus:ring-2 focus:ring-primary" />
           <div className="sheet-action-bar grid grid-cols-2 gap-2">
             <Button type="button" variant="ghost" onClick={() => setOpenShiftSheetOpen(false)}>{t('common.cancel')}</Button>
             <Button type="submit"><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
@@ -860,6 +848,10 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
               {zShiftLines.map((shift) => (
                 <section key={shift.shiftId} className="space-y-1 border-b border-outline-variant pb-3 last:border-0 last:pb-0">
                   <h3 className="font-display text-title-sm">{shift.staffName}</h3>
+                  <p className="font-body text-body-xs text-on-surface-variant">
+                    Opened {new Date(shift.openedAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })} ·
+                    {' '}Closed {shift.closedAt ? new Date(shift.closedAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '—'}
+                  </p>
                   <Metric label="Float" amount={shift.startingCashMillimes} />
                   <Metric label="Cash sales" amount={shift.cashSalesMillimes ?? 0} />
                   <Metric label="Card sales" amount={shift.cardSalesMillimes ?? 0} />
@@ -874,19 +866,16 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
                 </section>
               ))}
             </div>
-            <label className="font-body text-label-md">Total cash for the day, excluding opening floats (TND)
-              <input readOnly inputMode="none" value={zCountedCash} placeholder="0.000" className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
+            <label className="font-body text-label-md">Total cash for the day, excluding opening floats (millimes)
+              <input type="number" min="0" step="1" inputMode="numeric" required value={zCountedCash} onChange={(event) => setZCountedCash(event.target.value)} placeholder="0" className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
             </label>
-            <Keypad decimal onPress={(value) => setZCountedCash((current) => appendDecimalAmount(current, value))} onClear={() => setZCountedCash('')} onBackspace={() => setZCountedCash((current) => current.slice(0, -1))} />
-            <label className="font-body text-label-md">Total card payments in period (TND)
-              <input readOnly inputMode="none" value={zCountedCard} placeholder="0.000" className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
+            <label className="font-body text-label-md">Total card payments in period (millimes)
+              <input type="number" min="0" step="1" inputMode="numeric" required value={zCountedCard} onChange={(event) => setZCountedCard(event.target.value)} placeholder="0" className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
             </label>
-            <Keypad decimal onPress={(value) => setZCountedCard((current) => appendDecimalAmount(current, value))} onClear={() => setZCountedCard('')} onBackspace={() => setZCountedCard((current) => current.slice(0, -1))} />
             {store?.allowOtherPayments && <>
-              <label className="font-body text-label-md">Total other payments in period (TND)
-                <input readOnly inputMode="none" value={zCountedOther} placeholder="0.000" className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
+              <label className="font-body text-label-md">Total other payments in period (millimes)
+                <input type="number" min="0" step="1" inputMode="numeric" required value={zCountedOther} onChange={(event) => setZCountedOther(event.target.value)} placeholder="0" className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
               </label>
-              <Keypad decimal onPress={(value) => setZCountedOther((current) => appendDecimalAmount(current, value))} onClear={() => setZCountedOther('')} onBackspace={() => setZCountedOther((current) => current.slice(0, -1))} />
             </>}
             {zReviewed && zDifference !== undefined && (
               <div className="space-y-2 rounded-xl bg-surface-container-low p-3" aria-live="polite">
@@ -945,9 +934,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           movements={cashMovements}
           countedCash={countedCash}
           differenceNote={differenceNote}
-          onCountPress={pressCountedCash}
-          onCountClear={() => setCountedCash('')}
-          onCountBackspace={() => setCountedCash((value) => value.slice(0, -1))}
+          onCountChange={setCountedCash}
           onNoteChange={setDifferenceNote}
           onSubmit={(event) => { void closeShift(event); }}
           submitLabel={t('shift.closeShift')}
@@ -988,21 +975,18 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
         title={movementKind === 'in' ? 'Cash in' : 'Cash out'}
       >
         <form onSubmit={(event) => { void submitCashMovement(event); }} className="flex flex-col gap-3">
-          <label htmlFor="cash-movement-amount" className="font-body text-label-md text-on-surface">Amount (TND)</label>
+          <label htmlFor="cash-movement-amount" className="font-body text-label-md text-on-surface">Amount (millimes)</label>
           <input
             id="cash-movement-amount"
-            readOnly
-            inputMode="none"
+            type="number"
+            min="0"
+            step="1"
+            inputMode="numeric"
+            required
             value={movementAmount}
-            placeholder="0.000"
+            onChange={(event) => setMovementAmount(event.target.value)}
+            placeholder="0"
             className="h-12 w-full rounded-lg bg-surface-container-low px-3 font-display text-title-md tabular-nums"
-          />
-          <Keypad
-            decimal
-            disabled={movementBusy}
-            onPress={pressMovementAmount}
-            onClear={() => setMovementAmount('')}
-            onBackspace={() => setMovementAmount((value) => value.slice(0, -1))}
           />
           <div>
             <p className="mb-2 font-body text-label-md text-on-surface">Reason</p>
@@ -1017,7 +1001,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           </label>
           <div className="sheet-action-bar grid grid-cols-2 gap-2">
             <Button type="button" variant="ghost" onClick={() => setMovementSheetOpen(false)}>Cancel</Button>
-            <Button type="submit" disabled={movementBusy || !movementShiftId || !Number.isSafeInteger(enteredMovementMillimes) || enteredMovementMillimes <= 0}>
+            <Button type="submit" disabled={movementBusy || !movementShiftId || enteredMovementMillimes === undefined || enteredMovementMillimes <= 0}>
               <MaterialIcon name={movementKind === 'in' ? 'add' : 'remove'} />Record {movementKind === 'in' ? 'cash in' : 'cash out'}
             </Button>
           </div>
@@ -1053,25 +1037,13 @@ function getExpectedCash(shift: ShiftRecord, breakdown: ShiftCloseBreakdown, mov
     movementTotals.cashInMillimes - movementTotals.cashOutMillimes;
 }
 
-function appendDecimalAmount(current: string, value: string) {
-  if (value === '.') {
-    if (current.includes('.')) return current;
-    return current ? `${current}.` : '0.';
-  }
-  const [whole, fraction] = current.split('.');
-  if (whole.length >= 9 || (fraction !== undefined && fraction.length >= 3)) return current;
-  return current + value;
-}
-
 function ShiftCloseForm({
   shift,
   breakdown,
   movements,
   countedCash,
   differenceNote,
-  onCountPress,
-  onCountClear,
-  onCountBackspace,
+  onCountChange,
   onNoteChange,
   onSubmit,
   submitLabel,
@@ -1082,9 +1054,7 @@ function ShiftCloseForm({
   movements: CashMovementRecord[];
   countedCash: string;
   differenceNote: string;
-  onCountPress: (value: string) => void;
-  onCountClear: () => void;
-  onCountBackspace: () => void;
+  onCountChange: (value: string) => void;
   onNoteChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   submitLabel: string;
@@ -1093,10 +1063,7 @@ function ShiftCloseForm({
   const [reviewed, setReviewed] = useState(false);
   const movementTotals = getCashMovementTotals(movements, shift.id);
   const expectedCash = getExpectedCash(shift, breakdown, movements);
-  const parsedCount = countedCash.trim() ? Number(countedCash.replace(',', '.')) : Number.NaN;
-  const countedCashMillimes = Number.isFinite(parsedCount) && parsedCount >= 0
-    ? Math.round(parsedCount * 1000)
-    : undefined;
+  const countedCashMillimes = parseNonNegativeMillimes(countedCash);
   const difference = countedCashMillimes === undefined ? undefined : countedCashMillimes - expectedCash;
   function submitOrReview(event: FormEvent<HTMLFormElement>) {
     if (!reviewed) {
@@ -1138,20 +1105,18 @@ function ShiftCloseForm({
           </div>
         </>}
       </div>
-      <label htmlFor={`counted-cash-${shift.id}`} className="font-body text-label-md">{t('shift.countedCash')} (TND)</label>
+      <label htmlFor={`counted-cash-${shift.id}`} className="font-body text-label-md">{t('shift.countedCash')} (millimes)</label>
       <input
         id={`counted-cash-${shift.id}`}
-        readOnly
-        inputMode="none"
+        type="number"
+        min="0"
+        step="1"
+        inputMode="numeric"
+        required
         value={countedCash}
-        placeholder="0.000"
+        onChange={(event) => onCountChange(event.target.value)}
+        placeholder="0"
         className="h-14 rounded-xl bg-surface-container-low px-4 font-body text-title-md tabular-nums outline-none focus:ring-2 focus:ring-primary"
-      />
-      <Keypad
-        decimal
-        onPress={onCountPress}
-        onClear={onCountClear}
-        onBackspace={onCountBackspace}
       />
       {reviewed && difference !== undefined && (
         <p

@@ -1,4 +1,5 @@
 export type UserRole = 'staff' | 'owner' | 'super_admin';
+export type ProfileAvatarId = 'avatar-1' | 'avatar-2' | 'avatar-3' | 'avatar-4' | 'avatar-5' | 'avatar-6';
 export type OrderStatus = 'done' | 'pending_void' | 'voided';
 export type PaymentMethod = 'cash' | 'card' | 'other' | 'tab';
 export type ShiftStatus = 'open' | 'closed';
@@ -44,6 +45,7 @@ export interface UserRecord {
   id: string;
   role: UserRole;
   name: string;
+  avatarId?: ProfileAvatarId;
   phone?: string;
   notes?: string;
   email?: string;

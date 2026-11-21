@@ -6,6 +6,7 @@ import { MaterialIcon } from '../components/MaterialIcon';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
+import { useFocusRefreshKey } from '../lib/useFocusRefreshKey';
 import { adminWorkspaceLinks } from '../app/navigation';
 import { t } from '../i18n/translations';
 import { orderService } from '../services/orderService';
@@ -48,6 +49,7 @@ function ExpiryTag({ store }: { store: StoreRecord }) {
 }
 
 export function SuperAdminOverviewScreen() {
+  const refreshKey = useFocusRefreshKey();
   const [stores, setStores] = useState<StoreRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ totalOrders: 0, totalSales: 0, noOpenShifts: 0 });
@@ -89,7 +91,7 @@ export function SuperAdminOverviewScreen() {
     }
     void load();
     return () => { active = false; };
-  }, []);
+  }, [refreshKey]);
 
   const nonArchivedStores = stores.filter((store) => !store.archivedAt);
   const activeStores = nonArchivedStores.filter((store) => !storeIsSuspended(store));
@@ -194,6 +196,7 @@ function OverviewMetric({
 
 function SuperAdminStoresContent() {
   const admin = useAuthStore((state) => state.user);
+  const refreshKey = useFocusRefreshKey();
   const [stores, setStores] = useState<StoreRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
@@ -229,7 +232,7 @@ function SuperAdminStoresContent() {
       if (active) setLoading(false);
     });
     return () => { active = false; };
-  }, []);
+  }, [refreshKey]);
 
   async function createOwner(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

@@ -8,6 +8,7 @@ import { FirstRunHint } from '../components/FirstRunHint';
 import { ItemCard, type ItemCardItem } from '../components/ItemCard';
 import { ItemLogo } from '../components/ItemLogo';
 import { Keypad } from '../components/Keypad';
+import { LazyBatch } from '../components/LazyBatch';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { TicketRow } from '../components/TicketRow';
@@ -926,17 +927,36 @@ export function PosScreen() {
               </span>
             </div>
             <div className="scrollbar-hidden flex gap-2.5 overflow-x-auto px-3 pb-1">
-              {quickPicks.map((item) => (
-                <button key={item.id} type="button" onClick={() => addItem(item)} className={`flex ${largeButtons ? 'min-h-40 w-40' : 'min-h-32 w-36'} shrink-0 flex-col justify-between rounded-2xl bg-surface-container-lowest p-3 text-left shadow-card active:scale-[0.98]`}>
-                  <div className="flex items-start justify-between">
-                    <ItemLogo id={item.icon} size="sm" />
-                  </div>
-                  <div className="mt-2">
-                    <p className="truncate font-body text-label-md text-on-surface">{item.name}</p>
-                    <p className="font-display text-headline-sm text-primary">{formatTnd(item.priceMillimes / 1000)} <small className="font-body text-label-sm text-outline">DT</small></p>
-                  </div>
-                </button>
-              ))}
+              {quickPicks.map((item) => {
+                const quantity = cart
+                  .filter((line) => line.itemId === item.id)
+                  .reduce((sum, line) => sum + line.quantity, 0);
+                return (
+                  <article key={item.id} className={`flex ${largeButtons ? 'min-h-40 w-40' : 'min-h-32 w-36'} shrink-0 flex-col justify-between rounded-2xl bg-surface-container-lowest p-3 text-left shadow-card`}>
+                    <button type="button" aria-label={t('pos.addItem', { item: item.name })} onClick={() => addItem(item)} className="flex min-h-0 flex-1 flex-col justify-between text-left active:scale-[0.98]">
+                      <div className="flex items-start justify-between">
+                        <ItemLogo id={item.icon} size="sm" />
+                        {quantity > 0 && <span className="rounded-full bg-primary-fixed px-2 py-0.5 font-body text-label-sm text-on-surface">{t('pos.itemAddedToCart', { count: quantity })}</span>}
+                      </div>
+                      <div className="mt-2">
+                        <p className="truncate font-body text-label-md text-on-surface">{item.name}</p>
+                        <p className="font-display text-headline-sm text-primary">{formatTnd(item.priceMillimes / 1000)} <small className="font-body text-label-sm text-outline">DT</small></p>
+                      </div>
+                    </button>
+                    {quantity > 0 && !item.outOfStock && (
+                      <div className="mt-1 flex items-center justify-between rounded-lg bg-surface-container-low p-0.5">
+                        <button type="button" aria-label={t('pos.removeItem', { item: item.name })} onClick={() => changeProductQuantity(item.id, -1)} className={`flex ${largeButtons ? 'h-14 w-14' : 'h-8 w-8'} items-center justify-center rounded-lg bg-surface-container-lowest text-primary`}>
+                          <MaterialIcon name={quantity === 1 ? 'delete' : 'remove'} className="text-sm" />
+                        </button>
+                        <span className="font-display text-label-lg text-primary">{quantity}</span>
+                        <button type="button" aria-label={t('pos.addItem', { item: item.name })} onClick={() => addItem(item)} className={`flex ${largeButtons ? 'h-14 w-14' : 'h-8 w-8'} items-center justify-center rounded-lg bg-primary text-on-primary`}>
+                          <MaterialIcon name="add" className="text-sm" />
+                        </button>
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
             </div>
           </section>
 
@@ -951,19 +971,23 @@ export function PosScreen() {
                 {search ? 'No products match your search.' : 'No products are available yet.'}
               </p>
             ) : <div className="pos-catalog-grid grid grid-cols-2 gap-3 xl:grid-cols-3">
-              {filteredItems.map((item) => (
-                <ItemCard
-                  key={item.id}
-                  item={{ id: item.id, name: item.name, price: item.priceMillimes / 1000, icon: item.icon, outOfStock: item.outOfStock, outOfStockBy: item.outOfStockBy, outOfStockAt: item.outOfStockAt }}
-                  quantity={cart.filter((line) => line.itemId === item.id).reduce((sum, line) => sum + line.quantity, 0)}
-                  onAdd={() => addItem(item)}
-                  onRemove={() => changeProductQuantity(item.id, -1)}
-                  canToggleStock={user?.role === 'owner' || can86Items}
-                  onToggleStock={() => { void toggleStock(item); }}
-                  onOpenOutOfStock={() => setMarkedOutOfStockItem(item)}
-                  largeButtons={largeButtons}
-                />
-              ))}
+              <LazyBatch
+                items={filteredItems}
+                resetKey={search}
+                renderItem={(item) => (
+                  <ItemCard
+                    key={item.id}
+                    item={{ id: item.id, name: item.name, price: item.priceMillimes / 1000, icon: item.icon, outOfStock: item.outOfStock, outOfStockBy: item.outOfStockBy, outOfStockAt: item.outOfStockAt }}
+                    quantity={cart.filter((line) => line.itemId === item.id).reduce((sum, line) => sum + line.quantity, 0)}
+                    onAdd={() => addItem(item)}
+                    onRemove={() => changeProductQuantity(item.id, -1)}
+                    canToggleStock={user?.role === 'owner' || can86Items}
+                    onToggleStock={() => { void toggleStock(item); }}
+                    onOpenOutOfStock={() => setMarkedOutOfStockItem(item)}
+                    largeButtons={largeButtons}
+                  />
+                )}
+              />
             </div>}
           </section>
         </section>
@@ -1056,7 +1080,7 @@ export function PosScreen() {
         )}
       </BottomSheet>
       <BottomSheet open={customerPickerOpen} onClose={() => setCustomerPickerOpen(false)} title="Choose customer" panelClassName="h-[60dvh]">
-        <div className="flex flex-col gap-2 pt-2">
+        <div className="flex flex-col gap-2 px-2 pt-2">
           <label className="relative block">
             <MaterialIcon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-lg text-outline" />
             <input

@@ -4,6 +4,7 @@ import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { ListSkeleton } from '../components/ListSkeleton';
+import { LazyBatch } from '../components/LazyBatch';
 import { StatusTag } from '../components/StatusTag';
 import { ToggleSwitch } from '../components/ToggleSwitch';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
@@ -568,7 +569,7 @@ function OwnerStaffContent() {
       </div>
 
       <CardGrid className="mobile-card-list mobile-gap-3">
-        {loading ? <ListSkeleton label="Loading staff" /> : visibleStaff.map((staffMember) => {
+        {loading ? <ListSkeleton label="Loading staff" /> : <LazyBatch items={visibleStaff} resetKey={`${statusFilter}-${positionFilter}-${sortBy}-${searchQuery}`} renderItem={(staffMember) => {
           const currentShift = openShiftFor(staffMember);
           const lastShift = lastShiftFor(staffMember);
           const initials = staffMember.name.trim().split(/\s+/).slice(0, 2).map((part) => Array.from(part)[0] ?? '').join('').toLocaleUpperCase();
@@ -625,7 +626,7 @@ function OwnerStaffContent() {
               </div>
             </article>
           );
-        })}
+        }} />}
         {!loading && !error && visibleStaff.length === 0 && (
           <div className="rounded-xl bg-surface-container-lowest px-5 py-8 text-center shadow-card">
             <MaterialIcon name="person_search" className="text-3xl text-outline" />
@@ -853,10 +854,8 @@ function PositionCard({ position, permissions, staffCount, onClick }: { position
         <span className="font-body text-label-lg text-on-surface">{position.name}</span>
         <MaterialIcon name="edit" className="text-lg text-outline" />
       </span>
-      <span className="mt-1 block font-body text-body-sm text-outline">{staffCount} staff</span>
-      <span className="mt-2 flex flex-wrap gap-1.5">
-        {enabled.map((permission) => <span key={permission.id} className="rounded-full bg-primary-fixed/50 px-2 py-1 font-body text-label-sm text-primary">{permission.label}</span>)}
-        {enabled.length === 0 && <span className="font-body text-body-sm text-outline">No permissions assigned</span>}
+      <span className="mt-1 block font-body text-body-sm text-outline">
+        {staffCount} staff · {enabled.length} {enabled.length === 1 ? 'permission' : 'permissions'}
       </span>
     </button>
   );
@@ -929,8 +928,12 @@ function StaffDrinkRulesEditor({
   const [itemSearch, setItemSearch] = useState('');
   const categoryQuery = categorySearch.trim().toLocaleLowerCase();
   const itemQuery = itemSearch.trim().toLocaleLowerCase();
-  const visibleCategories = categories.filter((category) => category.name.toLocaleLowerCase().includes(categoryQuery));
-  const visibleItems = items.filter((item) => item.name.toLocaleLowerCase().includes(itemQuery));
+  const visibleCategories = categoryQuery
+    ? categories.filter((category) => category.name.toLocaleLowerCase().includes(categoryQuery))
+    : [];
+  const visibleItems = itemQuery
+    ? items.filter((item) => item.name.toLocaleLowerCase().includes(itemQuery))
+    : [];
 
   return (
     <section className="flex flex-col gap-3 rounded-xl bg-surface-container-low p-3">
@@ -965,7 +968,7 @@ function StaffDrinkRulesEditor({
               {category.name}
             </label>
           ))}
-          {visibleCategories.length === 0 && <p className="px-1 py-2 font-body text-body-sm text-outline">{categories.length === 0 ? 'No categories available.' : 'No matching categories.'}</p>}
+          {visibleCategories.length === 0 && <p className="px-1 py-2 font-body text-body-sm text-outline">{categories.length === 0 ? 'No categories available.' : categoryQuery ? 'No matching categories.' : 'Search to find categories.'}</p>}
         </div>
       </fieldset>
       <fieldset className="flex flex-col gap-2">
@@ -992,7 +995,7 @@ function StaffDrinkRulesEditor({
               {item.name}
             </label>
           ))}
-          {visibleItems.length === 0 && <p className="px-1 py-2 font-body text-body-sm text-outline">{items.length === 0 ? 'No active catalog items.' : 'No matching items.'}</p>}
+          {visibleItems.length === 0 && <p className="px-1 py-2 font-body text-body-sm text-outline">{items.length === 0 ? 'No active catalog items.' : itemQuery ? 'No matching items.' : 'Search to find items.'}</p>}
         </div>
       </fieldset>
     </section>

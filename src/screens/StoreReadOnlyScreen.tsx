@@ -5,6 +5,7 @@ import { ItemLogo } from '../components/ItemLogo';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
+import { useFocusRefreshKey } from '../lib/useFocusRefreshKey';
 import { adminWorkspaceLinks } from '../app/navigation';
 import { formatTnd } from '../lib/format';
 import { t } from '../i18n/translations';
@@ -34,6 +35,7 @@ function effectiveStoreActive(store: StoreRecord): boolean {
 
 export function StoreReadOnlyScreen() {
   const { storeId = '' } = useParams();
+  const refreshKey = useFocusRefreshKey();
   const [store, setStore] = useState<StoreRecord>();
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [staff, setStaff] = useState<UserSummary[]>([]);
@@ -82,7 +84,7 @@ export function StoreReadOnlyScreen() {
     }
     void load();
     return () => { active = false; };
-  }, [storeId]);
+  }, [refreshKey, storeId]);
 
   const todayOrders = useMemo(() => orders.filter((order) => localDateKey(new Date(order.createdAt)) === today), [orders, today]);
   const completedOrders = todayOrders.filter((order) => order.status === 'done');

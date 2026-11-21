@@ -665,6 +665,9 @@ describe('local money logic', () => {
     await expect(orderService.listToday(storeId)).resolves.toEqual([currentOrder]);
     await shiftService.closeShift(currentShift.id, 1_700);
 
+    const currentPeriod = await reportService.getCurrentPeriodSummary(storeId);
+    expect(currentPeriod.shiftLines.map((shift) => shift.shiftId)).toEqual([currentShift.id]);
+
     const secondZ = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
       countedCashMillimes: 700,
     });

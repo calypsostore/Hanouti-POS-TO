@@ -15,7 +15,7 @@ import { TicketRow } from '../components/TicketRow';
 import { TopBar } from '../components/TopBar';
 import { TicketView } from '../components/TicketView';
 import { formatTnd } from '../lib/format';
-import { getCustomerCreditTone } from '../lib/customerCredit';
+import { getCustomerCreditTone, loadCustomerCreditStatuses } from '../lib/customerCredit';
 import { useDisplaySettings } from '../lib/displaySettings';
 import { useQueryCacheRefresh } from '../lib/useQueryCacheRefresh';
 import { t } from '../i18n/translations';
@@ -125,6 +125,7 @@ export function PosScreen() {
   const [canOverrideCreditLimit, setCanOverrideCreditLimit] = useState(false);
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
   const [customerCreditStatuses, setCustomerCreditStatuses] = useState<Record<string, CustomerCreditStatus>>({});
+  const [customerCreditUnavailable, setCustomerCreditUnavailable] = useState(false);
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
   const [customerSearch, setCustomerSearch] = useState('');
   const [creditOverrideOpen, setCreditOverrideOpen] = useState(false);
@@ -180,6 +181,7 @@ export function PosScreen() {
     const refresh = async () => {
       setCatalogLoading(true);
       setCatalogError('');
+      setCustomerCreditUnavailable(false);
       try {
         const [items, categories, shift, currentStore, todaysOrders, customerList, nextDayStatus] = await Promise.all([
           catalogService.listItems(storeId),
@@ -195,7 +197,6 @@ export function PosScreen() {
         const compPermission = user?.role === 'owner' || permissionSet.has('comp_items');
         const tabsPermission = permissionSet.has('use_tabs');
         const overridePermission = permissionSet.has('tab_override_limit');
-        const creditStatuses = await customerService.getCreditStatuses(storeId, customerList);
         const queuedOrders = await offlineOrderQueue.pendingOrders(storeId);
         const attentionOrders = await offlineOrderQueue.needsAttention(storeId);
         setCatalogRecords(items);
@@ -209,8 +210,15 @@ export function PosScreen() {
         setCanUseTabs(user?.role === 'owner' || tabsPermission);
         setCanOverrideCreditLimit(user?.role === 'owner' || overridePermission);
         setCustomers(customerList);
-        setCustomerCreditStatuses(creditStatuses);
+        setCustomerCreditStatuses({});
         setNeedsAttentionOrders(attentionOrders);
+        setCatalogLoading(false);
+
+        const creditStatusResult = await loadCustomerCreditStatuses(
+          () => customerService.getCreditStatuses(storeId, customerList),
+        );
+        setCustomerCreditStatuses(creditStatusResult.statuses);
+        setCustomerCreditUnavailable(creditStatusResult.unavailable);
         if (user) {
           try {
             await offlineOrderQueue.cacheSnapshot({
@@ -219,7 +227,7 @@ export function PosScreen() {
               items,
               categories,
               customers: customerList,
-              creditStatuses,
+              creditStatuses: creditStatusResult.statuses,
               shift,
               store: currentStore,
               orders: todaysOrders,
@@ -676,9 +684,12 @@ export function PosScreen() {
         setCatalogRecords(await catalogService.listItems(storeId));
         setOrders(await orderService.listTodaySummaries(storeId));
         const customerList = await customerService.listCustomers(storeId);
-        const creditStatuses = await customerService.getCreditStatuses(storeId, customerList);
+        const creditStatusResult = await loadCustomerCreditStatuses(
+          () => customerService.getCreditStatuses(storeId, customerList),
+        );
         setCustomers(customerList);
-        setCustomerCreditStatuses(creditStatuses);
+        setCustomerCreditStatuses(creditStatusResult.statuses);
+        setCustomerCreditUnavailable(creditStatusResult.unavailable);
       } catch (refreshError) {
         orderNotice ||= `Order created, but the POS could not refresh: ${refreshError instanceof Error ? refreshError.message : 'Please reload the page.'}`;
       }
@@ -967,6 +978,11 @@ export function PosScreen() {
               <span className="font-body text-label-sm text-outline">{t('pos.touchToAdd')}</span>
             </div>
             {catalogError && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{catalogError}</p>}
+            {customerCreditUnavailable && (
+              <p role="status" className="mb-3 rounded-lg bg-warning-container px-3 py-2 font-body text-label-sm text-on-warning-container">
+                Customer credit balances are unavailable; customer selection is still available.
+              </p>
+            )}
             {catalogLoading ? <ListSkeleton rows={4} label="Loading products" /> : filteredItems.length === 0 ? (
               <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">
                 {search ? 'No products match your search.' : 'No products are available yet.'}

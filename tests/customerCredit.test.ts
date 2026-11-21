@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { getCustomerCreditTone } from '../src/lib/customerCredit';
+import { describe, expect, it, vi } from 'vitest';
+import { getCustomerCreditTone, loadCustomerCreditStatuses } from '../src/lib/customerCredit';
 
 describe('getCustomerCreditTone', () => {
   it.each([
@@ -11,5 +11,23 @@ describe('getCustomerCreditTone', () => {
     [75, 'bg-error-dark'],
   ])('uses %s percent as %s', (percentUsed, barClass) => {
     expect(getCustomerCreditTone('ok', percentUsed).barClass).toBe(barClass);
+  });
+});
+
+describe('loadCustomerCreditStatuses', () => {
+  it('returns no credit data and logs the error when the request fails', async () => {
+    const error = new Error('RPC failed');
+    const load = vi.fn().mockRejectedValue(error);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await expect(loadCustomerCreditStatuses(load)).resolves.toEqual({
+        statuses: {},
+        unavailable: true,
+      });
+      expect(consoleError).toHaveBeenCalledWith('Unable to load customer credit statuses.', error);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });

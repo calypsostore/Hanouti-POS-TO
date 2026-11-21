@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { UpdateRequiredModal } from '../src/components/UpdateRequiredModal';
 import {
   confirmUpdateIfUnsaved,
+  getPostUpdateStatus,
+  sanitizeStoredResult,
   shouldSnoozeUpdate,
   UPDATE_REMINDER_DELAY_MS,
 } from '../src/services/updateModalLogic';
@@ -28,6 +30,24 @@ const availableUpdate: UpdateCheckResult = {
 };
 
 describe('required update modal logic', () => {
+  it('discards stored results from another build, mode, or completed update', () => {
+    expect(sanitizeStoredResult(availableUpdate, 'old-build', '1.0.3', 'hosted')).toEqual(availableUpdate);
+    expect(sanitizeStoredResult(availableUpdate, 'current-build', '1.0.3', 'hosted')).toBeNull();
+    expect(sanitizeStoredResult(availableUpdate, 'old-build', '1.0.3', 'web')).toBeNull();
+    expect(sanitizeStoredResult(
+      { ...availableUpdate, latestBuild: 'old-build' },
+      'old-build',
+      '1.0.3',
+      'hosted',
+    )).toBeNull();
+  });
+
+  it('classifies update reload recovery without retrying automatically', () => {
+    expect(getPostUpdateStatus(null, 'current-build')).toBeNull();
+    expect(getPostUpdateStatus('current-build', 'current-build')).toBe('completed');
+    expect(getPostUpdateStatus('new-build', 'current-build')).toBe('failed');
+  });
+
   it('shows the blocking modal when an update is found', () => {
     const markup = renderToStaticMarkup(React.createElement(UpdateRequiredModal, { result: availableUpdate }));
 

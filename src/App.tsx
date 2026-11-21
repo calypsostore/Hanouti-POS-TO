@@ -196,12 +196,10 @@ export default function App() {
   const locked = useAuthStore((state) => state.locked);
   const initializationError = useAuthStore((state) => state.initializationError);
   const hydrate = useAuthStore((state) => state.hydrate);
+  const [updateReloadError, setUpdateReloadError] = useState(() => updateService.getPostUpdateMessage());
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(() => updateService.getLastResult());
-  const [serviceWorkerUpdateAvailable, setServiceWorkerUpdateAvailable] = useState(false);
-  const [updateReloadError, setUpdateReloadError] = useState('');
 
   useEffect(() => updateService.subscribeResults(setUpdateResult), []);
-  useEffect(() => updateService.subscribe(setServiceWorkerUpdateAvailable), []);
 
   useEffect(() => {
     void hydrate();
@@ -359,13 +357,12 @@ export default function App() {
   return (
     <>
       <UpdateRequiredModal result={updateResult} />
-      {serviceWorkerUpdateAvailable && (
+      {updateReloadError && (
         <div role="status" className="fixed inset-x-0 top-0 z-[120] flex items-center justify-between gap-3 bg-primary-dark px-4 py-3 text-white shadow-overlay">
           <div>
-            <p className="font-body text-label-md">New version available - reload</p>
-            {updateReloadError && <p role="alert" className="mt-1 font-body text-body-sm text-white">{updateReloadError}</p>}
+            <p role="alert" className="font-body text-label-md">{updateReloadError}</p>
           </div>
-          <Button variant="secondary" className="shrink-0" onClick={() => { void reloadWithAvailableUpdate(); }}>Reload</Button>
+          <Button variant="secondary" className="shrink-0" onClick={() => { void reloadWithAvailableUpdate(); }}>Retry update</Button>
         </div>
       )}
       <PermissionsPrompt />

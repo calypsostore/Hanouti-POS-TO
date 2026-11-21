@@ -20,7 +20,7 @@ describe('updateService.checkForUpdates', () => {
     vi.stubGlobal('__APP_VERSION__', '1.0.4');
     vi.stubGlobal('__BUILD_ID__', 'current-build');
     vi.stubGlobal('window', {
-      location: { origin: 'https://hanoutipos.vercel.app', reload: vi.fn() },
+      location: { origin: 'https://hanoutipos.vercel.app', reload: vi.fn(), replace: vi.fn() },
       setTimeout: (...args: Parameters<typeof setTimeout>) => globalThis.setTimeout(...args),
       clearTimeout: (...args: Parameters<typeof clearTimeout>) => globalThis.clearTimeout(...args),
       setInterval: (...args: Parameters<typeof setInterval>) => globalThis.setInterval(...args),
@@ -96,6 +96,108 @@ describe('updateService.checkForUpdates', () => {
     });
     expect(workerRegistration.update).toHaveBeenCalledOnce();
     expect(workerRegistration.waiting.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('deduplicates concurrent update checks', async () => {
+    let resolveFetch: ((response: Response) => void) | undefined;
+    vi.mocked(fetch).mockImplementation(() => new Promise((resolve) => {
+      resolveFetch = resolve;
+    }));
+
+    const firstCheck = updateService.checkForUpdates();
+    const concurrentCheck = updateService.checkForUpdates();
+
+    expect(concurrentCheck).toBe(firstCheck);
+    resolveFetch?.(new Response(
+      JSON.stringify({ version: '1.0.4', buildId: 'current-build' }),
+      { status: 200 },
+    ));
+    await firstCheck;
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it('throttles automatic checks but lets a manual check bypass the interval', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(
+      JSON.stringify({ version: '1.0.4', buildId: 'current-build' }),
+      { status: 200 },
+    ));
+
+    await updateService.checkForUpdates({ automatic: true });
+    await updateService.checkForUpdates({ automatic: true });
+
+    expect(fetch).toHaveBeenCalledOnce();
+    await updateService.checkForUpdates();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not resurrect a stored update from another build after a check fails', async () => {
+    localStorage.setItem('7anouti-pos:last-update-result', JSON.stringify({
+      mode: 'web',
+      currentVersion: '1.0.4',
+      currentBuild: 'previous-build',
+      latestVersion: '1.0.5',
+      latestBuild: 'future-build',
+      latestApkUrl: null,
+      checkedAt: new Date().toISOString(),
+      updateAvailable: true,
+    }));
+    vi.mocked(fetch).mockRejectedValue(new TypeError('Failed to fetch'));
+
+    const result = await updateService.checkForUpdates();
+
+    expect(result).toMatchObject({ updateAvailable: false, latestBuild: null });
+  });
+
+  it('does not preserve an expired stored update after a check fails', async () => {
+    localStorage.setItem('7anouti-pos:last-update-result', JSON.stringify({
+      mode: 'web',
+      currentVersion: '1.0.4',
+      currentBuild: 'current-build',
+      latestVersion: '1.0.5',
+      latestBuild: 'future-build',
+      latestApkUrl: null,
+      checkedAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
+      updateAvailable: true,
+    }));
+    vi.mocked(fetch).mockRejectedValue(new TypeError('Failed to fetch'));
+
+    const result = await updateService.checkForUpdates();
+
+    expect(result).toMatchObject({ updateAvailable: false, latestBuild: null });
+  });
+
+  it('activates a waiting worker and cache-busts the update reload', async () => {
+    let controllerChangeListener: (() => void) | undefined;
+    const waiting = {
+      postMessage: vi.fn(() => controllerChangeListener?.()),
+    };
+    const workerRegistration = {
+      waiting,
+      update: vi.fn().mockResolvedValue(undefined),
+      unregister: vi.fn().mockResolvedValue(true),
+    };
+    vi.stubGlobal('navigator', {
+      serviceWorker: {
+        getRegistration: vi.fn().mockResolvedValue(workerRegistration),
+        getRegistrations: vi.fn().mockResolvedValue([workerRegistration]),
+        addEventListener: vi.fn((_type: string, listener: () => void) => {
+          controllerChangeListener = listener;
+        }),
+        removeEventListener: vi.fn(),
+      },
+    });
+    vi.mocked(fetch).mockResolvedValue(new Response(
+      JSON.stringify({ version: '1.1.0', buildId: 'deployed-build' }),
+      { status: 200 },
+    ));
+
+    await updateService.checkForUpdates();
+    await updateService.forceRefresh();
+
+    expect(waiting.postMessage).toHaveBeenCalledWith({ type: 'SKIP_WAITING' });
+    expect(workerRegistration.unregister).toHaveBeenCalledOnce();
+    expect(localStorage.getItem('7anouti-pos:updating-to')).toBe('deployed-build');
+    expect(window.location.replace).toHaveBeenCalledWith('https://hanoutipos.vercel.app/?v=deployed-build');
   });
 
   it('reports an APK requirement when the release manifest has a newer APK version code', async () => {

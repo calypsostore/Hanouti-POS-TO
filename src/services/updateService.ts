@@ -5,15 +5,18 @@ import { notificationService } from './notificationService';
 import { PRODUCTION_URL } from '../config/appConfig';
 import { parseAppUpdateManifest } from './appUpdateManifest';
 import { UPDATE_GITHUB_REPOSITORY } from '../config/updateConfig';
-import { confirmUpdateIfUnsaved } from './updateModalLogic';
+import { confirmUpdateIfUnsaved, getPostUpdateStatus, sanitizeStoredResult } from './updateModalLogic';
 
 declare const __APP_VERSION__: string;
 declare const __BUILD_ID__: string;
 
 const LAST_CHECK_KEY = '7anouti-pos:last-update-check';
 const LAST_RESULT_KEY = '7anouti-pos:last-update-result';
+const UPDATE_TARGET_KEY = '7anouti-pos:updating-to';
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const MIN_AUTOMATIC_CHECK_INTERVAL_MS = 30_000;
 const CHECK_REQUEST_TIMEOUT_MS = 10_000;
+const SERVICE_WORKER_ACTIVATION_TIMEOUT_MS = 3_000;
 const RELEASE_MANIFEST_URL = `${PRODUCTION_URL}/api/update-manifest`;
 
 export type UpdateMode = 'hosted' | 'bundled' | 'web';
@@ -30,16 +33,14 @@ export interface UpdateCheckResult {
   error?: string;
 }
 
-type UpdateListener = (available: boolean) => void;
 type ResultListener = (result: UpdateCheckResult) => void;
-const listeners = new Set<UpdateListener>();
 const resultListeners = new Set<ResultListener>();
 let registration: ServiceWorkerRegistration | undefined;
-let registrationUpdateListenerRegistered = false;
-let hasUpdate = false;
 let availableVersion: string | undefined;
 let availableBuild: string | undefined;
 let monitorStarted = false;
+let inFlightCheck: Promise<UpdateCheckResult> | null = null;
+let postUpdateMessage: string | null | undefined;
 const unsavedStateProviders = new Set<() => boolean>();
 
 function runOverdueCheck(checkOverdueCustomers?: () => Promise<void>): void {
@@ -51,7 +52,7 @@ function runOverdueCheck(checkOverdueCustomers?: () => Promise<void>): void {
 }
 
 function runAutomaticCheck(reason: 'startup' | 'interval' | 'foreground'): void {
-  void updateService.checkForUpdates().then((result) => {
+  void updateService.checkForUpdates({ automatic: true }).then((result) => {
     console.info('[updates] Automatic check completed.', {
       reason,
       checkedAt: result.checkedAt,
@@ -63,32 +64,23 @@ function runAutomaticCheck(reason: 'startup' | 'interval' | 'foreground'): void 
   });
 }
 
-function notifyListeners(): void {
-  for (const listener of listeners) listener(hasUpdate);
-}
-
 function notifyResultListeners(result: UpdateCheckResult): void {
   for (const listener of resultListeners) listener(result);
 }
 
 function setUpdateAvailable(version: string, build: string): void {
-  const shouldNotify = !hasUpdate || availableBuild !== build;
-  hasUpdate = true;
+  const shouldNotify = availableBuild !== build;
   availableVersion = version;
   availableBuild = build;
   if (!shouldNotify) return;
-  notifyListeners();
   void notificationService.notifyAppUpdate(version, build).catch((error: unknown) => {
     console.error('[updates] Could not create in-app update notifications.', error);
   });
 }
 
 function clearUpdateAvailable(): void {
-  const shouldNotify = hasUpdate;
-  hasUpdate = false;
   availableVersion = undefined;
   availableBuild = undefined;
-  if (shouldNotify) notifyListeners();
 }
 
 function isLocalhost(origin: string): boolean {
@@ -112,22 +104,87 @@ function getOriginDetails(): { mode: UpdateMode; origin: string } {
   return { mode: 'web', origin };
 }
 
-function readLastResult(): UpdateCheckResult | null {
+function getBuildId(): string {
+  return typeof __BUILD_ID__ === 'undefined' ? '' : __BUILD_ID__;
+}
+
+function getAppVersion(): string {
+  return typeof __APP_VERSION__ === 'undefined' ? '' : __APP_VERSION__;
+}
+
+function isUpdateCheckResult(value: unknown): value is UpdateCheckResult {
+  if (typeof value !== 'object' || value === null) return false;
+  const result = value as Partial<UpdateCheckResult>;
+  return (
+    (result.mode === 'hosted' || result.mode === 'bundled' || result.mode === 'web')
+    && typeof result.currentVersion === 'string'
+    && typeof result.currentBuild === 'string'
+    && (result.latestVersion === null || typeof result.latestVersion === 'string')
+    && (result.latestBuild === null || typeof result.latestBuild === 'string')
+    && (result.latestApkUrl === null || typeof result.latestApkUrl === 'string')
+    && typeof result.checkedAt === 'string'
+    && typeof result.updateAvailable === 'boolean'
+    && (result.error === undefined || typeof result.error === 'string')
+  );
+}
+
+function readStoredResult(): UpdateCheckResult | null {
   try {
     const raw = localStorage.getItem(LAST_RESULT_KEY);
     if (!raw) return null;
     const result: unknown = JSON.parse(raw);
-    if (
-      typeof result !== 'object'
-      || result === null
-      || !('mode' in result)
-      || !('checkedAt' in result)
-    ) return null;
-    return result as UpdateCheckResult;
+    return isUpdateCheckResult(result) ? result : null;
   } catch (error) {
     console.error('[updates] Could not read the last update result.', error);
     return null;
   }
+}
+
+function readLastResult(): UpdateCheckResult | null {
+  const result = readStoredResult();
+  if (!result) return null;
+  const { mode } = getOriginDetails();
+  return sanitizeStoredResult(result, getBuildId(), getAppVersion(), mode);
+}
+
+function clearStoredUpdateResult(): void {
+  try {
+    localStorage.removeItem(LAST_RESULT_KEY);
+    localStorage.removeItem(LAST_CHECK_KEY);
+  } catch (error) {
+    console.error('[updates] Could not clear the completed update result.', error);
+  }
+}
+
+function getPostUpdateMessage(): string | null {
+  if (postUpdateMessage !== undefined) return postUpdateMessage;
+  let targetBuild: string | null;
+  try {
+    targetBuild = localStorage.getItem(UPDATE_TARGET_KEY);
+  } catch (error) {
+    console.error('[updates] Could not read the pending update target.', error);
+    postUpdateMessage = null;
+    return postUpdateMessage;
+  }
+  if (!targetBuild) {
+    postUpdateMessage = null;
+    return postUpdateMessage;
+  }
+
+  try {
+    localStorage.removeItem(UPDATE_TARGET_KEY);
+  } catch (error) {
+    console.error('[updates] Could not clear the pending update target.', error);
+  }
+  const status = getPostUpdateStatus(targetBuild, getBuildId());
+  if (status === 'completed') {
+    clearStoredUpdateResult();
+    clearUpdateAvailable();
+    postUpdateMessage = null;
+    return postUpdateMessage;
+  }
+  postUpdateMessage = 'Update did not finish. Tap to retry.';
+  return postUpdateMessage;
 }
 
 function saveResult(result: UpdateCheckResult, notify = true): void {
@@ -202,7 +259,7 @@ async function updateHostedServiceWorker(): Promise<void> {
   await registration.update();
 }
 
-async function checkForUpdates(): Promise<UpdateCheckResult> {
+async function performUpdateCheck(): Promise<UpdateCheckResult> {
   const { mode, origin } = getOriginDetails();
   const checkedAt = new Date().toISOString();
   const previousResult = readLastResult();
@@ -269,7 +326,15 @@ async function checkForUpdates(): Promise<UpdateCheckResult> {
     result.error = error instanceof Error
       ? error.message
       : 'No internet connection';
-    if (previousResult?.updateAvailable && previousResult.mode === mode) {
+    const previousResultAgeMs = previousResult
+      ? Date.now() - new Date(previousResult.checkedAt).getTime()
+      : Number.NaN;
+    if (
+      previousResult?.updateAvailable
+      && previousResult.mode === mode
+      && previousResultAgeMs >= 0
+      && previousResultAgeMs <= 24 * 60 * 60 * 1000
+    ) {
       result.updateAvailable = true;
       result.latestVersion = previousResult.latestVersion;
       result.latestBuild = previousResult.latestBuild;
@@ -283,6 +348,60 @@ async function checkForUpdates(): Promise<UpdateCheckResult> {
 
   saveResult(result);
   return result;
+}
+
+function checkForUpdates(options: { automatic?: boolean } = {}): Promise<UpdateCheckResult> {
+  if (inFlightCheck) return inFlightCheck;
+
+  if (options.automatic) {
+    const lastCheckAt = Date.parse(updateService.getLastCheck() ?? '');
+    const storedResult = readStoredResult();
+    const { mode } = getOriginDetails();
+    const installedBuild = mode === 'bundled' ? storedResult?.currentBuild : getBuildId();
+    const currentResult = storedResult
+      && storedResult.mode === mode
+      && storedResult.currentVersion === getAppVersion()
+      && storedResult.currentBuild === installedBuild
+      ? storedResult
+      : null;
+    if (
+      currentResult
+      && Number.isFinite(lastCheckAt)
+      && Date.now() - lastCheckAt < MIN_AUTOMATIC_CHECK_INTERVAL_MS
+    ) return Promise.resolve(currentResult);
+  }
+
+  let trackedCheck: Promise<UpdateCheckResult>;
+  trackedCheck = performUpdateCheck().finally(() => {
+    if (inFlightCheck === trackedCheck) inFlightCheck = null;
+  });
+  inFlightCheck = trackedCheck;
+  return trackedCheck;
+}
+
+async function activateWaitingWorker(worker: ServiceWorker): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      navigator.serviceWorker.removeEventListener('controllerchange', finish);
+      resolve();
+    };
+    const timeoutId = window.setTimeout(finish, SERVICE_WORKER_ACTIVATION_TIMEOUT_MS);
+    navigator.serviceWorker.addEventListener('controllerchange', finish, { once: true });
+    try {
+      worker.postMessage({ type: 'SKIP_WAITING' });
+    } catch (error) {
+      if (!settled) {
+        settled = true;
+        window.clearTimeout(timeoutId);
+        navigator.serviceWorker.removeEventListener('controllerchange', finish);
+      }
+      reject(new Error('Could not activate the waiting service worker.', { cause: error }));
+    }
+  });
 }
 
 export const updateService = {
@@ -299,6 +418,13 @@ export const updateService = {
   },
 
   getAvailableVersion(): string | undefined {
+    if (!availableVersion) {
+      const result = readLastResult();
+      if (result?.updateAvailable && result.latestVersion && result.latestBuild) {
+        availableVersion = result.latestVersion;
+        availableBuild = result.latestBuild;
+      }
+    }
     return availableVersion;
   },
 
@@ -315,10 +441,8 @@ export const updateService = {
     return readLastResult();
   },
 
-  subscribe(callback: UpdateListener): () => void {
-    listeners.add(callback);
-    callback(hasUpdate);
-    return () => listeners.delete(callback);
+  getPostUpdateMessage(): string | null {
+    return getPostUpdateMessage();
   },
 
   subscribeResults(callback: ResultListener): () => void {
@@ -338,27 +462,24 @@ export const updateService = {
   async register(): Promise<void> {
     if (this.getMode() === 'bundled' || import.meta.env.DEV || !('serviceWorker' in navigator)) return;
     registration = await navigator.serviceWorker.register('/sw.js');
-    if (registrationUpdateListenerRegistered) return;
-    registrationUpdateListenerRegistered = true;
-    const announceWaitingWorker = () => {
-      if (registration?.waiting && navigator.serviceWorker.controller) {
-        setUpdateAvailable(__APP_VERSION__, `${__BUILD_ID__}-service-worker`);
-      }
-    };
-    registration.addEventListener('updatefound', () => {
-      const installing = registration?.installing;
-      if (!installing) return;
-      installing.addEventListener('statechange', () => {
-        if (installing.state === 'installed' && navigator.serviceWorker.controller) announceWaitingWorker();
-      });
-    });
-    announceWaitingWorker();
   },
 
   checkForUpdates,
 
   async forceRefresh(): Promise<void> {
+    const result = readLastResult();
+    if (!result?.updateAvailable || !result.latestBuild) {
+      throw new Error('The update build is not available.');
+    }
+    try {
+      localStorage.setItem(UPDATE_TARGET_KEY, result.latestBuild);
+    } catch (error) {
+      throw new Error('Could not prepare the update reload.', { cause: error });
+    }
+
     if ('serviceWorker' in navigator) {
+      registration = await navigator.serviceWorker.getRegistration();
+      if (registration?.waiting) await activateWaitingWorker(registration.waiting);
       const registrations = await navigator.serviceWorker.getRegistrations();
       await Promise.all(registrations.map((workerRegistration) => workerRegistration.unregister()));
     }
@@ -366,7 +487,9 @@ export const updateService = {
       const cacheNames = await caches.keys();
       await Promise.all(cacheNames.map((cacheName) => caches.delete(cacheName)));
     }
-    window.location.reload();
+    const reloadUrl = new URL('/', window.location.origin);
+    reloadUrl.searchParams.set('v', result.latestBuild);
+    window.location.replace(reloadUrl.toString());
   },
 
   async openHostedApp(): Promise<void> {
@@ -439,10 +562,3 @@ export const updateService = {
     };
   },
 };
-
-const initialResult = readLastResult();
-if (initialResult?.updateAvailable && initialResult.latestVersion) {
-  hasUpdate = true;
-  availableVersion = initialResult.latestVersion;
-  availableBuild = initialResult.latestBuild ?? undefined;
-}

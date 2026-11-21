@@ -861,3 +861,37 @@ revoke all on function public.get_dashboard_summary(uuid, timestamptz, timestamp
 grant execute on function public.get_customers_credit_status(uuid) to authenticated;
 grant execute on function public.get_shift_summary(uuid) to authenticated;
 grant execute on function public.get_dashboard_summary(uuid, timestamptz, timestamptz, boolean) to authenticated;
+
+create or replace function public.get_store_permissions()
+returns text[]
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce(array_agg(effective.permission_id order by effective.permission_id), '{}'::text[])
+  from (
+    select distinct permission.permission_id
+    from public.profiles profile
+    left join public.positions position_record
+      on position_record.id = profile.position_id
+      and position_record.store_id = profile.store_id
+    left join public.permission_overrides overrides
+      on overrides.user_id = profile.id
+      and overrides.store_id = profile.store_id
+    cross join lateral unnest(
+      coalesce(position_record.permission_ids, '{}'::text[]) || coalesce(overrides.granted, '{}'::text[])
+    ) as permission(permission_id)
+    where profile.id = (select auth.uid())
+      and profile.is_active
+      and profile.role = 'staff'
+      and profile.store_id = (select public.current_store_id())
+      and (
+        permission.permission_id = any(coalesce(overrides.granted, '{}'::text[]))
+        or not (permission.permission_id = any(coalesce(overrides.revoked, '{}'::text[])))
+      )
+  ) effective
+$$;
+
+revoke all on function public.get_store_permissions() from public, anon;
+grant execute on function public.get_store_permissions() to authenticated;

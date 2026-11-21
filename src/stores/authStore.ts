@@ -42,13 +42,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   hydrate: async () => {
     set({ ready: false, initializationError: null });
     try {
-      await assertExpectedSchemaVersion();
-      await initializeMockData();
+      await Promise.all([assertExpectedSchemaVersion(), initializeMockData()]);
       const user = await authService.getCurrentUser();
-      const locked = user ? await authService.isSessionLocked() : false;
+      const locked = user ? await authService.isSessionLocked(user.id) : false;
       set({ user, locked, ready: true, initializationError: null });
       if (isSupabaseDriver() && !authStateSubscription) {
-        const { data } = getSupabaseClient().auth.onAuthStateChange((_event, session) => {
+        const { data } = getSupabaseClient().auth.onAuthStateChange((event, session) => {
+          if (event === 'INITIAL_SESSION') return;
           window.setTimeout(() => {
             if (!session) {
               useCartStore.getState().clearOrder();
@@ -68,7 +68,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   refreshCurrentUser: async () => {
     try {
       const user = await authService.getCurrentUser();
-      const locked = user ? await authService.isSessionLocked() : false;
+      const locked = user ? await authService.isSessionLocked(user.id) : false;
       set({ user, locked, initializationError: null });
     } catch (error) {
       console.error('[startup] Could not refresh the signed-in user.', error);

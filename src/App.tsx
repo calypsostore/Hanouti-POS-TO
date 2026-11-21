@@ -116,8 +116,10 @@ function ProtectedRoute({ roles, children, permission }: ProtectedRouteProps) {
     const checkPermission = () => {
       const currentRequestId = ++requestId;
       setPermissionAllowed(null);
-      void Promise.all(permissionKey.split('|').map((permissionId) => userService.hasPermission(user.id, permissionId))).then((results) => {
-        if (active && currentRequestId === requestId) setPermissionAllowed(results.some(Boolean));
+      void userService.getEffectivePermissions(user.id).then((permissionIds) => {
+        if (active && currentRequestId === requestId) {
+          setPermissionAllowed(permissionKey.split('|').some((permissionId) => permissionIds.includes(permissionId)));
+        }
       }).catch((error: unknown) => {
         console.error('Could not verify staff permission.', error);
         if (active && currentRequestId === requestId) setPermissionAllowed(false);

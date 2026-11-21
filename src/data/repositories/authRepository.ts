@@ -116,9 +116,8 @@ export const authRepository = {
 
   currentUser,
 
-  async isSessionLocked(): Promise<boolean> {
-    const user = await currentUser();
-    return Boolean(user && typeof window !== 'undefined' && window.sessionStorage.getItem(SESSION_LOCK_KEY) === user.id);
+  async isSessionLocked(userId: string): Promise<boolean> {
+    return typeof window !== 'undefined' && window.sessionStorage.getItem(SESSION_LOCK_KEY) === userId;
   },
 
   async hasPersonalPin(userId: string): Promise<boolean> {

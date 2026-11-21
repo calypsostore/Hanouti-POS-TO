@@ -139,10 +139,10 @@ export const authService = {
     return withoutPassword(user);
   },
 
-  async isSessionLocked(): Promise<boolean> {
-    if (isSupabaseDriver()) return authRepository.isSessionLocked();
+  async isSessionLocked(userId: string): Promise<boolean> {
+    if (isSupabaseDriver()) return authRepository.isSessionLocked(userId);
     const session = readData<AuthSession | null>(SESSION_KEY, null);
-    return session ? session.locked === true || getSessionStorageLock(session.userId) : false;
+    return session?.userId === userId && (session.locked === true || getSessionStorageLock(userId));
   },
 
   async hasPersonalPin(userId: string): Promise<boolean> {

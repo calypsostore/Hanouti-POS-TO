@@ -845,18 +845,19 @@ export const userService = {
 
   async getEffectivePermissions(userId: string): Promise<string[]> {
     if (isSupabaseDriver()) {
+      const { data: sessionData, error: sessionError } = await getSupabaseClient().auth.getSession();
+      if (sessionError) throw new Error(`Could not load the active session: ${sessionError.message}`, { cause: sessionError });
+      if (!sessionData.session) throw new Error('An active sign-in is required to read permissions.');
+      if (sessionData.session.user.id === userId) {
+        const { data, error } = await getSupabaseClient().rpc('get_store_permissions');
+        if (error) throw new Error(`Could not load effective permissions: ${error.message}`, { cause: error });
+        if (!Array.isArray(data) || data.some((permissionId) => typeof permissionId !== 'string')) {
+          throw new Error('The server returned an invalid effective permission list.');
+        }
+        return data;
+      }
       const user = await getProfile(userId);
       if (!user || user.role !== 'staff' || !user.storeId) return [];
-      const { data: authData, error: authError } = await getSupabaseClient().auth.getUser();
-      if (authError || !authData.user) throw new Error('An active sign-in is required to read permissions.', { cause: authError });
-      if (authData.user.id === userId) {
-        const checks = await Promise.all(PERMISSIONS.map(async (permission) => {
-          const { data, error } = await getSupabaseClient().rpc('has_store_permission', { p_permission: permission.id });
-          if (error) throw new Error(`Could not verify ${permission.id} permission: ${error.message}`, { cause: error });
-          return data === true ? permission.id : undefined;
-        }));
-        return checks.filter((permissionId): permissionId is string => permissionId !== undefined);
-      }
       const [{ data: position, error: positionError }, overrides] = await Promise.all([
         user.positionId
           ? getSupabaseClient().from('positions').select('permission_ids').eq('id', user.positionId).eq('store_id', user.storeId).maybeSingle()

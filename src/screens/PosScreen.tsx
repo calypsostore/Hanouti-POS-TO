@@ -177,19 +177,21 @@ export function PosScreen() {
       setCatalogLoading(true);
       setCatalogError('');
       try {
-        const [items, categories, shift, currentStore, todaysOrders, permission, compPermission, tabsPermission, overridePermission, customerList, nextDayStatus] = await Promise.all([
+        const [items, categories, shift, currentStore, todaysOrders, effectivePermissionIds, customerList, nextDayStatus] = await Promise.all([
           catalogService.listItems(storeId),
           catalogService.listCategories(storeId),
           user ? shiftService.getOpenShiftForUser(storeId, user.id) : Promise.resolve(undefined),
           storeId ? userService.getStore(storeId) : Promise.resolve(undefined),
           orderService.listTodaySummaries(storeId),
-          user ? userService.hasPermission(user.id, '86_items') : Promise.resolve(false),
-          user?.role === 'owner' ? Promise.resolve(true) : user ? userService.hasPermission(user.id, 'comp_items') : Promise.resolve(false),
-          user && user.role === 'staff' ? userService.hasPermission(user.id, 'use_tabs') : Promise.resolve(false),
-          user && user.role === 'staff' ? userService.hasPermission(user.id, 'tab_override_limit') : Promise.resolve(false),
+          user ? userService.getEffectivePermissions(user.id) : Promise.resolve([]),
           storeId ? customerService.listCustomers(storeId) : Promise.resolve([]),
           reportService.getDayStatus(storeId),
         ]);
+        const permissionSet = new Set(effectivePermissionIds);
+        const permission = user?.role === 'owner' || permissionSet.has('86_items');
+        const compPermission = user?.role === 'owner' || permissionSet.has('comp_items');
+        const tabsPermission = permissionSet.has('use_tabs');
+        const overridePermission = permissionSet.has('tab_override_limit');
         const creditStatuses = await customerService.getCreditStatuses(storeId, customerList);
         const queuedOrders = await offlineOrderQueue.pendingOrders(storeId);
         const attentionOrders = await offlineOrderQueue.needsAttention(storeId);

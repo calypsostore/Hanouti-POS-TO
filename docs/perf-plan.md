@@ -10,3 +10,17 @@
 8. Test update-state pure helpers and concurrent checks; verify bounded order query behavior, cached permissions, targeted invalidation, and aggregate result shapes with focused tests.
 9. Existing indexes already cover orders(store_id, created_at), orders(shift_id), order_lines(order_id), catalog_items(store_id), and notifications(user_id, created_at); avoid duplicate indexes.
 10. Preserve the pre-existing uncommitted worktree changes. In particular, src/App.tsx has unrelated loading-screen edits and will also be touched by Phases 1 and 3; isolate phase hunks before commits.
+
+## Request-count report
+
+These are source-derived Supabase REST/RPC counts, not production telemetry. Realtime WebSocket messages, auth token refreshes, and cached responses are excluded.
+
+| Flow | Before | After |
+| --- | --- | --- |
+| Staff effective permissions | Protected routes and POS fetched permissions independently. | One aggregate `get_store_permissions` RPC during auth hydration; route and POS consumers use auth state, and focus/permission changes refresh it once. |
+| POS credit status | One balance request per customer (`N`). | One `get_customers_credit_status` RPC for the store (`1`), saving `N - 1` requests when `N > 1`. |
+| Shift adjustment reads | One adjustment query per shift (`N`). | One adjustment query for the listed shifts (`1`), saving `N - 1` requests when `N > 1`. |
+| Dashboard aggregation | Client-side reads of historical orders and related records. | One secured dashboard aggregate RPC; shift metadata is loaded separately, with adjustments batched. |
+| Order history | Unbounded full-order reads, including line details. | Summary reads are capped at 200 orders per page (`ceil(N / 200)` requests); details and lines load on demand. |
+| Repeated catalog/store reads | Repeated requests on focus and screen refresh. | A 15-second keyed cache deduplicates fresh/in-flight reads, serves stale data while revalidating, and invalidates by changed table. |
+| Notification catch-up | One 50-row query could skip older unseen rows when more than 50 arrived. | Pages of 50, at most three pages per pass, with a scheduled continuation; in-memory notification history is capped at 200. |

@@ -1,4 +1,7 @@
+create extension if not exists pgtap;
 create extension if not exists plpgsql_check;
+
+select plan(1);
 
 select p.oid::regprocedure as fn,
        pg_get_function_identity_arguments(p.oid) as arguments,
@@ -12,3 +15,24 @@ where n.nspname = 'public'
   and l.lanname = 'plpgsql'
   and p.prorettype <> 'trigger'::regtype
 order by fn;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    join pg_language l on l.oid = p.prolang
+    cross join lateral plpgsql_check_function_tb(p.oid) issue
+    where n.nspname = 'public'
+      and l.lanname = 'plpgsql'
+      and p.prorettype <> 'trigger'::regtype
+      and issue.level = 'error'
+  ) then
+    raise exception 'plpgsql_check reported an error in a public PL/pgSQL function.';
+  end if;
+end
+$$;
+
+select pass('public PL/pgSQL functions have no plpgsql_check errors');
+select * from finish();

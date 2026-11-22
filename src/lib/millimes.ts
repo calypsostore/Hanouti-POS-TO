@@ -1,5 +1,5 @@
 export function parseNonNegativeMillimes(value: string): number | undefined {
-  const trimmed = value.trim().replace(/\s/g, '').replace(/,/g, '.');
+  const trimmed = value.trim();
   if (!/^(?:\d+)(?:\.\d{0,3})?$/.test(trimmed)) return undefined;
 
   const [dinarsText, decimalsText = ''] = trimmed.split('.');

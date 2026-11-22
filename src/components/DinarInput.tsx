@@ -10,12 +10,11 @@ export function DinarInput({ allowZero = true, ...props }: DinarInputProps) {
       {...props}
       type="text"
       inputMode="decimal"
-      minLength={props.minLength}
       min={allowZero ? '0' : '0.001'}
       step="0.001"
       onChange={(event) => {
         const next = event.target.value;
-        if (/^\d*(?:[.,]\d{0,3})?$/.test(next) || next === '') {
+        if (/^\d*(?:\.\d{0,3})?$/.test(next) || next === '') {
           props.onChange?.(event);
         }
       }}

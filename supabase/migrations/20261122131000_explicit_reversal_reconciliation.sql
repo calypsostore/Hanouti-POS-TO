@@ -23,9 +23,38 @@ comment on column public.tabs.reversal_attribution is
 comment on column public.tabs.reversal_post_close_at is
   'Deterministic operational event timestamp for explicitly post-close reversals. It is a reportable event marker, not the basis for ownership.';
 
-create unique index if not exists tabs_one_reversal_per_payment_idx
-  on public.tabs (reverses_tab_id)
-  where kind = 'reversal' and reverses_tab_id is not null;
+create or replace function public.prevent_duplicate_tab_reversal()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.kind = 'reversal' and new.reverses_tab_id is not null then
+    perform pg_advisory_xact_lock(
+      hashtextextended(new.reverses_tab_id::text, 0)
+    );
+    if exists (
+      select 1
+      from public.tabs existing
+      where existing.kind = 'reversal'
+        and existing.reverses_tab_id = new.reverses_tab_id
+        and existing.id <> new.id
+    ) then
+      raise exception 'This payment has already been reversed.';
+    end if;
+  end if;
+  return new;
+end
+$$;
+
+revoke all on function public.prevent_duplicate_tab_reversal() from public, anon, authenticated;
+
+drop trigger if exists prevent_duplicate_tab_reversal_trigger on public.tabs;
+create trigger prevent_duplicate_tab_reversal_trigger
+before insert or update of kind, reverses_tab_id on public.tabs
+for each row
+execute function public.prevent_duplicate_tab_reversal();
 
 create or replace function public.capture_shift_reversal_snapshot()
 returns trigger
@@ -296,7 +325,7 @@ begin
       select sum(case
         when tab.kind = 'settled' then tab.amount_millimes
         when tab.kind = 'reversal'
-          and tab.reversal_attribution = 'same_shift'
+          and tab.reversal_attribution in ('same_shift', 'post_close')
           then -tab.amount_millimes
         else 0
       end)
@@ -604,10 +633,19 @@ as $$
 declare
   result jsonb;
   target public.shifts%rowtype;
+  expected_cash bigint;
   unresolved jsonb;
 begin
   result := public.get_shift_summary_legacy(p_shift_id);
   select * into target from public.shifts where id = p_shift_id;
+  expected_cash := public.get_shift_expected_cash(p_shift_id);
+  result := jsonb_set(result, '{expectedCashMillimes}', to_jsonb(expected_cash), true);
+  result := jsonb_set(
+    result,
+    '{cashFlowExFloatMillimes}',
+    to_jsonb(expected_cash - target.starting_cash_millimes),
+    true
+  );
 
   select coalesce(jsonb_agg(jsonb_build_object(
     'reversalId', reversal.id,
@@ -634,7 +672,7 @@ begin
       select sum(case
         when tab.kind = 'settled' then tab.amount_millimes
         when tab.kind = 'reversal'
-          and tab.reversal_attribution = 'same_shift'
+          and tab.reversal_attribution in ('same_shift', 'post_close')
           then -tab.amount_millimes
         else 0
       end)
@@ -644,24 +682,24 @@ begin
         and tab.kind in ('settled', 'reversal')
     ), 0)), true);
     result := jsonb_set(result, '{cardTabPaymentsMillimes}', to_jsonb(coalesce((
-      select sum(tab.amount_millimes) filter (
+      select coalesce(sum(tab.amount_millimes) filter (
         where tab.kind = 'settled' and tab.payment_method = 'card'
       ), 0) - coalesce(sum(tab.amount_millimes) filter (
         where tab.kind = 'reversal'
           and tab.payment_method = 'card'
-          and tab.reversal_attribution = 'same_shift'
+          and tab.reversal_attribution in ('same_shift', 'post_close')
       ), 0)
       from public.tabs tab
       where tab.shift_id = p_shift_id
         and tab.kind in ('settled', 'reversal')
     ), 0)), true);
     result := jsonb_set(result, '{otherTabPaymentsMillimes}', to_jsonb(coalesce((
-      select sum(tab.amount_millimes) filter (
+      select coalesce(sum(tab.amount_millimes) filter (
         where tab.kind = 'settled' and tab.payment_method = 'other'
       ), 0) - coalesce(sum(tab.amount_millimes) filter (
         where tab.kind = 'reversal'
           and tab.payment_method = 'other'
-          and tab.reversal_attribution = 'same_shift'
+          and tab.reversal_attribution in ('same_shift', 'post_close')
       ), 0)
       from public.tabs tab
       where tab.shift_id = p_shift_id
@@ -672,7 +710,10 @@ begin
       select sum(case
         when tab.kind = 'settled' then tab.amount_millimes
         when tab.kind = 'reversal'
-          and public.is_tab_reversal_included_in_shift_close(tab.id, tab.shift_id)
+          and (
+            public.is_tab_reversal_included_in_shift_close(tab.id, tab.shift_id)
+            or tab.reversal_attribution = 'post_close'
+          )
           then -tab.amount_millimes
         else 0
       end)
@@ -682,24 +723,30 @@ begin
         and tab.kind in ('settled', 'reversal')
     ), 0)), true);
     result := jsonb_set(result, '{cardTabPaymentsMillimes}', to_jsonb(coalesce((
-      select sum(tab.amount_millimes) filter (
+      select coalesce(sum(tab.amount_millimes) filter (
         where tab.kind = 'settled' and tab.payment_method = 'card'
       ), 0) - coalesce(sum(tab.amount_millimes) filter (
         where tab.kind = 'reversal'
           and tab.payment_method = 'card'
-          and public.is_tab_reversal_included_in_shift_close(tab.id, tab.shift_id)
+          and (
+            public.is_tab_reversal_included_in_shift_close(tab.id, tab.shift_id)
+            or tab.reversal_attribution = 'post_close'
+          )
       ), 0)
       from public.tabs tab
       where tab.shift_id = p_shift_id
         and tab.kind in ('settled', 'reversal')
     ), 0)), true);
     result := jsonb_set(result, '{otherTabPaymentsMillimes}', to_jsonb(coalesce((
-      select sum(tab.amount_millimes) filter (
+      select coalesce(sum(tab.amount_millimes) filter (
         where tab.kind = 'settled' and tab.payment_method = 'other'
       ), 0) - coalesce(sum(tab.amount_millimes) filter (
         where tab.kind = 'reversal'
           and tab.payment_method = 'other'
-          and public.is_tab_reversal_included_in_shift_close(tab.id, tab.shift_id)
+          and (
+            public.is_tab_reversal_included_in_shift_close(tab.id, tab.shift_id)
+            or tab.reversal_attribution = 'post_close'
+          )
       ), 0)
       from public.tabs tab
       where tab.shift_id = p_shift_id
@@ -792,8 +839,6 @@ begin
   from public.tabs tab
   where tab.store_id = p_store_id
     and tab.created_at between p_from and p_to;
-
-  reconstructed_expected := reconstructed_expected - cash_refunds;
 
   select
     coalesce(sum(tab.amount_millimes) filter (
@@ -907,6 +952,7 @@ declare
   server_summary jsonb;
   server_sales bigint;
   server_order_count integer;
+  shift_count integer;
   server_payment_split jsonb;
   server_cash_tab bigint;
   server_card_tab bigint;
@@ -958,6 +1004,27 @@ begin
     or period_to > now() + interval '30 seconds' then
     raise exception 'Report details or period are invalid.';
   end if;
+  if jsonb_typeof(p_report->'shifts') is distinct from 'array' then
+    raise exception 'Report shift lines must be a JSON array.';
+  end if;
+  if exists (
+    select 1
+    from jsonb_array_elements(p_report->'shifts') as snapshot_line(value)
+    where jsonb_typeof(snapshot_line.value) is distinct from 'object'
+      or jsonb_typeof(snapshot_line.value->'shiftId') is distinct from 'string'
+      or snapshot_line.value->>'shiftId' !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+  ) then
+    raise exception 'Report shift IDs must be valid UUIDs.';
+  end if;
+  if exists (
+    select 1
+    from jsonb_array_elements(p_report->'shifts') as snapshot_line(value)
+    where jsonb_typeof(snapshot_line.value->'startingCashMillimes') is distinct from 'number'
+      or snapshot_line.value->>'startingCashMillimes' !~ '^[0-9]+$'
+      or jsonb_typeof(snapshot_line.value->'forceClosedByOwner') is distinct from 'boolean'
+  ) then
+    raise exception 'Report shift lines do not match persisted shifts.';
+  end if;
 
   previous_z_at := public.get_last_z_report_boundary(target_store.store_id);
   select min(shift.opened_at)
@@ -977,6 +1044,85 @@ begin
   end if;
   if period_from is distinct from expected_period_from then
     raise exception 'Report period must begin when the first unreported shift after the previous Z opens.';
+  end if;
+
+  if exists (
+    select 1
+    from jsonb_array_elements(p_report->'shifts') as snapshot_line(value)
+    join public.z_reported_shifts reported
+      on reported.store_id = target_store.store_id
+      and reported.shift_id = (snapshot_line.value->>'shiftId')::uuid
+  ) then
+    raise exception 'A shift in this Z report was already included in a previous Z report.';
+  end if;
+  select count(*)::integer
+  into shift_count
+  from public.shifts shift
+  where shift.store_id = target_store.store_id
+    and shift.opened_at >= period_from
+    and shift.opened_at <= period_to
+    and not exists (
+      select 1
+      from public.z_reported_shifts reported
+      where reported.store_id = shift.store_id
+        and reported.shift_id = shift.id
+    );
+  if jsonb_array_length(p_report->'shifts') <> shift_count then
+    raise exception 'Report shift lines do not match persisted shifts.';
+  end if;
+  if exists (
+    select 1
+    from public.shifts eligible_shift
+    where eligible_shift.store_id = target_store.store_id
+      and eligible_shift.opened_at >= period_from
+      and eligible_shift.opened_at <= period_to
+      and not exists (
+        select 1
+        from public.z_reported_shifts reported
+        where reported.store_id = eligible_shift.store_id
+          and reported.shift_id = eligible_shift.id
+      )
+      and not exists (
+        select 1
+        from jsonb_array_elements(p_report->'shifts') as snapshot_line(value)
+        where (snapshot_line.value->>'shiftId')::uuid = eligible_shift.id
+          and (snapshot_line.value->>'startingCashMillimes')::bigint
+            = eligible_shift.starting_cash_millimes
+          and (snapshot_line.value->>'forceClosedByOwner')::boolean
+            = eligible_shift.force_closed_by_owner
+      )
+  ) or exists (
+    select 1
+    from jsonb_array_elements(p_report->'shifts') as snapshot_line(value)
+    where not exists (
+      select 1
+      from public.shifts eligible_shift
+      where (snapshot_line.value->>'shiftId')::uuid = eligible_shift.id
+        and eligible_shift.store_id = target_store.store_id
+        and eligible_shift.opened_at >= period_from
+        and eligible_shift.opened_at <= period_to
+        and eligible_shift.starting_cash_millimes
+          = (snapshot_line.value->>'startingCashMillimes')::bigint
+        and eligible_shift.force_closed_by_owner
+          = (snapshot_line.value->>'forceClosedByOwner')::boolean
+        and not exists (
+          select 1
+          from public.z_reported_shifts reported
+          where reported.store_id = eligible_shift.store_id
+            and reported.shift_id = eligible_shift.id
+        )
+    )
+  ) then
+    raise exception 'Report shift lines contain values that do not match persisted shifts.';
+  end if;
+
+  if exists (
+    select 1
+    from public.orders order_record
+    where order_record.store_id = target_store.store_id
+      and order_record.status = 'pending_void'
+  ) then
+    raise exception 'Resolve every void request before creating a Z report.';
   end if;
 
   if exists (
@@ -1057,7 +1203,7 @@ begin
       where reported.store_id = shift.store_id
         and reported.shift_id = shift.id
     );
-  server_expected_cash := coalesce(server_expected_cash, 0) - server_cash_refunds;
+  server_expected_cash := coalesce(server_expected_cash, 0);
   expected_cash_ex_float := server_expected_cash - server_cash_float;
 
   expected_card := (server_payment_split->>'card')::bigint + server_card_tab;

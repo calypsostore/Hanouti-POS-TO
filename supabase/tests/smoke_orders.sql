@@ -1,5 +1,8 @@
 -- Paste into the Supabase SQL editor using its postgres role.
 -- All created rows, including the temporary auth users, are rolled back.
+create extension if not exists pgtap;
+select plan(1);
+
 begin;
 
 create temporary table smoke_order_context (
@@ -140,5 +143,18 @@ from smoke_order_context context;
 select order_kind, order_number
 from smoke_order_results
 order by order_number;
+
+do $$
+begin
+  if (select count(*) from smoke_order_results) <> 2
+    or (select min(order_number) from smoke_order_results) <> 1
+    or (select max(order_number) from smoke_order_results) <> 2 then
+    raise exception 'Smoke orders must receive consecutive ticket numbers.';
+  end if;
+end
+$$;
+
+select pass('order creation and ticket numbering assertions completed');
+select * from finish();
 
 rollback;

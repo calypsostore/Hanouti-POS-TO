@@ -9,12 +9,11 @@ describe('Dinar millimes parsing', () => {
     ['0.250', 250],
     ['1.005', 1005],
     ['100.000', 100000],
-    ['50,000', 50000],
   ])('parses %s as %i millimes', (input, expected) => {
     expect(parseNonNegativeMillimes(input)).toBe(expected);
   });
 
-  it.each(['', '  ', '-200', 'not a number', '1.0000', '9007199254740992', '1e3', '.250'])(
+  it.each(['', '  ', '-200', 'not a number', '1.0000', '9007199254740992', '1e3', '.250', '50,000', '1 005'])(
     'rejects invalid Dinar input (%s)',
     (input) => {
       expect(parseNonNegativeMillimes(input)).toBeUndefined();

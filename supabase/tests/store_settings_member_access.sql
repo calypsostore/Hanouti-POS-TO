@@ -1,16 +1,24 @@
 -- Run against a migrated Supabase database with the postgres role.
 -- Verifies a staff session sees the store's manual Quick Picks and no other stores.
+create extension if not exists pgtap;
+select plan(1);
+
 begin;
 
 create temporary table store_settings_context (
   store_id uuid primary key,
   other_store_id uuid not null,
   staff_id uuid not null,
-  item_id uuid not null
+  owner_id uuid not null,
+  item_id uuid not null,
+  session_id text not null
 ) on commit drop;
 
 insert into store_settings_context
-values (gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), gen_random_uuid());
+values (
+  gen_random_uuid(), gen_random_uuid(), gen_random_uuid(),
+  gen_random_uuid(), gen_random_uuid(), gen_random_uuid()::text
+);
 
 insert into auth.users (
   id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -22,8 +30,18 @@ select staff_id, 'authenticated', 'authenticated',
        '{"name":"Settings smoke staff"}'::jsonb, now(), now()
 from store_settings_context;
 
+insert into auth.users (
+  id, aud, role, email, encrypted_password, email_confirmed_at,
+  raw_app_meta_data, raw_user_meta_data, created_at, updated_at
+)
+select owner_id, 'authenticated', 'authenticated',
+       'settings-owner-' || replace(store_id::text, '-', '') || '@example.invalid',
+       '', now(), '{"provider":"email","providers":["email"]}'::jsonb,
+       '{"name":"Settings smoke owner"}'::jsonb, now(), now()
+from store_settings_context;
+
 insert into public.stores (id, store_id, owner_id, code, name)
-select store_id, store_id, gen_random_uuid(),
+select store_id, store_id, owner_id,
        'ss' || left(replace(store_id::text, '-', ''), 8),
        'Settings smoke store'
 from store_settings_context
@@ -34,10 +52,22 @@ select other_store_id, other_store_id, gen_random_uuid(),
 from store_settings_context;
 
 insert into public.profiles (id, store_id, role, name, email, username, is_active)
+select owner_id, store_id, 'owner', 'Settings smoke owner',
+       'settings-owner-' || replace(store_id::text, '-', '') || '@example.invalid',
+       'settings-owner-' || left(replace(store_id::text, '-', ''), 12), true
+from store_settings_context;
+
+insert into public.profiles (id, store_id, role, name, email, username, is_active)
 select staff_id, store_id, 'staff', 'Settings smoke staff',
        'settings-staff-' || replace(staff_id::text, '-', '') || '@example.invalid',
        'settings-staff-' || left(replace(staff_id::text, '-', ''), 12), true
 from store_settings_context;
+
+insert into public.auth_sessions (session_id, user_id, session_version, expires_at)
+select context.session_id, context.staff_id, profile.session_version,
+       now() + interval '1 hour'
+from store_settings_context context
+join public.profiles profile on profile.id = context.staff_id;
 
 insert into public.store_settings (store_id, settings)
 select store_id,
@@ -58,7 +88,8 @@ select set_config(
   jsonb_build_object(
     'sub', staff_id,
     'role', 'authenticated',
-    'item_id', item_id
+    'item_id', item_id,
+    'session_id', session_id
   )::text,
   true
 )
@@ -96,5 +127,8 @@ begin
 end
 $$;
 reset role;
+
+select pass('store settings member-access assertions completed');
+select * from finish();
 
 rollback;

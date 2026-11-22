@@ -1,5 +1,8 @@
 -- Run against a migrated Supabase database with the postgres role.
 -- Fixture data is rolled back after every assertion completes.
+create extension if not exists pgtap;
+select plan(1);
+
 begin;
 
 create temporary table shift_report_audit_context (
@@ -314,6 +317,7 @@ declare
   flow record;
   report_store record;
   v_staff_shift uuid;
+  v_same_shift uuid;
   v_owner_shift uuid;
   v_minus_shift uuid;
   v_force_shift uuid;
@@ -329,6 +333,8 @@ declare
   v_next_z_order uuid;
   v_pin_void_order uuid;
   v_tab_payment uuid;
+  v_post_close_payment uuid;
+  v_period_from timestamptz;
   v_expected bigint;
   v_result jsonb;
   v_z_report public.reports%rowtype;
@@ -405,6 +411,15 @@ begin
     'sub', flow.owner_id, 'role', 'authenticated', 'session_id', flow.owner_session_id
   )::text, true);
   perform public.reverse_tab_payment(v_tab_payment, '1234', 'Same-shift test reversal');
+  begin
+    perform public.reverse_tab_payment(v_tab_payment, '1234', 'Repeated reversal attempt');
+    raise exception 'Repeated reversal attempt unexpectedly succeeded.';
+  exception
+    when others then
+      if SQLERRM <> 'This payment has already been reversed.' then
+        raise;
+      end if;
+  end;
   perform set_config('request.jwt.claim.sub', flow.staff_id::text, true);
   perform set_config('request.jwt.claim.role', 'authenticated', true);
   perform set_config('request.jwt.claims', jsonb_build_object(
@@ -427,10 +442,23 @@ begin
   if public.get_shift_expected_cash(v_staff_shift) <> 6600 then
     raise exception 'Cash expected must include float, cash sales, cash tab payments, cash in, and cash out.';
   end if;
+  v_result := public.get_shift_summary(v_staff_shift);
+  if (v_result->>'expectedCashMillimes')::bigint <> 6600
+    or (v_result->>'cashFlowExFloatMillimes')::bigint <> 1600
+    or (v_result->>'tabPaymentsMillimes')::bigint <> 500
+    or (v_result->>'cardTabPaymentsMillimes')::bigint <> 0
+    or (v_result->>'otherTabPaymentsMillimes')::bigint <> 0 then
+    raise exception 'Open shift summary did not reconcile attributed cash and non-cash tab payments.';
+  end if;
   if (select count(*) from public.orders where id = any(array[v_order_cash, v_order_card, v_order_tab])) <> 3 then
     raise exception 'Cash, card, and tab sales were not recorded.';
   end if;
-  if (select count(*) from public.tabs where customer_id = flow.customer_id and kind = 'settled') <> 1 then
+  if not exists (
+    select 1 from public.tabs
+    where id = v_tab_payment
+      and customer_id = flow.customer_id
+      and kind = 'settled'
+  ) then
     raise exception 'Cash tab settlement was not recorded.';
   end if;
 
@@ -442,21 +470,26 @@ begin
     raise exception 'Stock must remain held, not restored, while a void is pending.';
   end if;
   perform public.close_shift(v_staff_shift, 5700, 'One hundred millimes over.');
+  v_same_shift := v_staff_shift;
   if not exists (
     select 1
     from public.shift_reversal_snapshots snapshot
+    join public.tabs reversal on reversal.id = snapshot.reversal_id
     where snapshot.shift_id = v_staff_shift
-      and snapshot.reversal_id = v_tab_payment
+      and reversal.reverses_tab_id = v_tab_payment
+      and reversal.kind = 'reversal'
   ) then
     raise exception 'Same-shift reversal was not captured in the close snapshot.';
   end if;
-  if not exists (
-    select 1
+  if (
+    select count(*)
     from public.shift_reversal_snapshots snapshot
+    join public.tabs reversal on reversal.id = snapshot.reversal_id
     where snapshot.shift_id = v_staff_shift
-      and snapshot.reversal_id = v_tab_payment
-  ) then
-    raise exception 'A pre-close reversal was not captured at shift close.';
+      and reversal.kind = 'reversal'
+      and reversal.reversal_attribution = 'same_shift'
+  ) <> 2 then
+    raise exception 'Every pre-close same-shift reversal must be captured at shift close.';
   end if;
   perform set_config('request.jwt.claim.sub', flow.owner_id::text, true);
   perform set_config('request.jwt.claim.role', 'authenticated', true);
@@ -506,7 +539,50 @@ begin
     'sub', flow.owner_id, 'role', 'authenticated', 'session_id', flow.owner_session_id
   )::text, true);
   v_owner_shift := (public.open_shift(3000)).id;
-  v_result := public.close_shift(v_owner_shift, 3000, null);
+  select id into v_post_close_payment
+  from public.tabs
+  where customer_id = flow.customer_id
+    and kind = 'settled'
+    and note = 'Audit settlement';
+  if v_post_close_payment is null then
+    raise exception 'The original cash tab settlement was not available for post-close testing.';
+  end if;
+  perform public.reverse_tab_payment(v_post_close_payment, '1234', 'Post-close test reversal');
+  if not exists (
+    select 1
+    from public.tabs reversal
+    where reversal.reverses_tab_id = v_post_close_payment
+      and reversal.shift_id = v_owner_shift
+      and reversal.kind = 'reversal'
+      and reversal.reversal_attribution = 'post_close'
+  ) then
+    raise exception 'A post-close reversal was not attributed to the later open shift.';
+  end if;
+  if public.get_shift_expected_cash(v_same_shift) <> 6600
+    or public.get_shift_expected_cash(v_owner_shift) <> 2500 then
+    raise exception 'A post-close reversal must reduce only the later shift cash ledger.';
+  end if;
+  v_result := public.get_shift_summary(v_owner_shift);
+  if (v_result->>'expectedCashMillimes')::bigint <> 2500
+    or (v_result->>'tabPaymentsMillimes')::bigint <> -500 then
+    raise exception 'The later shift summary did not include its post-close reversal exactly once.';
+  end if;
+  select opened_at into v_period_from from public.shifts where id = v_same_shift;
+  v_result := public.get_reversal_ledger(flow.store_id, v_period_from, now());
+  if (v_result->>'cashVerifiedNetMillimes')::bigint <> 0
+    or (v_result->>'cashPostCloseReversalMillimes')::bigint <> 500
+    or jsonb_array_length(v_result->'unresolvedTabReversals') <> 0 then
+    raise exception 'The post-close reversal was not accounted for once in the verified period ledger.';
+  end if;
+  v_result := public.get_dashboard_summary(flow.store_id, v_period_from, now(), true);
+  if (v_result->>'cashRefundsMillimes')::bigint <> 500
+    or (v_result->>'totalExpectedCashMillimes')::bigint <> (
+      select coalesce(sum((line->>'expectedCashMillimes')::bigint), 0)
+      from jsonb_array_elements(v_result->'shiftLines') line
+    ) then
+    raise exception 'The dashboard deducted the post-close reversal more than once.';
+  end if;
+  v_result := public.close_shift(v_owner_shift, 2500, null);
   if v_result->'shift'->>'difference_millimes' <> '0' then
     raise exception 'An owner-opened zero-difference shift did not close at zero.';
   end if;
@@ -640,6 +716,19 @@ begin
   ) then
     raise exception 'A reversal after close without a later active shift must be marked ambiguous and exposed for reconciliation.';
   end if;
+  select opened_at into v_period_from from public.shifts where id = v_z_shift;
+  v_result := public.get_reversal_ledger(report_store.store_id, v_period_from, now());
+  if (v_result->>'cashVerifiedNetMillimes')::bigint <> 500
+    or (v_result->>'cashPostCloseReversalMillimes')::bigint <> 0
+    or jsonb_array_length(v_result->'unresolvedTabReversals') <> 1 then
+    raise exception 'An ambiguous reversal changed verified totals or was hidden from reconciliation.';
+  end if;
+  v_result := public.get_shift_summary(v_z_shift);
+  if (v_result->>'expectedCashMillimes')::bigint <> 500
+    or (v_result->>'tabPaymentsMillimes')::bigint <> 500
+    or jsonb_array_length(v_result->'unresolvedTabReversals') <> 1 then
+    raise exception 'An ambiguous reversal changed closed-shift totals or was hidden from reconciliation.';
+  end if;
 
   perform set_config('request.jwt.claim.sub', report_store.staff_id::text, true);
   perform set_config('request.jwt.claim.role', 'authenticated', true);
@@ -669,6 +758,20 @@ begin
   end if;
 
   v_snapshot := pg_temp.shift_audit_z_snapshot(report_store.store_id, 0, null, 1100, 1200);
+  begin
+    perform public.record_report(v_snapshot, '1234');
+    raise exception 'Z unexpectedly accepted an unresolved ambiguous reversal.';
+  exception when others then
+    if position('Z reconciliation unresolved:' in sqlerrm) = 0 then
+      raise;
+    end if;
+  end;
+  delete from public.tabs reversal
+  where reversal.reverses_tab_id = v_tab_payment
+    and reversal.kind = 'reversal'
+    and reversal.reversal_attribution = 'ambiguous';
+
+  v_snapshot := pg_temp.shift_audit_z_snapshot(report_store.store_id, 0, null, 1100, 1200);
   v_snapshot := jsonb_set(v_snapshot, '{expectedCardMillimes}', '1'::jsonb, true);
   begin
     perform public.record_report(v_snapshot, '1234');
@@ -687,20 +790,47 @@ begin
       raise;
     end if;
   end;
-  v_snapshot := pg_temp.shift_audit_z_snapshot(report_store.store_id, 0, null, 1100, 1200);
-  select public.record_report(v_snapshot, '1234') into v_z_report;
+  -- now() is fixed for this transaction; keep later fixture events outside the immutable Z interval.
+  update public.shifts
+  set opened_at = opened_at - interval '2 seconds',
+      closed_at = closed_at - interval '2 seconds'
+  where store_id = report_store.store_id;
+  update public.orders
+  set created_at = created_at - interval '2 seconds',
+      void_requested_at = void_requested_at - interval '2 seconds',
+      voided_at = voided_at - interval '2 seconds'
+  where store_id = report_store.store_id;
+  update public.tabs
+  set created_at = created_at - interval '2 seconds'
+  where store_id = report_store.store_id;
+  update public.cash_movements
+  set created_at = created_at - interval '2 seconds'
+  where store_id = report_store.store_id;
+  update public.shift_void_adjustments
+  set created_at = created_at - interval '2 seconds'
+  where store_id = report_store.store_id;
+  update public.comps
+  set created_at = created_at - interval '2 seconds'
+  where store_id = report_store.store_id;
+  update public.expenses
+  set created_at = created_at - interval '2 seconds'
+  where store_id = report_store.store_id;
+  v_snapshot := pg_temp.shift_audit_z_snapshot(report_store.store_id, 500, null, 1100, 1200);
+  v_snapshot := jsonb_set(v_snapshot, '{periodTo}', to_jsonb(now() - interval '1 second'), true);
+  v_snapshot := jsonb_set(v_snapshot, '{createdAt}', to_jsonb(now() - interval '1 second'), true);
+  v_z_report := public.record_report(v_snapshot, '1234');
   if v_z_report.type <> 'Z'
     or v_z_report.cash_difference_millimes <> 0
     or (v_z_report.data->>'cashDifferenceMillimes')::bigint <> 0
     or (v_z_report.data->>'cashDifference')::bigint <> 0
     or v_z_report.z_number <> 1
-    or (v_z_report.data->>'totalExpectedCashMillimes')::bigint <> 500
+    or (v_z_report.data->>'totalExpectedCashMillimes')::bigint <> 1000
     or (v_z_report.data->>'cashFloatMillimes')::bigint <> 500
-    or (v_z_report.data->>'expectedCashExFloatMillimes')::bigint <> 0
-    or (v_z_report.data->>'countedCashMillimes')::bigint <> 0
+    or (v_z_report.data->>'expectedCashExFloatMillimes')::bigint <> 500
+    or (v_z_report.data->>'countedCashMillimes')::bigint <> 500
     or (v_z_report.data->>'countedCashIncludesFloat')::boolean is distinct from false
     or (v_z_report.data->>'totalDifferenceMillimes')::bigint <> 1000
-    or (v_z_report.data->>'cashRefundsMillimes')::bigint <> 500
+    or (v_z_report.data->>'cashRefundsMillimes')::bigint <> 0
     or (v_z_report.data->>'expectedCardMillimes')::bigint <> 1100
     or (v_z_report.data->>'countedCardMillimes')::bigint <> 1100
     or (v_z_report.data->>'expectedOtherMillimes')::bigint <> 1200
@@ -710,7 +840,7 @@ begin
     or (select count(*) from public.z_reported_shifts
         where store_id = report_store.store_id and shift_id = v_z_shift) <> 1
     or not exists (
-      select 1 from jsonb_array_elements(v_z_report.data->'shifts') line
+      select 1 from jsonb_array_elements(v_z_report.data->'shiftLines') line
       where (line->>'forceClosedByOwner')::boolean
         and (line->>'voidsAutoApprovedCount')::integer = 1
     ) then
@@ -730,6 +860,7 @@ begin
       from public.reports report
       cross join lateral jsonb_array_elements(
         case
+          when jsonb_typeof(report.data->'shiftLines') = 'array' then report.data->'shiftLines'
           when jsonb_typeof(report.data->'shifts') = 'array' then report.data->'shifts'
           else '[]'::jsonb
         end
@@ -802,7 +933,8 @@ begin
     update public.reports set data = data || '{"tampered":true}'::jsonb where id = v_z_report.id;
     raise exception 'Stored Z report was unexpectedly mutable.';
   exception when others then
-    if position('Stored reports are immutable.' in sqlerrm) = 0 then
+    if position('Stored reports are immutable.' in sqlerrm) = 0
+      and position('reports is append-only;' in sqlerrm) = 0 then
       raise;
     end if;
   end;
@@ -810,7 +942,8 @@ begin
     delete from public.reports where id = v_z_report.id;
     raise exception 'Stored Z report was unexpectedly deletable.';
   exception when others then
-    if position('Stored reports are immutable.' in sqlerrm) = 0 then
+    if position('Stored reports are immutable.' in sqlerrm) = 0
+      and position('reports is append-only;' in sqlerrm) = 0 then
       raise;
     end if;
   end;
@@ -863,7 +996,7 @@ begin
     end if;
   end;
   v_snapshot := pg_temp.shift_audit_z_snapshot(report_store.store_id, 1000, null, 0, 0);
-  select public.record_report(v_snapshot, '1234') into v_next_z_report;
+  v_next_z_report := public.record_report(v_snapshot, '1234');
   if v_next_z_report.z_number <> 2
     or v_next_z_report.sales_millimes <> 1000
     or (v_next_z_report.data->>'periodFrom')::timestamptz is distinct from (
@@ -871,8 +1004,8 @@ begin
     )
     or v_next_z_report.period_to is distinct from
       public.try_parse_z_report_timestamp(v_next_z_report.data->>'periodTo')
-    or jsonb_array_length(v_next_z_report.data->'shifts') <> 1
-    or (v_next_z_report.data->'shifts'->0->>'shiftId')::uuid <> v_next_z_shift
+    or jsonb_array_length(v_next_z_report.data->'shiftLines') <> 1
+    or (v_next_z_report.data->'shiftLines'->0->>'shiftId')::uuid <> v_next_z_shift
     or not exists (
       select 1 from public.orders where id = v_next_z_order
         and created_at between v_next_z_report.period_from and v_next_z_report.period_to
@@ -900,14 +1033,19 @@ begin
     or public.get_next_order_number() <> 1 then
     raise exception 'The next business day did not start a fresh ticket counter.';
   end if;
+  alter table public.orders alter column created_at set default clock_timestamp();
   v_result := public.create_order(
     v_z_shift, pg_temp.shift_audit_order_items(report_store.item_id), 'cash'
   );
+  alter table public.orders alter column created_at set default now();
   if (v_result->'order'->>'number')::integer <> 1
     or (v_result->'order'->>'business_date')::date <> v_next_business_date then
     raise exception 'Overnight order date or ticket counter does not match the business day.';
   end if;
 end
 $$;
+
+select pass('shift, reversal, and Z-report audit assertions completed');
+select * from finish();
 
 rollback;

@@ -11,6 +11,7 @@ import { ListSkeleton } from '../components/ListSkeleton';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { LogoPicker } from '../components/LogoPicker';
+import { DinarInput } from '../components/DinarInput';
 import { ItemLogo } from '../components/ItemLogo';
 import { PageContainer } from '../components/layout';
 import { catalogService } from '../services/catalogService';
@@ -92,7 +93,7 @@ function localDateKey(date: Date): string {
 
 function parseMillimesAmount(value: string): number {
   const millimes = parseNonNegativeMillimes(value);
-  if (millimes === undefined) throw new Error('Enter a non-negative whole number of millimes.');
+  if (millimes === undefined) throw new Error('Enter a valid non-negative TND amount with up to three decimal places.');
   return millimes;
 }
 
@@ -974,7 +975,7 @@ export function SettingsScreen() {
               <label className="font-body text-label-md">Store phone<input value={storePhone} maxLength={50} onChange={(event) => setStorePhone(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
               <label className="font-body text-label-md">Tax ID<input value={storeTaxId} maxLength={50} onChange={(event) => setStoreTaxId(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
               <label className="font-body text-label-md">Store ID<input readOnly value={store.code.toUpperCase()} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 text-on-surface-variant" /></label>
-              <label className="font-body text-label-md">{t('settings.dailySalesTarget')} (millimes)<input required type="number" min="0" step="1" inputMode="numeric" value={dailySalesTarget} onChange={(event) => setDailySalesTarget(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
+              <label className="font-body text-label-md">{t('settings.dailySalesTarget')} (TND)<DinarInput required value={dailySalesTarget} onChange={(event) => setDailySalesTarget(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
               <p className="-mt-2 font-body text-body-sm text-outline">{t('settings.dailySalesTargetHelp')}</p>
               <Button type="submit" variant="secondary">{t('common.save')}</Button>
             </form>
@@ -1153,8 +1154,8 @@ export function SettingsScreen() {
                 <h3 className="font-body text-label-lg text-on-surface">Large cash-out threshold</h3>
                 <p className="mt-1 font-body text-body-sm text-on-surface-variant">Notify the owner when a cash-out is greater than this amount. Set to 0 to alert for every cash-out. Default: 50.000 DT.</p>
               </div>
-              <label htmlFor="cash-out-alert-threshold" className="font-body text-label-md text-on-surface">Alert threshold (millimes)</label>
-              <input id="cash-out-alert-threshold" type="number" min="0" step="1" inputMode="numeric" required value={cashOutAlertThreshold} onChange={(event) => setCashOutAlertThreshold(event.target.value)} className="h-12 rounded-lg bg-surface-container-lowest px-3 outline-none focus:ring-2 focus:ring-primary" />
+              <label htmlFor="cash-out-alert-threshold" className="font-body text-label-md text-on-surface">Alert threshold (TND)</label>
+              <DinarInput id="cash-out-alert-threshold" required value={cashOutAlertThreshold} onChange={(event) => setCashOutAlertThreshold(event.target.value)} className="h-12 rounded-lg bg-surface-container-lowest px-3 outline-none focus:ring-2 focus:ring-primary" />
               <Button type="submit" variant="secondary" disabled={savingCashOutThreshold}>{savingCashOutThreshold ? 'Saving…' : t('common.save')}</Button>
             </form>
           </section>

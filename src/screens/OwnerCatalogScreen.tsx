@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { BottomSheet } from '../components/BottomSheet';
+import { DinarInput } from '../components/DinarInput';
 import { Button } from '../components/Button';
 import { Chip } from '../components/Chip';
 import { ItemLogo } from '../components/ItemLogo';
@@ -251,7 +252,7 @@ function OwnerCatalogContent() {
       }
       if (!draft.price.trim()) throw new Error('Enter a product price.');
       const priceMillimes = parseNonNegativeMillimes(draft.price);
-      if (priceMillimes === undefined) throw new Error('Enter a non-negative whole number of millimes for the product price.');
+      if (priceMillimes === undefined) throw new Error('Enter a valid product price in TND with up to three decimal places.');
 
       const stockCount = draft.availability === 'out' ? 0 : draft.stockCount.trim() ? Number(draft.stockCount) : null;
       if (stockCount !== null && (!Number.isInteger(stockCount) || stockCount < 0)) throw new Error('Stock count must be a non-negative whole number.');
@@ -272,7 +273,7 @@ function OwnerCatalogContent() {
         if (names.has(normalizedName)) throw new Error('Modifier option names must be unique.');
         names.add(normalizedName);
         const modifierPriceMillimes = parseNonNegativeMillimes(rawPrice);
-        if (modifierPriceMillimes === undefined) throw new Error('Enter a non-negative whole number of millimes for each modifier price.');
+        if (modifierPriceMillimes === undefined) throw new Error('Enter a valid modifier price in TND with up to three decimal places.');
         modifiers.push({ id: modifier.id, name, priceMillimes: modifierPriceMillimes });
       }
       if (draft.modifiersRequired && modifiers.length === 0) throw new Error('Add at least one modifier option for a required group.');
@@ -611,7 +612,7 @@ function OwnerCatalogContent() {
           )}
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="font-body text-label-md">Product name<input required value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
-            <label className="font-body text-label-md">{t('catalog.priceMillimes')}<input required type="number" min="0" step="1" inputMode="numeric" value={draft.price} onChange={(event) => setDraft((current) => ({ ...current, price: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /><span className="mt-1 block text-body-sm text-outline">Enter a whole number of millimes.</span></label>
+            <label className="font-body text-label-md">{t('catalog.priceMillimes')}<DinarInput required value={draft.price} onChange={(event) => setDraft((current) => ({ ...current, price: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /><span className="mt-1 block text-body-sm text-outline">Enter the price in TND, for example 50.000.</span></label>
             <label className="font-body text-label-md">SKU / barcode<input value={draft.sku} onChange={(event) => setDraft((current) => ({ ...current, sku: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
             <label className="font-body text-label-md">Category<select required value={draft.categoryId} onChange={(event) => setDraft((current) => ({ ...current, categoryId: event.target.value }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary"><option value="">Select a category</option>{activeCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
             <label className="font-body text-label-md">Stock count <span className="text-outline">(leave blank for untracked)</span><input type="number" min="0" step="1" required={Boolean(editingItem && editingItem.stockCount !== null && draft.availability !== 'out')} value={draft.stockCount} onChange={(event) => setDraft((current) => ({ ...current, stockCount: event.target.value, availability: event.target.value === '0' ? 'out' : current.availability === 'out' ? 'available' : current.availability }))} placeholder="Not tracked" className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
@@ -644,14 +645,14 @@ function OwnerCatalogContent() {
                 <div key={modifier.id} className="flex items-center gap-2">
                   <label className="sr-only" htmlFor={`modifier-name-${modifier.id}`}>Option name</label>
                   <input id={`modifier-name-${modifier.id}`} value={modifier.name} onChange={(event) => setDraft((current) => ({ ...current, modifiers: current.modifiers.map((option, optionIndex) => optionIndex === index ? { ...option, name: event.target.value } : option) }))} placeholder="Option name" className="h-11 min-w-0 flex-1 rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" />
-                  <label className="sr-only" htmlFor={`modifier-price-${modifier.id}`}>Option price in millimes</label>
-                  <div className="relative w-40 shrink-0"><input id={`modifier-price-${modifier.id}`} type="number" min="0" step="1" inputMode="numeric" value={modifier.price} onChange={(event) => setDraft((current) => ({ ...current, modifiers: current.modifiers.map((option, optionIndex) => optionIndex === index ? { ...option, price: event.target.value } : option) }))} className="h-11 w-full rounded-lg bg-surface-container-low px-3 pr-16 text-right outline-none focus:ring-2 focus:ring-primary" /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-body-sm text-outline">millimes</span></div>
+                  <label className="sr-only" htmlFor={`modifier-price-${modifier.id}`}>Option price in TND</label>
+                  <div className="relative w-40 shrink-0"><DinarInput id={`modifier-price-${modifier.id}`} value={modifier.price} onChange={(event) => setDraft((current) => ({ ...current, modifiers: current.modifiers.map((option, optionIndex) => optionIndex === index ? { ...option, price: event.target.value } : option) }))} className="h-11 w-full rounded-lg bg-surface-container-low px-3 pr-16 text-right outline-none focus:ring-2 focus:ring-primary" /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-body-sm text-outline">TND</span></div>
                   <button type="button" aria-label={`Remove ${modifier.name || 'modifier option'}`} onClick={() => setDraft((current) => ({ ...current, modifiers: current.modifiers.filter((_, optionIndex) => optionIndex !== index) }))} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-error-dark hover:bg-error-container"><MaterialIcon name="delete" /></button>
                 </div>
               ))}
               <Button type="button" variant="secondary" className="self-start" onClick={() => setDraft((current) => ({ ...current, modifiers: [...current.modifiers, { id: crypto.randomUUID(), name: '', price: '' }] }))}><MaterialIcon name="add" />Add option</Button>
             </div>
-            <p className="mt-2 font-body text-body-sm text-outline">Enter each option add-on as a whole number of millimes.</p>
+            <p className="mt-2 font-body text-body-sm text-outline">Enter each option add-on in TND, for example 0.250.</p>
           </fieldset>
 
           <label className="flex items-center gap-2 font-body text-label-md"><input type="checkbox" checked={draft.isActive} onChange={(event) => setDraft((current) => ({ ...current, isActive: event.target.checked }))} className="h-4 w-4 accent-primary" />Product is active in the POS</label>

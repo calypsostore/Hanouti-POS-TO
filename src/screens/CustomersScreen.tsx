@@ -4,6 +4,7 @@ import { ownerWorkspaceLinks } from '../app/navigation';
 import { CardGrid, PageContainer, PageHeader, SplitView } from '../components/layout';
 import { BottomNav } from '../components/BottomNav';
 import { BottomSheet } from '../components/BottomSheet';
+import { DinarInput } from '../components/DinarInput';
 import { Button } from '../components/Button';
 import { Keypad } from '../components/Keypad';
 import { ListSkeleton } from '../components/ListSkeleton';
@@ -15,7 +16,7 @@ import { TopBar } from '../components/TopBar';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { formatTnd } from '../lib/format';
 import { getCustomerCreditTone } from '../lib/customerCredit';
-import { parseNonNegativeMillimes } from '../lib/millimes';
+import { formatMillimes, parseNonNegativeMillimes } from '../lib/millimes';
 import { customerService } from '../services/customerService';
 import { shareCustomerStatement } from '../services/customerStatementShare';
 import { shareTextAsPdf } from '../services/receiptExport';
@@ -73,7 +74,7 @@ function parseMillimes(value: string, required: boolean): number | undefined {
   if (!value.trim() && !required) return undefined;
   const millimes = parseNonNegativeMillimes(value);
   if (millimes === undefined || (required && millimes === 0)) {
-    throw new Error(required ? 'Enter a payment greater than zero millime.' : 'Enter a non-negative whole number of millimes.');
+    throw new Error(required ? 'Enter a payment greater than 0.000 TND.' : 'Enter a valid non-negative Dinar amount with up to three decimal places.');
   }
   return millimes;
 }
@@ -819,20 +820,16 @@ export function CustomersScreen() {
           <div className="flex flex-col gap-3">
             <p className="font-body text-label-md text-on-surface">Quick amount</p>
             <div className="grid grid-cols-2 gap-2">
-              <Button type="button" variant="secondary" disabled={paymentShiftOpen !== true || paymentBalance <= 0} onClick={() => setPaymentAmount(String(paymentBalance))}>
+              <Button type="button" variant="secondary" disabled={paymentShiftOpen !== true || paymentBalance <= 0} onClick={() => setPaymentAmount(formatMillimes(paymentBalance))}>
                 Full balance
               </Button>
-              <Button type="button" variant="secondary" disabled={paymentShiftOpen !== true || paymentBalance <= 0} onClick={() => setPaymentAmount(String(Math.round(paymentBalance / 2)))}>
+              <Button type="button" variant="secondary" disabled={paymentShiftOpen !== true || paymentBalance <= 0} onClick={() => setPaymentAmount(formatMillimes(Math.round(paymentBalance / 2)))}>
                 Half
               </Button>
             </div>
-            <label htmlFor="customer-payment-amount" className="font-body text-label-md text-on-surface">Custom amount (millimes)</label>
-            <input
+            <label htmlFor="customer-payment-amount" className="font-body text-label-md text-on-surface">Custom amount (TND)</label>
+            <DinarInput
               id="customer-payment-amount"
-              type="number"
-              min="0"
-              step="1"
-              inputMode="numeric"
               disabled={paymentShiftOpen !== true}
               value={paymentAmount}
               onChange={(event) => setPaymentAmount(event.target.value)}
@@ -968,7 +965,7 @@ function CustomerForm({ draft, setDraft, onSubmit, submitLabel, isEditing = fals
       <label className="font-body text-label-md text-on-surface">Name<input required value={draft.name} onChange={(event) => update('name', event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
       <label className="font-body text-label-md text-on-surface">Phone<input value={draft.phone} onChange={(event) => update('phone', event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
       <label className="font-body text-label-md text-on-surface">Email (optional)<input type="email" value={draft.email} onChange={(event) => update('email', event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
-      <label className="font-body text-label-md text-on-surface">Monthly credit limit (millimes)<input type="number" min="0" step="1" inputMode="numeric" value={draft.creditLimit} onChange={(event) => { update('creditLimit', event.target.value); onCreditLimitChange?.(); }} placeholder={isEditing && hasExistingCreditLimit ? 'Blank keeps saved limit' : 'No limit'} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
+      <label className="font-body text-label-md text-on-surface">Monthly credit limit (TND)<DinarInput value={draft.creditLimit} onChange={(event) => { update('creditLimit', event.target.value); onCreditLimitChange?.(); }} placeholder={isEditing && hasExistingCreditLimit ? 'Blank keeps saved limit' : 'No limit'} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
       {isEditing && hasExistingCreditLimit && (
         <button
           type="button"

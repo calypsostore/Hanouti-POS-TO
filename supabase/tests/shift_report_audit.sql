@@ -636,8 +636,9 @@ begin
       and reversal.shift_id = v_z_shift
       and reversal.kind = 'reversal'
       and reversal.payment_method = 'cash'
+      and reversal.reversal_attribution = 'ambiguous'
   ) then
-    raise exception 'A post-close cash reversal was not stored on the original closed shift.';
+    raise exception 'A reversal after close without a later active shift must be marked ambiguous and exposed for reconciliation.';
   end if;
 
   perform set_config('request.jwt.claim.sub', report_store.staff_id::text, true);

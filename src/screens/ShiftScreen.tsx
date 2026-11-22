@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { BottomNav } from '../components/BottomNav';
 import { BottomSheet } from '../components/BottomSheet';
+import { DinarInput } from '../components/DinarInput';
 import { Button } from '../components/Button';
 import { Chip } from '../components/Chip';
 import { FirstRunHint } from '../components/FirstRunHint';
@@ -52,7 +53,7 @@ const emptyShiftBreakdown: ShiftCloseBreakdown = {
 
 function parseMillimes(value: string): number {
   const millimes = parseNonNegativeMillimes(value);
-  if (millimes === undefined) throw new Error('Enter a non-negative whole number of millimes.');
+  if (millimes === undefined) throw new Error('Enter a valid non-negative TND amount with up to three decimal places.');
   return millimes;
 }
 
@@ -846,8 +847,8 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       <BottomSheet open={openShiftSheetOpen} onClose={closeStartingCashSheet} title={t('shift.openShift')}>
         <form onSubmit={(event) => { void openShift(event); }} className="flex flex-col gap-3">
           <p className="font-body text-body-sm text-on-surface-variant">Count the cash drawer before taking orders.</p>
-          <label htmlFor="starting-cash" className="block font-body text-label-md">{t('shift.startingCash')} (millimes)</label>
-          <input id="starting-cash" type="number" min="0" step="1" inputMode="numeric" required value={startingCash} onChange={(event) => { setStartingCash(event.target.value); setStartingCashEdited(true); }} className="h-14 w-full rounded-xl bg-surface-container-low px-4 font-body text-title-md tabular-nums outline-none focus:ring-2 focus:ring-primary" />
+          <label htmlFor="starting-cash" className="block font-body text-label-md">{t('shift.startingCash')} (TND)</label>
+          <DinarInput id="starting-cash" required value={startingCash} onChange={(event) => { setStartingCash(event.target.value); setStartingCashEdited(true); }} className="h-14 w-full rounded-xl bg-surface-container-low px-4 font-body text-title-md tabular-nums outline-none focus:ring-2 focus:ring-primary" />
           <div className="sheet-action-bar grid grid-cols-2 gap-2">
             <Button type="button" variant="ghost" onClick={closeStartingCashSheet}>{t('common.cancel')}</Button>
             <Button type="submit"><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
@@ -971,15 +972,15 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
                 </section>
               ))}
             </div>
-            <label className="font-body text-label-md">Total cash for the day, excluding opening floats (millimes)
-              <input type="number" min="0" step="1" inputMode="numeric" required value={zCountedCash} onChange={(event) => setZCountedCash(event.target.value)} className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
+            <label className="font-body text-label-md">Total cash for the day, excluding opening floats (TND)
+              <DinarInput required value={zCountedCash} onChange={(event) => setZCountedCash(event.target.value)} className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
             </label>
-            <label className="font-body text-label-md">Total card payments in period (millimes)
-              <input type="number" min="0" step="1" inputMode="numeric" required value={zCountedCard} onChange={(event) => setZCountedCard(event.target.value)} className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
+            <label className="font-body text-label-md">Total card payments in period (TND)
+              <DinarInput required value={zCountedCard} onChange={(event) => setZCountedCard(event.target.value)} className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
             </label>
             {store?.allowOtherPayments && <>
-              <label className="font-body text-label-md">Total other payments in period (millimes)
-                <input type="number" min="0" step="1" inputMode="numeric" required value={zCountedOther} onChange={(event) => setZCountedOther(event.target.value)} className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
+              <label className="font-body text-label-md">Total other payments in period (TND)
+                <DinarInput required value={zCountedOther} onChange={(event) => setZCountedOther(event.target.value)} className="mt-1.5 h-14 w-full rounded-xl bg-surface-container-low px-4 font-display text-title-md tabular-nums" />
               </label>
             </>}
             {zReviewed && zDifference !== undefined && (
@@ -1080,13 +1081,9 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
         title={movementKind === 'in' ? 'Cash in' : 'Cash out'}
       >
         <form onSubmit={(event) => { void submitCashMovement(event); }} className="flex flex-col gap-3">
-          <label htmlFor="cash-movement-amount" className="font-body text-label-md text-on-surface">Amount (millimes)</label>
-          <input
+          <label htmlFor="cash-movement-amount" className="font-body text-label-md text-on-surface">Amount (TND)</label>
+          <DinarInput
             id="cash-movement-amount"
-            type="number"
-            min="0"
-            step="1"
-            inputMode="numeric"
             required
             value={movementAmount}
             onChange={(event) => setMovementAmount(event.target.value)}
@@ -1209,13 +1206,9 @@ function ShiftCloseForm({
           </div>
         </>}
       </div>
-      <label htmlFor={`counted-cash-${shift.id}`} className="font-body text-label-md">{t('shift.countedCash')} (millimes)</label>
-      <input
+      <label htmlFor={`counted-cash-${shift.id}`} className="font-body text-label-md">{t('shift.countedCash')} (TND)</label>
+      <DinarInput
         id={`counted-cash-${shift.id}`}
-        type="number"
-        min="0"
-        step="1"
-        inputMode="numeric"
         required
         value={countedCash}
         onChange={(event) => onCountChange(event.target.value)}

@@ -280,7 +280,7 @@ async function createOwner(
 
 async function createStaff(admin: SupabaseClient, caller: CallerProfile, input: ProvisionRequest): Promise<unknown> {
   const storeId = requiredText(input.storeId, 'Store ID');
-  if (caller.role !== 'owner' || caller.store_id !== storeId) throw new Error('Only this store owner can create staff accounts.');
+  if (caller.role !== 'owner') throw new Error('Only a store owner can create staff accounts.');
   const name = requiredText(input.name, 'Staff name');
   const positionId = requiredText(input.positionId, 'Position');
   const phone = input.phone?.trim() || null;
@@ -290,10 +290,15 @@ async function createStaff(admin: SupabaseClient, caller: CallerProfile, input: 
 
   const { data: store, error: storeError } = await admin
     .from('stores')
-    .select('code, name')
+    .select('owner_id, is_active, archived_at, subscription_paid_until, code, name')
     .eq('store_id', storeId)
     .maybeSingle();
   if (storeError || !store) throw new Error('The store could not be found.');
+  if (store.owner_id !== caller.id) throw new Error('Only the owner assigned to this store can create staff accounts.');
+  if (!store.is_active || store.archived_at ||
+    (store.subscription_paid_until && store.subscription_paid_until < tunisianDate())) {
+    throw new Error('The store is not active.');
+  }
   const { data: position, error: positionError } = await admin
     .from('positions')
     .select('id')

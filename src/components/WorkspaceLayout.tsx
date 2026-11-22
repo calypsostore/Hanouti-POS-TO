@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { ownerMoreLinks, ownerPrimaryLinks } from '../app/navigation';
 import { BottomSheet } from './BottomSheet';
@@ -11,7 +11,7 @@ import { useNotificationStore } from '../stores/notificationStore';
 import { PageContainer } from './layout/PageContainer';
 import { userService } from '../services/userService';
 import { resolveStoreSettings, type StoreType } from '../types/domain';
-import { getLogoDefinition } from '../data/logoCatalog';
+import { ProfileAvatar } from './ProfileAvatar';
 
 export interface WorkspaceLink {
   to: string;
@@ -32,14 +32,16 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
   const location = useLocation();
   const user = useAuthStore((state) => state.user);
   const isOwnerWorkspace = links.some((link) => link.to === '/owner/dashboard');
+  const isShiftWorkspace = location.pathname === '/owner/shifts';
   const isDashboardWorkspace = location.pathname === '/owner/dashboard' || location.pathname === '/admin/overview';
   const [moreOpen, setMoreOpen] = useState(false);
   const [pendingVoidCount, setPendingVoidCount] = useState(0);
   const unreadNotificationCount = useNotificationStore((state) => state.unreadCount);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('hanouti.sidebar-collapsed.v1') === 'true');
+  const [activeLinkPosition, setActiveLinkPosition] = useState({ top: 0, left: 0, width: 0, height: 0, visible: false });
+  const sidebarNavRef = useRef<HTMLElement>(null);
   const [storeLogoId, setStoreLogoId] = useState('');
   const [storeType, setStoreType] = useState<StoreType>('general');
-  const storeLogo = getLogoDefinition(storeLogoId);
 
   useEffect(() => {
     const storeId = user?.storeId;
@@ -100,6 +102,36 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
       return next;
     });
   };
+  useLayoutEffect(() => {
+    const nav = sidebarNavRef.current;
+    if (!nav) return;
+    const updateActivePosition = () => {
+      const activeLink = nav.querySelector<HTMLElement>('.desktop-sidebar__link.is-active');
+      if (!activeLink) {
+        setActiveLinkPosition((position) => ({ ...position, visible: false }));
+        return;
+      }
+      const navBounds = nav.getBoundingClientRect();
+      const linkBounds = activeLink.getBoundingClientRect();
+      setActiveLinkPosition({
+        top: linkBounds.top - navBounds.top + nav.scrollTop,
+        left: linkBounds.left - navBounds.left + nav.scrollLeft,
+        width: linkBounds.width,
+        height: linkBounds.height,
+        visible: true,
+      });
+    };
+    updateActivePosition();
+    const resizeObserver = new ResizeObserver(updateActivePosition);
+    resizeObserver.observe(nav);
+    window.addEventListener('resize', updateActivePosition);
+    nav.addEventListener('scroll', updateActivePosition, { passive: true });
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateActivePosition);
+      nav.removeEventListener('scroll', updateActivePosition);
+    };
+  }, [location.pathname, sidebarCollapsed, links]);
   const sidebarGroups: Array<{ title: string; links: WorkspaceLink[] }> = isOwnerWorkspace
     ? [
         { title: 'Operations', links: links.filter((link) => ['/owner/dashboard', '/pos', '/orders', '/owner/shifts', '/owner/voids'].includes(link.to)) },
@@ -111,43 +143,75 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
     : [{ title: 'System', links }];
 
   return (
-    <div className={`workspace-layout min-h-screen bg-surface pb-6${isOwnerWorkspace ? ' owner-workspace' : ''}${isDashboardWorkspace ? ' dashboard-workspace' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
+    <div className={`workspace-layout min-h-screen bg-surface pb-6${isOwnerWorkspace ? ' owner-workspace' : ''}${isDashboardWorkspace ? ' dashboard-workspace' : ''}${isShiftWorkspace ? ' shift-screen-layout' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
       <TopBar title={title} storeName={storeName} storeLogoId={storeLogoId} storeType={storeType} onProfileClick={() => navigate('/settings')} />
       <aside className="desktop-sidebar" aria-label={t('common.workspaceNavigation')}>
         <div className="desktop-sidebar__brand">
-          <span className="desktop-sidebar__logo">
-            {storeLogo ? <img src={storeLogo.src} alt="" className="h-8 w-8 object-contain" /> : (
-              <MaterialIcon name={storeType === 'coffee' ? 'local_cafe' : storeType === 'restaurant' ? 'restaurant' : storeType === 'bakery' ? 'bakery_dining' : storeType === 'grocery' ? 'local_mall' : 'storefront'} />
-            )}
+          <span className="desktop-sidebar__logo" aria-hidden="true">
+            <svg viewBox="0 0 48 48" focusable="false">
+              <path d="M17 18v-3.5a7 7 0 0 1 14 0V18" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="3" />
+              <path d="M13 18h22l-2 21H15z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="3" />
+              <path d="m19 28 4 4 7-8" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" />
+            </svg>
           </span>
-          {!sidebarCollapsed && <span className="desktop-sidebar__app-name">{t('common.appName')}</span>}
+          {!sidebarCollapsed && (
+            <span className="desktop-sidebar__brand-copy">
+              <span className="desktop-sidebar__app-name">{t('common.appName')}</span>
+              <span className="desktop-sidebar__tagline">Smart Business</span>
+            </span>
+          )}
         </div>
-        <nav className="desktop-sidebar__nav">
+        <nav ref={sidebarNavRef} className="desktop-sidebar__nav">
+          <span
+            aria-hidden="true"
+            className="desktop-sidebar__active-capsule"
+            style={{
+              height: `${activeLinkPosition.height}px`,
+              width: `${activeLinkPosition.width}px`,
+              transform: `translate3d(${activeLinkPosition.left}px, ${activeLinkPosition.top}px, 0)`,
+              opacity: activeLinkPosition.visible ? 1 : 0,
+            }}
+          />
           {sidebarGroups.map((group) => (
             <div className="desktop-sidebar__group" key={group.title}>
               {!sidebarCollapsed && <p className="desktop-sidebar__group-title">{group.title}</p>}
-              {group.links.map((link) => (
-                <NavLink
-                  key={link.id ?? link.to}
-                  to={link.to}
-                  title={sidebarCollapsed ? t(link.label) : undefined}
-                  className={({ isActive }) => `desktop-sidebar__link${isActive ? ' is-active' : ''}`}
-                >
-                  <MaterialIcon name={link.icon} className="desktop-sidebar__icon" />
-                  {!sidebarCollapsed && <span className="desktop-sidebar__label">{t(link.label)}</span>}
-                  {badgeCountFor(link) > 0 && (
-                    <span className={`workspace-nav-badge${sidebarCollapsed ? ' workspace-nav-badge--collapsed' : ''}`}>
-                      {badgeCountFor(link) > 99 ? '99+' : badgeCountFor(link)}
-                    </span>
-                  )}
-                </NavLink>
-              ))}
+              <div className="desktop-sidebar__group-card">
+                {group.links.map((link) => (
+                  <NavLink
+                    key={link.id ?? link.to}
+                    to={link.to}
+                    title={sidebarCollapsed ? t(link.label) : undefined}
+                    className={({ isActive }) => `desktop-sidebar__link${isActive ? ' is-active' : ''}`}
+                  >
+                    <MaterialIcon name={link.icon} className="desktop-sidebar__icon" />
+                    {!sidebarCollapsed && <span className="desktop-sidebar__label">{t(link.label)}</span>}
+                    {badgeCountFor(link) > 0 && (
+                      <span className={`workspace-nav-badge${sidebarCollapsed ? ' workspace-nav-badge--collapsed' : ''}`}>
+                        {badgeCountFor(link) > 99 ? '99+' : badgeCountFor(link)}
+                      </span>
+                    )}
+                  </NavLink>
+                ))}
+              </div>
             </div>
           ))}
         </nav>
-        <button type="button" className="desktop-sidebar__collapse" onClick={toggleSidebar} aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
-          <MaterialIcon name={sidebarCollapsed ? 'chevron_right' : 'chevron_left'} />
-        </button>
+        <div className="desktop-sidebar__footer">
+          <button type="button" className="desktop-sidebar__user" onClick={() => navigate('/settings')} aria-label="Open profile and settings">
+            <span className="desktop-sidebar__avatar">
+              <ProfileAvatar avatarId={user?.avatarId} className="h-full w-full" />
+            </span>
+            {!sidebarCollapsed && user && (
+              <span className="desktop-sidebar__user-copy">
+                <span className="desktop-sidebar__user-name">{user.name}</span>
+                <span className="desktop-sidebar__user-role">{user.role === 'owner' ? 'Manager' : user.role === 'staff' ? 'Staff' : 'Administrator'}</span>
+              </span>
+            )}
+          </button>
+          <button type="button" className="desktop-sidebar__collapse" onClick={toggleSidebar} aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+            <MaterialIcon name={sidebarCollapsed ? 'keyboard_arrow_up' : 'keyboard_arrow_down'} />
+          </button>
+        </div>
       </aside>
       <nav aria-label={t('common.workspaceNavigation')} className={`workspace-desktop-nav scrollbar-hidden sticky top-16 z-20 flex gap-2 overflow-x-auto border-b border-outline-variant bg-surface/95 px-3 py-2 backdrop-blur-xl${isOwnerWorkspace ? ' owner-desktop-nav' : ''}`}>
         {links.map((link) => (

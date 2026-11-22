@@ -7,6 +7,7 @@ interface LazyBatchProps<T> {
   initial?: number;
   step?: number;
   className?: string;
+  rootSelector?: string;
 }
 
 export function LazyBatch<T>({
@@ -16,6 +17,7 @@ export function LazyBatch<T>({
   initial = 6,
   step = 6,
   className = '',
+  rootSelector,
 }: LazyBatchProps<T>) {
   const sentinel = useRef<HTMLDivElement>(null);
   const [limit, setLimit] = useState(initial);
@@ -27,16 +29,17 @@ export function LazyBatch<T>({
   useEffect(() => {
     const element = sentinel.current;
     if (!element || limit >= items.length) return;
+    const root = rootSelector ? document.querySelector(rootSelector) : null;
 
     const observer = new IntersectionObserver((entries) => {
       if (entries.some((entry) => entry.isIntersecting)) {
         setLimit((current) => Math.min(current + step, items.length));
       }
-    }, { rootMargin: '300px 0px' });
+    }, { root, rootMargin: '40px 0px' });
 
     observer.observe(element);
     return () => observer.disconnect();
-  }, [items.length, limit, step]);
+  }, [items.length, limit, rootSelector, step]);
 
   return (
     <>

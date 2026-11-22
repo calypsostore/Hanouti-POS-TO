@@ -550,7 +550,7 @@ export function CustomersScreen() {
     <div className="pb-24">
       <PageHeader title="Customers & tabs" subtitle="Accounts, balances, and recent payments" />
 
-      <section aria-label="Accounts summary" className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+      <section aria-label="Accounts summary" className="customer-summary mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
         <SummaryCard className="col-span-2 sm:col-span-1" icon="account_balance_wallet" label="Total outstanding" value={`${formatTnd(summary.totalOutstandingMillimes / 1000)} DT`} tone="primary" />
         <SummaryCard icon="groups" label="Customers owing" value={String(summary.customersOwing)} tone="success" />
         <SummaryCard icon="event_busy" label="Overdue" value={String(summary.overdueCount)} tone="error" />
@@ -575,41 +575,43 @@ export function CustomersScreen() {
         </section>
       )}
 
-      <label className="relative mb-3 block">
-        <MaterialIcon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-xl text-outline" />
-        <input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search customers"
-          aria-label="Search customers"
-          className="h-12 w-full rounded-xl bg-surface-container-lowest pl-11 pr-4 font-body text-body-md shadow-card outline-none focus:ring-2 focus:ring-primary"
-        />
-      </label>
-
-      <div className="scrollbar-hidden -mx-4 mb-3 flex gap-2 overflow-x-auto px-4 py-1" role="group" aria-label="Filter customers">
-        {filterOptions.map((option) => (
-          <button
-            key={option.id}
-            type="button"
-            aria-pressed={filter === option.id}
-            onClick={() => setFilter(option.id)}
-            className={`min-h-10 shrink-0 rounded-full px-4 font-body text-label-md ${filter === option.id ? 'bg-primary text-on-primary' : 'bg-surface-container-lowest text-on-surface-variant'}`}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-
-      {filter !== 'overdue' && (
-        <label className="mb-3 flex items-center justify-between gap-3 font-body text-label-sm text-on-surface-variant">
-          Sort by
-          <select value={sort} onChange={(event) => setSort(event.target.value as CustomerSort)} className="h-11 max-w-56 rounded-lg bg-surface-container-lowest px-3 text-on-surface">
-            <option value="balance">Balance high to low</option>
-            <option value="name">Name</option>
-            <option value="lastPayment">Last payment</option>
-          </select>
+      <div className="customer-controls mb-3">
+        <label className="customer-search relative">
+          <MaterialIcon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-lg text-outline" />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search customers"
+            aria-label="Search customers"
+            className="h-11 w-full rounded-xl bg-surface-container-lowest pl-10 pr-3 font-body text-body-md shadow-card outline-none focus:ring-2 focus:ring-primary"
+          />
         </label>
-      )}
+
+        <div className="scrollbar-hidden customer-filter-row flex gap-1.5 overflow-x-auto" role="group" aria-label="Filter customers">
+          {filterOptions.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              aria-pressed={filter === option.id}
+              onClick={() => setFilter(option.id)}
+              className={`min-h-10 shrink-0 rounded-full px-3 font-body text-label-md ${filter === option.id ? 'bg-primary text-on-primary' : 'bg-surface-container-lowest text-on-surface-variant'}`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+
+        {filter !== 'overdue' && (
+          <label className="customer-sort flex items-center gap-2 font-body text-label-sm text-on-surface-variant">
+            <span>Sort</span>
+            <select value={sort} onChange={(event) => setSort(event.target.value as CustomerSort)} className="h-11 min-w-44 rounded-lg bg-surface-container-lowest px-3 text-on-surface">
+              <option value="balance">Balance high to low</option>
+              <option value="name">Name</option>
+              <option value="lastPayment">Last payment</option>
+            </select>
+          </label>
+        )}
+      </div>
 
       {error && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       {overdueActionError && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{overdueActionError}</p>}
@@ -618,7 +620,13 @@ export function CustomersScreen() {
         <ListSkeleton label="Loading customers" />
       ) : filteredCustomers.length > 0 ? (
         <CardGrid className="mobile-card-list customer-card-list">
-          <LazyBatch items={filteredCustomers} resetKey={`${filter}-${search}`} renderItem={(customer) => {
+          <LazyBatch
+            items={filteredCustomers}
+            resetKey={`${filter}-${search}`}
+            initial={6}
+            step={6}
+            rootSelector={isDetail ? '.customer-split-list' : undefined}
+            renderItem={(customer) => {
             const dueInfo = dueInfos[customer.id];
             if (isOwner && filter === 'overdue' && dueInfo?.overdue) {
               return (
@@ -651,7 +659,7 @@ export function CustomersScreen() {
       {canCreate && (
         <Button
           onClick={() => { setError(''); setAddOpen(true); }}
-          className={`customer-add-button fixed right-4 z-30 min-h-14 rounded-full px-5 shadow-overlay ${isOwner ? 'bottom-6' : 'bottom-24'}`}
+          className={`customer-add-button fixed right-4 z-30 min-h-12 rounded-full px-4 shadow-overlay ${isOwner ? 'bottom-6' : 'bottom-24'}`}
         >
           <MaterialIcon name="person_add" />Add customer
         </Button>
@@ -661,9 +669,11 @@ export function CustomersScreen() {
 
   const detailContent = (
     <div className="customer-detail-content pb-6">
-      <Button variant="ghost" onClick={() => navigate('/customers')} className="mb-3 min-h-10 px-2">
+      <div className="customer-detail-toolbar">
+        <Button variant="ghost" onClick={() => navigate('/customers')} className="customer-detail-back min-h-9 px-2">
         <MaterialIcon name="arrow_back" />Customers
-      </Button>
+        </Button>
+      </div>
       {error && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       {notice && <p role="status" className="mb-3 rounded-lg bg-success-container p-3 font-body text-body-sm text-on-success-container">{notice}</p>}
       {loading || (isDetail && loadedCustomerId !== customerId) ? (
@@ -678,6 +688,11 @@ export function CustomersScreen() {
               <h1 className="truncate font-display text-headline-lg text-on-surface">{selected.name}</h1>
               <p className="truncate font-body text-body-sm text-on-surface-variant">{[selected.phone, selected.email].filter(Boolean).join(' · ') || 'No contact details'}</p>
               <p className="font-body text-body-sm text-outline">Terms: {selected.settlementTerms} · Last payment: {dateLabel(selected.lastPaymentAt)}</p>
+              {selected.notes?.trim() && (
+                <p className="mt-1 line-clamp-2 font-body text-body-sm text-on-surface-variant">
+                  <span className="font-semibold text-on-surface">Note:</span> {selected.notes.trim()}
+                </p>
+              )}
             </div>
             {selectedDue?.overdue && <span className="rounded-full bg-error-container px-3 py-1 font-body text-label-sm text-on-error-container">Overdue</span>}
           </header>
@@ -1053,10 +1068,12 @@ function SummaryCard({ icon, label, value, tone, className = '' }: {
       ? 'bg-error-container text-on-error-container'
       : 'bg-primary-fixed text-primary';
   return (
-    <article className={`rounded-2xl bg-surface-container-lowest p-4 shadow-card ${className}`}>
-      <span className={`flex h-10 w-10 items-center justify-center rounded-xl ${toneClass}`}><MaterialIcon name={icon} /></span>
-      <p className="mt-3 font-body text-body-sm text-on-surface-variant">{label}</p>
-      <p className="mt-1 font-display text-headline-md tabular-nums text-on-surface">{value}</p>
+    <article className={`rounded-xl bg-surface-container-lowest p-3 shadow-card md:flex md:min-h-[84px] md:items-center md:gap-3 ${className}`}>
+      <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${toneClass}`}><MaterialIcon name={icon} /></span>
+      <div className="mt-3 min-w-0 md:mt-0">
+        <p className="font-body text-body-sm text-on-surface-variant">{label}</p>
+        <p className="mt-0.5 truncate font-display text-headline-sm tabular-nums text-on-surface md:text-headline-md">{value}</p>
+      </div>
     </article>
   );
 }
@@ -1124,14 +1141,14 @@ function CreditRing({ status }: { status?: CustomerCreditStatus }) {
   return (
     <div
       aria-label={status?.limit === undefined ? 'No credit limit' : `${Math.round(percent)} percent of credit limit used`}
-      className="flex h-36 w-36 shrink-0 items-center justify-center rounded-full"
+      className="customer-credit-ring flex h-28 w-28 shrink-0 items-center justify-center rounded-full"
       style={{
         background: status?.limit === undefined
           ? 'conic-gradient(rgb(var(--color-surface-container-high)) 0% 100%)'
           : `conic-gradient(rgb(var(--color-success-dark)) 0% ${greenEnd}%, rgb(var(--color-warning)) ${greenEnd}% ${orangeEnd}%, rgb(var(--color-error)) ${orangeEnd}% ${percent}%, rgb(var(--color-surface-container-high)) ${percent}% 100%)`,
       }}
     >
-      <div className="flex h-28 w-28 flex-col items-center justify-center rounded-full bg-surface-container-lowest">
+      <div className="customer-credit-ring__inner flex h-20 w-20 flex-col items-center justify-center rounded-full bg-surface-container-lowest">
         <span className="font-display text-headline-md tabular-nums text-on-surface">{status?.limit === undefined ? '—' : `${Math.round(percent)}%`}</span>
         <span className="font-body text-body-sm text-outline">used</span>
       </div>

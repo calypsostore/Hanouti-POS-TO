@@ -9,7 +9,6 @@ function getSemanticIconColor(name: string): string | undefined {
     name === 'delete'
     || name === 'delete_outline'
     || name === 'delete_sweep'
-    || name === 'close'
     || name === 'cancel'
     || name === 'block'
     || name === 'dangerous'

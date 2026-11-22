@@ -32,6 +32,7 @@ import type { OrderRecord } from '../types/domain';
 import { Link } from 'react-router-dom';
 import { parseNonNegativeMillimes } from '../lib/millimes';
 import { createLatestRequestGuard } from '../lib/requestGuard';
+import { useNotificationStore } from '../stores/notificationStore';
 
 type ShiftCloseBreakdown = ShiftSalesBreakdown & {
   pendingVoidCount: number;
@@ -58,27 +59,6 @@ function parseMillimes(value: string): number {
   return millimes;
 }
 
-function reportDrawerAmounts(report: ReportRecord) {
-  const cashFloat = report.cashFloatMillimes ??
-    (report.shifts ?? []).reduce((sum, shift) => sum + shift.startingCashMillimes, 0);
-  const expectedTotal = report.totalExpectedCashMillimes ??
-    (report.expectedCashExFloatMillimes ?? 0) + cashFloat;
-  const expected = report.countedCashIncludesFloat
-    ? expectedTotal
-    : report.expectedCashExFloatMillimes ?? expectedTotal - cashFloat;
-  const counted = report.countedCashMillimes === undefined
-    ? 0
-    : report.countedCashIncludesFloat
-      ? report.countedCashMillimes
-      : report.expectedCashExFloatMillimes === undefined
-        ? report.countedCashMillimes - cashFloat
-        : report.countedCashMillimes;
-  const difference = report.countedCashMillimes === undefined
-    ? report.cashDifference ?? report.cashDifferenceMillimes ?? 0
-    : counted - expected;
-  return { expected, counted, difference };
-}
-
 const cashMovementReasons: { reason: CashMovementReason; label: string }[] = [
   { reason: 'supplier', label: 'Bought milk' },
   { reason: 'change', label: 'Change float' },
@@ -86,8 +66,15 @@ const cashMovementReasons: { reason: CashMovementReason; label: string }[] = [
   { reason: 'other', label: 'Other' },
 ];
 
+type ArchiveQuickDate = 'today' | 'yesterday' | '7days' | '30days' | 'month' | 'custom';
+
+function localDateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
 function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const user = useAuthStore((state) => state.user);
+  const unreadNotificationCount = useNotificationStore((state) => state.unreadCount);
   const storeId = user?.storeId ?? '';
   const refreshKey = useFocusRefreshKey();
   const [shifts, setShifts] = useState<ShiftRecord[]>([]);
@@ -118,9 +105,13 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const [openShiftSheetOpen, setOpenShiftSheetOpen] = useState(false);
   const [closeShiftSheetOpen, setCloseShiftSheetOpen] = useState(false);
   const [forceCloseShiftTarget, setForceCloseShiftTarget] = useState<ShiftRecord | null>(null);
-  const [activeTab, setActiveTab] = useState<'shifts' | 'reports' | 'archive'>(() =>
-    ownerMode && new URLSearchParams(window.location.search).get('tab') === 'reports' ? 'reports' : 'shifts',
-  );
+  const [activeTab, setActiveTab] = useState<'shifts' | 'reports' | 'archive'>(() => {
+    if (!ownerMode) return 'shifts';
+    return new URLSearchParams(window.location.search).get('tab') === 'reports' ? 'reports' : 'archive';
+  });
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyStatus, setHistoryStatus] = useState<'all' | 'open' | 'closed'>('all');
+  const [historyStaff, setHistoryStaff] = useState('all');
   const [ownerPin, setOwnerPin] = useState('');
   const [forceShiftPin, setForceShiftPin] = useState('');
   const [forceShiftConfirmed, setForceShiftConfirmed] = useState(false);
@@ -146,13 +137,31 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const [reportPreview, setReportPreview] = useState<ReportRecord>();
   const [archivePreviewDismissed, setArchivePreviewDismissed] = useState(false);
   const [archiveReports, setArchiveReports] = useState<ReportRecord[]>([]);
+  const [archiveSearch, setArchiveSearch] = useState('');
+  const [archiveQuickDate, setArchiveQuickDate] = useState<ArchiveQuickDate>('today');
+  const [archiveCustomFrom, setArchiveCustomFrom] = useState('');
+  const [archiveCustomTo, setArchiveCustomTo] = useState('');
+  const [archiveStatus, setArchiveStatus] = useState<'all' | 'verified' | 'unverified'>('all');
+  const [archiveEmployee, setArchiveEmployee] = useState('all');
+  const [archiveMinAmount, setArchiveMinAmount] = useState('');
+  const [archiveMaxAmount, setArchiveMaxAmount] = useState('');
+  const [archiveSort, setArchiveSort] = useState<'newest' | 'oldest' | 'amount-desc' | 'amount-asc'>('newest');
+  const [archiveFiltersOpen, setArchiveFiltersOpen] = useState(false);
+  const [previewZoom, setPreviewZoom] = useState(100);
   const [dayStatus, setDayStatus] = useState<ReportDayStatus>({
     dayIsClosed: false,
     hasActivity: false,
     openShiftCount: 0,
   });
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const refreshGuardRef = useRef(createLatestRequestGuard());
   const zSubmissionRef = useRef(false);
+
+  useEffect(() => {
+    const updateFullscreenState = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', updateFullscreenState);
+    return () => document.removeEventListener('fullscreenchange', updateFullscreenState);
+  }, []);
 
   useEffect(() => updateService.registerUnsavedState(() => startingCashEdited || countedCash.length > 0), [startingCashEdited, countedCash.length]);
 
@@ -572,12 +581,6 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const zDisabledReason = reportDisabledReason ||
     (openCount > 0 ? 'Close every open shift before creating a Z report.' : '') ||
     (pendingVoidOrders.length > 0 ? 'Resolve every void request before creating a Z report.' : '');
-  const isArchivePreview = reportPreview?.type === 'Z'
-    ? reportPreview
-    : archivePreviewDismissed
-      ? undefined
-      : archiveReports.filter((report) => report.type === 'Z')
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
   const parsedZCountedCash = parseNonNegativeMillimes(zCountedCash);
   const zDifference = parsedZCountedCash === undefined ? undefined : parsedZCountedCash - zExpectedCash;
   const parsedZCardMillimes = parseNonNegativeMillimes(zCountedCard);
@@ -592,119 +595,546 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const hasZDifference = Boolean(zDifference !== undefined && zDifference !== 0 ||
     zCardDifference !== undefined && zCardDifference !== 0 ||
     zOtherDifference !== undefined && zOtherDifference !== 0);
+  const filteredHistory = shifts.filter((shift) => {
+    const staffName = staffNames[shift.staffId] ?? 'Staff';
+    const searchText = `${staffName} ${new Date(shift.openedAt).toLocaleString()} ${shift.closedAt ? new Date(shift.closedAt).toLocaleString() : ''}`.toLocaleLowerCase();
+    return (historyStatus === 'all' || shift.status === historyStatus)
+      && (historyStaff === 'all' || shift.staffId === historyStaff)
+      && (!historySearch.trim() || searchText.includes(historySearch.trim().toLocaleLowerCase()));
+  });
+
+  const zReports = archiveReports.filter((report) => report.type === 'Z');
+  const filteredArchiveReports = zReports.filter((report) => {
+    const today = new Date();
+    const reportDate = report.businessDate;
+    let dateMatches = true;
+    if (archiveQuickDate === 'today') dateMatches = reportDate === localDateKey(today);
+    if (archiveQuickDate === 'yesterday') {
+      const yesterday = new Date(today);
+      yesterday.setDate(today.getDate() - 1);
+      dateMatches = reportDate === localDateKey(yesterday);
+    }
+    if (archiveQuickDate === '7days') {
+      const start = new Date(today);
+      start.setDate(today.getDate() - 6);
+      dateMatches = reportDate >= localDateKey(start) && reportDate <= localDateKey(today);
+    }
+    if (archiveQuickDate === '30days') {
+      const start = new Date(today);
+      start.setDate(today.getDate() - 29);
+      dateMatches = reportDate >= localDateKey(start) && reportDate <= localDateKey(today);
+    }
+    if (archiveQuickDate === 'month') {
+      dateMatches = reportDate.startsWith(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-`);
+    }
+    if (archiveQuickDate === 'custom') {
+      dateMatches = (!archiveCustomFrom || reportDate >= archiveCustomFrom)
+        && (!archiveCustomTo || reportDate <= archiveCustomTo);
+    }
+
+    const employeeNames = [
+      ...(report.employeeBreakdown ?? []).map((employee) => employee.name),
+      ...(report.shifts ?? []).map((shift) => shift.staffName),
+    ].filter(Boolean);
+    const employeeMatches = archiveEmployee === 'all' || employeeNames.includes(archiveEmployee);
+    const statusMatches = archiveStatus === 'all'
+      || (archiveStatus === 'verified' && report.pinVerified !== false)
+      || (archiveStatus === 'unverified' && report.pinVerified === false);
+    const amount = report.salesCollectedMillimes ?? report.salesMillimes;
+    const minAmount = archiveMinAmount.trim() ? Number(archiveMinAmount) * 1000 : undefined;
+    const maxAmount = archiveMaxAmount.trim() ? Number(archiveMaxAmount) * 1000 : undefined;
+    const amountMatches = (minAmount === undefined || amount >= minAmount)
+      && (maxAmount === undefined || amount <= maxAmount);
+    const searchText = [
+      report.reportNumber,
+      report.id,
+      report.businessDate,
+      report.generatedBy,
+      ...employeeNames,
+    ].filter(Boolean).join(' ').toLocaleLowerCase();
+    const searchMatches = !archiveSearch.trim() || searchText.includes(archiveSearch.trim().toLocaleLowerCase());
+
+    return dateMatches && employeeMatches && statusMatches && amountMatches && searchMatches;
+  }).sort((left, right) => {
+    if (archiveSort === 'oldest') return left.createdAt.localeCompare(right.createdAt);
+    if (archiveSort === 'amount-desc' || archiveSort === 'amount-asc') {
+      const leftAmount = left.salesCollectedMillimes ?? left.salesMillimes;
+      const rightAmount = right.salesCollectedMillimes ?? right.salesMillimes;
+      return archiveSort === 'amount-desc' ? rightAmount - leftAmount : leftAmount - rightAmount;
+    }
+    return right.createdAt.localeCompare(left.createdAt);
+  });
+
+  const archiveEmployeeOptions = Array.from(new Set(
+    zReports.flatMap((report) => [
+      ...(report.employeeBreakdown ?? []).map((employee) => employee.name),
+      ...(report.shifts ?? []).map((shift) => shift.staffName),
+    ].filter(Boolean)),
+  ));
+
+  function clearArchiveFilters() {
+    setArchiveSearch('');
+    setArchiveQuickDate('today');
+    setArchiveCustomFrom('');
+    setArchiveCustomTo('');
+    setArchiveStatus('all');
+    setArchiveEmployee('all');
+    setArchiveMinAmount('');
+    setArchiveMaxAmount('');
+    setArchiveSort('newest');
+  }
+
+  async function toggleFullscreen() {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await document.documentElement.requestFullscreen();
+      }
+    } catch (fullscreenError) {
+      console.error('Unable to toggle full-screen shift view.', fullscreenError);
+      setError('Full-screen mode is unavailable in this browser.');
+    }
+  }
+
+  const isArchivePreview = reportPreview?.type === 'Z'
+    ? reportPreview
+    : archivePreviewDismissed
+      ? undefined
+      : filteredArchiveReports[0];
+  const summaryReport = ownerMode && activeTab === 'archive'
+    ? isArchivePreview ?? filteredArchiveReports[0]
+    : undefined;
+  const liveShiftTotals = openShifts.reduce((totals, shift) => {
+    const breakdown = breakdownsByShift[shift.id] ?? emptyShiftBreakdown;
+    return {
+      transactions: totals.transactions + breakdown.orderCount,
+      cash: totals.cash + breakdown.cashSalesMillimes,
+      cards: totals.cards + breakdown.cardSalesMillimes,
+      sales: totals.sales + breakdown.cashSalesMillimes + breakdown.cardSalesMillimes + breakdown.otherSalesMillimes + breakdown.tabSalesMillimes,
+    };
+  }, { transactions: 0, cash: 0, cards: 0, sales: 0 });
+  const metricAmount = (millimes: number) => `${formatTnd(millimes / 1000)} DT`;
+  const summaryExpenses = summaryReport?.expensesMillimes ??
+    summaryReport?.expenseDetails?.reduce((sum, expense) => sum + expense.amountMillimes, 0) ?? 0;
+  const summaryMetrics = [
+    {
+      label: 'Total Sales',
+      value: metricAmount(summaryReport?.grossMillimes ?? summaryReport?.salesCollectedMillimes ?? summaryReport?.salesMillimes ?? liveShiftTotals.sales),
+      icon: 'shopping_cart',
+      tone: 'cyan',
+    },
+    {
+      label: 'Transactions',
+      value: String(summaryReport?.orderCount ?? liveShiftTotals.transactions),
+      icon: 'receipt_long',
+      tone: 'blue',
+    },
+    {
+      label: 'Cash',
+      value: metricAmount(summaryReport?.cashSalesMillimes ?? summaryReport?.paymentSplit?.cash ?? liveShiftTotals.cash),
+      icon: 'payments',
+      tone: 'green',
+    },
+    {
+      label: 'Cards',
+      value: metricAmount(summaryReport?.paymentSplit?.card ?? summaryReport?.shifts?.reduce((sum, shift) => sum + (shift.cardSalesMillimes ?? 0), 0) ?? liveShiftTotals.cards),
+      icon: 'credit_card',
+      tone: 'purple',
+    },
+    {
+      label: 'Expenses',
+      value: metricAmount(summaryExpenses),
+      icon: 'work',
+      tone: 'orange',
+    },
+    {
+      label: 'Net Sales',
+      value: metricAmount(summaryReport?.netMillimes ?? summaryReport?.netProfitMillimes ?? ((summaryReport?.salesCollectedMillimes ?? summaryReport?.salesMillimes ?? liveShiftTotals.sales) - summaryExpenses)),
+      icon: 'trending_up',
+      tone: 'cyan',
+    },
+  ];
+  const shiftOverviewMetrics = ownerMode ? summaryMetrics : [
+    { label: 'Open shifts', value: String(openCount), icon: 'schedule', tone: 'primary' },
+    { label: 'Transactions', value: String(liveShiftTotals.transactions), icon: 'receipt_long', tone: 'cyan' },
+    { label: 'Cash sales', value: metricAmount(liveShiftTotals.cash), icon: 'payments', tone: 'green' },
+    { label: 'Card sales', value: metricAmount(liveShiftTotals.cards), icon: 'credit_card', tone: 'blue' },
+    { label: 'Pending voids', value: String(pendingVoidOrders.length), icon: 'pending_actions', tone: 'orange' },
+  ];
 
   return (
-    <>
-      <div className="mb-4 flex items-center justify-between gap-3 lg:hidden">
+    <div className={`shift-workspace ${ownerMode ? 'shift-workspace--owner' : ''}`}>
+      {ownerMode && (
+        <div className="shift-topbar">
+          <Link to="/owner/dashboard" className="shift-topbar-brand" aria-label="Go to 7anouti-POS dashboard">
+            <span className="shift-topbar-logo" aria-hidden="true">
+              <svg viewBox="0 0 48 48" focusable="false">
+                <path d="M17 18v-3.5a7 7 0 0 1 14 0V18" />
+                <path d="M13 18h22l-2 21H15z" />
+                <path d="m19 28 4 4 7-8" />
+              </svg>
+            </span>
+            <span className="shift-topbar-brand-copy">
+              <strong>7anouti-POS</strong>
+              <span>Smart Business</span>
+            </span>
+          </Link>
+          <label className="shift-topbar-search">
+            <MaterialIcon name="search" />
+            <input
+              value={archiveSearch}
+              onChange={(event) => setArchiveSearch(event.target.value)}
+              placeholder="Search in reports..."
+              aria-label="Search in reports"
+            />
+          </label>
+          <div className="shift-topbar-actions">
+            <Link to="/notifications" className="shift-topbar-icon-button" aria-label={`Notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ''}`}>
+              <MaterialIcon name="notifications" />
+              {unreadNotificationCount > 0 && <span className="shift-topbar-badge">{unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}</span>}
+            </Link>
+            <button type="button" className="shift-topbar-icon-button" onClick={() => { void toggleFullscreen(); }} aria-label={isFullscreen ? 'Exit full screen' : 'Enter full screen'}>
+              <MaterialIcon name={isFullscreen ? 'fullscreen_exit' : 'fullscreen'} />
+            </button>
+          </div>
+        </div>
+      )}
+      {!ownerMode && <div className="mb-4 flex items-center justify-between gap-3 lg:hidden">
         <div>
           <h1 className="font-display text-headline-lg text-on-surface">{pageTitle}</h1>
           <p className="mt-1 font-body text-body-md text-on-surface-variant">{store?.name}</p>
         </div>
         {ownerMode && !ownOpenShift
-          ? <Button onClick={openStartingCashSheet}><MaterialIcon name="lock_open" />Open my shift</Button>
+          ? <Button className="shift-open-button" onClick={openStartingCashSheet}><MaterialIcon name="lock_open" />Open my shift</Button>
           : ownerMode
             ? <StatusTag status="started">{`${openCount} open`}</StatusTag>
             : canOpenCloseShift && !ownOpenShift && (!closedShiftSummary || dayStatus.dayIsClosed)
-              ? <Button onClick={openStartingCashSheet}><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
+              ? <Button className="shift-open-button" onClick={openStartingCashSheet}><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
               : null}
-      </div>
-      <PageHeader className="hidden lg:flex" title={pageTitle} subtitle={store?.name} actions={
-        ownerMode
-          ? <div className="flex items-center gap-2">
-            <StatusTag status="started">{`${openCount} open`}</StatusTag>
-            {!ownOpenShift && <Button onClick={openStartingCashSheet}><MaterialIcon name="lock_open" />Open my shift</Button>}
+      </div>}
+      {ownerMode ? (
+        <header className="shift-apple-header items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="shift-header-mark grid size-12 shrink-0 place-items-center rounded-2xl">
+              <MaterialIcon name="payments" className="text-2xl" />
+            </span>
+            <div className="min-w-0">
+              <h1 className="truncate font-display text-headline-md text-on-surface">Shift Management</h1>
+              <p className="mt-0.5 truncate font-body text-body-sm text-on-surface-variant">Manage your shifts and view daily reports</p>
+            </div>
           </div>
-          : canOpenCloseShift && !ownOpenShift && (!closedShiftSummary || dayStatus.dayIsClosed)
-            ? <Button className="w-full lg:w-auto lg:min-w-[160px]" onClick={openStartingCashSheet}><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="shift-location-chip">
+              <MaterialIcon name="location_on" />
+              <span>{store?.address || store?.name || 'Your store'}</span>
+              <MaterialIcon name="expand_more" />
+            </span>
+            {ownOpenShift ? (
+              <>
+                <StatusTag status="started">{`Shift open · ${new Date(ownOpenShift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}</StatusTag>
+                {canOpenCloseShift && (
+                  <Button className="shift-open-button" onClick={openCountedCashSheet}>
+                    <MaterialIcon name="lock" />Close Shift
+                  </Button>
+                )}
+              </>
+            ) : (
+              <StatusTag status="closed">No shift open</StatusTag>
+            )}
+            {!ownOpenShift && (
+              <Button className="shift-open-button" onClick={openStartingCashSheet}>
+                <MaterialIcon name="lock_open" />Open Shift
+              </Button>
+            )}
+          </div>
+        </header>
+      ) : (
+        <PageHeader className="hidden lg:flex" title={pageTitle} subtitle={store?.name} actions={
+          canOpenCloseShift && !ownOpenShift && (!closedShiftSummary || dayStatus.dayIsClosed)
+            ? <Button className="shift-open-button w-full lg:w-auto lg:min-w-[160px]" onClick={openStartingCashSheet}><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
             : undefined
-      } />
-      {(ownerMode || (dayStatus.dayIsClosed && !ownOpenShift)) && (
-        <p role="status" className={`mb-4 rounded-xl p-3 font-body text-body-sm ${dayStatus.dayIsClosed ? 'bg-warning-container text-on-warning-container' : 'bg-surface-container-low text-on-surface-variant'}`}>
+        } />
+      )}
+      {((ownerMode && activeTab !== 'archive') || (dayStatus.dayIsClosed && !ownOpenShift && !ownerMode)) && (
+        <p role="status" className={`shift-day-status mb-4 rounded-xl p-3 font-body text-body-sm ${dayStatus.dayIsClosed ? 'shift-day-status--warning' : ''}`}>
           {dayStatusMessage}
         </p>
       )}
-      <FirstRunHint id={`shift-${user?.id ?? 'guest'}`} title={t('hint.title')} message={t('hint.shift')} />
+      {(error || notice) && (
+        <p role={error ? 'alert' : 'status'} className={`mb-3 rounded-xl p-3 font-body text-body-sm ${error ? 'bg-error-container text-on-error-container' : 'bg-success-container text-on-success-container'}`}>
+          {error || notice}
+        </p>
+      )}
+      {(!ownerMode || activeTab !== 'archive') && (
+        <FirstRunHint id={`shift-${user?.id ?? 'guest'}`} title={t('hint.title')} message={t('hint.shift')} />
+      )}
+
+      {(!ownerMode || activeTab !== 'reports') && (
+        <section className="shift-overview-grid mb-4" aria-label="Shift overview">
+          {shiftOverviewMetrics.map((card) => (
+            <article key={card.label} className={`shift-overview-card shift-overview-card--${card.tone}`}>
+              <span className="shift-overview-icon grid size-11 shrink-0 place-items-center rounded-full">
+                <MaterialIcon name={card.icon} className="text-xl" />
+              </span>
+              <div className="min-w-0">
+                <p className="font-body text-label-sm text-on-surface-variant">{card.label}</p>
+                <strong className="mt-1 block truncate font-display text-title-md tabular-nums text-on-surface">{card.value}</strong>
+              </div>
+            </article>
+          ))}
+        </section>
+      )}
 
       {ownerMode && (
-        <nav className="mb-4 grid grid-cols-3 gap-2" aria-label="Shift and report sections">
+        <nav className="shift-section-tabs mb-4 grid grid-cols-3 gap-1 p-1" aria-label="Shift and report sections">
           {([
-            ['shifts', 'Shifts'],
-            ['reports', 'X / Z'],
-            ['archive', 'Daily reports'],
-          ] as const).map(([tab, label]) => (
-            <Button key={tab} variant={activeTab === tab ? 'primary' : 'secondary'} onClick={() => setActiveTab(tab)}>{label}</Button>
+            ['shifts', 'Shift', 'schedule'],
+            ['reports', 'Z Reports', 'analytics'],
+            ['archive', 'Daily Reports', 'description'],
+          ] as const).map(([tab, label, icon]) => (
+            <Button key={tab} variant={activeTab === tab ? 'primary' : 'secondary'} onClick={() => setActiveTab(tab)}>
+              <MaterialIcon name={icon} className="text-lg" />
+              {label}
+            </Button>
           ))}
         </nav>
       )}
 
       {ownerMode && activeTab === 'reports' && (
-        <section className="grid gap-4 tablet:grid-cols-2">
-          <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-            <h2 className="font-display text-headline-md">Live X report</h2>
-            <p className="mt-2 font-body text-body-sm text-outline">A frozen snapshot for review. The day stays open.</p>
-            <Button disabled={Boolean(reportDisabledReason)} className="mt-4 w-full" onClick={() => { void createXReport(); }}><MaterialIcon name="summarize" />Print X report</Button>
+        <section className="shift-reports-grid grid gap-4 tablet:grid-cols-2">
+          <article className="shift-report-card shift-x-card rounded-2xl p-4">
+            <div className="shift-report-card__header flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="shift-report-icon grid size-12 shrink-0 place-items-center rounded-2xl">
+                  <MaterialIcon name="summarize" className="text-2xl" />
+                </span>
+                <div className="min-w-0">
+                  <p className="font-body text-label-sm text-primary">Live preview</p>
+                  <h2 className="font-display text-headline-md text-on-surface">X report</h2>
+                </div>
+              </div>
+              <StatusTag status={reportDisabledReason ? 'closed' : 'started'}>{reportDisabledReason ? 'Unavailable' : 'Live'}</StatusTag>
+            </div>
+            <p className="mt-3 font-body text-body-sm text-on-surface-variant">A frozen cash snapshot for review. The business day remains open.</p>
+            <div className="shift-report-meta mt-4 grid grid-cols-2 gap-2">
+              <div><p>Open shifts</p><strong>{openCount}</strong></div>
+              <div><p>Pending voids</p><strong>{pendingVoidOrders.length}</strong></div>
+            </div>
+            <Button disabled={Boolean(reportDisabledReason)} className="shift-report-action mt-4 w-full" onClick={() => { void createXReport(); }}>
+              <MaterialIcon name="summarize" />Print X report
+            </Button>
             {reportDisabledReason && <p className="mt-2 font-body text-body-sm text-outline">{reportDisabledReason}</p>}
           </article>
-          <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-            <h2 className="font-display text-headline-md">Close day: Z report</h2>
-            <p className="mt-2 font-body text-body-sm text-outline">Every Z requires the owner PIN and every shift must be closed.</p>
+          <article className="shift-report-card shift-z-card rounded-2xl p-4">
+            <div className="shift-report-card__header flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="shift-report-icon shift-report-icon--danger grid size-12 shrink-0 place-items-center rounded-2xl">
+                  <MaterialIcon name="lock" className="text-2xl" />
+                </span>
+                <div className="min-w-0">
+                  <p className="font-body text-label-sm text-warning-dark">Final close</p>
+                  <h2 className="font-display text-headline-md text-on-surface">Z report</h2>
+                </div>
+              </div>
+              <StatusTag status={zDisabledReason ? 'closed' : 'started'}>{zDisabledReason ? 'Blocked' : 'Ready'}</StatusTag>
+            </div>
+            <p className="mt-3 font-body text-body-sm text-on-surface-variant">Requires your owner PIN. All shifts and voids must be resolved first.</p>
             {(openShifts.length > 0 || pendingVoidOrders.length > 0) && (
-              <div className="mt-4 space-y-3 rounded-xl bg-warning-container p-3 text-on-warning-container">
-                <h3 className="font-display text-title-sm">Resolve these before creating a Z report</h3>
-                {openShifts.map((shift) => (
-                  <p key={shift.id} className="font-body text-body-sm">
-                    Open shift · {staffNames[shift.staffId] ?? 'Staff'} · {new Date(shift.openedAt).toLocaleString()}
-                  </p>
-                ))}
-                {pendingVoidOrders.map((order) => (
-                  <p key={order.id} className="font-body text-body-sm">
-                    Void #{order.number} · {staffNames[order.staffId] ?? order.staffName ?? 'Staff'} ·
-                    {' '}{formatTnd(order.totalMillimes / 1000)} DT · {order.voidReason || 'Reason not recorded'}
-                  </p>
-                ))}
-                <div className="grid gap-2 tablet:grid-cols-2">
-                  <Link to="/owner/voids" className="flex min-h-12 items-center justify-center rounded-full border border-outline px-4 font-body text-label-md">
+              <div className="shift-resolution-panel mt-3">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="font-display text-label-lg text-on-surface">Before closing</h3>
+                  <span className="shift-resolution-count">{openShifts.length + pendingVoidOrders.length}</span>
+                </div>
+                <div className="mt-2 flex max-h-24 flex-col gap-1.5 overflow-y-auto">
+                  {openShifts.map((shift) => (
+                    <p key={shift.id} className="shift-resolution-row font-body text-body-sm">
+                      <MaterialIcon name="schedule" className="text-base" />
+                      <span>Open shift · {staffNames[shift.staffId] ?? 'Staff'}</span>
+                    </p>
+                  ))}
+                  {pendingVoidOrders.map((order) => (
+                    <p key={order.id} className="shift-resolution-row font-body text-body-sm">
+                      <MaterialIcon name="pending_actions" className="text-base" />
+                      <span>Void #{order.number} · {formatTnd(order.totalMillimes / 1000)} DT</span>
+                    </p>
+                  ))}
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <Link to="/owner/voids" className="shift-resolution-link flex min-h-11 items-center justify-center gap-2 rounded-xl px-3 font-body text-label-md">
+                    <MaterialIcon name="rule" className="text-lg" />
                     Review voids
                   </Link>
-                  <Button variant="danger" onClick={() => { void openZCloseDialog(true); }}>
+                  <Button variant="danger" className="shift-force-button min-h-11" onClick={() => { void openZCloseDialog(true); }}>
                     Force close everything
                   </Button>
                 </div>
               </div>
             )}
-            <Button disabled={Boolean(zDisabledReason)} variant="danger" className="mt-4 w-full" onClick={() => { void openZCloseDialog(); }}><MaterialIcon name="lock" />Close day: Z report</Button>
-            {zDisabledReason && <p role="status" className="mt-2 rounded-lg bg-warning-container p-3 text-on-warning-container">{zDisabledReason}</p>}
+            <Button disabled={Boolean(zDisabledReason)} variant="danger" className="shift-report-action shift-z-action mt-4 w-full" onClick={() => { void openZCloseDialog(); }}>
+              <MaterialIcon name="lock" />Close day: Z report
+            </Button>
           </article>
           {reportPreview && <div className="tablet:col-span-2"><ReportView inline report={reportPreview} store={store ?? undefined} settings={store?.settings} storeName={store?.name ?? ''} onClose={() => setReportPreview(undefined)} /></div>}
         </section>
       )}
 
       {ownerMode && activeTab === 'archive' && (
-        <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-          <h2 className="mb-3 font-display text-headline-md">Daily reports</h2>
-          {loading ? <ListSkeleton label="Loading daily reports" /> : (
-            <div className="flex flex-col gap-2">
-              {archiveReports.filter((report) => report.type === 'Z').map((report) => {
-                const amounts = reportDrawerAmounts(report);
-                return (
-                  <button key={report.id} type="button" onClick={() => { setReportPreview(report); setArchivePreviewDismissed(false); }} className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-low p-3 text-left">
-                    <div>
-                      <strong>{report.reportNumber ?? `Z-${String(report.zNumber ?? 0).padStart(6, '0')}`}</strong>
-                      <p className="font-body text-body-sm text-outline">{report.businessDate} · Sales {formatTnd((report.salesCollectedMillimes ?? report.salesMillimes) / 1000)} DT</p>
-                      <p className="font-body text-body-sm">
-                        Expected {report.countedCashIncludesFloat ? 'total cash' : 'ex-float'} {formatTnd(amounts.expected / 1000)} ·
-                        Counted {formatTnd(amounts.counted / 1000)} ·
-                        Difference {formatTnd(amounts.difference / 1000)}
-                      </p>
-                    </div>
-                    <StatusTag status="closed">{report.pinVerified === false ? 'PIN unavailable' : 'PIN verified'}</StatusTag>
-                  </button>
-                );
-              })}
-              {archiveReports.filter((report) => report.type === 'Z').length === 0 && <p className="font-body text-body-sm text-outline">No Z reports yet.</p>}
+        <section className="shift-archive-page">
+          <div className="shift-archive-toolbar-panel">
+            <div className="shift-date-segments" role="group" aria-label="Quick date filters">
+              {([
+                ['today', 'Today'],
+                ['yesterday', 'Yesterday'],
+                ['7days', '7 Days'],
+                ['30days', '30 Days'],
+                ['month', 'This Month'],
+                ['custom', 'Custom Range'],
+              ] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={archiveQuickDate === value}
+                  onClick={() => setArchiveQuickDate(value)}
+                >
+                  {value === 'custom' && <MaterialIcon name="calendar_month" />}
+                  {label}
+                </button>
+              ))}
+            </div>
+            <label className="shift-spotlight relative">
+              <MaterialIcon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-lg text-outline" />
+              <input
+                value={archiveSearch}
+                onChange={(event) => setArchiveSearch(event.target.value)}
+                placeholder="Search reports..."
+                aria-label="Search daily reports"
+                className="h-11 w-full rounded-xl pl-10 pr-3 font-body text-body-md outline-none"
+              />
+            </label>
+            {archiveQuickDate === 'custom' && (
+              <div className="shift-custom-dates">
+                <label>From<input type="date" value={archiveCustomFrom} onChange={(event) => setArchiveCustomFrom(event.target.value)} /></label>
+                <label>To<input type="date" value={archiveCustomTo} onChange={(event) => setArchiveCustomTo(event.target.value)} /></label>
+              </div>
+            )}
+            <div className="shift-archive-filter-area">
+              <span className="sr-only">{filteredArchiveReports.length} report{filteredArchiveReports.length === 1 ? '' : 's'}</span>
+              <button type="button" className="shift-filter-trigger" onClick={() => setArchiveFiltersOpen((open) => !open)} aria-label="Filter reports" aria-expanded={archiveFiltersOpen}>
+                <MaterialIcon name="tune" className="text-xl" />
+                {(archiveStatus !== 'all' || archiveEmployee !== 'all' || archiveMinAmount || archiveMaxAmount) && <span className="shift-filter-count">•</span>}
+              </button>
+            </div>
+            {archiveFiltersOpen && (
+              <div className="shift-advanced-filters">
+                <label>Status
+                  <select value={archiveStatus} onChange={(event) => setArchiveStatus(event.target.value as 'all' | 'verified' | 'unverified')}>
+                    <option value="all">All statuses</option>
+                    <option value="verified">Verified</option>
+                    <option value="unverified">Unverified</option>
+                  </select>
+                </label>
+                <label>Employee
+                  <select value={archiveEmployee} onChange={(event) => setArchiveEmployee(event.target.value)}>
+                    <option value="all">All employees</option>
+                    {archiveEmployeeOptions.map((employee) => <option key={employee} value={employee}>{employee}</option>)}
+                  </select>
+                </label>
+                <label>Minimum amount
+                  <input type="number" min="0" step="0.001" value={archiveMinAmount} onChange={(event) => setArchiveMinAmount(event.target.value)} placeholder="0.000" />
+                </label>
+                <label>Maximum amount
+                  <input type="number" min="0" step="0.001" value={archiveMaxAmount} onChange={(event) => setArchiveMaxAmount(event.target.value)} placeholder="0.000" />
+                </label>
+              </div>
+            )}
+            {(archiveQuickDate !== 'today' || archiveSearch || archiveStatus !== 'all' || archiveEmployee !== 'all' || archiveMinAmount || archiveMaxAmount) && (
+              <div className="shift-active-filters">
+                {archiveSearch && <button type="button" onClick={() => setArchiveSearch('')}>“{archiveSearch}” <MaterialIcon name="close" className="text-base" /></button>}
+                {archiveStatus !== 'all' && <button type="button" onClick={() => setArchiveStatus('all')}>{archiveStatus} <MaterialIcon name="close" className="text-base" /></button>}
+                {archiveEmployee !== 'all' && <button type="button" onClick={() => setArchiveEmployee('all')}>{archiveEmployee} <MaterialIcon name="close" className="text-base" /></button>}
+                {archiveQuickDate !== 'today' && <button type="button" onClick={() => setArchiveQuickDate('today')}>{archiveQuickDate === 'custom' ? 'Custom range' : archiveQuickDate} <MaterialIcon name="close" className="text-base" /></button>}
+                <button type="button" className="shift-clear-filters" onClick={clearArchiveFilters}>Clear all</button>
+              </div>
+            )}
+          </div>
+          <div className="shift-archive-layout">
+            <div className="shift-archive-card rounded-2xl p-4">
+              <div className="shift-archive-card-heading">
+                <h2 className="font-display text-headline-md text-on-surface">
+                  <MaterialIcon name="description" />
+                  Reports History
+                </h2>
+                <label className="shift-sort-control">
+                  <span>Sort by:</span>
+                  <select
+                    value={archiveSort}
+                    onChange={(event) => setArchiveSort(event.target.value as typeof archiveSort)}
+                    aria-label="Sort reports"
+                  >
+                    <option value="newest">Newest</option>
+                    <option value="oldest">Oldest</option>
+                    <option value="amount-desc">Amount: high to low</option>
+                    <option value="amount-asc">Amount: low to high</option>
+                  </select>
+                </label>
+              </div>
+            {loading ? <ListSkeleton label="Loading daily reports" /> : (
+              <div className="shift-archive-list flex flex-col gap-2">
+                {filteredArchiveReports.map((report) => {
+                  const selected = isArchivePreview?.id === report.id;
+                  const reportTime = new Date(report.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                  return (
+                    <button
+                      key={report.id}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => { setReportPreview(report); setArchivePreviewDismissed(false); }}
+                      className={`shift-archive-row flex items-start justify-between gap-3 rounded-xl p-3 text-left ${selected ? 'shift-archive-row--selected' : ''}`}
+                    >
+                      <span className="shift-archive-row-icon">
+                        <MaterialIcon name="description" />
+                      </span>
+                      <span className="shift-archive-row-copy">
+                        <strong className="text-on-surface">{report.reportNumber ?? `Z-${String(report.zNumber ?? 0).padStart(6, '0')}`}</strong>
+                        <span className="font-body text-body-sm text-on-surface-variant">{report.businessDate} · {reportTime}</span>
+                      </span>
+                      <span className="shift-archive-row-summary">
+                        <strong>{formatTnd((report.salesCollectedMillimes ?? report.salesMillimes) / 1000)} DT</strong>
+                        <StatusTag status={report.pinVerified === false ? 'pending' : 'started'}>
+                          {report.pinVerified === false ? 'PIN unavailable' : 'Verified'}
+                        </StatusTag>
+                      </span>
+                      <MaterialIcon name="chevron_right" className="shift-archive-row-chevron" />
+                    </button>
+                  );
+                })}
+                {filteredArchiveReports.length === 0 && (
+                  <div className="shift-archive-empty">
+                    <MaterialIcon name="search_off" className="text-2xl text-outline" />
+                    <p className="font-body text-body-sm text-on-surface-variant">No reports match these filters.</p>
+                    <button type="button" onClick={clearArchiveFilters}>Clear filters</button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          {isArchivePreview ? (
+            <div className="shift-archive-preview">
+              <ReportView inline report={isArchivePreview} store={store ?? undefined} settings={store?.settings} storeName={store?.name ?? ''} previewZoom={previewZoom} onClose={() => { setReportPreview(undefined); setArchivePreviewDismissed(true); }} />
+              <div className="shift-preview-zoom" role="group" aria-label="Report preview zoom">
+                <button type="button" aria-label="Zoom out" disabled={previewZoom <= 70} onClick={() => setPreviewZoom((zoom) => Math.max(70, zoom - 10))}>−</button>
+                <span>{previewZoom}%</span>
+                <button type="button" aria-label="Zoom in" disabled={previewZoom >= 150} onClick={() => setPreviewZoom((zoom) => Math.min(150, zoom + 10))}>+</button>
+              </div>
+            </div>
+          ) : (
+            <div className="shift-archive-preview shift-archive-preview--empty">
+              <MaterialIcon name="description" className="text-3xl text-outline" />
+              <p className="font-body text-body-sm text-on-surface-variant">Select a Z report to preview it.</p>
             </div>
           )}
-          {isArchivePreview && <div className="mt-4"><ReportView inline report={isArchivePreview} store={store ?? undefined} settings={store?.settings} storeName={store?.name ?? ''} onClose={() => { setReportPreview(undefined); setArchivePreviewDismissed(true); }} /></div>}
+          </div>
         </section>
       )}
 
@@ -717,9 +1147,11 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
         />
       )}
 
-      {(!ownerMode || activeTab === 'shifts') && (ownOpenShift ? (
-        <div className="grid gap-4 tablet:grid-cols-2">
-          <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+      {(!ownerMode || activeTab === 'shifts') && (
+        <div className="shift-management-layout">
+          {ownOpenShift ? (
+        <div className="shift-current-layout grid gap-3 tablet:grid-cols-2 lg:grid-cols-1">
+          <section className="shift-current-card shift-glass-card rounded-2xl p-4">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <p className="font-body text-label-sm uppercase text-outline">{t('shift.openSince', { time: new Date(ownOpenShift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })}</p>
@@ -755,27 +1187,74 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             </Button>}
           </div>
         </div>
-      ) : canOpenCloseShift && (!closedShiftSummary || ownerMode || dayStatus.dayIsClosed) ? (
-        <Button className="w-full max-w-xl" onClick={openStartingCashSheet}>
-          <MaterialIcon name="lock_open" />{ownerMode ? 'Open my shift' : t('shift.openShift')}
-        </Button>
-      ) : null)}
+      ) : null}
 
       {reportPreview && !ownerMode && <div className="mt-4">
         <ReportView inline report={reportPreview} store={store ?? undefined} settings={store?.settings} storeName={store?.name ?? ''} onClose={() => setReportPreview(undefined)} />
       </div>}
 
-      {(error || notice) && <p role={error ? 'alert' : 'status'} className={`mt-4 rounded-lg p-3 font-body text-body-sm ${error ? 'bg-error-container text-on-error-container' : 'bg-success-container text-on-success-container'}`}>{error || notice}</p>}
-
-      {(!ownerMode || activeTab === 'shifts') && <section className="mt-6">
+      {(!ownerMode || activeTab === 'shifts') && <section className="shift-history mt-6">
         <h2 className="mb-3 font-display text-headline-md text-on-surface">{t('shift.history')}</h2>
+        <div className="shift-history-toolbar mb-3 grid gap-2">
+          <label className="relative">
+            <MaterialIcon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-lg text-outline" />
+            <input
+              value={historySearch}
+              onChange={(event) => setHistorySearch(event.target.value)}
+              placeholder="Search staff or date"
+              aria-label="Search shift history"
+              className="h-11 w-full rounded-lg bg-surface-container-lowest pl-10 pr-3 font-body text-body-md shadow-card outline-none focus:ring-2 focus:ring-primary"
+            />
+          </label>
+          <div className="shift-status-filters flex items-center gap-1 rounded-xl bg-surface-container-lowest p-1 shadow-card" role="group" aria-label="Filter shift status">
+            {([
+              ['all', 'All'],
+              ['open', 'Open'],
+              ['closed', 'Closed'],
+            ] as const).map(([status, label]) => (
+              <button
+                key={status}
+                type="button"
+                aria-pressed={historyStatus === status}
+                onClick={() => setHistoryStatus(status)}
+                className={`min-h-9 shrink-0 rounded-lg px-3 font-body text-label-md transition ${
+                  historyStatus === status
+                    ? 'bg-primary text-on-primary shadow-card'
+                    : 'text-on-surface-variant hover:bg-surface-container'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <label className="shift-staff-filter">
+            <span className="sr-only">Filter by staff</span>
+            <select
+              value={historyStaff}
+              onChange={(event) => setHistoryStaff(event.target.value)}
+              aria-label="Filter by staff"
+              className="h-11 w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 font-body text-body-md text-on-surface outline-none focus:ring-2 focus:ring-primary"
+            >
+              <option value="all">All staff</option>
+              {Object.entries(staffNames).map(([staffId, staffName]) => (
+                <option key={staffId} value={staffId}>{staffName}</option>
+              ))}
+            </select>
+          </label>
+        </div>
         {loading ? <ListSkeleton label="Loading shifts" /> : <DataTable<ShiftRecord>
-          rows={shifts}
+          rows={filteredHistory}
           getRowKey={(shift) => shift.id}
           columns={[
             { key: 'staff', label: 'Staff', sortValue: (shift) => staffNames[shift.staffId] ?? 'Staff', render: (shift) => staffNames[shift.staffId] ?? 'Staff' },
             { key: 'opened', label: 'Opened', sortValue: (shift) => shift.openedAt, render: (shift) => new Date(shift.openedAt).toLocaleString() },
             { key: 'closed', label: 'Closed', sortValue: (shift) => shift.closedAt ?? '', render: (shift) => shift.closedAt ? new Date(shift.closedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—' },
+            { key: 'duration', label: 'Duration', sortValue: (shift) => new Date(shift.closedAt ?? Date.now()).getTime() - new Date(shift.openedAt).getTime(), render: (shift) => {
+              const durationMinutes = Math.max(0, Math.floor((new Date(shift.closedAt ?? Date.now()).getTime() - new Date(shift.openedAt).getTime()) / 60_000));
+              return durationMinutes >= 60 ? `${Math.floor(durationMinutes / 60)}h ${durationMinutes % 60}m` : `${durationMinutes}m`;
+            } },
+            { key: 'starting', label: 'Starting', sortValue: (shift) => shift.startingCashMillimes, render: (shift) => `${formatTnd(shift.startingCashMillimes / 1000)} DT` },
+            { key: 'counted', label: 'Counted', sortValue: (shift) => shift.countedCashMillimes ?? 0, render: (shift) => shift.countedCashMillimes === undefined ? '—' : `${formatTnd(shift.countedCashMillimes / 1000)} DT` },
             { key: 'status', label: 'Status', render: (shift) => (
               <div className="flex flex-col items-start gap-1">
                 <StatusTag status={shift.status === 'open' ? 'started' : 'closed'}>{shift.status === 'open' ? 'Open' : 'Closed'}</StatusTag>
@@ -792,11 +1271,15 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             ) },
           ] satisfies DataTableColumn<ShiftRecord>[]}
           mobileCards={(shift) => (
-            <article key={shift.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-surface-container-lowest p-4 shadow-card">
+            <article key={shift.id} className="shift-history-card flex flex-wrap items-center justify-between gap-3 rounded-2xl p-4">
               <div>
                 <p className="font-body text-label-lg text-on-surface">{staffNames[shift.staffId] ?? 'Staff'}</p>
                 <p className="mt-1 font-body text-body-sm text-outline">
                   {new Date(shift.openedAt).toLocaleString()} {shift.closedAt ? ` • Closed ${new Date(shift.closedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+                </p>
+                <p className="mt-1 font-body text-label-sm text-on-surface-variant">
+                  Start {formatTnd(shift.startingCashMillimes / 1000)} DT
+                  {shift.countedCashMillimes !== undefined ? ` • Counted ${formatTnd(shift.countedCashMillimes / 1000)} DT` : ''}
                 </p>
                 {shift.forceClosedByOwner && <p className="mt-1 font-body text-label-sm text-warning">Closed by force</p>}
                 {(shift.voidsAutoApprovedCount ?? 0) > 0 && <p className="mt-1 font-body text-label-sm text-warning">Voids auto-approved: {shift.voidsAutoApprovedCount}</p>}
@@ -826,6 +1309,8 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           empty={!loading && !error ? <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">{t('common.noData')}</p> : undefined}
         />}
       </section>}
+        </div>
+      )}
       <BottomSheet open={openShiftSheetOpen} onClose={closeStartingCashSheet} title={t('shift.openShift')}>
         <form onSubmit={(event) => { void openShift(event); }} className="flex flex-col gap-3">
           <p className="font-body text-body-sm text-on-surface-variant">Count the cash drawer before taking orders.</p>
@@ -1091,7 +1576,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           </div>
         </form>
       </BottomSheet>
-    </>
+    </div>
   );
 }
 
@@ -1250,7 +1735,7 @@ function ClosedShiftSummary({
   const durationMinutes = Math.floor(durationMs / 60_000);
   const difference = shift.differenceMillimes ?? 0;
   return (
-    <section className="mb-4 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
+    <section className="shift-glass-card mb-4 rounded-2xl p-4">
       <div className="mb-3">
         <h2 className="font-display text-headline-md text-on-surface">Shift closed</h2>
         <p className="font-body text-body-sm text-on-surface-variant">

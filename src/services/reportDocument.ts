@@ -115,7 +115,10 @@ export function buildReportDocument(
     { label: 'Net sales', value: money(report.netMillimes ?? report.salesMillimes), emphasized: true },
     ...(report.salesCollectedMillimes === undefined ? [] : [{ label: 'Sales collected', value: money(report.salesCollectedMillimes) }]),
     ...(cashSales === undefined ? [] : [{ label: 'Cash', value: money(cashSales) }]),
-    ...(paymentSplit ? [{ label: 'Card', value: money(paymentSplit.card) }, { label: 'Other', value: money(paymentSplit.other) }] : []),
+    ...(paymentSplit ? [
+      { label: 'Card', value: money(paymentSplit.card), emphasized: true },
+      { label: 'Other', value: money(paymentSplit.other) },
+    ] : []),
     ...(tabSales === undefined ? [] : [{ label: 'Tab sales', value: money(tabSales) }]),
   ]);
   if (report.expensesMillimes !== undefined || report.netProfitMillimes !== undefined || report.expenseDetails?.length) {
@@ -250,12 +253,127 @@ export function buildReportDocument(
   }
   appendSection(sections, 'CASH MOVEMENTS', cashMovements);
 
-  if (report.employeeBreakdown?.length) {
-    appendSection(sections, 'BY EMPLOYEE', report.employeeBreakdown.map((employee) => ({
-      label: `${employee.name} · ${employee.orderCount} orders`,
-      value: money(employee.salesMillimes),
-    })));
+  const employees = new Map<string, {
+    staffId?: string;
+    name: string;
+    orderCount?: number;
+    salesMillimes?: number;
+    shifts: NonNullable<ReportRecord['shifts']>;
+    voidedOrderCount: number;
+    voidedTotalMillimes: number;
+  }>();
+  const employeeKeysByName = new Map<string, string[]>();
+  for (const employee of report.employeeBreakdown ?? []) {
+    employees.set(employee.staffId, {
+      staffId: employee.staffId,
+      name: employee.name,
+      orderCount: employee.orderCount,
+      salesMillimes: employee.salesMillimes,
+      shifts: [],
+      voidedOrderCount: 0,
+      voidedTotalMillimes: 0,
+    });
+    employeeKeysByName.set(employee.name, [...(employeeKeysByName.get(employee.name) ?? []), employee.staffId]);
   }
+  for (const shift of reportShifts) {
+    const sameNameKeys = employeeKeysByName.get(shift.staffName) ?? [];
+    const staffId = shift.staffId ?? (sameNameKeys.length === 1 ? sameNameKeys[0] : undefined);
+    const key = staffId ?? `shift:${shift.shiftId}`;
+    const employee = employees.get(key) ?? {
+      staffId,
+      name: shift.staffName,
+      shifts: [],
+      voidedOrderCount: 0,
+      voidedTotalMillimes: 0,
+    };
+    employee.shifts.push(shift);
+    employees.set(key, employee);
+  }
+  for (const order of report.voids?.orders ?? []) {
+    if (!order.staffId) continue;
+    const employee = employees.get(order.staffId) ?? {
+      staffId: order.staffId,
+      name: order.staffName ?? 'Staff',
+      shifts: [],
+      voidedOrderCount: 0,
+      voidedTotalMillimes: 0,
+    };
+    employee.voidedOrderCount += 1;
+    employee.voidedTotalMillimes += order.totalMillimes;
+    employees.set(order.staffId, employee);
+  }
+  const employeeLines: ReportSection['lines'] = [];
+  for (const employee of employees.values()) {
+    const shifts = employee.shifts;
+    const sumShiftValue = (select: (shift: typeof shifts[number]) => number | undefined) => {
+      if (!shifts.length) return undefined;
+      const values = shifts.map(select);
+      if (values.some((value) => value === undefined)) return undefined;
+      return values.reduce<number>((sum, value) => sum + (value ?? 0), 0);
+    };
+    const orderCount = employee.orderCount ?? sumShiftValue((shift) => shift.orderCount);
+    const salesMillimes = employee.salesMillimes ?? sumShiftValue((shift) => (
+      [shift.cashSalesMillimes, shift.cardSalesMillimes, shift.otherSalesMillimes, shift.tabSalesMillimes]
+        .some((value) => value === undefined)
+        ? undefined
+        : (shift.cashSalesMillimes ?? 0) + (shift.cardSalesMillimes ?? 0)
+          + (shift.otherSalesMillimes ?? 0) + (shift.tabSalesMillimes ?? 0)
+    ));
+    employeeLines.push({
+      label: `${employee.name} · ${orderCount === undefined ? 'Order count unavailable' : `${orderCount} orders`}`,
+      value: salesMillimes === undefined ? 'Sales not recorded' : money(salesMillimes),
+      emphasized: true,
+    });
+    if (employee.voidedOrderCount > 0) {
+      employeeLines.push({
+        label: 'Voided orders / total',
+        value: `${employee.voidedOrderCount} / ${money(employee.voidedTotalMillimes)}`,
+      });
+    }
+    if (!shifts.length) continue;
+
+    const paymentFields = [
+      shifts.some((shift) => shift.cashSalesMillimes !== undefined) ? sumShiftValue((shift) => shift.cashSalesMillimes) : undefined,
+      shifts.some((shift) => shift.cardSalesMillimes !== undefined) ? sumShiftValue((shift) => shift.cardSalesMillimes) : undefined,
+      shifts.some((shift) => shift.otherSalesMillimes !== undefined) ? sumShiftValue((shift) => shift.otherSalesMillimes) : undefined,
+      shifts.some((shift) => shift.tabSalesMillimes !== undefined) ? sumShiftValue((shift) => shift.tabSalesMillimes) : undefined,
+    ];
+    if (paymentFields.some((value) => value !== undefined)) {
+      employeeLines.push({
+        label: 'Cash / card / other / tab sales',
+        value: paymentFields.map((value) => value === undefined ? 'Not recorded' : money(value)).join(' / '),
+      });
+    }
+    employeeLines.push({
+      label: 'Shift count / starting cash',
+      value: `${shifts.length} / ${money(sumShiftValue((shift) => shift.startingCashMillimes))}`,
+    });
+    const expected = sumShiftValue((shift) => shift.expectedCashMillimes);
+    const counted = sumShiftValue((shift) => shift.countedCashMillimes);
+    employeeLines.push({
+      label: 'Expected / counted cash',
+      value: `${expected === undefined ? 'Not recorded' : money(expected)} / ${counted === undefined ? 'Not recorded' : money(counted)}`,
+    });
+    const cashIn = sumShiftValue((shift) => shift.cashInMillimes);
+    const cashOut = sumShiftValue((shift) => shift.cashOutMillimes);
+    if (cashIn !== undefined || cashOut !== undefined) {
+      employeeLines.push({
+        label: 'Cash in / out',
+        value: `${cashIn === undefined ? 'Not recorded' : money(cashIn)} / ${cashOut === undefined ? 'Not recorded' : money(cashOut)}`,
+      });
+    }
+    const shiftIds = new Set(shifts.map((shift) => shift.shiftId));
+    const postCloseVoids = (report.voidAdjustments ?? []).filter((item) => shiftIds.has(item.shiftId));
+    if (postCloseVoids.length) {
+      const count = (kind: NonNullable<ReportRecord['voidAdjustments']>[number]['kind']) =>
+        postCloseVoids.filter((item) => item.kind === kind).length;
+      employeeLines.push({
+        label: 'Post-close cash adjustment records (request / approval / rejection)',
+        value: `${count('requested')} / ${count('approved')} / ${count('rejected')}`,
+      });
+    }
+  }
+  appendSection(sections, 'BY EMPLOYEE', employeeLines);
 
   if (reportShifts.length) {
     appendSection(sections, 'BY SHIFT / PERSON', reportShifts.flatMap((shift) => {
@@ -267,24 +385,23 @@ export function buildReportDocument(
         { label: 'Shift ID', value: shift.shiftId },
         { label: 'Opened', value: localDateTime(shift.openedAt) },
         ...(shift.closedAt ? [{ label: 'Closed', value: localDateTime(shift.closedAt) }] : []),
+        { label: 'Starting cash', value: money(shift.startingCashMillimes) },
         { label: 'Closed by force', value: shift.forceClosedByOwner ? 'Yes · UNVERIFIED' : 'No' },
         ...(shift.voidsAutoApprovedCount
-          ? [{ label: 'Voids auto-approved', value: `${shift.voidsAutoApprovedCount} · UNVERIFIED` }]
+          ? [{ label: 'Voids auto-approved at forced close', value: String(shift.voidsAutoApprovedCount) }]
           : []),
       ];
-      const paymentAmounts = [
-        shift.cashSalesMillimes,
-        shift.cardSalesMillimes,
-        shift.otherSalesMillimes,
-        shift.tabSalesMillimes,
-      ];
-      if (paymentAmounts.some((amount) => amount !== undefined)) {
+      if (shift.cashSalesMillimes !== undefined) lines.push({ label: 'Cash sales', value: money(shift.cashSalesMillimes) });
+      if (shift.cardSalesMillimes !== undefined) lines.push({ label: 'Card sales', value: money(shift.cardSalesMillimes), emphasized: true });
+      if (shift.otherSalesMillimes !== undefined) lines.push({ label: 'Other sales', value: money(shift.otherSalesMillimes) });
+      if (shift.tabSalesMillimes !== undefined) lines.push({ label: 'Tab sales', value: money(shift.tabSalesMillimes) });
+      if (shift.tabPaymentsMillimes !== undefined) lines.push({ label: 'Tab payments', value: money(shift.tabPaymentsMillimes) });
+      if (shift.expectedCashMillimes !== undefined || shift.countedCashMillimes !== undefined) {
         lines.push({
-          label: 'Cash / card / other / tab',
-          value: paymentAmounts.map((amount) => amount === undefined ? '—' : money(amount)).join(' / '),
+          label: 'Expected / counted cash',
+          value: `${shift.expectedCashMillimes === undefined ? 'Not recorded' : money(shift.expectedCashMillimes)} / ${shift.countedCashMillimes === undefined ? 'Not recorded' : money(shift.countedCashMillimes)}`,
         });
       }
-      if (shift.tabPaymentsMillimes !== undefined) lines.push({ label: 'Tab payments', value: money(shift.tabPaymentsMillimes) });
       if (shift.voidAdjustmentMillimes !== undefined) {
         lines.push({ label: 'Post-close void adjustments', value: money(shift.voidAdjustmentMillimes) });
       }
@@ -427,7 +544,7 @@ export function buildReportDocument(
               : 'BALANCED',
       })),
       ...forcedShifts.map((shift) => ({
-        label: `${shift.staffName} · UNVERIFIED · force-closed · auto-approved voids`,
+        label: `${shift.staffName} · force-closed auto-approved voids`,
         value: String(shift.voidsAutoApprovedCount ?? 0),
       })),
     ]);

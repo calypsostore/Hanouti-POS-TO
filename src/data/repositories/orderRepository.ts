@@ -118,6 +118,7 @@ function orderQuery(storeId: string, options: OrderListOptions, includeItems: bo
     ].join(', '))
     .eq('store_id', storeId)
     .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
     .range(from, to);
   if (options.staffId) query = query.eq('staff_id', options.staffId);
   if (options.businessDate) query = query.eq('business_date', options.businessDate);

@@ -420,6 +420,10 @@ export interface ReportVoidLine {
   reason: string;
   totalMillimes: number;
   approvedBy?: string;
+  staffId?: string;
+  staffName?: string;
+  shiftId?: string;
+  voidedAt?: string;
   autoApprovedAtForcedClose?: boolean;
 }
 
@@ -499,6 +503,7 @@ export interface ReportEmployeeLine {
 
 export interface ReportShiftLine {
   shiftId: string;
+  staffId?: string;
   staffName: string;
   orderCount?: number;
   status?: 'in_progress' | 'closed';

@@ -151,6 +151,31 @@ async function authorizeCreditOverride(input: {
   writeData('credit-override-pin-attempts', { ...attempts, [input.storeId]: { count: 0, lockedUntil: 0 } });
 }
 
+async function verifyVoidPinWithLockout(storeId: string, pin: string): Promise<boolean> {
+  requireOnlineForAction('Voiding orders');
+  const store = await userService.getStore(storeId);
+  if (!store) throw new Error('The store could not be found.');
+  if (store.pinMustChange) throw new Error('Set your admin PIN in Settings before voiding orders.');
+  if (isSupabaseDriver()) return userService.verifyStorePin(storeId, pin, 'void');
+
+  const attempts = readData<Record<string, { count: number; lockedUntil: number }>>('void-pin-attempts', {});
+  const attempt = attempts[storeId] ?? { count: 0, lockedUntil: 0 };
+  if (attempt.lockedUntil > Date.now()) {
+    const seconds = Math.ceil((attempt.lockedUntil - Date.now()) / 1000);
+    throw new Error(`PIN pad locked. Try again in ${seconds} seconds.`);
+  }
+  if (!await userService.verifyStorePin(storeId, pin, 'void')) {
+    const count = attempt.count + 1;
+    writeData('void-pin-attempts', {
+      ...attempts,
+      [storeId]: { count: count >= 3 ? 0 : count, lockedUntil: count >= 3 ? Date.now() + 60_000 : 0 },
+    });
+    throw new Error(count >= 3 ? 'PIN pad locked for 60 seconds after 3 incorrect PINs.' : 'Incorrect Admin PIN.');
+  }
+  writeData('void-pin-attempts', { ...attempts, [storeId]: { count: 0, lockedUntil: 0 } });
+  return true;
+}
+
 export { offlineOrderQueue };
 
 async function createQueuedOrder(input: {
@@ -313,12 +338,27 @@ export const orderService = {
     return (await this.listByBusinessDate(storeId, businessDate, staffId)).map(toOrderSummary);
   },
 
-  async listByBusinessDate(storeId: string, businessDate: string, staffId?: string): Promise<OrderRecord[]> {
+  async listByBusinessDate(
+    storeId: string,
+    businessDate: string,
+    staffId?: string,
+    pagination: { limit: number; offset: number } = { limit: 200, offset: 0 },
+  ): Promise<OrderRecord[]> {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) {
       throw new Error('Choose a valid business date.');
     }
+    if (!Number.isSafeInteger(pagination.limit) || pagination.limit < 1 ||
+      !Number.isSafeInteger(pagination.offset) || pagination.offset < 0 ||
+      !Number.isSafeInteger(pagination.offset + pagination.limit)) {
+      throw new Error('Order page range is invalid.');
+    }
     if (isSupabaseDriver()) {
-      return listRemoteOrders(storeId, { staffId, businessDate });
+      return listRemoteOrders(storeId, {
+        staffId,
+        businessDate,
+        limit: pagination.limit,
+        range: { from: pagination.offset, to: pagination.offset + pagination.limit - 1 },
+      });
     }
     const [shifts, store] = await Promise.all([
       shiftService.listShifts(storeId),
@@ -336,7 +376,8 @@ export const orderService = {
           timeZone,
         ) === businessDate;
       })
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .slice(pagination.offset, pagination.offset + pagination.limit);
   },
 
   async listAll(storeId: string): Promise<OrderRecord[]> {
@@ -592,7 +633,16 @@ export const orderService = {
       summary: `Requested a void for order #${order.number}. ${cleanedReason}`,
       entityType: 'order',
       entityId: order.id,
-      meta: { before: { status: order.status }, after: { status: updated.status, voidReason: cleanedReason } },
+      meta: {
+        orderNumber: order.number,
+        shiftId: order.shiftId,
+        amountMillimes: order.totalMillimes,
+        paymentMethod: order.paymentMethod,
+        requestedAt: updated.voidRequestedAt,
+        reason: cleanedReason,
+        before: { status: order.status },
+        after: { status: updated.status, voidReason: cleanedReason },
+      },
     });
     await notificationService.notifyVoidRequested(updated);
     return updated;
@@ -618,21 +668,7 @@ export const orderService = {
     if ((await userService.getStore(order.storeId))?.pinMustChange) {
       throw new Error('Set your admin PIN in Settings before voiding orders.');
     }
-    const attempts = readData<Record<string, { count: number; lockedUntil: number }>>('void-pin-attempts', {});
-    const attempt = attempts[order.storeId] ?? { count: 0, lockedUntil: 0 };
-    if (attempt.lockedUntil > Date.now()) {
-      const seconds = Math.ceil((attempt.lockedUntil - Date.now()) / 1000);
-      throw new Error(`PIN pad locked. Try again in ${seconds} seconds.`);
-    }
-    if (!await userService.verifyStorePin(order.storeId, pin, 'void')) {
-      const count = attempt.count + 1;
-      writeData('void-pin-attempts', {
-        ...attempts,
-        [order.storeId]: { count: count >= 3 ? 0 : count, lockedUntil: count >= 3 ? Date.now() + 60_000 : 0 },
-      });
-      throw new Error(count >= 3 ? 'PIN pad locked for 60 seconds after 3 incorrect PINs.' : 'Incorrect Admin PIN.');
-    }
-    writeData('void-pin-attempts', { ...attempts, [order.storeId]: { count: 0, lockedUntil: 0 } });
+    await verifyVoidPinWithLockout(order.storeId, pin);
     const updated: OrderRecord = {
       ...order,
       status: 'voided',
@@ -649,7 +685,16 @@ export const orderService = {
       summary: `Voided order #${order.number}. ${cleanedReason}`,
       entityType: 'order',
       entityId: order.id,
-      meta: { before: { status: order.status }, after: { status: updated.status, voidReason: cleanedReason } },
+      meta: {
+        orderNumber: order.number,
+        shiftId: order.shiftId,
+        amountMillimes: order.totalMillimes,
+        paymentMethod: order.paymentMethod,
+        authorizationMethod: 'admin_pin',
+        voidedAt: updated.voidedAt,
+        before: { status: order.status },
+        after: { status: updated.status, voidReason: cleanedReason },
+      },
     });
     if (order.paymentMethod === 'cash') {
       await shiftService.recordClosedShiftVoidAdjustment({
@@ -663,6 +708,10 @@ export const orderService = {
     }
     await restoreOrderStock(order, actorId);
     return updated;
+  },
+
+  verifyVoidPin(storeId: string, pin: string): Promise<boolean> {
+    return verifyVoidPinWithLockout(storeId, pin);
   },
 
   async resolveVoidRequest(orderId: string, ownerId: string, decision: 'approve' | 'reject', reason?: string): Promise<OrderRecord> {
@@ -699,7 +748,17 @@ export const orderService = {
         : `Rejected void request for order #${order.number}.`,
       entityType: 'order',
       entityId: order.id,
-      meta: { before: { status: order.status, voidReason: order.voidReason }, after: { status: updated.status, voidReason: updated.voidReason } },
+      meta: {
+        orderNumber: order.number,
+        shiftId: order.shiftId,
+        amountMillimes: order.totalMillimes,
+        paymentMethod: order.paymentMethod,
+        authorizationMethod: 'owner_approval',
+        resolvedAt: updated.voidedAt ?? new Date().toISOString(),
+        resolutionReason: decision === 'approve' ? cleanedReason : reason?.trim() || undefined,
+        before: { status: order.status, voidReason: order.voidReason },
+        after: { status: updated.status, voidReason: updated.voidReason },
+      },
     });
     if (decision === 'approve') {
       await restoreOrderStock(order, ownerId);

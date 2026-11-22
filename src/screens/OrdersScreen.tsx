@@ -19,6 +19,9 @@ import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
 import { DataTable, type DataTableColumn } from '../components/layout';
 import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
+import { getOrderTags, matchesOrderSearch } from '../lib/orderTags';
+
+const ORDER_PAGE_SIZE = 100;
 
 type OrderStatus = 'done' | 'pending' | 'voided';
 type OrderFilter = 'all' | 'done' | 'pending' | 'voided';
@@ -44,8 +47,7 @@ interface OrderView {
   record: OrderRecord;
 }
 
-async function toOrderView(order: OrderRecord): Promise<OrderView> {
-  const staff = await userService.getUser(order.staffId);
+function toOrderView(order: OrderRecord, staffName?: string): OrderView {
   return {
     id: order.id,
     number: order.number,
@@ -58,7 +60,7 @@ async function toOrderView(order: OrderRecord): Promise<OrderView> {
       name: item.name,
       total: item.lineTotalMillimes / 1000,
     })),
-    staff: staff?.name ?? t('common.staff'),
+    staff: order.staffName ?? staffName ?? t('common.staff'),
     reason: order.voidReason,
     voidedBy: order.voidedBy,
     voidRequestedAt: order.voidRequestedAt,
@@ -95,8 +97,12 @@ export function OrdersScreen() {
   const [orders, setOrders] = useState<OrderView[]>([]);
   const [businessDate, setBusinessDate] = useState(() => localDateKey());
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMoreOrders, setHasMoreOrders] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [filter, setFilter] = useState<OrderFilter>('all');
+  const [search, setSearch] = useState('');
+  const [tagFilter, setTagFilter] = useState('');
   const [activeOrder, setActiveOrder] = useState<OrderView | null>(null);
   const [pin, setPin] = useState('');
   const [feedback, setFeedback] = useState('');
@@ -104,12 +110,27 @@ export function OrdersScreen() {
   const [voidReason, setVoidReason] = useState('');
   const [ticketOrder, setTicketOrder] = useState<OrderView | null>(null);
   const [pinLockedSeconds, setPinLockedSeconds] = useState(0);
+  const [verifiedPinForOrderId, setVerifiedPinForOrderId] = useState<string | null>(null);
+  const [voidBusy, setVoidBusy] = useState(false);
   const hasLoadedOrdersRef = useRef(false);
+  const loadingMoreRef = useRef(false);
+  const orderFetchVersionRef = useRef(0);
+  const nextOrderOffsetRef = useRef(0);
 
   const visibleOrders = useMemo(
-    () => orders.filter((order) => filter === 'all' || order.status === filter),
-    [filter, orders],
+    () => orders.filter((order) =>
+      (filter === 'all' || order.status === filter)
+      && (!tagFilter || getOrderTags(order.record).some((tag) => tag.id === tagFilter))
+      && matchesOrderSearch(order.record, order.staff, search)),
+    [filter, orders, search, tagFilter],
   );
+  const availableTags = useMemo(() => {
+    const tags = new Map<string, ReturnType<typeof getOrderTags>[number]>();
+    for (const order of orders) {
+      for (const tag of getOrderTags(order.record)) tags.set(tag.id, tag);
+    }
+    return [...tags.values()];
+  }, [orders]);
   const doneTotal = orders.filter((order) => order.status === 'done').reduce((sum, order) => sum + order.total, 0);
   const pendingCount = orders.filter((order) => order.status === 'pending').length;
   const doneCount = orders.filter((order) => order.status === 'done').length;
@@ -117,16 +138,62 @@ export function OrdersScreen() {
 
   const refreshOrders = useCallback(async () => {
     const initialLoad = !hasLoadedOrdersRef.current;
+    const fetchVersion = orderFetchVersionRef.current + 1;
+    orderFetchVersionRef.current = fetchVersion;
     if (initialLoad) setLoading(true);
     setLoadError('');
     try {
-      const records = await orderService.listByBusinessDate(storeId, businessDate, staffFilter);
-      setOrders(await Promise.all(records.map(toOrderView)));
+      const records = await orderService.listByBusinessDate(storeId, businessDate, staffFilter, {
+        limit: ORDER_PAGE_SIZE,
+        offset: 0,
+      });
+      if (fetchVersion !== orderFetchVersionRef.current) return;
+      const staffNames = await userService.listStaffNames(storeId, records.map((order) => order.staffId));
+      if (fetchVersion !== orderFetchVersionRef.current) return;
+      setOrders(records.map((order) => toOrderView(order, staffNames.get(order.staffId))));
+      nextOrderOffsetRef.current = records.length;
+      setHasMoreOrders(records.length === ORDER_PAGE_SIZE);
       hasLoadedOrdersRef.current = true;
+    } catch (error) {
+      if (fetchVersion === orderFetchVersionRef.current) throw error;
     } finally {
-      if (initialLoad) setLoading(false);
+      if (initialLoad && fetchVersion === orderFetchVersionRef.current) setLoading(false);
     }
   }, [storeId, staffFilter, businessDate]);
+
+  const loadMoreOrders = useCallback(async () => {
+    if (!hasMoreOrders || loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
+    const fetchVersion = orderFetchVersionRef.current;
+    const offset = nextOrderOffsetRef.current;
+    setLoadingMore(true);
+    setLoadError('');
+    try {
+      const records = await orderService.listByBusinessDate(storeId, businessDate, staffFilter, {
+        limit: ORDER_PAGE_SIZE,
+        offset,
+      });
+      if (fetchVersion !== orderFetchVersionRef.current) return;
+      const staffNames = await userService.listStaffNames(storeId, records.map((order) => order.staffId));
+      if (fetchVersion !== orderFetchVersionRef.current) return;
+      nextOrderOffsetRef.current = offset + records.length;
+      setOrders((current) => {
+        const byId = new Map(current.map((order) => [order.id, order]));
+        for (const order of records.map((record) => toOrderView(record, staffNames.get(record.staffId)))) byId.set(order.id, order);
+        return [...byId.values()].sort((left, right) =>
+          right.record.createdAt.localeCompare(left.record.createdAt) || right.id.localeCompare(left.id));
+      });
+      setHasMoreOrders(records.length === ORDER_PAGE_SIZE);
+    } catch (error) {
+      if (fetchVersion === orderFetchVersionRef.current) {
+        console.error('Unable to load older orders.', error);
+        setLoadError(error instanceof Error ? error.message : t('common.loadFailed'));
+      }
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [businessDate, hasMoreOrders, staffFilter, storeId]);
 
   useEffect(() => {
     void refreshOrders().catch(() => setLoadError(t('common.loadFailed')));
@@ -181,41 +248,68 @@ export function OrdersScreen() {
     setPin('');
     setFeedback('');
     setVoidReason('');
+    setVerifiedPinForOrderId(null);
+    setVoidBusy(false);
+  }
+
+  async function submitDirectVoid(pinValue: string) {
+    if (!activeOrder || !user || voidBusy) return;
+    setVoidBusy(true);
+    try {
+      await orderService.voidWithPin(activeOrder.id, pinValue, user.id, voidReason);
+      await refreshOrders();
+      setActiveOrder(null);
+      showToast(t('orders.voidedToast', { number: activeOrder.number }));
+    } catch (error) {
+      setVerifiedPinForOrderId(null);
+      setFeedback(error instanceof Error ? error.message : t('orders.unableToVoid'));
+      setPinLockedSeconds(Math.ceil(orderService.getPinLockRemainingMs(activeOrder.record.storeId) / 1000));
+      window.setTimeout(() => setPin(''), 600);
+    } finally {
+      setVoidBusy(false);
+    }
   }
 
   async function pressPin(digit: string) {
-    if (pinLockedSeconds > 0) return;
-    if (pin.length >= 4) return;
-    if (pin.length === 3 && !voidReason.trim()) {
-      setFeedback('A reason is required to void this order.');
-      return;
-    }
+    if (pinLockedSeconds > 0 || voidBusy || pin.length >= 4) return;
     const nextPin = `${pin}${digit}`;
     setPin(nextPin);
     if (nextPin.length === 4) {
       if (!activeOrder || !user) return;
-      try {
-        await orderService.voidWithPin(activeOrder.id, nextPin, user.id, voidReason);
-        await refreshOrders();
-        setActiveOrder(null);
-        showToast(t('orders.voidedToast', { number: activeOrder.number }));
-      } catch (error) {
-        setFeedback(error instanceof Error ? error.message : t('orders.unableToVoid'));
-        setPinLockedSeconds(Math.ceil(orderService.getPinLockRemainingMs(activeOrder.record.storeId) / 1000));
-        window.setTimeout(() => setPin(''), 600);
+      if (!voidReason.trim()) {
+        setVoidBusy(true);
+        try {
+          const verified = await orderService.verifyVoidPin(activeOrder.record.storeId, nextPin);
+          if (!verified) throw new Error('Incorrect Admin PIN.');
+          setVerifiedPinForOrderId(activeOrder.id);
+          setFeedback('Admin PIN verified. Enter a reason, then confirm the direct void.');
+        } catch (error) {
+          setFeedback(error instanceof Error ? error.message : t('orders.unableToVoid'));
+          setPinLockedSeconds(Math.ceil(orderService.getPinLockRemainingMs(activeOrder.record.storeId) / 1000));
+          window.setTimeout(() => setPin(''), 600);
+        } finally {
+          setVoidBusy(false);
+        }
+        return;
       }
+      await submitDirectVoid(nextPin);
     }
   }
 
   async function requestVoid() {
-    if (!activeOrder || !user) return;
+    if (!activeOrder || !user || voidBusy) return;
+    setVoidBusy(true);
     try {
       await orderService.requestVoid(activeOrder.id, user.id, voidReason);
       await refreshOrders();
       setActiveOrder(null);
       showToast(t('orders.voidRequestSent'));
     } catch (error) {
+      setVerifiedPinForOrderId(null);
+      setPin('');
       setFeedback(error instanceof Error ? error.message : t('orders.unableToRequestVoid'));
+    } finally {
+      setVoidBusy(false);
     }
   }
 
@@ -264,12 +358,12 @@ export function OrdersScreen() {
             </label>
             <div className="flex min-w-20 flex-col items-center justify-center rounded-2xl border border-outline-variant/70 bg-surface-container-lowest px-3 py-2 shadow-card">
               <span className="font-display text-headline-md text-primary">{doneCount}</span>
-              <span className="font-body text-label-sm text-outline">Completed</span>
+              <span className="font-body text-label-sm text-outline">Completed loaded</span>
             </div>
           </div>
           <div className="flex items-center justify-between rounded-xl bg-surface-container-lowest p-4 shadow-card">
             <div>
-              <span className="font-body text-label-sm uppercase tracking-wider text-outline">Selected Day Total</span>
+              <span className="font-body text-label-sm uppercase tracking-wider text-outline">Loaded ticket total</span>
               <p className="mt-0.5 font-display text-currency-display-mobile text-primary">{formatTnd(doneTotal)} <small className="font-body text-label-md">DT</small></p>
             </div>
             <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-fixed/40 text-primary"><MaterialIcon name="coffee" className="text-2xl" /></span>
@@ -290,6 +384,32 @@ export function OrdersScreen() {
               </Chip>
             ))}
           </div>
+          <label className="flex min-h-12 items-center gap-3 rounded-xl border border-outline-variant/70 bg-surface-container-lowest px-3 shadow-card">
+            <MaterialIcon name="search" className="text-xl text-outline" />
+            <input
+              type="search"
+              aria-label="Search tickets"
+              placeholder="Search tickets, items, staff, notes, or location"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="min-w-0 flex-1 bg-transparent font-body text-body-md text-on-surface outline-none placeholder:text-outline"
+            />
+          </label>
+          {availableTags.length > 0 && (
+            <div className="scrollbar-hidden -mx-4 flex gap-2 overflow-x-auto px-4 py-1" aria-label="Filter tickets by tag">
+              <Chip selected={!tagFilter} onClick={() => setTagFilter('')} className="shrink-0 px-3">All tags</Chip>
+              {availableTags.map((tag) => (
+                <Chip key={tag.id} selected={tagFilter === tag.id} onClick={() => setTagFilter(tag.id)} className="shrink-0 px-3">
+                  {tag.label}
+                </Chip>
+              ))}
+            </div>
+          )}
+          {hasMoreOrders && (
+            <p className="font-body text-body-xs text-on-surface-variant">
+              Search and tag filters include loaded tickets only. Load older tickets to search the rest.
+            </p>
+          )}
         </section>
 
         <section className="flex flex-col gap-3 px-4 pb-8 pt-2">
@@ -302,7 +422,9 @@ export function OrdersScreen() {
           </div>
           {loadError && <p role="alert" className="rounded-xl bg-error-container p-3 font-body text-body-sm text-on-error-container">{loadError}</p>}
           {loading ? <ListSkeleton label="Loading orders" /> : visibleOrders.length === 0 ? (
-            <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">{t('orders.emptyFilter')}</p>
+            <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">
+              {search.trim() || tagFilter ? 'No tickets match the current search and tag filters.' : t('orders.emptyFilter')}
+            </p>
           ) : <DataTable<OrderView>
             rows={visibleOrders}
             getRowKey={(order) => order.id}
@@ -313,6 +435,7 @@ export function OrdersScreen() {
               { key: 'staff', label: 'Staff', sortValue: (order) => order.staff, render: (order) => order.staff },
               { key: 'items', label: 'Items', sortValue: (order) => order.items.reduce((sum, item) => sum + item.quantity, 0), render: (order) => `${order.items.reduce((sum, item) => sum + item.quantity, 0)} · ${order.items.map((item) => item.name).join(', ')}` },
               { key: 'payment', label: 'Payment', render: (order) => order.record.paymentMethod },
+              { key: 'tags', label: 'Tags', render: (order) => getOrderTags(order.record).map((tag) => tag.label).join(', ') || '—' },
               { key: 'total', label: 'Total', sortValue: (order) => order.total, render: (order) => `${formatTnd(order.status === 'voided' ? 0 : order.total)} DT` },
               { key: 'status', label: 'Status', render: (order) => statusLabel(order.status) },
               { key: 'actions', label: 'Actions', render: (order) => (
@@ -338,6 +461,27 @@ export function OrdersScreen() {
                 </div>
                 <StatusTag status={statusType(order.status)}>{statusLabel(order.status)}</StatusTag>
               </div>
+
+              {getOrderTags(order.record).length > 0 && (
+                <div className="flex flex-wrap gap-1.5" aria-label="Ticket tags">
+                  {getOrderTags(order.record).map((tag) => (
+                    <span
+                      key={tag.id}
+                      className={`rounded-full px-2.5 py-1 font-body text-label-sm ${
+                        tag.kind === 'attention'
+                          ? 'bg-warning-container text-on-warning-container'
+                          : tag.kind === 'location'
+                            ? 'bg-tertiary-container text-on-tertiary-container'
+                            : tag.kind === 'note'
+                              ? 'bg-secondary-container text-on-secondary-container'
+                              : 'bg-surface-container-high text-on-surface-variant'
+                      }`}
+                    >
+                      {tag.label}
+                    </span>
+                  ))}
+                </div>
+              )}
 
               <div className={`flex flex-col gap-1 rounded-lg p-3 ${order.status === 'voided' ? 'bg-surface-container-low/50 text-outline' : 'bg-surface-container-low'}`}>
                 {order.items.map((item, index) => (
@@ -370,7 +514,7 @@ export function OrdersScreen() {
                 {order.status !== 'pending' && (
                   <div className="flex items-center gap-2">
                     <Button variant="secondary" className="min-h-10 px-3 text-label-md" onClick={() => setTicketOrder(order)}><MaterialIcon name="receipt" className="text-lg" />{t('orders.ticket')}</Button>
-                    {order.status === 'done' && order.staffId === user?.id && <Button variant="danger" className="min-h-10 px-3 text-label-md" onClick={() => openVoidSheet(order)}><MaterialIcon name="cancel" className="text-lg" />{t('orders.void')}</Button>}
+                    {order.status === 'done' && (user?.role === 'owner' || order.staffId === user?.id) && <Button variant="danger" className="min-h-10 px-3 text-label-md" onClick={() => openVoidSheet(order)}><MaterialIcon name="cancel" className="text-lg" />{t('orders.void')}</Button>}
                   </div>
                 )}
                 {order.status === 'pending' && (
@@ -384,6 +528,11 @@ export function OrdersScreen() {
             )}
             empty={<p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">{t('orders.emptyFilter')}</p>}
           />}
+          {hasMoreOrders && (
+            <Button variant="secondary" className="w-full" disabled={loadingMore} onClick={() => void loadMoreOrders()}>
+              {loadingMore ? 'Loading older tickets…' : 'Load older tickets'}
+            </Button>
+          )}
         </section>
       </main>
 
@@ -392,14 +541,33 @@ export function OrdersScreen() {
         {activeOrder && (
           <div className="flex flex-col gap-4">
             <p className="text-center font-body text-body-sm text-outline">{t('orders.totalAuthorization', { total: formatTnd(activeOrder.total) })}</p>
+            <section className="flex flex-col gap-3 rounded-xl bg-surface-container-low p-3">
+              <div>
+                <p className="font-body text-label-md text-on-surface">Direct void — Administrator PIN</p>
+                <p className="font-body text-body-sm text-outline">Enter the PIN first or enter a reason before the PIN.</p>
+              </div>
+              <div className="flex justify-center gap-3" aria-label={t('orders.pinDigitsEntered', { count: pin.length })}>
+                {[0, 1, 2, 3].map((index) => <span key={index} className={`h-4 w-4 rounded-full ${index < pin.length ? 'bg-primary' : 'bg-surface-container-highest'}`} />)}
+              </div>
+              <p role={verifiedPinForOrderId === activeOrder.id ? 'status' : 'alert'} className={`min-h-4 text-center font-body text-label-sm ${verifiedPinForOrderId === activeOrder.id ? 'text-success-dark' : 'text-error-dark'}`}>
+                {pinLockedSeconds > 0 ? `PIN pad locked for ${pinLockedSeconds} seconds.` : feedback}
+              </p>
+              <Keypad
+                disabled={pinLockedSeconds > 0 || voidBusy}
+                onPress={pressPin}
+                onClear={() => { setPin(''); setVerifiedPinForOrderId(null); setFeedback(''); }}
+                onBackspace={() => { setPin((value) => value.slice(0, -1)); setVerifiedPinForOrderId(null); setFeedback(''); }}
+              />
+            </section>
             <label className="font-body text-label-md">Void reason
-              <textarea required value={voidReason} onChange={(event) => setVoidReason(event.target.value)} className="mt-1 min-h-20 w-full rounded-lg bg-surface-container-low p-3 outline-none focus:ring-2 focus:ring-primary" />
+              <textarea required maxLength={500} value={voidReason} onChange={(event) => setVoidReason(event.target.value)} className="mt-1 min-h-20 w-full rounded-lg bg-surface-container-low p-3 outline-none focus:ring-2 focus:ring-primary" />
             </label>
-            <div className="flex justify-center gap-3" aria-label={t('orders.pinDigitsEntered', { count: pin.length })}>
-              {[0, 1, 2, 3].map((index) => <span key={index} className={`h-4 w-4 rounded-full ${index < pin.length ? 'bg-primary' : 'bg-surface-container-highest'}`} />)}
-            </div>
-            <p role="alert" className="min-h-4 text-center font-body text-label-sm text-error-dark">{pinLockedSeconds > 0 ? `PIN pad locked for ${pinLockedSeconds} seconds.` : feedback}</p>
-            <Keypad disabled={pinLockedSeconds > 0} onPress={pressPin} onClear={() => { setPin(''); setFeedback(''); }} onBackspace={() => { setPin((value) => value.slice(0, -1)); setFeedback(''); }} />
+            {verifiedPinForOrderId === activeOrder.id && pin.length === 4 && (
+              <Button className="w-full" disabled={!voidReason.trim() || voidBusy} onClick={() => void submitDirectVoid(pin)}>
+                <MaterialIcon name="verified_user" className="text-lg" />
+                {voidBusy ? 'Processing…' : 'Confirm Direct Void'}
+              </Button>
+            )}
             <div className="flex flex-col gap-2 rounded-xl bg-surface-container-low p-3">
               <div className="flex items-center gap-2">
                 <MaterialIcon name="wifi_tethering" className="text-xl text-secondary" />
@@ -408,7 +576,7 @@ export function OrdersScreen() {
                   <p className="font-body text-body-sm text-outline">{t('orders.sendApproval')}</p>
                 </div>
               </div>
-              {canRequestVoid && <Button className="w-full" disabled={!voidReason.trim()} onClick={requestVoid}><MaterialIcon name="send_to_mobile" className="text-lg" />{t('orders.requestVoid')}</Button>}
+              {canRequestVoid && <Button className="w-full" disabled={!voidReason.trim() || voidBusy} onClick={requestVoid}><MaterialIcon name="send_to_mobile" className="text-lg" />Request Void — Owner Approval</Button>}
             </div>
           </div>
         )}

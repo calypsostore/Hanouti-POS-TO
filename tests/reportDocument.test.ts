@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildReportDocument, formatReceiptRow } from '../src/services/reportDocument';
-import { buildTicketDocument } from '../src/services/ticketDocument';
+import { buildKitchenTicketDocument, buildTicketDocument } from '../src/services/ticketDocument';
 import { resolveStoreSettings, type OrderRecord, type ReportRecord } from '../src/types/domain';
 
 function makeReport(type: 'X' | 'Z'): ReportRecord {
@@ -117,6 +117,71 @@ describe('report document', () => {
     expect(text).toContain('0.800 DT paid');
     expect(text).toContain('Closed by force');
     expect(text).toContain('BALANCED');
+  });
+
+  it('includes employee payment, drawer, and post-close void details in a Z report', () => {
+    const report = makeReport('Z');
+    report.employeeBreakdown = [{
+      staffId: 'staff-1',
+      name: 'Cashier',
+      orderCount: 2,
+      salesMillimes: 3000,
+    }];
+    report.shifts = [{
+      shiftId: 'shift-1',
+      staffId: 'staff-1',
+      staffName: 'Cashier',
+      orderCount: 2,
+      status: 'closed',
+      openedAt: '2026-11-20T07:00:00.000Z',
+      closedAt: '2026-11-20T15:00:00.000Z',
+      startingCashMillimes: 1000,
+      cashSalesMillimes: 1000,
+      cardSalesMillimes: 1500,
+      otherSalesMillimes: 250,
+      tabSalesMillimes: 250,
+      cashInMillimes: 500,
+      cashOutMillimes: 100,
+      expectedCashMillimes: 2400,
+      countedCashMillimes: 2300,
+      differenceMillimes: -100,
+      forceClosedByOwner: false,
+    }];
+    report.voidAdjustments = [
+      { shiftId: 'shift-1', staffName: 'Cashier', orderNumber: 8, kind: 'requested', amountMillimes: -1000, createdAt: '2026-11-20T12:00:00.000Z' },
+      { shiftId: 'shift-1', staffName: 'Cashier', orderNumber: 8, kind: 'approved', amountMillimes: -1000, createdAt: '2026-11-20T12:01:00.000Z' },
+      { shiftId: 'shift-1', staffName: 'Cashier', orderNumber: 9, kind: 'rejected', amountMillimes: 500, createdAt: '2026-11-20T13:00:00.000Z' },
+    ];
+    report.voids = {
+      count: 1,
+      totalMillimes: 500,
+      orders: [{
+        ticketNumber: 9,
+        reason: 'Wrong item',
+        totalMillimes: 500,
+        staffId: 'staff-1',
+        staffName: 'Cashier',
+        shiftId: 'shift-1',
+      }],
+    };
+
+    const document = buildReportDocument(report, { name: 'Test Store' });
+    const employee = document.sections.find((section) => section.title === 'BY EMPLOYEE');
+    const shifts = document.sections.find((section) => section.title === 'BY SHIFT / PERSON');
+    expect(employee?.lines).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Cashier · 2 orders', value: '3.000 DT' }),
+      expect.objectContaining({ label: 'Voided orders / total', value: '1 / 0.500 DT' }),
+      expect.objectContaining({ label: 'Cash / card / other / tab sales', value: '1.000 DT / 1.500 DT / 0.250 DT / 0.250 DT' }),
+      expect.objectContaining({ label: 'Expected / counted cash', value: '2.400 DT / 2.300 DT' }),
+      expect.objectContaining({ label: 'Post-close cash adjustment records (request / approval / rejection)', value: '1 / 1 / 1' }),
+    ]));
+    expect(shifts?.lines).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Starting cash', value: '1.000 DT' }),
+      expect.objectContaining({ label: 'Card sales', value: '1.500 DT', emphasized: true }),
+      expect.objectContaining({ label: 'Expected / counted cash', value: '2.400 DT / 2.300 DT' }),
+    ]));
+    expect(document.sections.find((section) => section.title === 'SALES')?.lines)
+      .toContainEqual(expect.objectContaining({ label: 'Card', value: '1.000 DT', emphasized: true }));
   });
 
   it('builds the required sections and reconciles category totals', () => {
@@ -354,5 +419,52 @@ describe('report document', () => {
     expect(settings.ticketHeaderText).toHaveLength(2);
     expect(settings.ticketHeaderText[0]).toHaveLength(60);
     expect(settings.paperWidth).toBe(58);
+  });
+
+  it('builds a kitchen copy with order details but no prices or payment data', () => {
+    const order: OrderRecord = {
+      id: 'order-1',
+      number: 7,
+      storeId: 'store-1',
+      staffId: 'staff-1',
+      staffName: 'Cashier',
+      shiftId: 'shift-1',
+      location: 'Table 5',
+      status: 'done',
+      paymentMethod: 'cash',
+      note: 'No onions',
+      items: [{
+        itemId: 'sandwich',
+        name: 'Sandwich',
+        quantity: 2,
+        unitPriceMillimes: 3500,
+        lineTotalMillimes: 7000,
+        modifiers: ['Extra cheese'],
+      }],
+      totalMillimes: 7000,
+      createdAt: '2026-11-20T20:00:00.000Z',
+    };
+    const document = buildKitchenTicketDocument(order, { name: 'Test Store' }, 'Cashier', {
+      showDateTime: false,
+    });
+    const text = document.lines.map((line) => line.text).join('\n');
+
+    expect(text).toContain('KITCHEN COPY #7');
+    expect(text).toContain('2 x Sandwich');
+    expect(text).toContain('Extra cheese');
+    expect(text).toContain('Location: Table 5');
+    expect(text).toContain('NOTE: No onions');
+    expect(text).not.toContain('7.000 DT');
+    expect(text).not.toContain('CASH');
+
+    const voidedCopy = buildKitchenTicketDocument({
+      ...order,
+      status: 'voided',
+      voidReason: 'Duplicate order',
+    }, { name: 'Test Store' }, 'Cashier', { showDateTime: false });
+    const voidedText = voidedCopy.lines.map((line) => line.text).join('\n');
+    expect(voidedText).toContain('VOIDED - DO NOT PREPARE');
+    expect(voidedText).toContain('Duplicate order');
+    expect(voidedText).not.toContain('Sandwich');
   });
 });

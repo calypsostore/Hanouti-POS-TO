@@ -61,6 +61,20 @@ export async function listProfiles(storeId?: string): Promise<UserSummary[]> {
   return (data ?? []).map((row) => profileFromRow(row as ProfileRow));
 }
 
+export async function listProfileNames(
+  storeId: string,
+  userIds: string[],
+): Promise<Array<{ id: string; name: string }>> {
+  if (!storeId || userIds.length === 0) return [];
+  const { data, error } = await getSupabaseClient()
+    .from('profiles')
+    .select('id, name')
+    .eq('store_id', storeId)
+    .in('id', [...new Set(userIds)]);
+  if (error) throw new Error(`Could not load order staff names: ${error.message}`, { cause: error });
+  return data ?? [];
+}
+
 export async function getPermissionOverrides(userId: string): Promise<PermissionOverrides | undefined> {
   const { data, error } = await getSupabaseClient()
     .from('permission_overrides')

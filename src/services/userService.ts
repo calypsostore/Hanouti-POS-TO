@@ -9,7 +9,7 @@ import { getSupabaseClient } from '../data/supabaseClient';
 import { isSupabaseDriver } from '../data/driver';
 import { fetchCachedQuery, invalidateQueryCache } from '../lib/queryCache';
 import { createOwnerAccount, createStaff, resetPassword } from '../data/repositories/accountRepository';
-import { getPermissionOverrides, getProfile, listProfiles } from '../data/repositories/profileRepository';
+import { getPermissionOverrides, getProfile, listProfileNames, listProfiles } from '../data/repositories/profileRepository';
 import { getStore as getRemoteStore, getSuperAdminStoreOverview, listStores as listRemoteStores } from '../data/repositories/storeRepository';
 import { formatStaffUsername, generateStoreCode, migrateLegacyDemoStoreIdentity } from './accountIdentity';
 import { isProfileAvatarId } from '../data/profileAvatars';
@@ -204,6 +204,17 @@ export const userService = {
         : user));
     }
     return getUsers().filter((user) => !storeId || user.storeId === storeId).map(withoutPassword);
+  },
+
+  async listStaffNames(storeId: string, staffIds: string[]): Promise<Map<string, string>> {
+    if (isSupabaseDriver()) {
+      const profiles = await listProfileNames(storeId, staffIds);
+      return new Map(profiles.map((profile) => [profile.id, profile.name]));
+    }
+    const requestedIds = new Set(staffIds);
+    return new Map(getUsers()
+      .filter((user) => user.storeId === storeId && requestedIds.has(user.id))
+      .map((user) => [user.id, user.name]));
   },
 
   async getUser(userId: string): Promise<UserSummary | undefined> {

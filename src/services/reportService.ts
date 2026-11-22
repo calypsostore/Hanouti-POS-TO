@@ -219,6 +219,7 @@ async function summarizeLocal(
     for (const order of shiftOrders) shiftPaymentSplit[order.paymentMethod] += order.totalMillimes;
     return {
       shiftId: shift.id,
+      staffId: shift.staffId,
       staffName,
       orderCount: shiftOrders.length,
       status: inProgress ? 'in_progress' : 'closed',
@@ -509,6 +510,10 @@ async function summarizeLocal(
         ticketNumber: order.number,
         reason: order.voidReason ?? '',
         totalMillimes: order.totalMillimes,
+        staffId: order.staffId,
+        staffName: order.staffName ?? staffById.get(order.staffId)?.name ?? 'Staff',
+        shiftId: order.shiftId,
+        voidedAt: order.voidedAt,
         autoApprovedAtForcedClose: order.voidReason === 'Auto-approved at forced close',
         approvedBy: order.voidedByUserId
           ? staffById.get(order.voidedByUserId)?.name ?? 'Unknown'
@@ -635,12 +640,19 @@ async function summarizeRemote(
       throw new Error(`Dashboard summary is missing a valid ${key}.`);
     }
   }
+  const shiftsInPeriod = shifts.filter((shift) => {
+    const opened = new Date(shift.openedAt).getTime();
+    return opened >= from && opened <= to;
+  });
+  const staffIdByShiftId = new Map(shiftsInPeriod.map((shift) => [shift.id, shift.staffId]));
+  const shiftLines = (summary.shiftLines as ReportShiftLine[]).map((line) => ({
+    ...line,
+    staffId: staffIdByShiftId.get(line.shiftId),
+  }));
   return {
     ...summary,
-    shifts: shifts.filter((shift) => {
-      const opened = new Date(shift.openedAt).getTime();
-      return opened >= from && opened <= to;
-    }),
+    shiftLines,
+    shifts: shiftsInPeriod,
   } as unknown as ReportSummary;
 }
 
@@ -1108,6 +1120,7 @@ export const reportService = {
       const dateParts = datePartsInTimezone(now, timeZone);
       const shiftLine: ReportShiftLine = {
         shiftId: shift.id,
+        staffId: shift.staffId,
         staffName,
         orderCount: getNumber('orderCount'),
         status: 'in_progress',
@@ -1185,6 +1198,7 @@ export const reportService = {
     const staffName = users.find((user) => user.id === staffId)?.name ?? generatedBy;
     const shiftLine: ReportShiftLine = {
       shiftId: shift.id,
+      staffId: shift.staffId,
       staffName,
       orderCount: completed.length,
       status: 'in_progress',

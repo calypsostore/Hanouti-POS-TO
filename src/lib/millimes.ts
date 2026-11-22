@@ -2,7 +2,7 @@ export function parseNonNegativeMillimes(value: string): number | undefined {
   const trimmed = value.trim();
   if (!trimmed) return undefined;
   const commaOnly = trimmed.includes(',') && !trimmed.includes('.');
-  let normalized = commaOnly ? trimmed.replace(/,/g, '.') : trimmed.replace(/,/g, '');
+  const normalized = commaOnly ? trimmed.replace(/,/g, '.') : trimmed.replace(/,/g, '');
   if (!/^(?:\d+)(?:\.\d{0,3})?$/.test(normalized)) return undefined;
 
   const [dinarsText, decimalsText = ''] = normalized.split('.');

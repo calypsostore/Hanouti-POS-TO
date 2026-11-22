@@ -56,3 +56,44 @@ export function buildTicketDocument(
     lines,
   };
 }
+
+export function buildKitchenTicketDocument(
+  order: OrderRecord,
+  store: { name: string },
+  staffName: string,
+  settings?: Partial<StoreSettings>,
+): ThermalReceiptDocument {
+  const resolved = resolveStoreSettings(settings);
+  const width = resolved.paperWidth;
+  const ticketNumber = order.syncStatus ? `LOCAL-${Math.abs(order.number)}` : String(order.number);
+  const lines: ReceiptLine[] = [
+    { text: store.name, align: 'center', bold: true, size: 'double' },
+    ...resolved.ticketHeaderText.map((text) => ({ text, align: 'center' as const })),
+    { text: '-'.repeat(widthChars(width)), kind: 'divider' },
+    { text: `KITCHEN COPY #${ticketNumber}`, align: 'center', bold: true, size: 'double' },
+    ...(resolved.showDateTime ? [{ text: new Date(order.createdAt).toLocaleString() }] : []),
+    ...(resolved.showStaffName ? [{ text: `Staff: ${order.staffName ?? staffName}` }] : []),
+    ...(order.location ? [{ text: `Location: ${order.location}`, bold: true }] : []),
+    ...(order.syncStatus === 'queued' ? [{ text: 'QUEUED - awaiting sync', bold: true }] : []),
+    ...(order.syncStatus === 'needs_attention' ? [{ text: 'NEEDS ATTENTION - order was not synced', bold: true }] : []),
+    { text: '-'.repeat(widthChars(width)), kind: 'divider' },
+    ...(order.status === 'voided'
+      ? [
+        { text: 'VOIDED - DO NOT PREPARE', align: 'center' as const, bold: true, size: 'double' as const },
+        { text: `Reason: ${order.voidReason ?? 'Not recorded'}` },
+      ]
+      : order.items.flatMap((item) => [
+        { text: `${item.quantity} x ${item.name}`, bold: true, size: 'double' as const },
+        ...item.modifiers.map((modifier) => ({ text: `  + ${modifier}` })),
+      ])),
+    ...(order.status !== 'voided' && order.note?.trim()
+      ? [{ text: '-'.repeat(widthChars(width)), kind: 'divider' as const }, { text: `NOTE: ${order.note}`, bold: true }]
+      : []),
+  ];
+  return {
+    title: `Kitchen Copy #${ticketNumber}`,
+    width,
+    logoSrc: resolved.showLogo ? getLogoSrc(resolved.storeLogoId) : undefined,
+    lines,
+  };
+}

@@ -88,6 +88,7 @@ export type NotificationType =
 
 export interface StoreSettings {
   defaultSettlementTerms: SettlementTerms;
+  blindShiftClosing: boolean;
   notificationPreferences: Partial<Record<NotificationType, boolean>>;
   quickPickMode: QuickPickMode;
   quickPickItemIds: string[];
@@ -137,6 +138,7 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: Record<NotificationType, boolean>
 export function resolveStoreSettings(settings?: Partial<StoreSettings>): StoreSettings {
   return {
     defaultSettlementTerms: settings?.defaultSettlementTerms ?? 'monthly',
+    blindShiftClosing: settings?.blindShiftClosing ?? false,
     notificationPreferences: {
       ...DEFAULT_NOTIFICATION_PREFERENCES,
       ...settings?.notificationPreferences,

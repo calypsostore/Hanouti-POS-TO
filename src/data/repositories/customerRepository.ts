@@ -162,13 +162,16 @@ export async function settleTab(input: {
   customerId: string;
   amountMillimes: number;
   shiftId: string;
+  paymentMethod?: 'cash' | 'card' | 'other';
+  idempotencyKey?: string;
   note?: string;
 }): Promise<TabRecord> {
   const { data, error } = await getSupabaseClient().rpc('settle_customer_tab', {
     p_customer_id: input.customerId,
     p_amount_millimes: input.amountMillimes,
     p_shift_id: input.shiftId,
-    p_payment_method: 'cash',
+    p_payment_method: input.paymentMethod ?? 'cash',
+    p_idempotency_key: input.idempotencyKey ?? null,
     p_note: input.note?.trim() || null,
   });
   if (error) repositoryError(error, 'Could not record tab payment');

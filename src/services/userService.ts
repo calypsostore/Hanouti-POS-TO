@@ -212,6 +212,7 @@ export const userService = {
     ownerId: string,
     changes: {
       defaultSettlementTerms?: StoreSettings['defaultSettlementTerms'];
+      blindShiftClosing?: StoreSettings['blindShiftClosing'];
       notificationPreferences?: Partial<StoreSettings['notificationPreferences']>;
       quickPickMode?: StoreSettings['quickPickMode'];
       quickPickItemIds?: StoreSettings['quickPickItemIds'];

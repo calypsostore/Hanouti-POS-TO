@@ -333,12 +333,15 @@ declare
   v_next_z_order uuid;
   v_pin_void_order uuid;
   v_tab_payment uuid;
+  v_settlement_key uuid;
+  v_settlement_repeat uuid;
   v_post_close_payment uuid;
   v_period_from timestamptz;
   v_expected bigint;
   v_result jsonb;
   v_z_report public.reports%rowtype;
   v_next_z_report public.reports%rowtype;
+  v_closed_shift jsonb;
   v_snapshot jsonb;
   v_next_business_date date;
   v_day_status jsonb;
@@ -587,6 +590,32 @@ begin
     raise exception 'An owner-opened zero-difference shift did not close at zero.';
   end if;
 
+  insert into public.store_settings (store_id, settings)
+  values (flow.store_id, '{"blindShiftClosing":true}'::jsonb)
+  on conflict (store_id) do update
+  set settings = public.store_settings.settings || excluded.settings;
+  perform set_config('request.jwt.claim.sub', flow.staff_id::text, true);
+  perform set_config('request.jwt.claim.role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', flow.staff_id, 'role', 'authenticated', 'session_id', flow.session_id
+  )::text, true);
+  v_closed_shift := public.close_shift(
+    (public.open_shift(0)).id,
+    0,
+    null
+  );
+  if v_closed_shift->'shift'->>'expected_cash_millimes' is not null
+    or v_closed_shift->'shift'->>'difference_millimes' is not null
+    or v_closed_shift->'shift'->>'difference_note' is not null
+    or public.get_shift_summary((v_closed_shift->'shift'->>'id')::uuid) ? 'expectedCashMillimes'
+    or public.get_shift_summary((v_closed_shift->'shift'->>'id')::uuid) ? 'differenceMillimes' then
+    raise exception 'Blind shift closing exposed expected or difference totals to staff.';
+  end if;
+  insert into public.store_settings (store_id, settings)
+  values (flow.store_id, '{"blindShiftClosing":false}'::jsonb)
+  on conflict (store_id) do update
+  set settings = public.store_settings.settings || excluded.settings;
+
   perform set_config('request.jwt.claim.sub', flow.staff_id::text, true);
   perform set_config('request.jwt.claim.role', 'authenticated', true);
   perform set_config('request.jwt.claims', jsonb_build_object(
@@ -634,9 +663,16 @@ begin
   v_order_other := (public.create_order(
     v_z_shift, pg_temp.shift_audit_order_items(report_store.item_id), 'other'
   )->'order'->>'id')::uuid;
+  v_settlement_key := gen_random_uuid();
   v_tab_payment := (public.settle_customer_tab(
-    report_store.customer_id, 500, v_z_shift, 'cash', 'Closed-shift reversal test'
+    report_store.customer_id, 500, v_z_shift, 'cash', 'Closed-shift reversal test', v_settlement_key
   )).id;
+  v_settlement_repeat := (public.settle_customer_tab(
+    report_store.customer_id, 500, v_z_shift, 'cash', 'Closed-shift reversal test', v_settlement_key
+  )).id;
+  if v_settlement_repeat <> v_tab_payment then
+    raise exception 'Repeated customer settlement did not return the original idempotent result.';
+  end if;
   perform public.settle_customer_tab(report_store.customer_id, 100, v_z_shift, 'card', 'Card tab payment');
   perform public.settle_customer_tab(report_store.customer_id, 200, v_z_shift, 'other', 'Other tab payment');
   perform public.request_order_void(v_pin_void_order, 'Void after review');

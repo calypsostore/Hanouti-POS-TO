@@ -304,6 +304,7 @@ export function SettingsScreen() {
   const [staffRuleDrafts, setStaffRuleDrafts] = useState<Record<string, StaffRuleDraft>>({});
   const [savingCreditPolicy, setSavingCreditPolicy] = useState(false);
   const [savingPaymentSettings, setSavingPaymentSettings] = useState(false);
+  const [savingBlindClosing, setSavingBlindClosing] = useState(false);
   const [savingAutoLock, setSavingAutoLock] = useState(false);
   const [savingCashOutThreshold, setSavingCashOutThreshold] = useState(false);
   const [savingSettlementTerms, setSavingSettlementTerms] = useState(false);
@@ -557,6 +558,21 @@ export function SettingsScreen() {
       setError(settingsError instanceof Error ? settingsError.message : 'Unable to save POS payment methods.');
     } finally {
       setSavingPaymentSettings(false);
+    }
+  }
+
+  async function changeBlindClosing(enabled: boolean) {
+    if (!store || !user || user.role !== 'owner') return;
+    setError('');
+    setNotice('');
+    setSavingBlindClosing(true);
+    try {
+      setStore(await userService.updateStoreSettings(store.id, user.id, { blindShiftClosing: enabled }));
+      setNotice(enabled ? 'Blind shift closing enabled.' : 'Normal shift closing restored.');
+    } catch (settingsError) {
+      setError(settingsError instanceof Error ? settingsError.message : 'Unable to save blind closing.');
+    } finally {
+      setSavingBlindClosing(false);
     }
   }
 
@@ -1051,6 +1067,23 @@ export function SettingsScreen() {
               <label className="flex min-h-12 items-center gap-3 font-body text-label-md text-on-surface">
                 <input type="checkbox" checked={store.allowOtherPayments ?? false} disabled={savingPaymentSettings} onChange={(event) => { void changePaymentMethodSetting('other', event.target.checked); }} className="h-5 w-5 accent-primary" />
                 Show Other at POS
+              </label>
+            </div>
+            <div className="flex flex-col gap-2 rounded-xl bg-surface-container-low p-3">
+              <label className="flex min-h-12 items-start gap-3 font-body text-label-md text-on-surface">
+                <input
+                  type="checkbox"
+                  checked={resolveStoreSettings(store.settings).blindShiftClosing}
+                  disabled={savingBlindClosing}
+                  onChange={(event) => { void changeBlindClosing(event.target.checked); }}
+                  className="mt-0.5 h-5 w-5 accent-primary"
+                />
+                <span>
+                  <strong className="block">Blind shift closing</strong>
+                  <span className="mt-1 block font-body text-body-sm text-on-surface-variant">
+                    Staff enter counted cash without seeing expected totals. Owners still receive the full reconciliation after closing.
+                  </span>
+                </span>
               </label>
             </div>
           </section>

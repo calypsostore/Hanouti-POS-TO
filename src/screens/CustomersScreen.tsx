@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ownerWorkspaceLinks } from '../app/navigation';
 import { CardGrid, PageContainer, PageHeader, SplitView } from '../components/layout';
@@ -25,8 +25,8 @@ import type { CustomerCreditAlert } from '../services/notificationService';
 import { notificationService } from '../services/notificationService';
 import { PERMISSIONS_CHANGED_EVENT, userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
-import type { CustomerRecord } from '../types/domain';
-import type { CustomerCreditStatus, CustomerDueInfo, CustomerLedgerEntry, CustomerStatementData } from '../services/customerService';
+import type { CustomerRecord, PaymentMethod } from '../types/domain';
+import type { CustomerBalanceReconciliation, CustomerCreditStatus, CustomerDueInfo, CustomerLedgerEntry, CustomerStatementData } from '../services/customerService';
 import type { NotificationRecord, OrderRecord, StoreRecord, TabRecord } from '../types/domain';
 
 type CustomerFilter = 'all' | 'owes' | 'near' | 'over' | 'overdue' | 'settled';
@@ -130,6 +130,10 @@ export function CustomersScreen() {
   const [clearCreditLimit, setClearCreditLimit] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentNote, setPaymentNote] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<Exclude<PaymentMethod, 'tab'>>('cash');
+  const paymentSubmissionRef = useRef(false);
+  const paymentIdempotencyKeyRef = useRef<string | undefined>(undefined);
+  const [paymentReconciliation, setPaymentReconciliation] = useState<CustomerBalanceReconciliation>();
   const [paymentShiftOpen, setPaymentShiftOpen] = useState<boolean | null>(null);
   const [paymentToast, setPaymentToast] = useState('');
   const [paymentReceipt, setPaymentReceipt] = useState<{
@@ -144,6 +148,7 @@ export function CustomersScreen() {
   const [reversePin, setReversePin] = useState('');
   const [reverseReason, setReverseReason] = useState('');
   const [reverseError, setReverseError] = useState('');
+  const reverseSubmissionRef = useRef(false);
   const [statementMode, setStatementMode] = useState<'view' | 'share' | null>(null);
   const [overdueStatement, setOverdueStatement] = useState<CustomerStatementData | null>(null);
   const [overdueAction, setOverdueAction] = useState<{ customerId: string; action: 'statement' | 'share' } | null>(null);
@@ -185,12 +190,13 @@ export function CustomersScreen() {
     if (customerId) {
       const customer = await customerService.getCustomer(customerId, storeId);
       if (customer) {
-        const [status, due, nextLedger, nextOrders, nextTransactions] = await Promise.all([
+        const [status, due, nextLedger, nextOrders, nextTransactions, reconciliation] = await Promise.all([
           customerService.getCreditStatus(customer.id),
           customerService.getDueInfo(customer),
           customerService.listLedger(customer.id),
           customerService.getOrderHistory(customer.id),
           customerService.listTransactions(customer.id),
+          customerService.getBalanceReconciliation(customer.id),
         ]);
         setSelected(customer);
         setCreditStatuses((current) => ({ ...current, [customer.id]: status }));
@@ -198,6 +204,7 @@ export function CustomersScreen() {
         setLedger(nextLedger);
         setOrders(nextOrders);
         setTransactions(nextTransactions);
+        setPaymentReconciliation(reconciliation);
         setLoadedCustomerId(customerId);
       } else {
         setSelected(null);
@@ -443,6 +450,9 @@ export function CustomersScreen() {
   async function settle(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selected || !user) return;
+    if (paymentSubmissionRef.current) return;
+    paymentSubmissionRef.current = true;
+    paymentIdempotencyKeyRef.current ??= crypto.randomUUID();
     setError('');
     setNotice('');
     try {
@@ -452,27 +462,34 @@ export function CustomersScreen() {
         customerId: selected.id,
         staffId: user.id,
         amountMillimes: parseMillimes(paymentAmount, true) ?? 0,
+        paymentMethod,
+        idempotencyKey: paymentIdempotencyKeyRef.current,
         note: paymentNote,
       });
       setPaymentAmount('');
       setPaymentNote('');
       setPaymentOpen(false);
+      let balanceAfter = balanceBefore - record.amountMillimes;
+      try {
+        await refresh();
+        balanceAfter = await customerService.getBalance(selected.id);
+      } catch (refreshError) {
+        setError(`Payment recorded, but the final server balance could not be refreshed: ${refreshError instanceof Error ? refreshError.message : 'Please reload the page.'}`);
+      }
       setPaymentReceipt({
         amountMillimes: record.amountMillimes,
         balanceBefore,
-        balanceAfter: balanceBefore - record.amountMillimes,
+        balanceAfter,
         note: record.note,
         occurredAt: record.createdAt,
       });
       setPaymentToast('Payment recorded.');
-      try {
-        await refresh();
-      } catch (refreshError) {
-        setError(`Payment recorded, but customer details could not be refreshed: ${refreshError instanceof Error ? refreshError.message : 'Please reload the page.'}`);
-      }
+      paymentIdempotencyKeyRef.current = undefined;
     } catch (paymentError) {
       setError(paymentError instanceof Error ? paymentError.message : 'Unable to record this payment.');
       if (paymentError instanceof Error && paymentError.message.includes('Open your shift')) setPaymentShiftOpen(false);
+    } finally {
+      paymentSubmissionRef.current = false;
     }
   }
 
@@ -486,6 +503,8 @@ export function CustomersScreen() {
   async function reversePayment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selected || !user || !reverseTarget) return;
+    if (reverseSubmissionRef.current) return;
+    reverseSubmissionRef.current = true;
     setReverseError('');
     try {
       await customerService.reversePayment({
@@ -507,6 +526,8 @@ export function CustomersScreen() {
       }
     } catch (reverseErrorValue) {
       setReverseError(reverseErrorValue instanceof Error ? reverseErrorValue.message : 'Unable to reverse this payment.');
+    } finally {
+      reverseSubmissionRef.current = false;
     }
   }
 
@@ -808,6 +829,16 @@ export function CustomersScreen() {
             <p className="font-body text-label-sm text-primary">{selected?.name} · Current balance</p>
             <p className="mt-1 font-display text-headline-lg text-on-surface">{balanceMoney(paymentBalance)}</p>
           </section>
+          {paymentReconciliation && paymentReconciliation.unresolvedReversalMillimes > 0 && (
+            <section className="rounded-xl bg-warning-container p-4 text-on-warning-container" role="status">
+              <p className="font-body text-label-md">
+                {paymentReconciliation.unresolvedReversals.length} ambiguous reversal(s) excluded from the verified balance
+              </p>
+              <p className="mt-1 font-body text-body-sm">
+                Unresolved amount: {money(paymentReconciliation.unresolvedReversalMillimes)}
+              </p>
+            </section>
+          )}
           {paymentShiftOpen === false && (
             <section className="rounded-xl bg-warning-container p-4" role="status">
               <p className="font-body text-label-md text-on-warning-container">Open your shift before accepting a customer payment.</p>
@@ -849,6 +880,23 @@ export function CustomersScreen() {
                 The extra {money(paymentAmountMillimes - paymentBalance)} will remain as customer credit.
               </p>
             )}
+            <div>
+              <p className="mb-2 font-body text-label-md text-on-surface">Payment method</p>
+              <div className="flex flex-wrap gap-2">
+                {(['cash', 'card', 'other'] as Exclude<PaymentMethod, 'tab'>[])
+                  .filter((method) => method === 'cash' || (method === 'card' ? store?.allowCardPayments : store?.allowOtherPayments))
+                  .map((method) => (
+                    <Button
+                      key={method}
+                      type="button"
+                      variant={paymentMethod === method ? 'primary' : 'secondary'}
+                      onClick={() => setPaymentMethod(method)}
+                    >
+                      {method === 'cash' ? 'Cash' : method === 'card' ? 'Card' : 'Other'}
+                    </Button>
+                  ))}
+              </div>
+            </div>
             <label className="font-body text-label-md text-on-surface">Note (optional)
               <textarea rows={2} value={paymentNote} disabled={paymentShiftOpen !== true} onChange={(event) => setPaymentNote(event.target.value)} className="mt-1.5 w-full rounded-lg bg-surface-container-low p-3" />
             </label>

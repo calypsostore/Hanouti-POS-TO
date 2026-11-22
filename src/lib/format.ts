@@ -1,9 +1,14 @@
-import { formatMillimes } from './millimes';
+import { formatMillimesWithThousands } from './millimes';
 
 export function formatTnd(amountInDinars: number): string {
-  return Number.isFinite(amountInDinars) ? amountInDinars.toFixed(3) : '—';
+  if (!Number.isFinite(amountInDinars)) return '—';
+  return new Intl.NumberFormat('en-US', {
+    useGrouping: true,
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  }).format(amountInDinars);
 }
 
 export function formatTndMillimes(amountMillimes: number): string {
-  return formatMillimes(amountMillimes);
+  return formatMillimesWithThousands(amountMillimes);
 }

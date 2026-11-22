@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { BottomNav } from '../components/BottomNav';
 import { BottomSheet } from '../components/BottomSheet';
 import { DinarInput } from '../components/DinarInput';
@@ -16,7 +16,7 @@ import { CashMovementNotificationError, shiftService } from '../services/shiftSe
 import { compService } from '../services/compService';
 import { userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
-import type { CashMovementReason, CashMovementRecord, ShiftRecord } from '../types/domain';
+import { resolveStoreSettings, type CashMovementReason, type CashMovementRecord, type ShiftRecord } from '../types/domain';
 import { t } from '../i18n/translations';
 import { ownerWorkspaceLinks } from '../app/navigation';
 import { DataTable, PageHeader, type DataTableColumn } from '../components/layout';
@@ -31,6 +31,7 @@ import type { ReportRecord, ReportShiftLine, UnresolvedTabReversalRecord } from 
 import type { OrderRecord } from '../types/domain';
 import { Link } from 'react-router-dom';
 import { parseNonNegativeMillimes } from '../lib/millimes';
+import { createLatestRequestGuard } from '../lib/requestGuard';
 
 type ShiftCloseBreakdown = ShiftSalesBreakdown & {
   pendingVoidCount: number;
@@ -150,10 +151,13 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     hasActivity: false,
     openShiftCount: 0,
   });
+  const refreshGuardRef = useRef(createLatestRequestGuard());
+  const zSubmissionRef = useRef(false);
 
   useEffect(() => updateService.registerUnsavedState(() => startingCashEdited || countedCash.length > 0), [startingCashEdited, countedCash.length]);
 
   const refresh = useCallback(async () => {
+    const generation = refreshGuardRef.current.begin();
     const [nextShifts, nextOpenShift, nextStore, nextMovements, allOrders, users, cashPermission, shiftPermission, xPermission, comps, nextReports, nextDayStatus] = await Promise.all([
       shiftService.listShifts(storeId),
       user ? shiftService.getOpenShiftForUser(storeId, user.id) : Promise.resolve(undefined),
@@ -168,6 +172,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       ownerMode ? reportService.listReports(storeId) : Promise.resolve([]),
       reportService.getDayStatus(storeId),
     ]);
+    if (!refreshGuardRef.current.isLatest(generation)) return;
     setShifts(nextShifts);
     setOwnOpenShift(nextOpenShift);
     setStore(nextStore);
@@ -179,34 +184,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     setCanOpenCloseShift(shiftPermission);
     setCanPrintOwnX(xPermission);
     if (ownerMode) setArchiveReports(nextReports);
-    if (ownerMode) {
-      const latestZ = nextReports
-        .filter((report) => report.type === 'Z')
-        .sort((left, right) =>
-          (right.periodTo ?? right.createdAt).localeCompare(left.periodTo ?? left.createdAt) ||
-          right.id.localeCompare(left.id),
-        )[0];
-      const boundary = latestZ?.periodTo ?? latestZ?.createdAt;
-      const hasActivityAfterZ = latestZ
-        ? nextShifts.some((shift) => new Date(shift.openedAt).getTime() >
-          new Date(boundary!).getTime())
-        : false;
-      setDayStatus(latestZ && !hasActivityAfterZ && allOrders.every((order) => order.status !== 'pending_void')
-        ? {
-          dayIsClosed: true,
-          hasActivity: false,
-          openShiftCount: 0,
-          periodFrom: latestZ.periodFrom,
-          lastZBoundary: boundary,
-          lastZ: {
-            reportNumber: latestZ.reportNumber ?? `Z-${String(latestZ.zNumber ?? 0).padStart(6, '0')}`,
-            createdAt: latestZ.createdAt,
-          },
-        }
-        : nextDayStatus);
-    } else {
-      setDayStatus(nextDayStatus);
-    }
+    setDayStatus(nextDayStatus);
     const breakdowns = await Promise.all(nextShifts.filter((shift) => shift.status === 'open')
       .map(async (shift) => {
         const [sales, pendingVoidCount] = await Promise.all([
@@ -218,6 +196,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           .reduce((sum, comp) => sum + comp.valueMillimes, 0);
         return [shift.id, { ...sales, pendingVoidCount, compsMillimes }] as const;
       }));
+    if (!refreshGuardRef.current.isLatest(generation)) return;
     setBreakdownsByShift(Object.fromEntries(breakdowns));
   }, [storeId, user, ownerMode]);
 
@@ -462,12 +441,13 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
 
   async function closeDayWithZ() {
     if (!user) return;
-    if (zBusy) return;
+    if (zBusy || zSubmissionRef.current) return;
     setError('');
     if (!zReviewed) {
       setZReviewed(true);
       return;
     }
+    zSubmissionRef.current = true;
     setZBusy(true);
     try {
       const latestDayStatus = await reportService.getDayStatus(storeId);
@@ -524,6 +504,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       setError(reportError instanceof Error ? reportError.message : 'Unable to close the business day.');
     } finally {
       setZBusy(false);
+      zSubmissionRef.current = false;
     }
   }
 
@@ -732,6 +713,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           shift={closedShiftSummary.shift}
           breakdown={closedShiftSummary.breakdown}
           onDone={() => setClosedShiftSummary(undefined)}
+          blind={resolveStoreSettings(store?.settings).blindShiftClosing && !ownerMode}
         />
       )}
 
@@ -1045,6 +1027,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           onSubmit={(event) => { void closeShift(event); }}
           submitLabel={t('shift.closeShift')}
           pendingVoidOrders={pendingVoidOrders.filter((order) => order.shiftId === ownOpenShift.id)}
+          blind={resolveStoreSettings(store?.settings).blindShiftClosing && !ownerMode}
         />}
       </BottomSheet>
       <BottomSheet
@@ -1149,6 +1132,7 @@ function ShiftCloseForm({
   onSubmit,
   submitLabel,
   pendingVoidOrders,
+  blind,
 }: {
   shift: ShiftRecord;
   breakdown: ShiftCloseBreakdown;
@@ -1160,6 +1144,7 @@ function ShiftCloseForm({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   submitLabel: string;
   pendingVoidOrders: OrderRecord[];
+  blind: boolean;
 }) {
   const [reviewed, setReviewed] = useState(false);
   const movementTotals = getCashMovementTotals(movements, shift.id);
@@ -1199,7 +1184,7 @@ function ShiftCloseForm({
         <Metric label="Cash out" amount={movementTotals.cashOutMillimes} />
         <Metric label="Comps value" amount={breakdown.compsMillimes} />
         <Metric label="Voids" amount={breakdown.voidsMillimes} />
-        {reviewed && countedCashMillimes !== undefined && <>
+        {!blind && reviewed && countedCashMillimes !== undefined && <>
           <div className="border-t border-outline-variant pt-2">
             <Metric label="Counted cash" amount={countedCashMillimes} />
             <Metric label="Expected cash in drawer" amount={expectedCash} prominent />
@@ -1214,7 +1199,7 @@ function ShiftCloseForm({
         onChange={(event) => onCountChange(event.target.value)}
         className="h-14 rounded-xl bg-surface-container-low px-4 font-body text-title-md tabular-nums outline-none focus:ring-2 focus:ring-primary"
       />
-      {reviewed && difference !== undefined && (
+      {!blind && reviewed && difference !== undefined && (
         <p
           aria-live="polite"
           className={`rounded-lg p-3 text-center font-display text-title-md ${
@@ -1227,7 +1212,7 @@ function ShiftCloseForm({
             : `${difference < 0 ? 'Short' : 'Over'} ${formatTnd(Math.abs(difference) / 1000)} DT`}
         </p>
       )}
-      {reviewed && difference !== undefined && difference !== 0 && (
+      {!blind && reviewed && difference !== undefined && difference !== 0 && (
         <label className="font-body text-label-md text-on-surface">
           Short note (required)
           <textarea
@@ -1253,10 +1238,12 @@ function ClosedShiftSummary({
   shift,
   breakdown,
   onDone,
+  blind,
 }: {
   shift: ShiftRecord;
   breakdown: ShiftCloseBreakdown;
   onDone: () => void;
+  blind: boolean;
 }) {
   const closedAt = shift.closedAt ? new Date(shift.closedAt) : new Date(shift.openedAt);
   const durationMs = Math.max(0, closedAt.getTime() - new Date(shift.openedAt).getTime());
@@ -1275,13 +1262,13 @@ function ClosedShiftSummary({
         <SummaryValue
           label="Cash"
           value={`${formatTnd((shift.countedCashMillimes ?? 0) / 1000)} DT`}
-          detail={`Expected ${formatTnd((shift.expectedCashMillimes ?? 0) / 1000)} DT`}
+          detail={blind ? 'Reconciliation available to the owner' : `Expected ${formatTnd((shift.expectedCashMillimes ?? 0) / 1000)} DT`}
         />
         <SummaryValue label="Tabs" value={`${formatTnd(breakdown.tabSalesMillimes / 1000)} DT`} />
         <SummaryValue
           label="Difference"
-          value={`${difference < 0 ? 'Short ' : difference > 0 ? 'Over ' : ''}${formatTnd(Math.abs(difference) / 1000)} DT`}
-          valueClass={difference === 0 ? 'text-success-dark' : difference < 0 ? 'text-error-dark' : 'text-warning'}
+          value={blind ? 'Hidden' : `${difference < 0 ? 'Short ' : difference > 0 ? 'Over ' : ''}${formatTnd(Math.abs(difference) / 1000)} DT`}
+          valueClass={blind ? 'text-on-surface-variant' : difference === 0 ? 'text-success-dark' : difference < 0 ? 'text-error-dark' : 'text-warning'}
         />
       </div>
       <Button type="button" className="mt-4 w-full" onClick={onDone}>Done</Button>

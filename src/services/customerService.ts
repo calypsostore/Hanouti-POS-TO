@@ -641,7 +641,7 @@ export const customerService = {
     return getTabs().filter((tab) => tab.customerId === customerId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },
 
-  async settleTab(input: { storeId: string; customerId: string; staffId: string; amountMillimes: number; note?: string }): Promise<TabRecord> {
+  async settleTab(input: { storeId: string; customerId: string; staffId: string; amountMillimes: number; paymentMethod?: 'cash' | 'card' | 'other'; idempotencyKey?: string; note?: string }): Promise<TabRecord> {
     requireOnlineForAction('Tab payments');
     if (!Number.isInteger(input.amountMillimes) || input.amountMillimes <= 0) throw new Error('Enter a payment greater than zero.');
     if (isSupabaseDriver()) {
@@ -653,6 +653,8 @@ export const customerService = {
         customerId: customer.id,
         amountMillimes: input.amountMillimes,
         shiftId: shift.id,
+        paymentMethod: input.paymentMethod,
+        idempotencyKey: input.idempotencyKey,
         note: input.note,
       });
     }
@@ -680,7 +682,7 @@ export const customerService = {
       shiftId: shift.id,
       staffId: input.staffId,
       kind: 'settled',
-      paymentMethod: 'cash',
+      paymentMethod: input.paymentMethod ?? 'cash',
       amountMillimes: input.amountMillimes,
       note: input.note?.trim() || undefined,
       createdAt,

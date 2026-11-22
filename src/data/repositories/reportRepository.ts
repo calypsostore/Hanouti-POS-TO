@@ -37,8 +37,8 @@ function mapReport(row: ReportRow): ReportRecord {
     orderCount: row.order_count,
     cashDifferenceMillimes: Number(row.cash_difference_millimes),
     zNumber: row.z_number ?? undefined,
-    periodFrom: row.period_from ?? undefined,
-    periodTo: row.period_to ?? undefined,
+    periodFrom: typeof row.data.periodFrom === 'string' ? row.data.periodFrom : undefined,
+    periodTo: typeof row.data.periodTo === 'string' ? row.data.periodTo : undefined,
     generatedBy: typeof row.data.generatedBy === 'string' ? row.data.generatedBy : row.generated_by ?? undefined,
   };
 }
@@ -52,6 +52,46 @@ function requireSummary(value: unknown, context: string): Record<string, unknown
     throw new Error(`${context} returned an invalid response.`);
   }
   return value as Record<string, unknown>;
+}
+
+export interface BusinessDayStatus {
+  dayIsClosed: boolean;
+  hasActivity: boolean;
+  openShiftCount: number;
+  periodFrom?: string;
+  lastZBoundary?: string;
+  lastZ?: { reportNumber: string; createdAt: string };
+}
+
+export async function getBusinessDayStatus(storeId: string): Promise<BusinessDayStatus> {
+  const { data, error } = await getSupabaseClient().rpc('get_business_day_status', {
+    p_store_id: storeId,
+  });
+  if (error) fail(error, 'Could not load business-day status');
+  const status = requireSummary(data, 'Business-day status');
+  if (typeof status.dayIsClosed !== 'boolean' || typeof status.hasActivity !== 'boolean' ||
+    typeof status.openShiftCount !== 'number') {
+    throw new Error('Business-day status returned an incomplete response.');
+  }
+  const lastZ = status.lastZ;
+  const lastZRow = typeof lastZ === 'object' && lastZ !== null
+    ? lastZ as Record<string, unknown>
+    : undefined;
+  return {
+    dayIsClosed: status.dayIsClosed,
+    hasActivity: status.hasActivity,
+    openShiftCount: status.openShiftCount,
+    periodFrom: typeof status.periodFrom === 'string' ? status.periodFrom : undefined,
+    lastZBoundary: typeof status.lastZBoundary === 'string' ? status.lastZBoundary : undefined,
+    lastZ: lastZRow &&
+      typeof lastZRow.reportNumber === 'string' &&
+      typeof lastZRow.createdAt === 'string'
+      ? {
+        reportNumber: lastZRow.reportNumber,
+        createdAt: lastZRow.createdAt,
+      }
+      : undefined,
+  };
 }
 
 export async function getDashboardSummary(

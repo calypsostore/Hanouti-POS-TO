@@ -261,6 +261,10 @@ describe('local money logic', () => {
       pin: '1234',
       reason: 'Cash refunded after shift close',
     });
+    const tabsAfterReverse = JSON.parse(localStorage.getItem('7anouti-pos:tabs') ?? '[]') as TabRecord[];
+    const reversal = tabsAfterReverse.find((tab) => tab.reversesTabId === 'settled-before-close');
+    if (reversal) reversal.reversalAttribution = 'post_close';
+    setLocalData('tabs', tabsAfterReverse);
 
     const summary = await reportService.getCurrentPeriodSummary(storeId);
     expect(summary.cashRefundsMillimes).toBe(5_000);
@@ -272,6 +276,197 @@ describe('local money logic', () => {
     });
     expect(zReport.cashDifferenceMillimes).toBe(0);
     expect(zReport.cashRefundsMillimes).toBe(5_000);
+  });
+
+  it('does not subtract a same-shift reversal again at Z time', async () => {
+    const shiftId = 'shift-same-shift-reversal';
+    prepareReportData([makeShift(shiftId, 0)]);
+    setLocalData('customers', [makeCustomer()]);
+    setLocalData('tabs', [
+      makeTab('same-shift-settlement', shiftId, 'settled', 500),
+      { ...makeTab('same-shift-reversal', shiftId, 'reversal', 500), reversesTabId: 'same-shift-settlement', reversalAttribution: 'same_shift' },
+    ]);
+
+    await shiftService.closeShift(shiftId, 0);
+
+    const summary = await reportService.getCurrentPeriodSummary(storeId);
+    expect(summary.shiftLines[0]?.includedTabReversalIds ?? []).toContain('same-shift-reversal');
+    expect(summary.cashRefundsMillimes).toBe(0);
+    expect(summary.totalExpectedCashMillimes).toBe(0);
+
+    const zReport = await reportService.closeDayWithZReport(storeId, 'Owner', '1234', {
+      countedCashMillimes: 0,
+    });
+    expect(zReport.cashRefundsMillimes).toBe(0);
+    expect(zReport.totalExpectedCashMillimes).toBe(0);
+  });
+
+  it('returns zero for an open X with a matching settlement and reversal', async () => {
+    const shiftId = 'shift-open-x-reversal';
+    prepareReportData([makeShift(shiftId, 0)]);
+    setLocalData('customers', [makeCustomer()]);
+    setLocalData('tabs', [
+      makeTab('open-cash-settlement', shiftId, 'settled', 500),
+      { ...makeTab('open-cash-reversal', shiftId, 'reversal', 500), reversesTabId: 'open-cash-settlement', reversalAttribution: 'same_shift' },
+      makeTab('open-card-settlement', shiftId, 'settled', 500, 'card'),
+      { ...makeTab('open-card-reversal', shiftId, 'reversal', 500, 'card'), reversesTabId: 'open-card-settlement', reversalAttribution: 'same_shift' },
+      makeTab('open-other-settlement', shiftId, 'settled', 500, 'other'),
+      { ...makeTab('open-other-reversal', shiftId, 'reversal', 500, 'other'), reversesTabId: 'open-other-settlement', reversalAttribution: 'same_shift' },
+    ]);
+
+    const report = await reportService.createXReport(storeId, 'Owner');
+
+    expect(report.totalExpectedCashMillimes).toBe(0);
+    expect(report.shifts?.[0]?.cardTabPaymentsMillimes).toBe(0);
+    expect(report.shifts?.[0]?.otherTabPaymentsMillimes).toBe(0);
+  });
+
+  it('preserves ambiguous cash card and other reversal amounts separately', async () => {
+    const shiftId = 'shift-ambiguous-methods';
+    prepareReportData([makeShift(shiftId, 0)]);
+    setLocalData('customers', [makeCustomer()]);
+    setLocalData('tabs', [
+      makeTab('ambiguous-cash-settlement', shiftId, 'settled', 500),
+      { ...makeTab('ambiguous-cash-reversal', shiftId, 'reversal', 500), reversesTabId: 'ambiguous-cash-settlement' },
+      makeTab('ambiguous-card-settlement', shiftId, 'settled', 1000, 'card'),
+      { ...makeTab('ambiguous-card-reversal', shiftId, 'reversal', 500, 'card'), reversesTabId: 'ambiguous-card-settlement' },
+      makeTab('ambiguous-other-settlement', shiftId, 'settled', 1000, 'other'),
+      { ...makeTab('ambiguous-other-reversal', shiftId, 'reversal', 500, 'other'), reversesTabId: 'ambiguous-other-settlement' },
+    ]);
+
+    const summary = await reportService.getCurrentPeriodSummary(storeId);
+    expect(summary.unresolvedTabReversals).toHaveLength(3);
+    expect(summary.unresolvedTabReversals).toEqual(expect.arrayContaining([
+      expect.objectContaining({ paymentMethod: 'cash', amountMillimes: 500, state: 'ambiguous' }),
+      expect.objectContaining({ paymentMethod: 'card', amountMillimes: 500, state: 'ambiguous' }),
+      expect.objectContaining({ paymentMethod: 'other', amountMillimes: 500, state: 'ambiguous' }),
+    ]));
+  });
+
+  it('blocks Z generation while ambiguous reversals remain unresolved', async () => {
+    const shiftId = 'shift-z-ambiguous';
+    prepareReportData([makeClosedShift(shiftId, 0)]);
+    setLocalData('customers', [makeCustomer()]);
+    setLocalData('tabs', [
+      makeTab('z-cash-settlement', shiftId, 'settled', 500),
+      {
+        ...makeTab('z-cash-reversal', shiftId, 'reversal', 500),
+        reversesTabId: 'z-cash-settlement',
+      },
+    ]);
+
+    await expect(reportService.closeDayWithZReport(storeId, 'Owner', '1234', {
+      countedCashMillimes: 0,
+    })).rejects.toThrow('Resolve every ambiguous tab reversal');
+  });
+
+  it('supports multiple settlements and full equal reversals without partial reversal entry', async () => {
+    const shiftId = 'shift-multiple-settlements';
+    prepareReportData([makeShift(shiftId, 0)]);
+    setLocalData('customers', [makeCustomer()]);
+    setLocalData('tabs', [
+      makeTab('settlement-one', shiftId, 'settled', 300),
+      makeTab('settlement-two', shiftId, 'settled', 700),
+    ]);
+
+    await customerService.reversePayment({
+      storeId,
+      customerId: 'customer-test',
+      paymentId: 'settlement-one',
+      ownerId,
+      pin: '1234',
+      reason: 'Full reversal of 300 millimes',
+    });
+
+    const tabs = JSON.parse(localStorage.getItem('7anouti-pos:tabs') ?? '[]') as TabRecord[];
+    expect(tabs.filter((tab) => tab.kind === 'reversal')).toHaveLength(1);
+    expect(tabs.find((tab) => tab.reversesTabId === 'settlement-one')?.amountMillimes).toBe(300);
+    expect(tabs.find((tab) => tab.reversesTabId === 'settlement-two')).toBeUndefined();
+  });
+
+  it('does not infer an ambiguous historical reversal inclusion', async () => {
+    const shiftId = 'shift-ambiguous-reversal';
+    const closedShift = {
+      ...makeClosedShift(shiftId, 0),
+      openedAt: '2026-11-22T10:00:00.000Z',
+      closedAt: '2026-11-22T11:00:00.000Z',
+      expectedCashMillimes: 500,
+      countedCashMillimes: 500,
+    };
+    prepareReportData([closedShift]);
+    setLocalData('customers', [makeCustomer()]);
+    setLocalData('tabs', [
+      { ...makeTab('historical-settlement', shiftId, 'settled', 500), createdAt: '2026-11-22T10:30:00.000Z' },
+      {
+        ...makeTab('historical-reversal', shiftId, 'reversal', 500),
+        reversesTabId: 'historical-settlement',
+        createdAt: '2026-11-22T10:45:00.000Z',
+      },
+    ]);
+
+    const summary = await reportService.getCurrentPeriodSummary(storeId);
+    expect(summary.ambiguousTabReversalIds).toContain('historical-reversal');
+    expect(summary.unresolvedTabReversals).toEqual([
+      expect.objectContaining({
+        reversalId: 'historical-reversal',
+        originalSettlementId: 'historical-settlement',
+        paymentMethod: 'cash',
+        amountMillimes: 500,
+        state: 'ambiguous',
+      }),
+    ]);
+    expect(summary.cashRefundsMillimes).toBe(0);
+  });
+
+  it('separates unresolved reversal amounts from the customer verified balance', async () => {
+    prepareReportData([makeShift('shift-customer-reconciliation', 0)]);
+    setLocalData('customers', [makeCustomer()]);
+    setLocalData('orders', [
+      makeOrder('customer-tab-charge', 'shift-customer-reconciliation', 'done', 'tab', 500, 'customer-test'),
+    ]);
+    setLocalData('tabs', [
+      makeTab('customer-settlement', 'shift-customer-reconciliation', 'settled', 500),
+      {
+        ...makeTab('customer-ambiguous-reversal', 'shift-customer-reconciliation', 'reversal', 500),
+        reversesTabId: 'customer-settlement',
+      },
+    ]);
+
+    const reconciliation = await customerService.getBalanceReconciliation('customer-test');
+    expect(reconciliation.verifiedBalanceMillimes).toBe(0);
+    expect(reconciliation.unresolvedReversalMillimes).toBe(500);
+    expect(reconciliation.unresolvedReversals).toEqual([
+      expect.objectContaining({
+        reversalId: 'customer-ambiguous-reversal',
+        originalSettlementId: 'customer-settlement',
+        paymentMethod: 'cash',
+        amountMillimes: 500,
+      }),
+    ]);
+  });
+
+  it('prevents a settlement from being reversed twice', async () => {
+    prepareReportData([makeShift('shift-duplicate-reversal', 0)]);
+    setLocalData('customers', [makeCustomer()]);
+    setLocalData('tabs', [makeTab('single-settlement', 'shift-duplicate-reversal', 'settled', 500)]);
+
+    await customerService.reversePayment({
+      storeId,
+      customerId: 'customer-test',
+      paymentId: 'single-settlement',
+      ownerId,
+      pin: '1234',
+      reason: 'First reversal',
+    });
+
+    await expect(customerService.reversePayment({
+      storeId,
+      customerId: 'customer-test',
+      paymentId: 'single-settlement',
+      ownerId,
+      pin: '1234',
+      reason: 'Second reversal',
+    })).rejects.toThrow('already been reversed');
   });
 
   it('records a PIN void on a closed cash shift and reconciles the Z cash ledger', async () => {
@@ -421,17 +616,19 @@ describe('local money logic', () => {
     setLocalData('tabs', [
       makeTab('card-tab-payment', shiftId, 'settled', 1_000, 'card'),
       makeTab('other-tab-payment', shiftId, 'settled', 2_000, 'other'),
+      { ...makeTab('card-tab-reversal', shiftId, 'reversal', 500, 'card'), reversesTabId: 'card-tab-payment', reversalAttribution: 'same_shift' },
+      { ...makeTab('other-tab-reversal', shiftId, 'reversal', 500, 'other'), reversesTabId: 'other-tab-payment', reversalAttribution: 'same_shift' },
     ]);
 
     const report = await reportService.closeDayWithZReport(storeId, 'Owner', '1234', {
       countedCashMillimes: 0,
-      countedCardMillimes: 5_000,
-      countedOtherMillimes: 5_000,
+      countedCardMillimes: 4_500,
+      countedOtherMillimes: 4_500,
     });
 
-    expect(report.expectedCardMillimes).toBe(5_000);
+    expect(report.expectedCardMillimes).toBe(4_500);
     expect(report.cardDifferenceMillimes).toBe(0);
-    expect(report.expectedOtherMillimes).toBe(5_000);
+    expect(report.expectedOtherMillimes).toBe(4_500);
     expect(report.otherDifferenceMillimes).toBe(0);
   });
 
@@ -595,6 +792,11 @@ describe('local money logic', () => {
       countedCashMillimes: 0,
     });
     expect((await userService.getStore(storeId))?.dayClosedOn).toBe(new Date().toLocaleDateString('en-CA'));
+    await expect(reportService.getDayStatus(storeId)).resolves.toMatchObject({
+      dayIsClosed: true,
+      hasActivity: false,
+      openShiftCount: 0,
+    });
 
     await expect(reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
       countedCashMillimes: 1_000,
@@ -643,6 +845,77 @@ describe('local money logic', () => {
     expect(new Date(secondZ.periodFrom).getTime()).toBeGreaterThan(new Date(firstZ.periodTo!).getTime());
   });
 
+  it('keeps the shift business date when Z closes after midnight and excludes it from the next Z', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-23T01:00:00.000Z'));
+    try {
+      const firstShift = {
+        ...makeClosedShift('shift-cross-midnight-z'),
+        openedAt: '2026-11-22T08:00:00.000Z',
+        closedAt: '2026-11-23T00:45:00.000Z',
+      };
+      prepareReportData([firstShift]);
+      setLocalData('stores', seedStores.map((store) => store.id === storeId
+        ? { ...store, timezone: 'Africa/Tunis', adminPin: '1234', adminPinHash: undefined }
+        : store));
+      setLocalData('reports', [{
+        id: 'previous-z-before-shift',
+        storeId,
+        type: 'Z',
+        businessDate: '2026-11-21',
+        createdAt: '2026-11-22T07:00:00.000Z',
+        periodTo: '2026-11-22T07:00:00.000Z',
+        salesMillimes: 0,
+        orderCount: 0,
+        cashDifferenceMillimes: 0,
+        shifts: [],
+      }]);
+
+      const firstZ = await reportService.closeDayWithZReport(storeId, ownerId, '1234', {
+        countedCashMillimes: 0,
+      });
+
+      expect(firstZ.businessDate).toBe('2026-11-22');
+      expect(firstZ.periodTo).toBe('2026-11-23T01:00:00.000Z');
+      expect(firstZ.shifts?.map((shift) => shift.shiftId)).toEqual([firstShift.id]);
+      expect(new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Africa/Tunis',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hourCycle: 'h23',
+      }).formatToParts(new Date(firstZ.periodTo!)).reduce<Record<string, string>>(
+        (parts, part) => ({ ...parts, [part.type]: part.value }),
+        {},
+      )).toMatchObject({
+        year: '2026',
+        month: '11',
+        day: '23',
+        hour: '02',
+        minute: '00',
+        second: '00',
+      });
+
+      vi.setSystemTime(new Date('2026-11-23T01:15:00.000Z'));
+      const nextShift = await shiftService.openShift(storeId, staffId, 0);
+      vi.setSystemTime(new Date('2026-11-23T01:30:00.000Z'));
+      await shiftService.closeShift(nextShift.id, 0);
+      vi.setSystemTime(new Date('2026-11-23T01:45:00.000Z'));
+
+      const nextZ = await reportService.closeDayWithZReport(storeId, ownerId, '1234', {
+        countedCashMillimes: 0,
+      });
+
+      expect(nextZ.shifts?.map((shift) => shift.shiftId)).toEqual([nextShift.id]);
+      expect(nextZ.shifts?.some((shift) => shift.shiftId === firstShift.id)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('limits each Z to shifts and orders opened in its period and freezes archived orders', async () => {
     const firstShift = makeClosedShift('shift-archived-period');
     const archivedOrder = {
@@ -675,6 +948,59 @@ describe('local money logic', () => {
     expect(secondZ.salesMillimes).toBe(700);
     expect(secondZ.shifts?.map((shift) => shift.shiftId)).toEqual([currentShift.id]);
     await expect(orderService.listToday(storeId)).resolves.toEqual([]);
+  });
+
+  it('falls back from a legacy date-only Z boundary to created_at across midnight', async () => {
+    const previousZCreatedAt = new Date(2026, 2, 1, 23, 0).toISOString();
+    const currentShiftOpenedAt = new Date(2026, 2, 2, 0, 5);
+    const previouslyClosedShift: ShiftRecord = {
+      ...makeClosedShift('shift-before-legacy-z', 1_000),
+      openedAt: new Date(2026, 2, 1, 8, 0).toISOString(),
+      closedAt: new Date(2026, 2, 1, 22, 30).toISOString(),
+      expectedCashMillimes: 6_000,
+      countedCashMillimes: 6_000,
+    };
+    const currentShift: ShiftRecord = {
+      ...makeClosedShift('shift-after-legacy-z', 2_000),
+      openedAt: currentShiftOpenedAt.toISOString(),
+      closedAt: new Date(2026, 2, 2, 0, 30).toISOString(),
+      expectedCashMillimes: 12_000,
+      countedCashMillimes: 12_000,
+    };
+    prepareReportData([previouslyClosedShift, currentShift]);
+    setLocalData('orders', [
+      { ...makeOrder('legacy-period-sale', previouslyClosedShift.id, 'done', 'cash', 5_000), createdAt: new Date(2026, 2, 1, 10, 0).toISOString() },
+      { ...makeOrder('new-period-sale', currentShift.id, 'done', 'cash', 10_000), createdAt: new Date(2026, 2, 2, 0, 10).toISOString() },
+    ]);
+    setLocalData('reports', [{
+      id: 'legacy-z',
+      storeId,
+      type: 'Z',
+      businessDate: '2026-03-01',
+      createdAt: previousZCreatedAt,
+      salesMillimes: 5_000,
+      orderCount: 1,
+      cashDifferenceMillimes: 0,
+      periodFrom: '2026-03-01',
+      periodTo: '2026-03-01',
+      shifts: [],
+    }]);
+
+    const status = await reportService.getDayStatus(storeId);
+    const summary = await reportService.getCurrentPeriodSummary(storeId);
+
+    expect(status).toMatchObject({ dayIsClosed: false, hasActivity: true });
+    expect(summary.shiftLines.map((shift) => shift.shiftId)).toEqual([currentShift.id]);
+    expect(summary.salesMillimes).toBe(10_000);
+    expect(summary.totalExpectedCashMillimes).toBe(12_000);
+    expect(summary.cashFloatMillimes).toBe(2_000);
+    expect(summary.expectedCashExFloatMillimes).toBe(10_000);
+
+    const secondZ = await reportService.closeDayWithZReport(storeId, ownerId, '1234', {
+      countedCashMillimes: 10_000,
+    });
+    expect(secondZ.periodFrom).toBe(currentShift.openedAt);
+    expect(secondZ.businessDate).toBe('2026-03-02');
   });
 
   it('does not repeat same-day expenses already included in the previous Z report', async () => {

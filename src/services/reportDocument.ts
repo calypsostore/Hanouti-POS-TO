@@ -209,6 +209,13 @@ export function buildReportDocument(
     ]);
   }
 
+  if (report.unresolvedTabReversals?.length) {
+    appendSection(sections, 'UNRESOLVED TAB REVERSALS — NOT INCLUDED IN VERIFIED TOTALS', report.unresolvedTabReversals.map((reversal) => ({
+      label: `${reversal.paymentMethod.toUpperCase()} · Reversal ${reversal.reversalId} · Settlement ${reversal.originalSettlementId} · Shift ${reversal.reversalShiftId} · ${reversal.reversalCreatedAt}`,
+      value: `UNRESOLVED ${money(reversal.amountMillimes)}${reversal.reason ? ` · ${reversal.reason}` : ''}`,
+    })));
+  }
+
   if (report.voidAdjustments?.length) {
     appendSection(sections, 'POST-CLOSE VOID ADJUSTMENTS', report.voidAdjustments.map((adjustment) => ({
       label: `Ticket #${adjustment.orderNumber} · ${adjustment.staffName} · ${new Date(adjustment.createdAt).toLocaleString()}`,

@@ -40,6 +40,8 @@ const emptySummary: DashboardSummary = {
   cardTabPaymentsMillimes: 0, otherTabPaymentsMillimes: 0,
   firstTicketNumber: undefined, lastTicketNumber: undefined, cashInMillimes: 0, cashOutMillimes: 0,
   cashRefundsMillimes: 0,
+  ambiguousTabReversalIds: [],
+  unresolvedTabReversals: [],
   cashMovements: [], employeeBreakdown: [],
   tabsIssuedMillimes: 0, tabsSettledMillimes: 0,
   salesByDay: [], salesByHour: [], salesTodayMillimes: 0, salesLastWeekMillimes: 0, recentOrders: [],

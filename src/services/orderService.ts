@@ -5,6 +5,7 @@ import type {
   OrderSummaryRecord,
   PaymentMethod,
   ReportRecord,
+  ShiftRecord,
   TabRecord,
 } from '../types/domain';
 import { shiftService } from './shiftService';
@@ -33,7 +34,14 @@ import {
   voidWithPin as voidRemoteOrder,
 } from '../data/repositories/orderRepository';
 import type { OrderListOptions } from '../data/repositories/orderRepository';
-import { listReports as listRemoteReports } from '../data/repositories/reportRepository';
+import {
+  getBusinessDayStatus as getRemoteBusinessDayStatus,
+} from '../data/repositories/reportRepository';
+import {
+  getLatestZReport,
+  getUnreportedShiftsAfterLastZ,
+  getZReportBoundaryValue,
+} from './reportPeriod';
 
 const getOrders = () => readData('orders', seedOrders);
 const saveOrders = (orders: OrderRecord[]) => writeData('orders', orders);
@@ -74,35 +82,22 @@ async function getCurrentBusinessDate(storeId: string): Promise<string> {
     Promise.resolve(readData<ReportRecord[]>('reports', seedReports)),
     shiftService.listShifts(storeId),
   ]);
-  const lastZ = reports
-    .filter((report) => report.storeId === storeId && report.type === 'Z')
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
-  const lastZAt = lastZ
-    ? new Date(lastZ.periodTo ?? lastZ.createdAt).getTime()
-    : Number.NEGATIVE_INFINITY;
-  const firstShift = shifts
-    .filter((shift) => shift.storeId === storeId && new Date(shift.openedAt).getTime() > lastZAt)
-    .sort((left, right) => left.openedAt.localeCompare(right.openedAt))[0];
+  const firstShift = getUnreportedShiftsAfterLastZ(storeId, reports, shifts)[0];
   return dateKeyInTimezone(new Date(firstShift?.openedAt ?? Date.now()), timeZone);
 }
 
 async function getCurrentReportPeriodStart(storeId: string): Promise<string | undefined> {
+  if (isSupabaseDriver()) {
+    const status = await getRemoteBusinessDayStatus(storeId);
+    return status.periodFrom ?? status.lastZBoundary;
+  }
   const [reports, shifts] = await Promise.all([
-    isSupabaseDriver()
-      ? listRemoteReports(storeId)
-      : Promise.resolve(readData<ReportRecord[]>('reports', seedReports)),
+    Promise.resolve(readData<ReportRecord[]>('reports', seedReports)),
     shiftService.listShifts(storeId),
   ]);
-  const lastZ = reports
-    .filter((report) => report.storeId === storeId && report.type === 'Z')
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
-  const lastZAt = lastZ
-    ? new Date(lastZ.periodTo ?? lastZ.createdAt).getTime()
-    : Number.NEGATIVE_INFINITY;
-  const firstShift = shifts
-    .filter((shift) => shift.storeId === storeId && new Date(shift.openedAt).getTime() > lastZAt)
-    .sort((left, right) => left.openedAt.localeCompare(right.openedAt))[0];
-  return firstShift?.openedAt ?? (lastZ ? lastZ.periodTo ?? lastZ.createdAt : undefined);
+  const lastZ = getLatestZReport(storeId, reports);
+  const firstShift = getUnreportedShiftsAfterLastZ(storeId, reports, shifts)[0];
+  return firstShift?.openedAt ?? getZReportBoundaryValue(lastZ);
 }
 
 export class OrderServiceError extends Error {
@@ -282,6 +277,8 @@ export interface ShiftSalesBreakdown {
   otherSalesMillimes: number;
   tabSalesMillimes: number;
   tabPaymentsMillimes: number;
+  cardTabPaymentsMillimes: number;
+  otherTabPaymentsMillimes: number;
   voidsMillimes: number;
 }
 
@@ -773,13 +770,42 @@ export const orderService = {
     const completedOrders = shiftOrders.filter((order) => order.status === 'done');
     const shiftTabPayments = readData<TabRecord[]>('tabs', [])
       .filter((tab) => tab.shiftId === shiftId);
+    const shift = readData<ShiftRecord[]>('shifts', []).find((candidate) => candidate.id === shiftId);
     const cashTabPaymentsTotal = shiftTabPayments
       .filter((tab) => (tab.paymentMethod ?? 'cash') === 'cash')
       .reduce((sum, tab) => {
         if (tab.kind === 'settled') return sum + tab.amountMillimes;
-        if (tab.kind === 'reversal') return sum - tab.amountMillimes;
+        if (tab.kind === 'reversal') {
+          if (shift?.status === 'closed') {
+            if (shift.includedTabReversalIds) {
+              return shift.includedTabReversalIds.includes(tab.id)
+                ? sum - tab.amountMillimes
+                : sum;
+            }
+            return sum;
+          }
+          return sum - tab.amountMillimes;
+        }
         return sum;
       }, 0);
+    const getNonCashTabPayments = (paymentMethod: 'card' | 'other') =>
+      shiftTabPayments
+        .filter((tab) => tab.paymentMethod === paymentMethod)
+        .reduce((sum, tab) => {
+          if (tab.kind === 'settled') return sum + tab.amountMillimes;
+          if (tab.kind === 'reversal') {
+            if (shift?.status === 'closed') {
+              if (shift.includedTabReversalIds) {
+                return shift.includedTabReversalIds.includes(tab.id)
+                  ? sum - tab.amountMillimes
+                  : sum;
+              }
+              return sum;
+            }
+            return sum - tab.amountMillimes;
+          }
+          return sum;
+        }, 0);
     return {
       orderCount: completedOrders.length,
       cashSalesMillimes: shiftOrders
@@ -796,6 +822,8 @@ export const orderService = {
         .filter((order) => order.paymentMethod === 'tab')
         .reduce((sum, order) => sum + order.totalMillimes, 0),
       tabPaymentsMillimes: cashTabPaymentsTotal,
+      cardTabPaymentsMillimes: getNonCashTabPayments('card'),
+      otherTabPaymentsMillimes: getNonCashTabPayments('other'),
       voidsMillimes: shiftOrders
         .filter((order) => order.status === 'voided')
         .reduce((sum, order) => sum + order.totalMillimes, 0),

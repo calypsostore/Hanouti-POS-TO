@@ -29,6 +29,8 @@ interface TabRow {
   note: string | null;
   reverses_tab_id: string | null;
   created_at: string;
+  reversal_attribution: 'same_shift' | 'post_close' | null;
+  reversal_post_close_at: string | null;
 }
 
 export interface CustomerCreditBalance {
@@ -67,6 +69,8 @@ function mapTab(row: TabRow): TabRecord {
     note: row.note ?? undefined,
     reversesTabId: row.reverses_tab_id ?? undefined,
     createdAt: row.created_at,
+    reversalPostCloseAt: row.reversal_post_close_at ?? undefined,
+    reversalAttribution: row.reversal_attribution ?? undefined,
   };
 }
 

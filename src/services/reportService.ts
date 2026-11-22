@@ -11,6 +11,7 @@ import type {
   ReportVoidAdjustmentLine,
   OrderSummaryRecord,
   TabRecord,
+  UnresolvedTabReversalRecord,
 } from '../types/domain';
 import { resolveStoreSettings } from '../types/domain';
 import { catalogService } from './catalogService';
@@ -25,13 +26,19 @@ import { activityService } from './activityService';
 import { expenseService } from './expenseService';
 import { notificationService } from './notificationService';
 import { isSupabaseDriver } from '../data/driver';
-import { getSupabaseClient } from '../data/supabaseClient';
 import {
+  getBusinessDayStatus as getRemoteBusinessDayStatus,
   getDashboardSummary as getRemoteDashboardSummary,
   getShiftSummary as getRemoteShiftSummary,
   listReports as listRemoteReports,
   saveReport as saveRemoteReport,
 } from '../data/repositories/reportRepository';
+import {
+  getLatestZReport,
+  getPreviouslyReportedZShiftIds,
+  getUnreportedShiftsAfterLastZ,
+  getZReportBoundaryValue,
+} from './reportPeriod';
 
 const getReports = () => readData('reports', seedReports);
 
@@ -39,6 +46,8 @@ export interface ReportDayStatus {
   dayIsClosed: boolean;
   hasActivity: boolean;
   openShiftCount: number;
+  periodFrom?: string;
+  lastZBoundary?: string;
   lastZ?: { reportNumber: string; createdAt: string };
 }
 
@@ -95,13 +104,9 @@ function sinceLastZ(
   reports: ReportRecord[],
   timeZone: string,
   shifts: Awaited<ReturnType<typeof shiftService.listShifts>>,
+  through = Number.POSITIVE_INFINITY,
 ): string {
-  const previous = reports.filter((report) => report.storeId === storeId && report.type === 'Z')
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
-  const previousZAt = previous ? new Date(previous.periodTo ?? previous.createdAt).getTime() : Number.NEGATIVE_INFINITY;
-  const firstShift = shifts
-    .filter((shift) => shift.storeId === storeId && new Date(shift.openedAt).getTime() > previousZAt)
-    .sort((left, right) => left.openedAt.localeCompare(right.openedAt))[0];
+  const firstShift = getUnreportedShiftsAfterLastZ(storeId, reports, shifts, through)[0];
   return firstShift?.openedAt ?? startOfBusinessDay(timeZone);
 }
 
@@ -117,6 +122,7 @@ async function summarizeLocal(
   to: number,
   excludedExpenseIds = new Set<string>(),
   useExpenseCreationPeriod = false,
+  excludedShiftIds = new Set<string>(),
 ) {
   const allOrders = await orderService.listAll(storeId);
   const periodOrders = allOrders.filter((order) => {
@@ -177,7 +183,7 @@ async function summarizeLocal(
     : readData<TabRecord[]>('tabs', []).filter((tab) => tab.storeId === storeId);
   const includedShifts = shifts.filter((shift) => {
     const opened = new Date(shift.openedAt).getTime();
-    return opened >= from && opened <= to;
+    return opened >= from && opened <= to && !excludedShiftIds.has(shift.id);
   });
   const shiftLines: ReportShiftLine[] = await Promise.all(includedShifts.map(async (shift) => {
     const inProgress = shift.status === 'open';
@@ -218,12 +224,15 @@ async function summarizeLocal(
       status: inProgress ? 'in_progress' : 'closed',
       openedAt: shift.openedAt,
       closedAt: shift.closedAt,
+      includedTabReversalIds: shift.includedTabReversalIds,
       startingCashMillimes: shift.startingCashMillimes,
       cashSalesMillimes: cashBreakdown.cashSalesMillimes,
       cardSalesMillimes: shiftPaymentSplit.card,
       otherSalesMillimes: shiftPaymentSplit.other,
       tabSalesMillimes: shiftPaymentSplit.tab,
       tabPaymentsMillimes: cashBreakdown.tabPaymentsMillimes,
+      cardTabPaymentsMillimes: cashBreakdown.cardTabPaymentsMillimes,
+      otherTabPaymentsMillimes: cashBreakdown.otherTabPaymentsMillimes,
       cashInMillimes,
       cashOutMillimes,
       expectedCashMillimes: expected,
@@ -286,20 +295,41 @@ async function summarizeLocal(
   const nonCashSettlements = settlements.filter((tab) => tab.paymentMethod !== undefined && tab.paymentMethod !== 'cash');
   const cashReversals = reversals.filter((tab) => (tab.paymentMethod ?? 'cash') === 'cash');
   const nonCashReversals = reversals.filter((tab) => tab.paymentMethod !== undefined && tab.paymentMethod !== 'cash');
+  const getReversalStatus = (reversal: TabRecord): 'included' | 'proven_post_close' | 'ambiguous' => {
+    if (reversal.reversalAttribution === 'same_shift') return 'included';
+    if (reversal.reversalAttribution === 'post_close') return 'proven_post_close';
+    const reversalShift = shifts.find((shift) => shift.id === reversal.shiftId);
+    if (reversalShift?.includedTabReversalIds?.includes(reversal.id)) return 'included';
+    return 'ambiguous';
+  };
   const tabsSettledMillimes = cashSettlements.reduce((sum, tab) => sum + tab.amountMillimes, 0) -
-    cashReversals.reduce((sum, tab) => sum + tab.amountMillimes, 0);
+    cashReversals.filter((reversal) => getReversalStatus(reversal) !== 'ambiguous')
+      .reduce((sum, tab) => sum + tab.amountMillimes, 0);
   const nonCashTabPaymentsMillimes = nonCashSettlements.reduce((sum, tab) => sum + tab.amountMillimes, 0) -
-    nonCashReversals.reduce((sum, tab) => sum + tab.amountMillimes, 0);
+    nonCashReversals.filter((reversal) => getReversalStatus(reversal) !== 'ambiguous')
+      .reduce((sum, tab) => sum + tab.amountMillimes, 0);
   const cardTabPaymentsMillimes = allCustomerTransactions
     .filter((tab) => tab.storeId === storeId && tab.paymentMethod === 'card' &&
       (tab.kind === 'settled' || tab.kind === 'reversal') &&
       new Date(tab.createdAt).getTime() >= from && new Date(tab.createdAt).getTime() <= to)
-    .reduce((sum, tab) => sum + (tab.kind === 'settled' ? tab.amountMillimes : -tab.amountMillimes), 0);
+    .reduce((sum, tab) => sum + (
+      tab.kind === 'settled'
+        ? tab.amountMillimes
+        : getReversalStatus(tab) === 'ambiguous'
+          ? 0
+          : -tab.amountMillimes
+    ), 0);
   const otherTabPaymentsMillimes = allCustomerTransactions
     .filter((tab) => tab.storeId === storeId && tab.paymentMethod === 'other' &&
       (tab.kind === 'settled' || tab.kind === 'reversal') &&
       new Date(tab.createdAt).getTime() >= from && new Date(tab.createdAt).getTime() <= to)
-    .reduce((sum, tab) => sum + (tab.kind === 'settled' ? tab.amountMillimes : -tab.amountMillimes), 0);
+    .reduce((sum, tab) => sum + (
+      tab.kind === 'settled'
+        ? tab.amountMillimes
+        : getReversalStatus(tab) === 'ambiguous'
+          ? 0
+          : -tab.amountMillimes
+    ), 0);
   const customerTabs: ReportCustomerTabLine[] = customers.map((customer) => {
     const customerOrders = allOrders.filter((order) => order.customerId === customer.id && order.paymentMethod === 'tab');
     const transactions = allCustomerTransactions.filter((tab) => tab.customerId === customer.id);
@@ -360,11 +390,28 @@ async function summarizeLocal(
     .filter((adjustment) => !includedShiftIds.has(adjustment.shiftId))
     .reduce((sum, adjustment) => sum + adjustment.amountMillimes, 0);
   const cashRefundsMillimes = cashReversals
-    .filter((reversal) => {
-      const shift = shifts.find((candidate) => candidate.id === reversal.shiftId);
-      return shift?.closedAt && new Date(shift.closedAt).getTime() < new Date(reversal.createdAt).getTime();
-    })
+    .filter((reversal) => getReversalStatus(reversal) === 'proven_post_close')
     .reduce((sum, reversal) => sum + reversal.amountMillimes, 0);
+  const ambiguousTabReversalIds = reversals
+    .filter((reversal) => getReversalStatus(reversal) === 'ambiguous')
+    .map((reversal) => reversal.id);
+  const unresolvedTabReversals: UnresolvedTabReversalRecord[] = reversals
+    .filter((reversal) => getReversalStatus(reversal) === 'ambiguous')
+    .map((reversal) => {
+      const original = allCustomerTransactions.find((tab) => tab.id === reversal.reversesTabId);
+      return {
+        reversalId: reversal.id,
+        originalSettlementId: reversal.reversesTabId ?? '',
+        originalShiftId: original?.shiftId,
+        reversalShiftId: reversal.shiftId,
+        paymentMethod: reversal.paymentMethod ?? 'cash',
+        amountMillimes: reversal.amountMillimes,
+        originalSettlementCreatedAt: original?.createdAt,
+        reversalCreatedAt: reversal.createdAt,
+        reason: reversal.note,
+        state: 'ambiguous',
+      };
+    });
   const cashDifferenceMillimes = closedShiftLines.reduce((sum, shift) => sum + (shift.differenceMillimes ?? 0), 0);
   const totalExpectedCashMillimes = shiftLines.reduce(
     (sum, shift) => sum + (shift.expectedCashMillimes ?? 0),
@@ -512,6 +559,8 @@ async function summarizeLocal(
       .filter((movement) => movement.kind === 'out')
       .reduce((sum, movement) => sum + movement.amountMillimes, 0),
     cashRefundsMillimes,
+    ambiguousTabReversalIds,
+    unresolvedTabReversals,
     cashMovements: reportCashMovements,
     voidAdjustments: periodVoidAdjustments,
     employeeBreakdown,
@@ -544,11 +593,12 @@ async function summarizeRemote(
   from: number,
   to: number,
   useExpenseCreationPeriod: boolean,
+  periodFromIso?: string,
 ): Promise<ReportSummary> {
   const [summary, shifts] = await Promise.all([
     getRemoteDashboardSummary(
       storeId,
-      new Date(from).toISOString(),
+      periodFromIso ?? new Date(from).toISOString(),
       new Date(to).toISOString(),
       useExpenseCreationPeriod,
     ),
@@ -600,9 +650,11 @@ async function summarize(
   to: number,
   excludedExpenseIds = new Set<string>(),
   useExpenseCreationPeriod = false,
+  periodFromIso?: string,
+  excludedShiftIds?: Set<string>,
 ): Promise<ReportSummary> {
-  if (isSupabaseDriver()) return summarizeRemote(storeId, from, to, useExpenseCreationPeriod);
-  return summarizeLocal(storeId, from, to, excludedExpenseIds, useExpenseCreationPeriod);
+  if (isSupabaseDriver()) return summarizeRemote(storeId, from, to, useExpenseCreationPeriod, periodFromIso);
+  return summarizeLocal(storeId, from, to, excludedExpenseIds, useExpenseCreationPeriod, excludedShiftIds);
 }
 
 async function createReport(
@@ -627,16 +679,26 @@ async function createReport(
   const reports = isSupabaseDriver() ? await listRemoteReports(storeId) : getReports();
   const storeTimeZone = store.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
   const shifts = await shiftService.listShifts(storeId);
-  const periodFrom = sinceLastZ(storeId, reports, storeTimeZone, shifts);
+  const periodFrom = isSupabaseDriver()
+    ? dayStatus.periodFrom
+    : sinceLastZ(storeId, reports, storeTimeZone, shifts, Date.parse(createdAt));
+  if (!periodFrom) {
+    throw new Error('The server could not determine the first unreported shift in this Z period.');
+  }
   const summary = await summarize(
     storeId,
     new Date(periodFrom).getTime(),
     new Date(createdAt).getTime(),
     expensesIncludedInZReports(storeId, reports),
     true,
+    isSupabaseDriver() ? periodFrom : undefined,
+    !isSupabaseDriver() && type === 'Z' ? getPreviouslyReportedZShiftIds(storeId, reports) : undefined,
   );
   if (type === 'Z' && summary.pendingVoids.count > 0) {
     throw new Error('Resolve every void request before creating a Z report.');
+  }
+  if (type === 'Z' && (summary.unresolvedTabReversals?.length ?? 0) > 0) {
+    throw new Error('Resolve every ambiguous tab reversal before creating a Z report.');
   }
   if (type === 'Z' && dayStatus.openShiftCount > 0) {
     throw new Error('Force-close or close every shift before creating a Z report.');
@@ -739,6 +801,8 @@ async function createReport(
     cashInMillimes: summary.cashInMillimes,
     cashOutMillimes: summary.cashOutMillimes,
     cashRefundsMillimes: summary.cashRefundsMillimes,
+    ambiguousTabReversalIds: summary.ambiguousTabReversalIds,
+    unresolvedTabReversals: summary.unresolvedTabReversals,
     cashMovements: summary.cashMovements,
     employeeBreakdown: summary.employeeBreakdown,
     cashOuts: summary.cashOuts,
@@ -791,54 +855,21 @@ async function createReport(
 export const reportService = {
   async getDayStatus(storeId: string): Promise<ReportDayStatus> {
     if (isSupabaseDriver()) {
-      const { data: authData, error: authError } = await getSupabaseClient().auth.getUser();
-      if (authError) throw authError;
-      const actor = authData.user ? await userService.getUser(authData.user.id) : undefined;
-      if (actor?.role !== 'owner') {
-        const { data, error } = await getSupabaseClient().rpc('get_business_day_status', {
-          p_store_id: storeId,
-        });
-        if (error) throw new Error(`Could not load business-day status: ${error.message}`, { cause: error });
-        if (typeof data !== 'object' || data === null) {
-          throw new Error('Business-day status response is invalid.');
-        }
-        const status = data as {
-          dayIsClosed?: unknown;
-          hasActivity?: unknown;
-          openShiftCount?: unknown;
-          lastZ?: { reportNumber?: unknown; createdAt?: unknown } | null;
-        };
-        if (typeof status.dayIsClosed !== 'boolean' || typeof status.hasActivity !== 'boolean' ||
-          typeof status.openShiftCount !== 'number') {
-          throw new Error('Business-day status response is incomplete.');
-        }
-        return {
-          dayIsClosed: status.dayIsClosed,
-          hasActivity: status.hasActivity,
-          openShiftCount: status.openShiftCount,
-          lastZ: status.lastZ && typeof status.lastZ.reportNumber === 'string' &&
-            typeof status.lastZ.createdAt === 'string'
-            ? { reportNumber: status.lastZ.reportNumber, createdAt: status.lastZ.createdAt }
-            : undefined,
-        };
-      }
+      return getRemoteBusinessDayStatus(storeId);
     }
     const [reports, shifts] = await Promise.all([
       this.listReports(storeId),
       shiftService.listShifts(storeId),
     ]);
-    const lastZReport = reports
-      .filter((report) => report.storeId === storeId && report.type === 'Z')
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
-    const lastZPeriodTo = lastZReport?.periodTo ?? lastZReport?.createdAt;
-    const activityShifts = shifts.filter((shift) =>
-      !lastZPeriodTo || new Date(shift.openedAt).getTime() > new Date(lastZPeriodTo).getTime(),
-    );
+    const lastZReport = getLatestZReport(storeId, reports);
+    const activityShifts = getUnreportedShiftsAfterLastZ(storeId, reports, shifts);
     const hasActivity = activityShifts.length > 0;
     return {
       dayIsClosed: Boolean(lastZReport) && !hasActivity,
       hasActivity,
       openShiftCount: shifts.filter((shift) => shift.status === 'open').length,
+      periodFrom: activityShifts[0]?.openedAt,
+      lastZBoundary: lastZReport ? getZReportBoundaryValue(lastZReport) : undefined,
       lastZ: lastZReport
         ? {
           reportNumber: lastZReport.reportNumber ?? `Z-${String(lastZReport.zNumber ?? 0).padStart(6, '0')}`,
@@ -849,21 +880,27 @@ export const reportService = {
   },
 
   async getCurrentPeriodSummary(storeId: string) {
-    const [reports, store, shifts] = await Promise.all([
+    const [reports, store, shifts, dayStatus] = await Promise.all([
       isSupabaseDriver() ? listRemoteReports(storeId) : Promise.resolve(getReports()),
       userService.getStore(storeId),
       shiftService.listShifts(storeId),
+      isSupabaseDriver() ? getRemoteBusinessDayStatus(storeId) : Promise.resolve(undefined),
     ]);
     if (!store) throw new Error('The store could not be found.');
     const timeZone = store.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const periodFrom = new Date(sinceLastZ(storeId, reports, timeZone, shifts)).getTime();
     const periodTo = Date.now();
+    const serverPeriodStart = dayStatus?.periodFrom ?? dayStatus?.lastZBoundary;
+    const periodFrom = isSupabaseDriver() && serverPeriodStart
+      ? Date.parse(serverPeriodStart)
+      : new Date(sinceLastZ(storeId, reports, timeZone, shifts, periodTo)).getTime();
     const summary = await summarize(
       storeId,
       periodFrom,
       periodTo,
       expensesIncludedInZReports(storeId, reports),
       true,
+      isSupabaseDriver() ? serverPeriodStart : undefined,
+      !isSupabaseDriver() ? getPreviouslyReportedZShiftIds(storeId, reports) : undefined,
     );
     return {
       ...summary,

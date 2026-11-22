@@ -1,4 +1,4 @@
-import type { CashMovementReason, CashMovementRecord, ShiftRecord } from '../types/domain';
+import type { CashMovementReason, CashMovementRecord, ShiftRecord, TabRecord } from '../types/domain';
 import { readData, writeData } from './storage';
 import { seedShiftsForStore } from './seedData';
 import { userService } from './userService';
@@ -24,6 +24,12 @@ import {
 const getShifts = () => readData('shifts', seedShiftsForStore);
 const getCashMovements = () => readData<CashMovementRecord[]>('cash-movements', []);
 const saveShifts = (shifts: ShiftRecord[]) => writeData('shifts', shifts);
+const getIncludedTabReversalIds = (shiftId: string, closedAt: string): string[] =>
+  readData<TabRecord[]>('tabs', [])
+    .filter((tab) => tab.storeId && tab.shiftId === shiftId &&
+      tab.kind === 'reversal' &&
+      new Date(tab.createdAt).getTime() <= new Date(closedAt).getTime())
+    .map((tab) => tab.id);
 const CASH_MOVEMENT_REASONS: CashMovementReason[] = ['supplier', 'change', 'expense', 'other'];
 const todayKey = () => {
   const date = new Date();
@@ -193,6 +199,7 @@ export const shiftService = {
     const expectedCashMillimes = await this.getExpectedCash(shiftId);
     const differenceMillimes = countedCashMillimes - expectedCashMillimes;
     const cleanedDifferenceNote = validateDifferenceNote(differenceMillimes, differenceNote);
+    const closedAt = new Date().toISOString();
     const updated: ShiftRecord = {
       ...shift,
       status: 'closed',
@@ -200,7 +207,8 @@ export const shiftService = {
       expectedCashMillimes,
       differenceMillimes,
       differenceNote: cleanedDifferenceNote,
-      closedAt: new Date().toISOString(),
+      closedAt,
+      includedTabReversalIds: getIncludedTabReversalIds(shiftId, closedAt),
       pendingVoidCount,
     };
     saveShifts(shifts.map((candidate) => candidate.id === shiftId ? updated : candidate));
@@ -233,6 +241,7 @@ export const shiftService = {
     if (!await userService.verifyStorePin(store.id, ownerPin, 'z_report')) throw new Error('Incorrect owner PIN.');
     const autoApproved = await orderService.autoApprovePendingVoids(store.id, actor.id, shift.id);
     const expectedCashMillimes = await this.getExpectedCash(shiftId);
+    const closedAt = new Date().toISOString();
     const updated: ShiftRecord = {
       ...shift,
       status: 'closed',
@@ -240,7 +249,8 @@ export const shiftService = {
       expectedCashMillimes,
       differenceMillimes: 0,
       differenceNote: undefined,
-      closedAt: new Date().toISOString(),
+      closedAt,
+      includedTabReversalIds: getIncludedTabReversalIds(shiftId, closedAt),
       forceClosedByOwner: true,
       closedByUserId: actor.id,
       voidsAutoApprovedCount: (shift.voidsAutoApprovedCount ?? 0) + autoApproved.length,
@@ -296,6 +306,7 @@ export const shiftService = {
         differenceMillimes: 0,
         differenceNote: undefined,
         closedAt: now,
+        includedTabReversalIds: getIncludedTabReversalIds(shift.id, now),
         forceClosedByOwner: true,
         closedByUserId: actor.id,
         voidsAutoApprovedCount: (shift.voidsAutoApprovedCount ?? 0) + count,

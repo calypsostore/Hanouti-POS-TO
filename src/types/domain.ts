@@ -295,6 +295,7 @@ export interface ShiftRecord {
   openedAt: string;
   closedAt?: string;
   forceClosedByOwner?: boolean;
+  includedTabReversalIds?: string[];
   voidsAutoApprovedCount?: number;
   pendingVoidCount?: number;
   closedByUserId?: string;
@@ -501,12 +502,15 @@ export interface ReportShiftLine {
   status?: 'in_progress' | 'closed';
   openedAt: string;
   closedAt?: string;
+  includedTabReversalIds?: string[];
   startingCashMillimes: number;
   cashSalesMillimes?: number;
   cardSalesMillimes?: number;
   otherSalesMillimes?: number;
   tabSalesMillimes?: number;
   tabPaymentsMillimes?: number;
+  cardTabPaymentsMillimes?: number;
+  otherTabPaymentsMillimes?: number;
   cashInMillimes?: number;
   cashOutMillimes?: number;
   expectedCashMillimes?: number;
@@ -518,6 +522,19 @@ export interface ReportShiftLine {
   voidAdjustmentMillimes?: number;
   voidRequestsMillimes?: number;
   voidRejectionsMillimes?: number;
+}
+
+export interface UnresolvedTabReversalRecord {
+  reversalId: string;
+  originalSettlementId: string;
+  originalShiftId?: string;
+  reversalShiftId: string;
+  paymentMethod: Exclude<PaymentMethod, 'tab'>;
+  amountMillimes: number;
+  originalSettlementCreatedAt?: string;
+  reversalCreatedAt: string;
+  reason?: string;
+  state: 'ambiguous';
 }
 
 export interface ReportRecord {
@@ -586,6 +603,8 @@ export interface ReportRecord {
   cashInMillimes?: number;
   cashOutMillimes?: number;
   cashRefundsMillimes?: number;
+  ambiguousTabReversalIds?: string[];
+  unresolvedTabReversals?: UnresolvedTabReversalRecord[];
   cashMovements?: ReportCashMovementLine[];
   cashOuts?: ReportCashOutLine[];
   employeeBreakdown?: ReportEmployeeLine[];
@@ -623,6 +642,8 @@ export interface TabRecord {
   note?: string;
   reversesTabId?: string;
   createdAt: string;
+  reversalPostCloseAt?: string;
+  reversalAttribution?: 'same_shift' | 'post_close';
 }
 
 export interface ActivityRecord {

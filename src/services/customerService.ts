@@ -1,4 +1,4 @@
-import { resolveStoreSettings, type CustomerRecord, type OrderRecord, type TabRecord } from '../types/domain';
+import { resolveStoreSettings, type CustomerRecord, type OrderRecord, type PaymentMethod, type TabRecord } from '../types/domain';
 import { activityService } from './activityService';
 import { userService } from './userService';
 import { shiftService } from './shiftService';
@@ -70,6 +70,18 @@ export interface AccountsSummary {
   overdueCount: number;
 }
 
+export interface CustomerBalanceReconciliation {
+  verifiedBalanceMillimes: number;
+  unresolvedReversalMillimes: number;
+  unresolvedReversals: Array<{
+    reversalId: string;
+    originalSettlementId: string;
+    paymentMethod: Exclude<PaymentMethod, 'tab'>;
+    amountMillimes: number;
+    reversalCreatedAt: string;
+  }>;
+}
+
 interface LedgerEvent {
   id: string;
   kind: 'issued' | 'payment' | 'reversal';
@@ -80,6 +92,7 @@ interface LedgerEvent {
   orderNumber?: number;
   note?: string;
   reversed?: boolean;
+  reconciliationState?: 'verified' | 'ambiguous';
 }
 
 const getCustomers = () => readData<CustomerRecord[]>('customers', []).map((customer) => ({
@@ -172,6 +185,9 @@ function getLedgerEvents(customerId: string, orders = getOrders(), tabs = getTab
         amountMillimes: tab.amountMillimes,
         description: 'Payment reversed',
         note: tab.note,
+        reconciliationState: tab.reversalAttribution === 'same_shift' || tab.reversalAttribution === 'post_close'
+          ? 'verified'
+          : 'ambiguous',
       });
     }
   }
@@ -182,8 +198,15 @@ function getLedgerEvents(customerId: string, orders = getOrders(), tabs = getTab
 }
 
 function ledgerBalance(customerId: string): number {
-  return getLedgerEvents(customerId).reduce((balance, event) =>
-    balance + (event.kind === 'payment' ? -event.amountMillimes : event.amountMillimes), 0);
+  return getLedgerEvents(customerId).reduce((balance, event) => {
+    if (event.kind === 'payment') return balance - event.amountMillimes;
+    if (event.kind === 'reversal') {
+      return event.reconciliationState === 'verified'
+        ? balance + event.amountMillimes
+        : balance;
+    }
+    return balance + event.amountMillimes;
+  }, 0);
 }
 
 async function getLedgerEventsForCustomer(customerId: string): Promise<LedgerEvent[]> {
@@ -421,6 +444,46 @@ export const customerService = {
   async getBalance(customerId: string): Promise<number> {
     if (isSupabaseDriver()) return getRemoteBalance(customerId);
     return ledgerBalance(customerId);
+  },
+
+  async getBalanceReconciliation(customerId: string): Promise<CustomerBalanceReconciliation> {
+    if (isSupabaseDriver()) {
+      const tabs = await this.listTransactions(customerId);
+      const unresolved = tabs.filter((tab) =>
+        tab.kind === 'reversal' &&
+        tab.reversalAttribution !== 'same_shift' &&
+        tab.reversalAttribution !== 'post_close',
+      );
+      const verifiedBalance = await getRemoteBalance(customerId);
+      return {
+        verifiedBalanceMillimes: verifiedBalance,
+        unresolvedReversalMillimes: unresolved.reduce((sum, tab) => sum + tab.amountMillimes, 0),
+        unresolvedReversals: unresolved.map((tab) => ({
+          reversalId: tab.id,
+          originalSettlementId: tab.reversesTabId ?? '',
+          paymentMethod: tab.paymentMethod,
+          amountMillimes: tab.amountMillimes,
+          reversalCreatedAt: tab.createdAt,
+        })),
+      };
+    }
+    const tabs = getTabs().filter((tab) => tab.customerId === customerId);
+    const unresolved = tabs.filter((tab) =>
+      tab.kind === 'reversal' &&
+      tab.reversalAttribution !== 'same_shift' &&
+      tab.reversalAttribution !== 'post_close',
+    );
+    return {
+      verifiedBalanceMillimes: ledgerBalance(customerId),
+      unresolvedReversalMillimes: unresolved.reduce((sum, tab) => sum + tab.amountMillimes, 0),
+      unresolvedReversals: unresolved.map((tab) => ({
+        reversalId: tab.id,
+        originalSettlementId: tab.reversesTabId ?? '',
+        paymentMethod: tab.paymentMethod,
+        amountMillimes: tab.amountMillimes,
+        reversalCreatedAt: tab.createdAt,
+      })),
+    };
   },
 
   async getCreditStatuses(
@@ -692,11 +755,15 @@ export const customerService = {
     }
 
     writeData('reverse-payment-pin-attempts', { ...attempts, [store.id]: { count: 0, lockedUntil: 0 } });
+    const openOwnerShift = await shiftService.getOpenShiftForUser(store.id, owner.id);
+    const reversalAttribution = openOwnerShift?.id === payment.shiftId
+      ? 'same_shift'
+      : 'post_close';
     const reversal: TabRecord = {
       id: `tab-${crypto.randomUUID()}`,
       storeId: store.id,
       customerId: customer.id,
-      shiftId: (await shiftService.getOpenShiftForUser(store.id, owner.id))?.id ?? payment.shiftId,
+      shiftId: openOwnerShift?.id ?? payment.shiftId,
       staffId: owner.id,
       kind: 'reversal',
       paymentMethod: payment.paymentMethod,
@@ -704,6 +771,8 @@ export const customerService = {
       note: reason,
       reversesTabId: payment.id,
       createdAt: new Date().toISOString(),
+      reversalAttribution,
+      reversalPostCloseAt: reversalAttribution === 'post_close' ? new Date().toISOString() : undefined,
     };
     writeData('tabs', [...tabs, reversal]);
     await activityService.log({

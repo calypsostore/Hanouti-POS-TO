@@ -7,6 +7,7 @@ create temporary table shift_report_audit_context (
   owner_id uuid not null,
   staff_id uuid not null,
   session_id text not null,
+  owner_session_id text not null,
   position_id uuid not null,
   category_id uuid not null,
   item_id uuid not null,
@@ -15,9 +16,11 @@ create temporary table shift_report_audit_context (
 
 insert into shift_report_audit_context
 select gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), gen_random_uuid()::text,
+       gen_random_uuid()::text,
        gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), gen_random_uuid()
 union all
 select gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), gen_random_uuid()::text,
+       gen_random_uuid()::text,
        gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), gen_random_uuid();
 
 insert into auth.users (
@@ -72,6 +75,12 @@ from shift_report_audit_context;
 insert into public.auth_sessions (session_id, user_id, session_version, expires_at)
 select session_id, staff_id, 0, now() + interval '1 hour'
 from shift_report_audit_context;
+
+insert into public.auth_sessions (session_id, user_id, session_version, expires_at)
+select context.owner_session_id, context.owner_id, owner.session_version,
+       now() + interval '1 hour'
+from shift_report_audit_context context
+join public.profiles owner on owner.id = context.owner_id;
 
 insert into public.categories (id, store_id, name)
 select category_id, store_id, 'Shift audit category'
@@ -138,12 +147,17 @@ begin
   into v_period_from
   from public.shifts shift
   where shift.store_id = p_store_id
-    and shift.opened_at > coalesce((
-      select coalesce(report.period_to, report.created_at)
-      from public.reports report
-      where report.store_id = p_store_id and report.type = 'Z'
-      order by report.created_at desc limit 1
-    ), '-infinity'::timestamptz);
+    and shift.opened_at > coalesce(
+      public.get_last_z_report_boundary(p_store_id),
+      '-infinity'::timestamptz
+    )
+    and shift.opened_at <= v_period_to
+    and not exists (
+      select 1
+      from public.z_reported_shifts reported
+      where reported.store_id = shift.store_id
+        and reported.shift_id = shift.id
+    );
 
   select count(*)::integer,
          coalesce(sum(order_record.total_millimes), 0)::bigint,
@@ -216,11 +230,9 @@ begin
   select coalesce(sum(tab.amount_millimes), 0)::bigint
   into v_cash_refunds
   from public.tabs tab
-  join public.shifts shift on shift.id = tab.shift_id
   where tab.store_id = p_store_id and tab.kind = 'reversal'
     and tab.payment_method = 'cash'
-    and tab.created_at between v_period_from and v_period_to
-    and shift.closed_at < tab.created_at;
+    and tab.created_at between v_period_from and v_period_to;
   v_cash_refunds := coalesce(v_cash_refunds, 0);
 
   select count(*)::integer, coalesce(sum(order_record.total_millimes), 0)::bigint
@@ -323,7 +335,40 @@ declare
   v_next_z_report public.reports%rowtype;
   v_snapshot jsonb;
   v_next_business_date date;
+  v_day_status jsonb;
+  v_record_report_definition text;
+  v_lock_position integer;
+  v_boundary_position integer;
 begin
+  if (select data_type from information_schema.columns
+      where table_schema = 'public' and table_name = 'reports' and column_name = 'period_from')
+      is distinct from 'timestamp with time zone'
+    or (select data_type from information_schema.columns
+      where table_schema = 'public' and table_name = 'reports' and column_name = 'period_to')
+      is distinct from 'timestamp with time zone'
+    or (select data_type from information_schema.columns
+      where table_schema = 'public' and table_name = 'stores' and column_name = 'day_closed_on')
+      is distinct from 'date' then
+    raise exception 'Report boundaries must preserve timestamps while store day_closed_on remains a date.';
+  end if;
+  v_record_report_definition := pg_get_functiondef('public.record_report(jsonb,text)'::regprocedure);
+  v_lock_position := strpos(v_record_report_definition, '  for update;');
+  v_boundary_position := strpos(
+    v_record_report_definition,
+    'previous_z_at := public.get_last_z_report_boundary'
+  );
+  if v_lock_position = 0 or v_boundary_position = 0 or v_lock_position >= v_boundary_position
+    or not exists (
+      select 1
+      from pg_catalog.pg_constraint constraint_record
+      where constraint_record.conrelid = 'public.z_reported_shifts'::regclass
+        and constraint_record.contype = 'p'
+        and pg_catalog.pg_get_constraintdef(constraint_record.oid)
+          = 'PRIMARY KEY (store_id, shift_id)'
+    ) then
+    raise exception 'Z submissions must lock the store before boundary checks and retain unique shift claims.';
+  end if;
+
   select * into flow
   from shift_report_audit_context
   order by store_id
@@ -351,6 +396,34 @@ begin
     v_staff_shift, pg_temp.shift_audit_order_items(flow.item_id), 'tab', flow.customer_id
   )->'order'->>'id')::uuid;
   perform public.settle_customer_tab(flow.customer_id, 500, v_staff_shift, 'cash', 'Audit settlement');
+  v_tab_payment := (public.settle_customer_tab(
+    flow.customer_id, 100, v_staff_shift, 'cash', 'Same-shift test settlement'
+  )).id;
+  perform set_config('request.jwt.claim.sub', flow.owner_id::text, true);
+  perform set_config('request.jwt.claim.role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', flow.owner_id, 'role', 'authenticated', 'session_id', flow.owner_session_id
+  )::text, true);
+  perform public.reverse_tab_payment(v_tab_payment, '1234', 'Same-shift test reversal');
+  perform set_config('request.jwt.claim.sub', flow.staff_id::text, true);
+  perform set_config('request.jwt.claim.role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', flow.staff_id, 'role', 'authenticated', 'session_id', flow.session_id
+  )::text, true);
+  v_tab_payment := (public.settle_customer_tab(
+    flow.customer_id, 100, v_staff_shift, 'cash', 'Same-shift snapshot settlement'
+  )).id;
+  perform set_config('request.jwt.claim.sub', flow.owner_id::text, true);
+  perform set_config('request.jwt.claim.role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', flow.owner_id, 'role', 'authenticated', 'session_id', flow.owner_session_id
+  )::text, true);
+  perform public.reverse_tab_payment(v_tab_payment, '1234', 'Same-shift snapshot reversal');
+  perform set_config('request.jwt.claim.sub', flow.staff_id::text, true);
+  perform set_config('request.jwt.claim.role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', flow.staff_id, 'role', 'authenticated', 'session_id', flow.session_id
+  )::text, true);
   if public.get_shift_expected_cash(v_staff_shift) <> 6600 then
     raise exception 'Cash expected must include float, cash sales, cash tab payments, cash in, and cash out.';
   end if;
@@ -369,10 +442,26 @@ begin
     raise exception 'Stock must remain held, not restored, while a void is pending.';
   end if;
   perform public.close_shift(v_staff_shift, 5700, 'One hundred millimes over.');
+  if not exists (
+    select 1
+    from public.shift_reversal_snapshots snapshot
+    where snapshot.shift_id = v_staff_shift
+      and snapshot.reversal_id = v_tab_payment
+  ) then
+    raise exception 'Same-shift reversal was not captured in the close snapshot.';
+  end if;
+  if not exists (
+    select 1
+    from public.shift_reversal_snapshots snapshot
+    where snapshot.shift_id = v_staff_shift
+      and snapshot.reversal_id = v_tab_payment
+  ) then
+    raise exception 'A pre-close reversal was not captured at shift close.';
+  end if;
   perform set_config('request.jwt.claim.sub', flow.owner_id::text, true);
   perform set_config('request.jwt.claim.role', 'authenticated', true);
   perform set_config('request.jwt.claims', jsonb_build_object(
-    'sub', flow.owner_id, 'role', 'authenticated'
+    'sub', flow.owner_id, 'role', 'authenticated', 'session_id', flow.owner_session_id
   )::text, true);
   perform public.resolve_order_void(v_order_cash, 'reject', '', '');
   if public.get_shift_expected_cash(v_staff_shift) <> 6600 then
@@ -395,7 +484,7 @@ begin
   perform set_config('request.jwt.claim.sub', flow.owner_id::text, true);
   perform set_config('request.jwt.claim.role', 'authenticated', true);
   perform set_config('request.jwt.claims', jsonb_build_object(
-    'sub', flow.owner_id, 'role', 'authenticated'
+    'sub', flow.owner_id, 'role', 'authenticated', 'session_id', flow.owner_session_id
   )::text, true);
   perform public.resolve_order_void(v_order_approve, 'approve', 'Approved test void', '');
   if (select status from public.orders where id = v_order_approve) <> 'voided' then
@@ -414,11 +503,11 @@ begin
   perform set_config('request.jwt.claim.sub', flow.owner_id::text, true);
   perform set_config('request.jwt.claim.role', 'authenticated', true);
   perform set_config('request.jwt.claims', jsonb_build_object(
-    'sub', flow.owner_id, 'role', 'authenticated'
+    'sub', flow.owner_id, 'role', 'authenticated', 'session_id', flow.owner_session_id
   )::text, true);
   v_owner_shift := (public.open_shift(3000)).id;
   v_result := public.close_shift(v_owner_shift, 3000, null);
-  if (v_result->'shift'->>'difference_millimes' <> '0' then
+  if v_result->'shift'->>'difference_millimes' <> '0' then
     raise exception 'An owner-opened zero-difference shift did not close at zero.';
   end if;
 
@@ -442,7 +531,7 @@ begin
   perform set_config('request.jwt.claim.sub', flow.owner_id::text, true);
   perform set_config('request.jwt.claim.role', 'authenticated', true);
   perform set_config('request.jwt.claims', jsonb_build_object(
-    'sub', flow.owner_id, 'role', 'authenticated'
+    'sub', flow.owner_id, 'role', 'authenticated', 'session_id', flow.owner_session_id
   )::text, true);
   v_result := public.force_close_shift(v_force_shift, '1234');
   if v_result->'shift'->>'difference_millimes' <> '0'
@@ -478,7 +567,8 @@ begin
   perform set_config('request.jwt.claim.sub', report_store.owner_id::text, true);
   perform set_config('request.jwt.claim.role', 'authenticated', true);
   perform set_config('request.jwt.claims', jsonb_build_object(
-    'sub', report_store.owner_id, 'role', 'authenticated'
+    'sub', report_store.owner_id, 'role', 'authenticated',
+    'session_id', report_store.owner_session_id
   )::text, true);
 
   v_snapshot := pg_temp.shift_audit_z_snapshot(report_store.store_id, 0, null);
@@ -516,7 +606,8 @@ begin
   perform set_config('request.jwt.claim.sub', report_store.owner_id::text, true);
   perform set_config('request.jwt.claim.role', 'authenticated', true);
   perform set_config('request.jwt.claims', jsonb_build_object(
-    'sub', report_store.owner_id, 'role', 'authenticated'
+    'sub', report_store.owner_id, 'role', 'authenticated',
+    'session_id', report_store.owner_session_id
   )::text, true);
   perform public.void_order_with_pin(v_pin_void_order, 'PIN void on closed shift', '1234');
   if public.get_shift_expected_cash(v_z_shift) <> 500
@@ -562,7 +653,8 @@ begin
   perform set_config('request.jwt.claim.sub', report_store.owner_id::text, true);
   perform set_config('request.jwt.claim.role', 'authenticated', true);
   perform set_config('request.jwt.claims', jsonb_build_object(
-    'sub', report_store.owner_id, 'role', 'authenticated'
+    'sub', report_store.owner_id, 'role', 'authenticated',
+    'session_id', report_store.owner_session_id
   )::text, true);
   perform public.force_close_day('1234');
   if exists (select 1 from public.shifts where store_id = report_store.store_id and status = 'open')
@@ -605,13 +697,17 @@ begin
     or (v_z_report.data->>'cashFloatMillimes')::bigint <> 500
     or (v_z_report.data->>'expectedCashExFloatMillimes')::bigint <> 0
     or (v_z_report.data->>'countedCashMillimes')::bigint <> 0
-    or (v_z_report.data->>'countedCashIncludesFloat')::boolean
+    or (v_z_report.data->>'countedCashIncludesFloat')::boolean is distinct from false
     or (v_z_report.data->>'totalDifferenceMillimes')::bigint <> 1000
     or (v_z_report.data->>'cashRefundsMillimes')::bigint <> 500
     or (v_z_report.data->>'expectedCardMillimes')::bigint <> 1100
     or (v_z_report.data->>'countedCardMillimes')::bigint <> 1100
     or (v_z_report.data->>'expectedOtherMillimes')::bigint <> 1200
     or (v_z_report.data->>'countedOtherMillimes')::bigint <> 1200
+    or v_z_report.period_to is distinct from
+      public.try_parse_z_report_timestamp(v_z_report.data->>'periodTo')
+    or (select count(*) from public.z_reported_shifts
+        where store_id = report_store.store_id and shift_id = v_z_shift) <> 1
     or not exists (
       select 1 from jsonb_array_elements(v_z_report.data->'shifts') line
       where (line->>'forceClosedByOwner')::boolean
@@ -619,6 +715,61 @@ begin
     ) then
     raise exception 'Z after force-close did not reconcile to the stored snapshot.';
   end if;
+  if exists (
+    with snapshot_shifts as (
+      select
+        report.store_id,
+        report.id as report_id,
+        report.created_at,
+        case
+          when line->>'shiftId' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+            then (line->>'shiftId')::uuid
+          else null
+        end as shift_id
+      from public.reports report
+      cross join lateral jsonb_array_elements(
+        case
+          when jsonb_typeof(report.data->'shifts') = 'array' then report.data->'shifts'
+          else '[]'::jsonb
+        end
+      ) line
+      where report.type = 'Z'
+    ),
+    ranked_shifts as (
+      select snapshot_shifts.*,
+        row_number() over (
+          partition by snapshot_shifts.store_id, snapshot_shifts.shift_id
+          order by snapshot_shifts.created_at, snapshot_shifts.report_id
+        ) as assignment_order
+      from snapshot_shifts
+      join public.shifts shift
+        on shift.id = snapshot_shifts.shift_id
+        and shift.store_id = snapshot_shifts.store_id
+      where snapshot_shifts.shift_id is not null
+    )
+    select 1
+    from ranked_shifts ranked
+    left join public.z_reported_shifts reported
+      on reported.store_id = ranked.store_id
+      and reported.shift_id = ranked.shift_id
+    where ranked.assignment_order = 1
+      and reported.report_id is distinct from ranked.report_id
+  ) then
+    raise exception 'Every historical Z shift must be claimed by its earliest report only.';
+  end if;
+
+  v_day_status := public.get_business_day_status(report_store.store_id);
+  if v_day_status->>'dayIsClosed' is distinct from 'true'
+    or v_day_status->>'hasActivity' is distinct from 'false' then
+    raise exception 'Business-day status did not use the exact latest Z boundary.';
+  end if;
+  begin
+    insert into public.z_reported_shifts (store_id, shift_id, report_id, reported_at)
+    values (report_store.store_id, v_z_shift, v_z_report.id, now());
+    raise exception 'A previously Z-reported shift was claimable again.';
+  exception when unique_violation then
+    null;
+  end;
 
   begin
     update public.orders set note = 'mutated after Z' where id = v_pending_order;
@@ -688,8 +839,28 @@ begin
   perform set_config('request.jwt.claim.sub', report_store.owner_id::text, true);
   perform set_config('request.jwt.claim.role', 'authenticated', true);
   perform set_config('request.jwt.claims', jsonb_build_object(
-    'sub', report_store.owner_id, 'role', 'authenticated'
+    'sub', report_store.owner_id, 'role', 'authenticated',
+    'session_id', report_store.owner_session_id
   )::text, true);
+  v_day_status := public.get_business_day_status(report_store.store_id);
+  if v_day_status->>'dayIsClosed' is distinct from 'false'
+    or v_day_status->>'hasActivity' is distinct from 'true' then
+    raise exception 'Business-day status did not recognize the newly opened shift.';
+  end if;
+  v_snapshot := pg_temp.shift_audit_z_snapshot(report_store.store_id, 1000, null, 0, 0);
+  v_snapshot := jsonb_set(
+    v_snapshot,
+    '{shifts,0,shiftId}',
+    '"malformed-shift-id"'::jsonb
+  );
+  begin
+    perform public.record_report(v_snapshot, '1234');
+    raise exception 'Z unexpectedly accepted a malformed shift UUID.';
+  exception when others then
+    if position('Report shift IDs must be valid UUIDs.' in sqlerrm) = 0 then
+      raise;
+    end if;
+  end;
   v_snapshot := pg_temp.shift_audit_z_snapshot(report_store.store_id, 1000, null, 0, 0);
   select public.record_report(v_snapshot, '1234') into v_next_z_report;
   if v_next_z_report.z_number <> 2
@@ -697,6 +868,8 @@ begin
     or (v_next_z_report.data->>'periodFrom')::timestamptz is distinct from (
       select opened_at from public.shifts where id = v_next_z_shift
     )
+    or v_next_z_report.period_to is distinct from
+      public.try_parse_z_report_timestamp(v_next_z_report.data->>'periodTo')
     or jsonb_array_length(v_next_z_report.data->'shifts') <> 1
     or (v_next_z_report.data->'shifts'->0->>'shiftId')::uuid <> v_next_z_shift
     or not exists (
@@ -707,7 +880,7 @@ begin
   end if;
   v_z_report := v_next_z_report;
 
-  select (coalesce(report.period_to, report.created_at) at time zone store.timezone)::date + 1
+  select (public.get_last_z_report_boundary(report.store_id) at time zone store.timezone)::date + 1
   into v_next_business_date
   from public.reports report
   join public.stores store on store.store_id = report.store_id
@@ -719,7 +892,7 @@ begin
   )::text, true);
   v_z_shift := (public.open_shift(0)).id;
   update public.shifts set opened_at = (
-    select coalesce(report.period_to, report.created_at) + interval '1 day'
+    select public.get_last_z_report_boundary(report.store_id) + interval '1 day'
     from public.reports report where report.id = v_z_report.id
   ) where id = v_z_shift;
   if public.get_current_business_date(report_store.store_id) <> v_next_business_date

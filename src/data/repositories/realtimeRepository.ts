@@ -2,7 +2,7 @@ import { isSupabaseDriver } from '../driver';
 import { getSupabaseClient } from '../supabaseClient';
 import { invalidateQueryCache } from '../../lib/queryCache';
 
-export type StoreRealtimeTable = 'orders' | 'shifts' | 'notifications' | 'catalog_items' | 'categories' | 'stores' | 'store_settings';
+export type StoreRealtimeTable = 'orders' | 'shifts' | 'notifications' | 'reports' | 'catalog_items' | 'categories' | 'stores' | 'store_settings';
 
 export function subscribeToStoreChanges(
   storeId: string,

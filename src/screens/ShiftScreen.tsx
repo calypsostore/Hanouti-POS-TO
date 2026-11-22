@@ -26,7 +26,7 @@ import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository
 import { useFocusRefreshKey } from '../lib/useFocusRefreshKey';
 import { reportService, type ReportDayStatus } from '../services/reportService';
 import { ReportView } from '../components/ReportView';
-import type { ReportRecord, ReportShiftLine } from '../types/domain';
+import type { ReportRecord, ReportShiftLine, UnresolvedTabReversalRecord } from '../types/domain';
 import type { OrderRecord } from '../types/domain';
 import { Link } from 'react-router-dom';
 import { parseNonNegativeMillimes } from '../lib/millimes';
@@ -43,6 +43,8 @@ const emptyShiftBreakdown: ShiftCloseBreakdown = {
   otherSalesMillimes: 0,
   tabSalesMillimes: 0,
   tabPaymentsMillimes: 0,
+  cardTabPaymentsMillimes: 0,
+  otherTabPaymentsMillimes: 0,
   voidsMillimes: 0,
   pendingVoidCount: 0,
   compsMillimes: 0,
@@ -134,6 +136,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const [zPendingVoids, setZPendingVoids] = useState({ count: 0, totalMillimes: 0 });
   const [zReviewed, setZReviewed] = useState(false);
   const [zShiftLines, setZShiftLines] = useState<ReportShiftLine[]>([]);
+  const [zUnresolvedReversals, setZUnresolvedReversals] = useState<UnresolvedTabReversalRecord[]>([]);
   const [zStep, setZStep] = useState<0 | 1 | 2>(1);
   const [zBusy, setZBusy] = useState(false);
   const [zNote, setZNote] = useState('');
@@ -174,8 +177,35 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     setCanCashInOut(cashPermission);
     setCanOpenCloseShift(shiftPermission);
     setCanPrintOwnX(xPermission);
-    setDayStatus(nextDayStatus);
     if (ownerMode) setArchiveReports(nextReports);
+    if (ownerMode) {
+      const latestZ = nextReports
+        .filter((report) => report.type === 'Z')
+        .sort((left, right) =>
+          (right.periodTo ?? right.createdAt).localeCompare(left.periodTo ?? left.createdAt) ||
+          right.id.localeCompare(left.id),
+        )[0];
+      const boundary = latestZ?.periodTo ?? latestZ?.createdAt;
+      const hasActivityAfterZ = latestZ
+        ? nextShifts.some((shift) => new Date(shift.openedAt).getTime() >
+          new Date(boundary!).getTime())
+        : false;
+      setDayStatus(latestZ && !hasActivityAfterZ && allOrders.every((order) => order.status !== 'pending_void')
+        ? {
+          dayIsClosed: true,
+          hasActivity: false,
+          openShiftCount: 0,
+          periodFrom: latestZ.periodFrom,
+          lastZBoundary: boundary,
+          lastZ: {
+            reportNumber: latestZ.reportNumber ?? `Z-${String(latestZ.zNumber ?? 0).padStart(6, '0')}`,
+            createdAt: latestZ.createdAt,
+          },
+        }
+        : nextDayStatus);
+    } else {
+      setDayStatus(nextDayStatus);
+    }
     const breakdowns = await Promise.all(nextShifts.filter((shift) => shift.status === 'open')
       .map(async (shift) => {
         const [sales, pendingVoidCount] = await Promise.all([
@@ -198,7 +228,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     }).finally(() => setLoading(false));
   }, [refresh, refreshKey]);
 
-  useEffect(() => subscribeToStoreChanges(storeId, ['orders', 'shifts', 'notifications'], () => {
+  useEffect(() => subscribeToStoreChanges(storeId, ['orders', 'shifts', 'notifications', 'reports', 'stores'], () => {
     void refresh().catch((loadError: unknown) => {
       console.error('Unable to refresh shifts after a live update.', loadError);
       setError(t('common.refreshFailed'));
@@ -316,6 +346,20 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
 
   async function openZCloseDialog(forceEverything = false) {
     setError('');
+    try {
+      const latestDayStatus = await reportService.getDayStatus(storeId);
+      setDayStatus(latestDayStatus);
+      if (latestDayStatus.dayIsClosed) {
+        setZSheetOpen(false);
+        setNotice(latestDayStatus.lastZ
+          ? `${latestDayStatus.lastZ.reportNumber} is already closed. Open a new shift to start another period.`
+          : 'The Z reporting period is already closed.');
+        return;
+      }
+    } catch (statusError) {
+      setError(statusError instanceof Error ? statusError.message : 'Unable to verify whether the Z reporting period is closed.');
+      return;
+    }
     setOwnerPin('');
     setZCountedCash('');
     setZCountedCard('');
@@ -330,6 +374,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     setZPendingVoids({ count: 0, totalMillimes: 0 });
     setZReviewed(false);
     setZShiftLines([]);
+    setZUnresolvedReversals([]);
     setZStep(1);
     setZNote('');
     if (forceEverything) {
@@ -404,6 +449,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       setZVoids({ count: live.voids.count, totalMillimes: live.voids.totalMillimes });
       setZPendingVoids({ count: live.pendingVoids.count, totalMillimes: live.pendingVoids.totalMillimes });
       setZShiftLines(live.shiftLines.filter((shift) => shift.status === 'closed'));
+      setZUnresolvedReversals(live.unresolvedTabReversals ?? []);
       setZReviewed(false);
       setZStep(2);
     } catch (pinError) {
@@ -415,6 +461,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
 
   async function closeDayWithZ() {
     if (!user) return;
+    if (zBusy) return;
     setError('');
     if (!zReviewed) {
       setZReviewed(true);
@@ -422,6 +469,14 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     }
     setZBusy(true);
     try {
+      const latestDayStatus = await reportService.getDayStatus(storeId);
+      setDayStatus(latestDayStatus);
+      if (latestDayStatus.dayIsClosed) {
+        throw new Error('This Z reporting period is already closed. A duplicate Z report was not created.');
+      }
+      if (zUnresolvedReversals.length > 0) {
+        throw new Error('Resolve every ambiguous tab reversal before closing the Z report.');
+      }
       if (!ownerPin || !/^\d{4}$/.test(ownerPin)) throw new Error('Owner PIN is required for every Z report.');
       const countedCashMillimes = parseMillimes(zCountedCash);
       const countedCardMillimes = parseMillimes(zCountedCard);
@@ -447,7 +502,22 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       setZReviewed(false);
       setZSheetOpen(false);
       setReportPreview(report);
-      await refresh();
+      setDayStatus({
+        dayIsClosed: true,
+        hasActivity: false,
+        openShiftCount: 0,
+        periodFrom: report.periodFrom,
+        lastZBoundary: report.periodTo,
+        lastZ: {
+          reportNumber: report.reportNumber ?? `Z-${String(report.zNumber ?? 0).padStart(6, '0')}`,
+          createdAt: report.createdAt,
+        },
+      });
+      try {
+        await refresh();
+      } catch (refreshError) {
+        setError(`Z report was saved, but the screen could not refresh: ${refreshError instanceof Error ? refreshError.message : 'Unknown refresh error'}`);
+      }
       setNotice('Z report created and the business day closed.');
     } catch (reportError) {
       setError(reportError instanceof Error ? reportError.message : 'Unable to close the business day.');
@@ -823,6 +893,16 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             </label>
             <Keypad onPress={(digit) => setOwnerPin((current) => current.length < 4 ? `${current}${digit}` : current)} onClear={() => setOwnerPin('')} onBackspace={() => setOwnerPin((current) => current.slice(0, -1))} />
             {error && <p role="alert" className="rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
+            {zUnresolvedReversals.length > 0 && (
+              <section role="alert" className="rounded-xl bg-warning-container p-3 text-on-warning-container">
+                <h3 className="font-display text-title-sm">Unresolved tab reversals — excluded from verified totals</h3>
+                {zUnresolvedReversals.map((reversal) => (
+                  <p key={reversal.reversalId} className="mt-1 font-body text-body-sm">
+                    {reversal.paymentMethod.toUpperCase()} · {formatTnd(reversal.amountMillimes / 1000)} DT · Reversal {reversal.reversalId} · Settlement {reversal.originalSettlementId}
+                  </p>
+                ))}
+              </section>
+            )}
             <div className="sheet-action-bar grid grid-cols-2 gap-2">
               <Button type="button" variant="ghost" onClick={() => setZSheetOpen(false)}>Cancel</Button>
               <Button type="submit" variant="danger" disabled={zBusy || ownerPin.length !== 4 || !forceEverythingConfirmed}>

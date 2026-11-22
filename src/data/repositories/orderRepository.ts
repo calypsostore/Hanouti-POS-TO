@@ -258,15 +258,70 @@ export async function getShiftBreakdown(shiftId: string): Promise<{
   otherSalesMillimes: number;
   tabSalesMillimes: number;
   tabPaymentsMillimes: number;
+  cardTabPaymentsMillimes: number;
+  otherTabPaymentsMillimes: number;
   voidsMillimes: number;
 }> {
   const client = getSupabaseClient();
-  const [{ data: orders, error: orderError }, { data: tabs, error: tabError }] = await Promise.all([
+  const [
+    { data: orders, error: orderError },
+    { data: tabs, error: tabError },
+    { data: shiftRow, error: shiftError },
+  ] = await Promise.all([
     client.from('orders').select('status, payment_method, total_millimes').eq('shift_id', shiftId),
-    client.from('tabs').select('kind, payment_method, amount_millimes').eq('shift_id', shiftId),
+    client.from('tabs').select('id, kind, payment_method, amount_millimes, created_at').eq('shift_id', shiftId),
+    client.from('shifts').select('status').eq('id', shiftId).maybeSingle(),
   ]);
   if (orderError) reportWorkflowError(orderError, 'Could not calculate shift sales');
   if (tabError) reportWorkflowError(tabError, 'Could not calculate shift tab payments');
+  if (shiftError) reportWorkflowError(shiftError, 'Could not calculate shift status');
+  let tabPaymentsMillimes = 0;
+  for (const tab of tabs ?? []) {
+    if (tab.kind === 'issued') continue;
+    if (tab.payment_method !== 'cash') continue;
+    if (tab.kind === 'settled') {
+      tabPaymentsMillimes += Number(tab.amount_millimes);
+      continue;
+    }
+    if (tab.kind === 'reversal') {
+      if (shiftRow?.status === 'open') {
+        tabPaymentsMillimes -= Number(tab.amount_millimes);
+        continue;
+      }
+      const { data: included, error: inclusionError } = await client.rpc(
+        'is_tab_reversal_included_in_shift_close',
+        { p_reversal_id: tab.id, p_reversal_shift_id: shiftId },
+      );
+      if (inclusionError) reportWorkflowError(inclusionError, 'Could not calculate reversal close inclusion');
+      if (included === true) tabPaymentsMillimes -= Number(tab.amount_millimes);
+    }
+  }
+  let cardTabPaymentsMillimes = 0;
+  let otherTabPaymentsMillimes = 0;
+  for (const tab of tabs ?? []) {
+    if (tab.kind === 'issued') continue;
+    if (tab.kind === 'settled') {
+      if (tab.payment_method === 'card') cardTabPaymentsMillimes += Number(tab.amount_millimes);
+      if (tab.payment_method === 'other') otherTabPaymentsMillimes += Number(tab.amount_millimes);
+      continue;
+    }
+    if (tab.kind === 'reversal') {
+      if (shiftRow?.status === 'open') {
+        if (tab.payment_method === 'card') cardTabPaymentsMillimes -= Number(tab.amount_millimes);
+        if (tab.payment_method === 'other') otherTabPaymentsMillimes -= Number(tab.amount_millimes);
+        continue;
+      }
+      const { data: included, error: inclusionError } = await client.rpc(
+        'is_tab_reversal_included_in_shift_close',
+        { p_reversal_id: tab.id, p_reversal_shift_id: shiftId },
+      );
+      if (inclusionError) reportWorkflowError(inclusionError, 'Could not calculate reversal close inclusion');
+      if (included === true) {
+        if (tab.payment_method === 'card') cardTabPaymentsMillimes -= Number(tab.amount_millimes);
+        if (tab.payment_method === 'other') otherTabPaymentsMillimes -= Number(tab.amount_millimes);
+      }
+    }
+  }
   return (orders ?? []).reduce((result, order) => {
     if (order.status === 'voided') {
       result.voidsMillimes += Number(order.total_millimes);
@@ -286,12 +341,9 @@ export async function getShiftBreakdown(shiftId: string): Promise<{
     cardSalesMillimes: 0,
     otherSalesMillimes: 0,
     tabSalesMillimes: 0,
-    tabPaymentsMillimes: (tabs ?? []).reduce((sum, tab) => {
-      if (tab.payment_method !== 'cash') return sum;
-      if (tab.kind === 'settled') return sum + Number(tab.amount_millimes);
-      if (tab.kind === 'reversal') return sum - Number(tab.amount_millimes);
-      return sum;
-    }, 0),
+    tabPaymentsMillimes,
+    cardTabPaymentsMillimes,
+    otherTabPaymentsMillimes,
     voidsMillimes: 0,
   });
 }

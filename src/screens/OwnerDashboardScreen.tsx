@@ -76,6 +76,8 @@ const emptySummary: DashboardSummary = {
   cashInMillimes: 0,
   cashOutMillimes: 0,
   cashRefundsMillimes: 0,
+  ambiguousTabReversalIds: [],
+  unresolvedTabReversals: [],
   cashMovements: [],
   employeeBreakdown: [],
   salesByDay: [],
@@ -335,6 +337,18 @@ function OwnerDashboardContent() {
         <SummaryCard icon="receipt_long" label={`Orders · ${t(periodLabels[period])}`} value={String(summary.orderCount)} tone="teal" />
         <SummaryCard icon="price_change" label={`${t('owner.cashDifferences')} · ${t(periodLabels[period])}`} value={formatSignedAmount(summary.cashDifferenceMillimes)} tone={summary.cashDifferenceMillimes === 0 ? 'green' : 'amber'} />
       </StatGrid>
+      {summary.unresolvedTabReversals && summary.unresolvedTabReversals.length > 0 && (
+        <section role="alert" className="mt-4 rounded-2xl bg-warning-container p-4 text-on-warning-container">
+          <h2 className="font-display text-headline-sm">Unresolved tab reversals — excluded from verified totals</h2>
+          <div className="mt-2 flex flex-col gap-1">
+            {summary.unresolvedTabReversals.map((reversal) => (
+              <p key={reversal.reversalId} className="font-body text-body-sm">
+                {reversal.paymentMethod.toUpperCase()} · {formatTnd(reversal.amountMillimes / 1000)} DT · Reversal {reversal.reversalId} · Settlement {reversal.originalSettlementId}
+              </p>
+            ))}
+          </div>
+        </section>
+      )}
 
       {renderTargetCard('lg:hidden')}
 

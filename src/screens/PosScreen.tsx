@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { createLatestRequestGuard } from '../lib/requestGuard';
 import { BottomNav } from '../components/BottomNav';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
@@ -147,6 +148,7 @@ export function PosScreen() {
   const [compError, setCompError] = useState('');
   const [staffDrinkAllowance, setStaffDrinkAllowance] = useState<StaffDrinkAllowance | null>(null);
   const undoTimeoutRef = useRef<number | undefined>(undefined);
+  const refreshGuardRef = useRef(createLatestRequestGuard());
   const orderIdempotencyKeyRef = useRef<string | undefined>(undefined);
   const pendingOrderSubmissionsRef = useRef(new Set<string>());
   const syncedOrdersRef = useRef(new Map<string, OrderRecord>());
@@ -178,20 +180,31 @@ export function PosScreen() {
   }
 
   useEffect(() => {
+    let active = true;
     const refresh = async () => {
+      const requestGeneration = refreshGuardRef.current.begin();
       setCatalogLoading(true);
       setCatalogError('');
       setCustomerCreditUnavailable(false);
       try {
-        const [items, categories, shift, currentStore, todaysOrders, customerList, nextDayStatus] = await Promise.all([
+        const [items, categories, shift, currentStore, todaysOrders, nextDayStatus] = await Promise.all([
           catalogService.listItems(storeId),
           catalogService.listCategories(storeId),
           user ? shiftService.getOpenShiftForUser(storeId, user.id) : Promise.resolve(undefined),
           storeId ? userService.getStore(storeId) : Promise.resolve(undefined),
           orderService.listTodaySummaries(storeId),
-          storeId ? customerService.listCustomers(storeId) : Promise.resolve([]),
           reportService.getDayStatus(storeId),
         ]);
+        if (!active || !refreshGuardRef.current.isLatest(requestGeneration)) return;
+
+        let customerList: CustomerRecord[] = [];
+        try {
+          customerList = storeId ? await customerService.listCustomers(storeId) : [];
+        } catch (customerError) {
+          console.error('Unable to load POS customers; the catalog remains available.', customerError);
+        }
+        if (!active || !refreshGuardRef.current.isLatest(requestGeneration)) return;
+
         const permissionSet = new Set(permissions);
         const permission = user?.role === 'owner' || permissionSet.has('86_items');
         const compPermission = user?.role === 'owner' || permissionSet.has('comp_items');
@@ -313,6 +326,8 @@ export function PosScreen() {
       });
     });
     return () => {
+      active = false;
+      refreshGuardRef.current.begin();
       unsubscribe();
       unsubscribeStoreSettings();
       window.removeEventListener('focus', onFocus);

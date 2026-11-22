@@ -10,7 +10,7 @@ import { isSupabaseDriver } from '../data/driver';
 import { fetchCachedQuery, invalidateQueryCache } from '../lib/queryCache';
 import { createOwnerAccount, createStaff, resetPassword } from '../data/repositories/accountRepository';
 import { getPermissionOverrides, getProfile, listProfiles } from '../data/repositories/profileRepository';
-import { getStore as getRemoteStore, listStores as listRemoteStores } from '../data/repositories/storeRepository';
+import { getStore as getRemoteStore, getSuperAdminStoreOverview, listStores as listRemoteStores } from '../data/repositories/storeRepository';
 import { formatStaffUsername, generateStoreCode, migrateLegacyDemoStoreIdentity } from './accountIdentity';
 import { isProfileAvatarId } from '../data/profileAvatars';
 
@@ -170,6 +170,28 @@ async function logUserMutation(input: {
 }
 
 export const userService = {
+  async getSuperAdminStoreOverview(search = '', limit = 100, offset = 0) {
+    if (!isSupabaseDriver()) {
+      const stores = await this.listStores();
+      return stores
+        .filter((store) => !search || `${store.name} ${store.code}`.toLowerCase().includes(search.toLowerCase()))
+        .slice(offset, offset + limit)
+        .map((store) => ({
+          storeId: store.id,
+          ownerId: store.ownerId || null,
+          code: store.code,
+          name: store.name,
+          isActive: store.isActive,
+          archivedAt: store.archivedAt ?? null,
+          subscriptionPaidUntil: store.subscription?.paidUntil ?? null,
+          todayOrderCount: 0,
+          todaySalesMillimes: 0,
+          openShiftCount: 0,
+          totalCount: stores.length,
+        }));
+    }
+    return getSuperAdminStoreOverview(search, limit, offset);
+  },
   async listUsers(storeId?: string): Promise<UserSummary[]> {
     if (isSupabaseDriver()) {
       const users = await listProfiles(storeId);

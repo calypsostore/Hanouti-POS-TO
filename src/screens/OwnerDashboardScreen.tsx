@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { CardGrid, PageHeader, StatGrid } from '../components/layout';
@@ -21,6 +21,7 @@ import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository
 import { shareCustomerStatement } from '../services/customerStatementShare';
 import { catalogService } from '../services/catalogService';
 import { useAuthStore } from '../stores/authStore';
+import { createLatestRequestGuard } from '../lib/requestGuard';
 import type { CustomerStatementData, OverdueCustomerRecord } from '../services/customerService';
 import type { CatalogItemRecord, NotificationRecord, ShiftRecord, StoreRecord, UserSummary } from '../types/domain';
 
@@ -92,6 +93,7 @@ const emptySummary: DashboardSummary = {
 
 function OwnerDashboardContent() {
   const user = useAuthStore((state) => state.user);
+  const refreshGuardRef = useRef(createLatestRequestGuard());
   const navigate = useNavigate();
   const storeId = user?.storeId ?? '';
   const cacheRevision = useQueryCacheRefresh(['catalog_items', 'categories', 'stores', 'store_settings']);
@@ -117,37 +119,60 @@ function OwnerDashboardContent() {
   useEffect(() => {
     let active = true;
     async function loadDashboard() {
+      const requestGeneration = refreshGuardRef.current.begin();
       setLoading(true);
       setLoadError('');
       try {
-        const [nextSummary, allUsers, nextStore, nextOverdueCustomers, nextCatalogItems, nextDayStatus, nextOpenShifts] = await Promise.all([
+        const critical = await Promise.allSettled([
           reportService.getDashboard(storeId, period),
           userService.listUsers(storeId),
           userService.getStore(storeId),
-          customerService.listOverdueCustomers(storeId),
           catalogService.listItems(storeId),
           reportService.getDayStatus(storeId),
           shiftService.listOpenShifts(storeId),
         ]);
+        if (!active || !refreshGuardRef.current.isLatest(requestGeneration)) return;
+        const [summaryResult, usersResult, storeResult, catalogResult, dayStatusResult, openShiftsResult] = critical;
         if (!active) return;
-        setSummary(nextSummary);
-        setDayStatus(nextDayStatus);
-        setRunningShifts(nextOpenShifts);
-        setStaff(allUsers.filter((member) => member.role === 'staff'));
-        setCatalogItems(nextCatalogItems);
-        setStore(nextStore);
-        setOverdueCustomers(nextOverdueCustomers);
+        if (summaryResult.status === 'fulfilled') setSummary(summaryResult.value);
+        if (usersResult.status === 'fulfilled') setStaff(usersResult.value.filter((member) => member.role === 'staff'));
+        if (storeResult.status === 'fulfilled') setStore(storeResult.value);
+        if (catalogResult.status === 'fulfilled') setCatalogItems(catalogResult.value);
+        if (dayStatusResult.status === 'fulfilled') setDayStatus(dayStatusResult.value);
+        if (openShiftsResult.status === 'fulfilled') setRunningShifts(openShiftsResult.value);
+        const criticalFailure = critical.find((result) =>
+          result.status === 'rejected' &&
+          (result.reason instanceof Error && /dashboard|report|store|catalog|shift/i.test(result.reason.message)),
+        );
+        if (criticalFailure) {
+          setLoadError('Some dashboard information could not be loaded. Available information remains visible.');
+        }
+
+        try {
+          const nextOverdueCustomers = await customerService.listOverdueCustomers(storeId);
+          if (active && refreshGuardRef.current.isLatest(requestGeneration)) setOverdueCustomers(nextOverdueCustomers);
+        } catch (overdueError) {
+          console.error('Unable to load overdue customers; dashboard remains available.', overdueError);
+        }
 
         if (user?.role === 'owner') {
-          await notificationService.checkOverdueCustomers(storeId, user.id);
-          const notifications = await notificationService.listFor(user);
-          if (active) {
-            setOwnerNotifications(notifications.filter((notification) =>
-              notification.type === 'customer_overdue' || notification.type === 'stock_depleted' ||
-              notification.type === 'item_86' || notification.type === 'low_stock' ||
-              notification.type === 'cash_out_alert' || notification.type === 'cash_difference' ||
-              notification.type === 'void_requested' || notification.type === 'subscription_expiring',
-            ));
+          try {
+            await notificationService.checkOverdueCustomers(storeId, user.id);
+          } catch (notificationError) {
+            console.error('Unable to refresh owner notifications.', notificationError);
+          }
+          try {
+            const notifications = await notificationService.listFor(user);
+            if (active) {
+              setOwnerNotifications(notifications.filter((notification) =>
+                notification.type === 'customer_overdue' || notification.type === 'stock_depleted' ||
+                notification.type === 'item_86' || notification.type === 'low_stock' ||
+                notification.type === 'cash_out_alert' || notification.type === 'cash_difference' ||
+                notification.type === 'void_requested' || notification.type === 'subscription_expiring',
+              ));
+            }
+          } catch (notificationError) {
+            console.error('Unable to load owner notifications.', notificationError);
           }
         }
       } finally {
@@ -168,6 +193,7 @@ function OwnerDashboardContent() {
     const unsubscribe = subscribeToStoreChanges(storeId, ['orders', 'shifts', 'notifications', 'catalog_items', 'categories', 'stores', 'store_settings'], refresh);
     return () => {
       active = false;
+      refreshGuardRef.current.begin();
       unsubscribe();
       window.removeEventListener('focus', refresh);
     };

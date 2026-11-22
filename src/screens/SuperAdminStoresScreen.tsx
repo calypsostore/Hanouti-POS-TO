@@ -9,8 +9,6 @@ import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { useFocusRefreshKey } from '../lib/useFocusRefreshKey';
 import { adminWorkspaceLinks } from '../app/navigation';
 import { t } from '../i18n/translations';
-import { orderService } from '../services/orderService';
-import { shiftService } from '../services/shiftService';
 import { useAuthStore } from '../stores/authStore';
 import { isSubscriptionExpired, type StoreRecord, type StoreSubscription, type UserSummary } from '../types/domain';
 import { userService } from '../services/userService';
@@ -60,26 +58,16 @@ export function SuperAdminOverviewScreen() {
     let active = true;
     async function load() {
       try {
-        const allStores = await userService.listStores();
-        const visibleStores = allStores.filter((store) => !store.archivedAt);
-        const summaries = await Promise.all(visibleStores.map(async (store) => {
-          const [orders, shifts] = await Promise.all([
-            orderService.listToday(store.id),
-            shiftService.listShifts(store.id),
-          ]);
-          return {
-            orders,
-            hasOpenShift: shifts.some((shift) => shift.status === 'open'),
-          };
-        }));
+        const [allStores, overview] = await Promise.all([
+          userService.listStores(),
+          userService.getSuperAdminStoreOverview('', 500, 0),
+        ]);
         if (!active) return;
         setStores(allStores);
         setStats({
-          totalOrders: summaries.reduce((sum, summary) => sum + summary.orders.length, 0),
-          totalSales: summaries.reduce((sum, summary) => sum + summary.orders
-            .filter((order) => order.status === 'done')
-            .reduce((sales, order) => sales + order.totalMillimes, 0), 0),
-          noOpenShifts: summaries.filter((summary) => !summary.hasOpenShift).length,
+          totalOrders: overview.reduce((sum, store) => sum + store.todayOrderCount, 0),
+          totalSales: overview.reduce((sum, store) => sum + store.todaySalesMillimes, 0),
+          noOpenShifts: overview.filter((store) => store.openShiftCount === 0 && !store.archivedAt).length,
         });
         setError('');
       } catch (loadError) {
@@ -218,9 +206,10 @@ function SuperAdminStoresContent() {
 
   async function refresh() {
     const nextStores = await userService.listStores();
-    const ownerRecords = await Promise.all(nextStores.map((store) => userService.getUser(store.ownerId)));
+    const ownerRecords = await userService.listUsers();
+    const ownersById = new Map(ownerRecords.map((owner) => [owner.id, owner]));
     setStores(nextStores);
-    setOwners(Object.fromEntries(nextStores.map((store, index) => [store.ownerId, ownerRecords[index]])));
+    setOwners(Object.fromEntries(nextStores.map((store) => [store.ownerId, ownersById.get(store.ownerId)])));
   }
 
   useEffect(() => {

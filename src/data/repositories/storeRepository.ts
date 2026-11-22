@@ -102,3 +102,43 @@ export async function listStores(): Promise<StoreRecord[]> {
   const settingsByStoreId = new Map((settingsRows ?? []).map((row) => [row.store_id, row.settings as StoreSettings]));
   return rows.map((row) => mapStore(row as StoreRow, settingsByStoreId.get(row.store_id)));
 }
+
+export interface SuperAdminStoreOverviewRow {
+  storeId: string;
+  ownerId: string | null;
+  code: string;
+  name: string;
+  isActive: boolean;
+  archivedAt: string | null;
+  subscriptionPaidUntil: string | null;
+  todayOrderCount: number;
+  todaySalesMillimes: number;
+  openShiftCount: number;
+  totalCount: number;
+}
+
+export async function getSuperAdminStoreOverview(
+  search = '',
+  limit = 100,
+  offset = 0,
+): Promise<SuperAdminStoreOverviewRow[]> {
+  const { data, error } = await getSupabaseClient().rpc('get_super_admin_store_overview', {
+    p_search: search,
+    p_limit: Math.min(500, Math.max(1, limit)),
+    p_offset: Math.max(0, offset),
+  });
+  if (error) throw new Error(`Could not load the aggregated platform overview: ${error.message}`, { cause: error });
+  return ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+    storeId: String(row.store_id),
+    ownerId: row.owner_id == null ? null : String(row.owner_id),
+    code: String(row.code),
+    name: String(row.name),
+    isActive: Boolean(row.is_active),
+    archivedAt: row.archived_at == null ? null : String(row.archived_at),
+    subscriptionPaidUntil: row.subscription_paid_until == null ? null : String(row.subscription_paid_until),
+    todayOrderCount: Number(row.today_order_count),
+    todaySalesMillimes: Number(row.today_sales_millimes),
+    openShiftCount: Number(row.open_shift_count),
+    totalCount: Number(row.total_count),
+  }));
+}

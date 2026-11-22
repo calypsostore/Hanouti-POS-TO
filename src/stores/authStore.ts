@@ -10,6 +10,7 @@ import { userService } from '../services/userService';
 
 let authStateSubscription: { unsubscribe: () => void } | undefined;
 let permissionRefreshGeneration = 0;
+let authRefreshGeneration = 0;
 
 interface AuthState {
   user: UserSummary | null;
@@ -87,18 +88,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
   refreshCurrentUser: async () => {
+    const requestGeneration = ++authRefreshGeneration;
     try {
       const user = await authService.getCurrentUser();
-      const requestGeneration = ++permissionRefreshGeneration;
+      if (requestGeneration !== authRefreshGeneration) return;
+      const permissionGeneration = ++permissionRefreshGeneration;
       const [locked, permissions] = await Promise.all([
         user ? authService.isSessionLocked(user.id) : Promise.resolve(false),
         user?.role === 'staff' ? userService.getEffectivePermissions(user.id) : Promise.resolve([]),
       ]);
-      if (requestGeneration !== permissionRefreshGeneration) return;
+      if (permissionGeneration !== permissionRefreshGeneration || requestGeneration !== authRefreshGeneration) return;
       set({ user, cachedUserDisplay: user ? { name: user.name } : null, locked, permissions, permissionsReady: true, initializationError: null });
     } catch (error) {
       console.error('[startup] Could not refresh the signed-in user.', error);
-      set({ initializationError: normalizeError(error) });
+      if (requestGeneration === authRefreshGeneration) {
+        set({ initializationError: normalizeError(error) });
+      }
     }
   },
   refreshPermissions: async () => {
@@ -122,6 +127,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
   login: async (identifier, password, roles) => {
     const user = await authService.login(identifier, password, roles);
+    authRefreshGeneration += 1;
     permissionRefreshGeneration += 1;
     set({ user, cachedUserDisplay: { name: user.name }, permissions: [], permissionsReady: user.role !== 'staff', locked: false });
     if (user.role === 'staff') await get().refreshPermissions();
@@ -167,6 +173,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ user, locked: false });
   },
   logout: async () => {
+    authRefreshGeneration += 1;
     if (isSupabaseDriver()) {
       try {
         const user = get().user;

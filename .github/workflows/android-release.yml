@@ -44,6 +44,9 @@ jobs:
           distribution: temurin
           java-version: 21
 
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Verify Android SDK
         shell: bash
         run: |
@@ -170,6 +173,9 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Verify Android SDK
         shell: bash

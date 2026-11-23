@@ -2046,18 +2046,34 @@ body .workspace-layout.shift-screen-layout:fullscreen > .workspace-main {
 
 @media (max-width: 700px) {
   .workspace-layout.shift-screen-layout {
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
     padding-bottom: 6rem;
   }
 
   .workspace-layout.shift-screen-layout > .workspace-main {
     width: 100%;
+    height: 100%;
+    min-height: 0;
     margin: 0;
+    overflow: hidden;
     padding: 8px;
   }
 
+  .shift-screen-layout .workspace-main > .page-container {
+    height: 100%;
+    min-height: 0;
+  }
+
   .shift-workspace--owner {
-    min-height: calc(100dvh - 72px);
+    height: 100%;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
     padding: 10px;
+    padding-bottom: calc(90px + env(safe-area-inset-bottom, 0px));
   }
 
   .shift-topbar {
@@ -4253,7 +4269,7 @@ body .workspace-layout.shift-screen-layout:fullscreen > .workspace-main {
   }
 
   .shift-workspace--owner .shift-history-toolbar {
-    grid-template-columns: minmax(0, 1fr) 180px;
+    grid-template-columns: minmax(0, 1fr) 180px 180px;
   }
 
   .shift-workspace--owner .data-table-desktop {
@@ -7332,7 +7348,7 @@ body .workspace-layout.shift-screen-layout:fullscreen > .workspace-main {
   grid-column: 2;
   grid-row: 1;
   margin: 0;
-  grid-template-columns: minmax(0, 1fr) 150px;
+  grid-template-columns: minmax(0, 1fr) 150px 150px;
   gap: 8px;
 }
 
@@ -7712,7 +7728,7 @@ body .workspace-layout.shift-screen-layout:fullscreen > .workspace-main {
 
 .shift-workspace--owner .shift-history-toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 180px;
+  grid-template-columns: minmax(0, 1fr) 180px 180px;
   align-items: center;
   gap: 10px;
   margin: 0;

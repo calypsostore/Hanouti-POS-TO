@@ -139,6 +139,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const [historySearch, setHistorySearch] = useState('');
   const [historyStatus, setHistoryStatus] = useState<'all' | 'open' | 'closed'>('all');
   const [historyStaff, setHistoryStaff] = useState('all');
+  const [historyDate, setHistoryDate] = useState(() => localDateKey(new Date()));
   const [ownerPin, setOwnerPin] = useState('');
   const [forceShiftPin, setForceShiftPin] = useState('');
   const [forceShiftConfirmed, setForceShiftConfirmed] = useState(false);
@@ -677,6 +678,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     const searchText = `${staffName} ${new Date(shift.openedAt).toLocaleString()} ${shift.closedAt ? new Date(shift.closedAt).toLocaleString() : ''}`.toLocaleLowerCase();
     return (historyStatus === 'all' || shift.status === historyStatus)
       && (historyStaff === 'all' || shift.staffId === historyStaff)
+      && (!ownerMode || !historyDate || localDateKey(new Date(shift.openedAt)) === historyDate)
       && (!historySearch.trim() || searchText.includes(historySearch.trim().toLocaleLowerCase()));
   });
 
@@ -1287,6 +1289,18 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
               ))}
             </select>
           </label>
+          {ownerMode && (
+            <label className="shift-date-filter">
+              <span className="sr-only">Filter by date</span>
+              <input
+                type="date"
+                value={historyDate}
+                onChange={(event) => setHistoryDate(event.target.value)}
+                aria-label="Filter by date"
+                className="h-11 w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 font-body text-body-md text-on-surface outline-none focus:ring-2 focus:ring-primary"
+              />
+            </label>
+          )}
         </div>
         {loading ? <ListSkeleton label="Loading shifts" /> : <DataTable<ShiftRecord>
           rows={filteredHistory}

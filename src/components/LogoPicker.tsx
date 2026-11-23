@@ -10,9 +10,10 @@ interface LogoPickerProps {
   allowedGroups?: string[];
   onChange: (logoId: string) => void;
   onClose: () => void;
+  panelClassName?: string;
 }
 
-export function LogoPicker({ open, value, allowedGroups, onChange, onClose }: LogoPickerProps) {
+export function LogoPicker({ open, value, allowedGroups, onChange, onClose, panelClassName }: LogoPickerProps) {
   const [group, setGroup] = useState(logoGroupsList[0] ?? '');
   const [search, setSearch] = useState('');
   const availableGroups = allowedGroups?.length ? allowedGroups : logoGroupsList;
@@ -31,7 +32,7 @@ export function LogoPicker({ open, value, allowedGroups, onChange, onClose }: Lo
   }
 
   return (
-    <BottomSheet open={open} onClose={onClose} title={t('logo.pickerTitle')}>
+    <BottomSheet open={open} onClose={onClose} title={t('logo.pickerTitle')} panelClassName={panelClassName}>
       <label className="relative mb-3 block">
         <span className="sr-only">{t('logo.search')}</span>
         <input

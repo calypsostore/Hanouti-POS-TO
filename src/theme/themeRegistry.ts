@@ -69,7 +69,9 @@ export const CRYSTAL_LIGHT: DesignTokens = {
     sheet: '0 10px 25px -4px rgba(15, 95, 110, 0.12), 0 4px 6px -2px rgba(15, 95, 110, 0.04)',
     overlay: '0 20px 30px -6px rgba(16, 27, 32, 0.22)',
   },
-  gradients: { page: 'radial-gradient(circle at top left, rgba(170, 237, 255, 0.32), transparent 28%)' },
+  gradients: {
+    page: 'radial-gradient(ellipse at 100% 100%, rgba(91, 226, 231, 0.18), transparent 42%), radial-gradient(ellipse at 0% 0%, rgba(128, 195, 255, 0.16), transparent 44%), linear-gradient(135deg, rgba(239, 249, 255, 0.92), rgba(239, 242, 255, 0.86) 54%, rgba(233, 250, 251, 0.92))',
+  },
   typography: { fontDisplay: 'Plus Jakarta Sans, sans-serif', fontBody: 'Inter, sans-serif' },
   spacing: { xs: '0.25rem', sm: '0.5rem', md: '0.75rem', lg: '1rem', xl: '1.5rem' },
   dimensions: { buttonHeight: '3rem', inputHeight: '3rem', iconSmall: '1rem', iconMedium: '1.5rem' },

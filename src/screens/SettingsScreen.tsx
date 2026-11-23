@@ -30,6 +30,7 @@ import { adminWorkspaceLinks, ownerWorkspaceLinks } from '../app/navigation';
 import { DEFAULT_NOTIFICATION_PREFERENCES, resolveStoreSettings, type CatalogItemRecord, type CategoryRecord, type NotificationRecord, type NotificationType, type OrderRecord, type PositionRecord, type ReportRecord, type ScheduleShiftRecord, type SettlementTerms, type StoreType } from '../types/domain';
 import { getStoreLogoGroups } from '../data/logoCatalog';
 import { AppearanceSettings } from '../components/AppearanceSettings';
+import { SettingsGlassSection } from '../components/settings/SettingsGlassSection';
 
 const notificationOptions: { type: NotificationType; label: string; description: string }[] = [
   { type: 'void_requested', label: 'Void request received', description: 'Notify the owner when staff request an order void.' },
@@ -784,7 +785,7 @@ export function SettingsScreen() {
   const content = (
     <div className="settings-content flex flex-col gap-4">
       <header className="settings-page-header">
-        <div className="settings-page-header__icon"><MaterialIcon name="tune" /></div>
+        <div className="settings-page-header__icon"><MaterialIcon name={activeSection?.icon ?? 'tune'} /></div>
         <div className="min-w-0">
           <p className="settings-page-header__eyebrow">{user?.name}</p>
           <h1 className="font-display text-headline-lg text-on-surface">{t('settings.title')}</h1>
@@ -832,11 +833,12 @@ export function SettingsScreen() {
 
       {user?.role === 'staff' && activeSection.id === 'notifications' && (
         <>
-          <section aria-labelledby="staff-notification-settings-heading" className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-            <div>
-              <h2 id="staff-notification-settings-heading" className="font-display text-headline-md text-on-surface">Notifications</h2>
-              <p className="mt-1 font-body text-body-sm text-on-surface-variant">These preferences are saved on this device.</p>
-            </div>
+          <SettingsGlassSection
+            heading="Notifications"
+            description="These preferences are saved on this device."
+            icon="notifications"
+            headingId="staff-notification-settings-heading"
+          >
             {preferencesLoading ? <ListSkeleton rows={3} label="Loading notification preferences" /> : notificationOptions.filter(({ type }) => [
               'void_approved', 'void_rejected', 'schedule_published', 'stock_depleted', 'item_86', 'app_update',
             ].includes(type)).map((option) => (
@@ -854,7 +856,7 @@ export function SettingsScreen() {
                 </span>
               </label>
             ))}
-          </section>
+          </SettingsGlassSection>
           <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
             <h2 className="mb-3 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="calendar_month" className="text-primary" />My schedule</h2>
             {scheduleLoading ? <ListSkeleton rows={2} label="Loading your schedule" /> : upcomingSchedule.length > 0 ? (
@@ -1155,23 +1157,27 @@ export function SettingsScreen() {
       )}
 
       <div hidden={activeSection.id !== 'help'}>
-      <section aria-labelledby="help-section-heading" className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-        <h2 id="help-section-heading" className="flex items-center gap-2 font-display text-headline-md text-on-surface">
-          <MaterialIcon name="help" className="text-primary" />{t('settings.help')}
-        </h2>
-        <p className="mt-1 font-body text-body-sm text-on-surface-variant">{t('help.intro')}</p>
+      <SettingsGlassSection
+        heading={t('settings.help')}
+        description={t('help.intro')}
+        icon="help"
+        headingId="help-section-heading"
+      >
         <HelpGuide title={t('help.staff')} steps={staffHelpSteps} />
         {user?.role === 'owner' && <HelpGuide title={t('help.owner')} steps={ownerHelpSteps} />}
-      </section>
+      </SettingsGlassSection>
       </div>
 
       <div hidden={activeSection.id !== 'language'}>
-      <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-        <h2 className="mb-3 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="language" className="text-primary" />{t('settings.language')}</h2>
+      <SettingsGlassSection
+        heading={t('settings.language')}
+        description="Choose the language used by the workspace."
+        icon="language"
+      >
         <select value={language} onChange={(event) => { void changeLanguage(event.target.value as 'en'); }} className="h-12 w-full rounded-lg bg-surface-container-low px-3 font-body text-body-md outline-none focus:ring-2 focus:ring-primary">
           <option value="en">{t('settings.englishOnly')}</option>
         </select>
-      </section>
+      </SettingsGlassSection>
       </div>
 
       <div hidden={activeSection.id !== 'permissions'}>
@@ -1179,8 +1185,11 @@ export function SettingsScreen() {
       </div>
 
       <div hidden={activeSection.id !== 'updates'}>
-      <section className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-        <h2 className="flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="system_update" className="text-primary" />{t('settings.appUpdates')}</h2>
+      <SettingsGlassSection
+        heading={t('settings.appUpdates')}
+        description="Check the installed build and available updates."
+        icon="system_update"
+      >
         <div className="flex items-center justify-between gap-2 font-body text-body-sm">
           <span className="text-on-surface-variant">{t('settings.currentVersion')}</span>
           <span className="font-semibold text-on-surface">v{updateService.getCurrentVersion()}</span>
@@ -1227,7 +1236,7 @@ export function SettingsScreen() {
             {updateResult ? JSON.stringify(updateResult, null, 2) : 'No update check has run yet.'}
           </pre>
         </details>
-      </section>
+      </SettingsGlassSection>
       </div>
 
       </div>
@@ -1238,6 +1247,7 @@ export function SettingsScreen() {
           allowedGroups={getStoreLogoGroups(storeType)}
           onChange={setStoreLogoId}
           onClose={() => setLogoPickerOpen(false)}
+          panelClassName="settings-logo-picker-panel"
         />
       )}
       </>

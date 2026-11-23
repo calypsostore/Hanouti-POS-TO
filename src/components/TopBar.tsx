@@ -274,7 +274,7 @@ export function TopBar({ title, storeName, storeLogoId, storeType = 'general', o
                 type="button"
                 aria-label={t('common.close')}
                 onClick={() => setNotificationsOpen(false)}
-                className="flex h-10 w-10 items-center justify-center rounded-full text-outline hover:bg-surface-container"
+                className="flex h-10 w-10 items-center justify-center rounded-full text-outline"
               >
                 <MaterialIcon name="close" />
               </button>
@@ -364,7 +364,7 @@ export function TopBar({ title, storeName, storeLogoId, storeType = 'general', o
               type="button"
               aria-label={t('common.close')}
               onClick={() => setProfileOpen(false)}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-outline hover:bg-surface-container"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-outline"
             >
               <MaterialIcon name="close" />
             </button>

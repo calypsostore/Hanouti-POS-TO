@@ -199,7 +199,7 @@ export function ActionFeedbackToast() {
             type="button"
             aria-label="Dismiss message"
             onClick={() => dismissToastRef.current()}
-            className="action-feedback-toast-dismiss flex h-8 w-8 shrink-0 items-center justify-center rounded-full hover:bg-white/15"
+            className="action-feedback-toast-dismiss flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
           >
             <MaterialIcon name="close" className="!text-white" />
           </button>

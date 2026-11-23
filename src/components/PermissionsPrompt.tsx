@@ -116,7 +116,7 @@ export function PermissionsPrompt() {
               type="button"
               aria-label="Close notification prompt"
               onClick={() => { void notNow(); }}
-              className="permissions-prompt__close absolute right-2 top-2 grid size-8 place-items-center rounded-full text-on-surface-variant transition hover:bg-surface-container"
+              className="permissions-prompt__close absolute right-2 top-2 grid size-8 place-items-center rounded-full text-on-surface-variant transition"
             >
               <MaterialIcon name="close" className="text-lg" />
             </button>

@@ -413,27 +413,6 @@ button {
   -webkit-backdrop-filter: blur(14px) saturate(140%);
 }
 
-.shift-day-status__message {
-  min-width: 0;
-  flex: 1;
-}
-
-.shift-day-status__dismiss {
-  display: grid;
-  width: 36px;
-  min-width: 36px;
-  height: 36px;
-  min-height: 36px;
-  flex: 0 0 36px;
-  place-items: center;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  padding: 0;
-}
-
 .shift-day-status--warning {
   border-color: rgb(var(--color-warning) / 24%);
   background: rgb(var(--color-warning-container) / 68%);
@@ -8231,13 +8210,6 @@ body .workspace-layout.shift-screen-layout:fullscreen > .workspace-main {
   color: #17355b;
 }
 
-.responsive-dialog__panel > div:first-child > div:first-child button,
-.responsive-dialog__panel button[aria-label*="Close"] {
-  border: 1px solid rgb(255 255 255 / 70%);
-  background: rgb(255 255 255 / 42%);
-  box-shadow: 0 5px 14px rgb(35 86 130 / 8%), inset 0 1px 0 rgb(255 255 255 / 78%);
-}
-
 .responsive-dialog__panel input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
 .responsive-dialog__panel select,
 .responsive-dialog__panel textarea {
@@ -8468,17 +8440,17 @@ body .workspace-layout.shift-screen-layout:fullscreen > .workspace-main {
   height: 34px;
   flex: 0 0 34px;
   place-items: center;
-  border: 1px solid rgb(255 255 255 / 78%);
+  border: 0;
   border-radius: 50%;
-  background: rgb(255 255 255 / 54%);
-  box-shadow: 0 5px 14px rgb(35 86 130 / 8%), inset 0 1px 0 rgb(255 255 255 / 84%);
+  background: transparent;
+  box-shadow: none;
   color: var(--glass-popup-text);
   cursor: pointer;
   transition: background-color 160ms ease, transform 160ms ease;
 }
 
 .glass-modal-close:hover {
-  background: rgb(255 255 255 / 82%);
+  background: transparent;
   transform: translateY(-1px);
 }
 
@@ -8623,8 +8595,6 @@ body .workspace-layout.shift-screen-layout:fullscreen > .workspace-main {
 }
 
 :root.dark .glass-modal-close {
-  border-color: rgb(255 255 255 / 14%);
-  background: rgb(15 29 36 / 72%);
   color: var(--glass-popup-text);
 }
 

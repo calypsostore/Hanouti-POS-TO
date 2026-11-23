@@ -173,7 +173,6 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     hasActivity: false,
     openShiftCount: 0,
   });
-  const [dismissedDayStatusMessage, setDismissedDayStatusMessage] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const refreshGuardRef = useRef(createLatestRequestGuard());
   const zSubmissionRef = useRef(false);
@@ -884,12 +883,9 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             : undefined
         } />
       )}
-      {(ownerMode || (dayStatus.dayIsClosed && !ownOpenShift)) && dayStatusMessage !== dismissedDayStatusMessage && (
+      {(ownerMode || (dayStatus.dayIsClosed && !ownOpenShift)) && (
         <p role="status" className={`shift-day-status mb-4 rounded-xl p-3 font-body text-body-sm ${dayStatus.dayIsClosed ? 'shift-day-status--warning' : ''}`}>
-          <span className="shift-day-status__message">{dayStatusMessage}</span>
-          <button type="button" className="shift-day-status__dismiss" aria-label="Dismiss shift status" onClick={() => setDismissedDayStatusMessage(dayStatusMessage)}>
-            <MaterialIcon name="close" className="text-lg" />
-          </button>
+          {dayStatusMessage}
         </p>
       )}
       {(error || notice) && (

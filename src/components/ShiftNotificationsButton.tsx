@@ -134,7 +134,7 @@ export function ShiftNotificationsButton() {
                 <Link to="/notifications" onClick={() => setOpen(false)} className="!min-h-0 !min-w-0 rounded-md px-2 py-1 font-body text-label-md text-primary hover:bg-primary-fixed">
                   See all
                 </Link>
-                <button type="button" aria-label={t('common.close')} onClick={() => setOpen(false)} className="flex h-10 w-10 items-center justify-center rounded-full text-outline hover:bg-surface-container">
+                <button type="button" aria-label={t('common.close')} onClick={() => setOpen(false)} className="flex h-10 w-10 items-center justify-center rounded-full text-outline">
                   <MaterialIcon name="close" />
                 </button>
               </div>

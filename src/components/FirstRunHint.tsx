@@ -42,7 +42,7 @@ export function FirstRunHint({ id, title, message }: FirstRunHintProps) {
         <p className="font-body text-label-md">{title}</p>
         <p className="mt-1 font-body text-body-sm text-on-surface-variant">{message}</p>
       </div>
-      <button type="button" onClick={dismiss} aria-label={t('hint.dismiss')} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-primary hover:bg-surface-container-low">
+      <button type="button" onClick={dismiss} aria-label={t('hint.dismiss')} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-primary">
         <MaterialIcon name="close" />
       </button>
     </aside>

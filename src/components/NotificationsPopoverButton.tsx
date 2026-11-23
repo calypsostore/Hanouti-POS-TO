@@ -1,0 +1,291 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { notificationPath } from '../lib/notificationPath';
+import { useAuthStore } from '../stores/authStore';
+import { useNotificationStore } from '../stores/notificationStore';
+import type { NotificationRecord, NotificationType } from '../types/domain';
+import { MaterialIcon } from './MaterialIcon';
+import { t } from '../i18n/translations';
+
+type NotificationTone = 'blue' | 'green' | 'red' | 'violet' | 'amber';
+
+interface NotificationAppearance {
+  icon: string;
+  tone: NotificationTone;
+}
+
+const notificationAppearance: Record<NotificationType, NotificationAppearance> = {
+  void_requested: { icon: 'pending_actions', tone: 'amber' },
+  void_approved: { icon: 'check_circle', tone: 'green' },
+  void_rejected: { icon: 'block', tone: 'red' },
+  schedule_published: { icon: 'calendar_month', tone: 'blue' },
+  customer_credit_warning: { icon: 'credit_card', tone: 'amber' },
+  customer_credit_limit: { icon: 'credit_card_off', tone: 'red' },
+  customer_overdue: { icon: 'schedule', tone: 'amber' },
+  stock_depleted: { icon: 'inventory_2', tone: 'red' },
+  item_86: { icon: 'do_not_disturb_on', tone: 'red' },
+  low_stock: { icon: 'inventory_2', tone: 'amber' },
+  shift_opened: { icon: 'notifications', tone: 'violet' },
+  shift_closed: { icon: 'power_settings_new', tone: 'red' },
+  cash_difference: { icon: 'price_change', tone: 'violet' },
+  cash_out_alert: { icon: 'payments', tone: 'amber' },
+  z_report_closed: { icon: 'notifications', tone: 'blue' },
+  app_update: { icon: 'download', tone: 'green' },
+  subscription_expiring: { icon: 'workspace_premium', tone: 'violet' },
+};
+
+interface NotificationsPopoverButtonProps {
+  id?: string;
+  buttonClassName?: string;
+  badgeClassName?: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
+export function NotificationsPopoverButton({
+  id = 'notifications-popover',
+  buttonClassName = 'relative flex h-10 w-10 items-center justify-center rounded-full bg-surface-container text-primary',
+  badgeClassName = 'absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-error px-1 font-body text-label-sm text-white',
+  open,
+  onOpenChange,
+}: NotificationsPopoverButtonProps) {
+  const navigate = useNavigate();
+  const user = useAuthStore((state) => state.user);
+  const unreadCount = useNotificationStore((state) => state.unreadCount);
+  const items = useNotificationStore((state) => state.items);
+  const recentNotifications = useMemo(() => items.slice(0, 6), [items]);
+  const loading = useNotificationStore((state) => state.status === 'loading');
+  const markRead = useNotificationStore((state) => state.markRead);
+  const markAllRead = useNotificationStore((state) => state.markAllRead);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const [error, setError] = useState('');
+  const [activeNotificationId, setActiveNotificationId] = useState('');
+  const [pendingBulkAction, setPendingBulkAction] = useState<'read' | null>(null);
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => new Set());
+  const [portalTarget, setPortalTarget] = useState<Element>(() => document.fullscreenElement ?? document.body);
+  const isOpen = open ?? uncontrolledOpen;
+  const visibleNotifications = recentNotifications.filter((notification) => !dismissedIds.has(notification.id));
+
+  const setPanelOpen = useCallback((nextOpen: boolean) => {
+    if (open === undefined) setUncontrolledOpen(nextOpen);
+    onOpenChange?.(nextOpen);
+  }, [open, onOpenChange]);
+
+  useEffect(() => {
+    setDismissedIds(new Set());
+  }, [user?.id]);
+
+  useEffect(() => {
+    const updatePortalTarget = () => setPortalTarget(document.fullscreenElement ?? document.body);
+    document.addEventListener('fullscreenchange', updatePortalTarget);
+    return () => document.removeEventListener('fullscreenchange', updatePortalTarget);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      setPanelOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [isOpen, setPanelOpen]);
+
+  function openNotifications() {
+    setError('');
+    setPanelOpen(true);
+  }
+
+  async function openNotification(notification: NotificationRecord) {
+    if (!user) return;
+    setActiveNotificationId(notification.id);
+    try {
+      if (!notification.readAt) await markRead(user, notification.id);
+      setPanelOpen(false);
+      navigate(notificationPath(notification, user.role));
+    } catch (openError) {
+      console.error('Unable to open this notification.', openError);
+      setError('Unable to open this notification. Please try again.');
+    } finally {
+      setActiveNotificationId('');
+    }
+  }
+
+  async function markNotificationRead(notificationId: string) {
+    if (!user) return;
+    setActiveNotificationId(notificationId);
+    try {
+      await markRead(user, notificationId);
+    } catch (markError) {
+      console.error('Unable to mark this notification as read.', markError);
+      setError('Unable to mark this notification as read. Please try again.');
+    } finally {
+      setActiveNotificationId('');
+    }
+  }
+
+  async function markAllNotificationsRead() {
+    if (!user) return;
+    setPendingBulkAction('read');
+    try {
+      await markAllRead(user);
+    } catch (markError) {
+      console.error('Unable to mark notifications as read.', markError);
+      setError('Unable to mark notifications as read. Please try again.');
+    } finally {
+      setPendingBulkAction(null);
+    }
+  }
+
+  function clearVisibleNotifications() {
+    if (visibleNotifications.length === 0) return;
+    const clearedIds = visibleNotifications.map((notification) => notification.id);
+    setDismissedIds((current) => new Set([...current, ...clearedIds]));
+  }
+
+  if (!user) return null;
+
+  return (
+    <>
+      <button
+        type="button"
+        className={buttonClassName}
+        aria-label={unreadCount ? `Notifications, ${unreadCount} unread` : 'Notifications'}
+        aria-haspopup="dialog"
+        aria-controls={id}
+        aria-expanded={isOpen}
+        onClick={openNotifications}
+      >
+        <MaterialIcon name="notifications" />
+        {unreadCount > 0 && <span className={badgeClassName}>{unreadCount > 99 ? '99+' : unreadCount}</span>}
+      </button>
+      {isOpen && createPortal(
+        <div
+          className="glass-modal-backdrop notification-popover-backdrop fixed inset-0 z-50 flex items-center justify-center"
+          onMouseDown={() => setPanelOpen(false)}
+        >
+          <section
+            id={id}
+            role="dialog"
+            aria-modal="true"
+            aria-label={t('nav.notifications')}
+            className="glass-modal-panel notification-center-panel"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header className="notification-center-header">
+              <div className="notification-center-brand">
+                <span className="notification-center-brand-icon">
+                  <MaterialIcon name="notifications_active" />
+                </span>
+                <h2 className="notification-center-title">{t('nav.notifications')}</h2>
+              </div>
+              <div className="notification-center-actions">
+                {unreadCount > 0 && (
+                  <button
+                    type="button"
+                    disabled={pendingBulkAction !== null}
+                    onClick={() => { void markAllNotificationsRead(); }}
+                    className="notification-center-header-link"
+                  >
+                    Read all
+                  </button>
+                )}
+                <Link
+                  to="/notifications"
+                  onClick={() => setPanelOpen(false)}
+                  className="notification-center-header-link"
+                >
+                  See all
+                </Link>
+                <button
+                  type="button"
+                  aria-label={t('common.close')}
+                  onClick={() => setPanelOpen(false)}
+                  className="notification-center-close"
+                >
+                  <MaterialIcon name="close" />
+                </button>
+              </div>
+            </header>
+
+            {error && <p role="alert" className="notification-center-error">{error}</p>}
+
+            <div className="notification-center-list">
+              {loading ? (
+                <p role="status" className="notification-center-empty">Loading notifications…</p>
+              ) : visibleNotifications.length > 0 ? visibleNotifications.map((notification) => {
+                const appearance = notificationAppearance[notification.type];
+                const busy = activeNotificationId === notification.id || pendingBulkAction !== null;
+                return (
+                  <article key={notification.id} className="notification-center-card">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => { void openNotification(notification); }}
+                      aria-label={`Open notification: ${notification.title}`}
+                      className="notification-center-open"
+                    >
+                      <span className={`notification-center-type-icon notification-center-type-icon--${appearance.tone}`}>
+                        <MaterialIcon name={appearance.icon} />
+                      </span>
+                      <span className="notification-center-copy">
+                        <span className="notification-center-title-row">
+                          <span className="notification-center-item-title">{notification.title}</span>
+                          {!notification.readAt && <span className="notification-center-unread" aria-label="Unread" />}
+                        </span>
+                        <span className="notification-center-body">{notification.body}</span>
+                        <span className="notification-center-time">
+                          <MaterialIcon name="schedule" />
+                          {new Date(notification.createdAt).toLocaleString()}
+                        </span>
+                      </span>
+                      <MaterialIcon name="chevron_right" className="notification-center-chevron" />
+                    </button>
+                    {!notification.readAt && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => { void markNotificationRead(notification.id); }}
+                        aria-label={`Mark notification as read: ${notification.title}`}
+                        className="notification-center-read"
+                      >
+                        <MaterialIcon name="done" />
+                        <span>Mark as read</span>
+                      </button>
+                    )}
+                  </article>
+                );
+              }) : (
+                <p role="status" className="notification-center-empty">You’re all caught up.</p>
+              )}
+            </div>
+
+            <footer className="notification-center-footer">
+              <button
+                type="button"
+                disabled={visibleNotifications.length === 0 || pendingBulkAction !== null}
+                onClick={() => { void clearVisibleNotifications(); }}
+                aria-label="Clear all notifications from this panel"
+                className="notification-center-footer-action"
+              >
+                <MaterialIcon name="delete_outline" />
+                <span>Clear all</span>
+              </button>
+              <Link
+                to="/notifications"
+                onClick={() => setPanelOpen(false)}
+                className="notification-center-footer-action notification-center-view-all"
+              >
+                <span>View all notifications</span>
+                <MaterialIcon name="chevron_right" />
+              </Link>
+            </footer>
+          </section>
+        </div>,
+        portalTarget,
+      )}
+    </>
+  );
+}

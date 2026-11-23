@@ -1,10 +1,11 @@
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from './Button';
 import { ReceiptDocumentView } from './ReceiptDocumentView';
 import { downloadThermalPdf, printOrSharePdf, shareThermalPdf } from '../services/receiptExport';
 import { buildKitchenTicketDocument, buildTicketDocument } from '../services/ticketDocument';
 import type { OrderRecord, StoreSettings } from '../types/domain';
+import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
 
 export function TicketView({ order, storeName, staffName, onClose, settings, storeAddress, storePhone, storeTaxId }: {
   order: OrderRecord;
@@ -19,6 +20,18 @@ export function TicketView({ order, storeName, staffName, onClose, settings, sto
   const [shareError, setShareError] = useState('');
   const [copyType, setCopyType] = useState<'customer' | 'kitchen'>('customer');
   const printTarget = useRef<HTMLElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const portalTarget = useOverlayTarget();
+  const closeOnEscape = useCallback(() => onClose(), [onClose]);
+  const zIndex = useOverlayLifecycle({
+    open: true,
+    kind: 'dialog',
+    onEscape: closeOnEscape,
+    lockScroll: true,
+    trapFocus: true,
+    restoreFocus: true,
+    containerRef: dialogRef,
+  });
   const ticketNumber = order.syncStatus ? `LOCAL-${Math.abs(order.number)}` : String(order.number);
   const ticketDocument = copyType === 'customer'
     ? buildTicketDocument(
@@ -67,8 +80,8 @@ export function TicketView({ order, storeName, staffName, onClose, settings, sto
   }
 
   return createPortal(
-    <div className="glass-modal-backdrop receipt-overlay" onMouseDown={onClose}>
-      <section role="dialog" aria-modal="true" aria-label={documentTitle} className="glass-modal-panel receipt-dialog" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="glass-modal-backdrop receipt-overlay" style={{ zIndex }} onMouseDown={onClose}>
+      <section ref={dialogRef} role="dialog" aria-modal="true" aria-label={documentTitle} className="glass-modal-panel receipt-dialog" onMouseDown={(event) => event.stopPropagation()}>
         <div className="receipt-actions no-print">
           <Button variant={copyType === 'customer' ? 'primary' : 'secondary'} aria-pressed={copyType === 'customer'} onClick={() => setCopyType('customer')}>Customer receipt</Button>
           <Button variant={copyType === 'kitchen' ? 'primary' : 'secondary'} aria-pressed={copyType === 'kitchen'} onClick={() => setCopyType('kitchen')}>Kitchen copy</Button>
@@ -81,6 +94,6 @@ export function TicketView({ order, storeName, staffName, onClose, settings, sto
         <ReceiptDocumentView ref={printTarget} document={ticketDocument} />
       </section>
     </div>,
-    globalThis.document.body,
+    portalTarget,
   );
 }

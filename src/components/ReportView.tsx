@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from './Button';
 import { MaterialIcon } from './MaterialIcon';
@@ -6,6 +6,7 @@ import { ReceiptDocumentView } from './ReceiptDocumentView';
 import { downloadOrSharePdf, downloadThermalPdf, printOrSharePdf } from '../services/receiptExport';
 import { buildReportDocument } from '../services/reportDocument';
 import type { ReportRecord, StoreRecord, StoreSettings } from '../types/domain';
+import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
 
 type ReportStore = Pick<StoreRecord, 'name' | 'address' | 'phone' | 'taxId'>;
 
@@ -28,6 +29,18 @@ export function ReportView({
 }) {
   const [shareError, setShareError] = useState('');
   const printTarget = useRef<HTMLElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const portalTarget = useOverlayTarget();
+  const closeOnEscape = useCallback(() => onClose(), [onClose]);
+  const zIndex = useOverlayLifecycle({
+    open: !inline,
+    kind: 'dialog',
+    onEscape: closeOnEscape,
+    lockScroll: true,
+    trapFocus: true,
+    restoreFocus: true,
+    containerRef: dialogRef,
+  });
   const reportStore: ReportStore = {
     name: report.frozenStoreName ?? report.storeName ?? store?.name ?? storeName,
     address: report.frozenStoreAddress ?? store?.address,
@@ -130,11 +143,11 @@ export function ReportView({
   }
 
   return createPortal(
-    <div className="glass-modal-backdrop receipt-overlay" onMouseDown={onClose}>
-      <section role="dialog" aria-modal="true" aria-label={`${document.title} report`} className="glass-modal-panel receipt-dialog report-dialog" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="glass-modal-backdrop receipt-overlay" style={{ zIndex }} onMouseDown={onClose}>
+      <section ref={dialogRef} role="dialog" aria-modal="true" aria-label={`${document.title} report`} className="glass-modal-panel receipt-dialog report-dialog" onMouseDown={(event) => event.stopPropagation()}>
         {content}
       </section>
     </div>,
-    globalThis.document.body,
+    portalTarget,
   );
 }

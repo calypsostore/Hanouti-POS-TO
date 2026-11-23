@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { LoginScreen } from './screens/LoginScreen';
 import { updateService, type UpdateCheckResult } from './services/updateService';
@@ -17,6 +18,7 @@ import { permissionService } from './services/permissionService';
 import { classifyInitializationError } from './services/serverErrorService';
 import { PullToRefresh } from './components/PullToRefresh';
 import { ActionFeedbackToast } from './components/ActionFeedbackToast';
+import { useOverlayLifecycle, useOverlayTarget } from './components/overlay/overlayArchitecture';
 
 const SetNewPasswordScreen = lazy(() => import('./screens/SetNewPasswordScreen').then((module) => ({ default: module.SetNewPasswordScreen })));
 const PosScreen = lazy(() => import('./screens/PosScreen').then((module) => ({ default: module.PosScreen })));
@@ -206,6 +208,14 @@ export default function App() {
   const hydrate = useAuthStore((state) => state.hydrate);
   const [updateReloadError, setUpdateReloadError] = useState(() => updateService.getPostUpdateMessage());
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(() => updateService.getLastResult());
+  const portalTarget = useOverlayTarget();
+  const updateBannerZIndex = useOverlayLifecycle({
+    open: Boolean(updateReloadError),
+    kind: 'toast',
+    lockScroll: false,
+    trapFocus: false,
+    restoreFocus: false,
+  });
 
   useEffect(() => updateService.subscribeResults(setUpdateResult), []);
 
@@ -376,13 +386,14 @@ export default function App() {
     <>
       <UpdateRequiredModal result={updateResult} />
       <ActionFeedbackToast />
-      {updateReloadError && (
-        <div role="status" className="fixed inset-x-0 top-0 z-[120] flex items-center justify-between gap-3 bg-primary-dark px-4 py-3 text-white shadow-overlay">
+      {updateReloadError && createPortal(
+        <div role="status" className="fixed inset-x-0 top-0 flex items-center justify-between gap-3 bg-primary-dark px-4 py-3 text-white shadow-overlay" style={{ zIndex: updateBannerZIndex }}>
           <div>
             <p role="alert" className="font-body text-label-md">{updateReloadError}</p>
           </div>
           <Button variant="secondary" className="shrink-0" onClick={() => { void reloadWithAvailableUpdate(); }}>Retry update</Button>
-        </div>
+        </div>,
+        portalTarget,
       )}
       <PermissionsPrompt />
       {user && !locked && <NotificationsBridge />}

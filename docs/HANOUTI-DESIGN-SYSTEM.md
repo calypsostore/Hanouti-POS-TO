@@ -1,139 +1,380 @@
 # Hanouti — Crystal Glass Design System
 
-**Status:** Audit and governance baseline. A targeted notification-panel update was implemented after review; no broader redesign, theme-selector expansion, or section migration is authorized by this document.
+**Status:** Approved design freeze and controlled-migration governance baseline.
 
-## 1. Purpose and design authority
+**Effective rule:** The approved designs listed below are frozen visual references. This document is the single design-system authority and the only current source for migration governance. No application redesign or migration is authorized merely by this document.
 
-The Shift section is the approved visual authority for **HANOUTI — CRYSTAL GLASS DESIGN SYSTEM**. New UI and future migrations must follow its visual language while preserving existing Hanouti branding, routes, permissions, data flows, offline behavior, and business logic. Legacy screens are evidence of existing behavior, not the reference for new styling.
+## 1. Purpose
 
-This audit distinguishes verified implementation from recommendations. The Login page remains an approved reference and must not be redesigned.
+This system defines how future UI work must protect the approved Hanouti identity and progressively migrate non-frozen application sections to Hanouti Crystal Glass.
 
-## 2. Shift visual language
+The legacy UI is not the visual reference for new work. The Shift section and Login page provide approved visual language, but they are outside the normal migration scope and must not be visually redesigned.
 
-The owner Shift screen combines the existing workspace shell with its own glass treatment:
+## 2. Approved and frozen components
 
-- **Canvas and surfaces:** a cool blue/white canvas with soft radial gradients; translucent pale surfaces; thin light borders; subtle inset highlights; restrained shadows; and backdrop blur/saturation.
-- **Shape and hierarchy:** rounded surfaces and pills, with cards commonly around 18–24 px radius. A compact Shift toolbar and status strip lead into pill-shaped section/date controls, colored KPI cards, and detailed shift history.
-- **Color:** teal/cyan is the primary interaction color. KPI cards use distinct pastel accents; semantic status colors distinguish success, warning, and error. Dark mode has explicit Shift-specific overrides.
-- **Typography and icons:** Inter is common in Shift-specific CSS, with Plus Jakarta Sans used for display headings elsewhere. Material Symbols are the dominant icon set. The Shift workspace also declares an Apple-system font stack, so typography is not fully governed by one shared token.
-- **Interaction:** active navigation and filter states use bright teal fills and clear shape changes; cards and controls use subtle transitions. The design has responsive refinements and reduced-motion rules.
-- **Desktop:** the owner workspace places a glass sidebar beside the Shift work area. The Shift view presents a six-card overview and a data table.
-- **Mobile:** the workspace becomes a single-column flow, the overview becomes a two-column card grid, and the owner bottom navigation is fixed to the bottom with safe-area padding. The Shift section tabs and header controls remain usable at a 390 px viewport.
-- **Full screen:** the application sidebar, standard top bar, and navigation are hidden; the Shift working area and its own toolbar remain.
+The following components are approved and frozen. No visual redesign is allowed unless the project owner explicitly authorizes a specific modification in writing.
 
-These are observed characteristics, not a requirement to copy every current pixel value. The goal is to preserve the established identity while moving repeated values into shared tokens.
+1. **Shift section**
+   - Owner and staff Shift views.
+   - Desktop and mobile layouts.
+   - Shift headers, tabs, status strips, cards, tables, filters, KPIs, and full-screen behavior.
+   - All existing spacing, dimensions, typography, colors, gradients, radii, shadows, blur, animations, transitions, and responsive behavior.
 
-## 3. Existing tokens and styling systems
+2. **Shift dialogs, popups, and cash movement interfaces**
+   - Cash movement sheets and dialogs.
+   - Shift confirmations and status prompts.
+   - Existing related actions, menus, notifications, and interaction states.
 
-### Present today
+3. **Desktop left sidebar navigation**
+   - Structure, width, spacing, colors, icons, labels, active/hover states, badges, and responsive behavior.
 
-- [`src/styles.css`](../src/styles.css) defines light and dark semantic color variables, including primary, surface, outline, success, warning, error, and secondary roles.
-- [`tailwind.config.ts`](../tailwind.config.ts) maps those color variables into Tailwind and defines typography sizes, font families, spacing, radii, and card/sheet/overlay shadows.
-- [`src/styles.css`](../src/styles.css) also defines `--glass-popup-*` variables for popup backdrop, surface, border, shadow, blur, radius, controls, and primary actions, with dark-mode overrides.
-- [`index.html`](../index.html) loads Inter, Plus Jakarta Sans, and Material Symbols; Roboto Mono is bundled locally and used for receipt-like output.
-- [`src/lib/displaySettings.ts`](../src/lib/displaySettings.ts) applies `light`, `dark`, or `system` mode and desktop compact density to the document root. Large POS buttons are also a display preference.
+4. **Mobile bottom navigation**
+   - Items, fixed position, height, spacing, safe-area behavior, active/hover states, icons, labels, colors, and animations.
 
-### Gaps and inconsistencies
+5. **Mobile More menu and expanded list**
+   - Trigger, sheet/popup, entries, separators, grouping, ordering, spacing, colors, icons, typography, and interactions.
 
-- The existing theme mechanism switches between light and dark token values; it is not a theme registry and does not provide named palettes, custom primary/accent colors, or live preview.
-- The device theme is applied both by the early bootstrap script in `index.html` and by `initializeDisplaySettings()` in `src/main.tsx`. A future authenticated preference must reconcile both paths to avoid a flash or applying a previous user's cached choice.
-- The root color tokens do not cover all of Shift's direct color literals, gradients, radii, shadows, and blur values. Some Shift rules therefore do not respond consistently to a future palette.
-- Tailwind has useful spacing, radius, typography, and shadow scales, but the glass-specific values and common control dimensions are not consistently routed through them.
-- `styles.css` is a large global stylesheet (currently over 11,500 lines) with global rules, shared overlay styles, and page-specific rules. Shift rules and responsive refinements recur in multiple later blocks, so a value can be overridden far from its first definition.
-- `Button`, `Chip`, `StatusTag`, `CardGrid`, `StatGrid`, and `DataTable` provide reusable starting points, but many screens still style controls and cards directly with utility classes or bespoke CSS. For example, `Button` has shared variants, while individual buttons often define their own sizes, radii, and states.
+6. **Notifications interface**
+   - Notification screen and notification popover/button presentation.
+   - Existing list, empty, read/unread, action, badge, overlay, and fullscreen presentation.
 
-## 4. Existing components and duplication
+7. **Login page**
+   - Existing brand identity, logo, decorations, bubbles, colors, glass effects, typography, layout, dimensions, animations, and interactions.
 
-- **Navigation:** [`src/components/WorkspaceLayout.tsx`](../src/components/WorkspaceLayout.tsx) renders the owner workspace shell and mobile navigation. [`src/components/BottomNav.tsx`](../src/components/BottomNav.tsx) is used by staff screens and contains another navigation rendering path, including owner-oriented logic. The owner workspace and staff pages do not necessarily render both at once, but the implementations and styling responsibilities overlap.
-- **Notifications:** Both [`src/components/TopBar.tsx`](../src/components/TopBar.tsx) and [`src/components/ShiftNotificationsButton.tsx`](../src/components/ShiftNotificationsButton.tsx) use the shared [`src/components/NotificationsPopoverButton.tsx`](../src/components/NotificationsPopoverButton.tsx) for popover markup and notification actions. This targeted component was added after the audit; the TopBar still coordinates opening it with the profile menu.
-- **Dialogs and receipts:** [`src/components/BottomSheet.tsx`](../src/components/BottomSheet.tsx) correctly reuses [`src/components/layout/ResponsiveDialog.tsx`](../src/components/layout/ResponsiveDialog.tsx). By contrast, [`src/components/ReportView.tsx`](../src/components/ReportView.tsx), [`src/components/TabStatementView.tsx`](../src/components/TabStatementView.tsx), and [`src/components/TicketView.tsx`](../src/components/TicketView.tsx) each manage their own portal/backdrop/panel wrapper.
-- **Global overlays:** [`src/components/PermissionsPrompt.tsx`](../src/components/PermissionsPrompt.tsx), [`src/components/UpdateRequiredModal.tsx`](../src/components/UpdateRequiredModal.tsx), and [`src/components/ActionFeedbackToast.tsx`](../src/components/ActionFeedbackToast.tsx) are mounted at the app level rather than through a shared overlay host.
-- **Settings:** [`src/lib/displaySettings.ts`](../src/lib/displaySettings.ts) owns theme and display preferences, while [`src/services/settingsService.ts`](../src/services/settingsService.ts) owns language. Both currently use browser `localStorage`; they are not a unified, authenticated user-preferences service.
+The frozen list includes appearance and behavior. It does not prevent necessary technical maintenance that reproduces the current approved result exactly.
 
-## 5. Theme engine and persistence proposal — not implemented
+## 3. Components requiring technical maintenance only
 
-Keep **theme palette** separate from **color mode**:
+Technical work may proceed only when it is necessary for correctness, maintainability, accessibility, performance, portal/fullscreen behavior, or browser compatibility, and only if the approved visual and interaction result remains unchanged.
 
-1. Define a typed theme registry for named palettes and semantic token values. Keep `light`, `dark`, and `system` as a separate mode choice. Custom primary/accent values should override semantic tokens, not page-specific CSS.
-2. Apply the selected semantic variables at the document root so Tailwind utilities and shared CSS consume the same source. Keep a default palette that reproduces the approved Shift identity and the current Login appearance.
-3. Persist personal appearance preferences per authenticated user. Prefer a dedicated `user_preferences` table keyed by `user_id` (foreign key to `profiles.id`) with a versioned appearance payload and `updated_at`, protected by row-level security so a user can read/write only their own preferences.
-4. Do not put personal theme choices in `store_settings`: that record is store-scoped and is used for shared business and receipt settings. The current `profiles` table has security-sensitive, explicitly restricted read/update grants; adding personal preference updates to it would require careful policy and column-grant work. A separate table is the safer boundary.
-5. Cache preferences locally only under an authenticated-user-specific key. Load/apply them after auth hydration, and clear or reset the active user's theme on logout/account switch so a shared terminal cannot leak one employee's theme into another's session. Define an offline fallback and sync/conflict rule before implementation.
-6. Keep device/terminal controls such as large POS buttons and compact density distinct unless product decisions explicitly make them personal. Do not silently migrate the existing unscoped `hanouti.display-settings.v1` value to a shared user.
+Maintenance-only areas include:
 
-Settings currently offers only `light`, `dark`, and `system`; multi-palette selection, custom color picking, preview/save/reset, and per-user persistence remain future work.
+- Shift full-screen and overlay integration.
+- Shift cash movement and other Shift dialog/popup portal placement.
+- Shift notification bridge and notification popover behavior.
+- Desktop sidebar implementation and owner/staff shell integration.
+- Mobile bottom navigation implementation.
+- Mobile More menu implementation and expanded list.
+- Notification interface state and bridge behavior.
+- Login initialization, loading, authentication integration, and technical accessibility fixes.
+- Shared primitives used by frozen components, provided the frozen component API and rendered appearance are preserved.
 
-## 6. Shared component architecture proposal — not implemented
+A maintenance change must include a before/after visual and interaction check. Any change that alters approved appearance or behavior requires separate explicit authorization.
 
-Build on existing components rather than creating a parallel UI library:
+## 4. Sections awaiting Crystal Glass migration
 
-- **Tokens:** semantic colors and theme roles; glass surfaces; border/radius; elevation; spacing; typography; icon sizes; control heights; motion; and z-index layers.
-- **Primitives:** buttons and icon buttons, inputs/selects/search, cards/stat cards, badges/status tags, navigation items, and tooltips. Components should expose semantic variants and states, not page-specific colors.
-- **Composites:** responsive tables with mobile-card renderers, loading/empty/error states, and shared notifications.
-- **Shell:** `WorkspaceLayout` owns the page shell and navigation presentation; shared navigation data remains in `src/app/navigation.ts`.
-- **Migration rule:** preserve business logic and page behavior; replace styling only in the approved section. Do not bulk-rewrite every screen or change the Login design.
+No section in this list is approved for migration until a migration stage names it and explicit section approval is recorded.
 
-## 7. Full-screen and overlay diagnosis
+### Owner workspace
 
-### Verified behavior
+- Owner dashboard.
+- Point of Sale.
+- Orders.
+- Customers and customer detail.
+- Staff list and staff profile.
+- Schedule.
+- Catalog/products.
+- Inventory.
+- Void requests.
+- Waste log.
+- Reports.
+- Expenses.
+- Suppliers.
+- Activity log.
+- Owner settings and settings subsections.
+- Owner loading, error, empty, and placeholder states.
 
-The owner Shift page calls `requestFullscreen()` on `.workspace-layout.shift-screen-layout`, tracks `fullscreenchange`, and calls `exitFullscreen()` to leave. The CSS hides the sidebar, standard top bar, desktop navigation, and owner mobile navigation while expanding the main work area. This was visually inspected at desktop and mobile sizes; entering and exiting full screen restored the normal shell.
+### Staff workspace
 
-The shared notification popover switches its portal target between `document.fullscreenElement` and `document.body` on `fullscreenchange`. In a desktop browser run, the notification popover appeared within the full-screen Shift content.
+- Staff dashboard.
+- Staff profile.
+- POS.
+- Orders.
+- Customers.
+- Settings.
+- Staff lock/setup experiences.
 
-### Confirmed defect
+### Authentication and account setup
 
-`ResponsiveDialog` always portals to `document.body`. The browser's fullscreen top layer only displays the fullscreen element and its descendants; raising a body's z-index cannot fix a portal outside that subtree. In a desktop browser run, opening the Shift **Cash Movements** bottom sheet created a dialog in the DOM, but the dialog was absent from the full-screen screenshot; the dialog was not contained by `document.fullscreenElement`. This affects Shift bottom-sheet flows that use `BottomSheet`/`ResponsiveDialog`.
+- Set-new-password and account setup flows.
+- Lock screen.
+- Initialization and server-error states.
+- Password/session recovery experiences that are not part of the frozen Login page.
 
-Other components also portal to `document.body`: the standard `TopBar` notification/profile popovers and the non-inline paths of report, ticket, and tab-statement views. In addition, the app-level permissions prompt, required-update modal, and action toast are outside the Shift workspace. They are structurally at risk of being hidden behind fullscreen content when triggered during Shift full screen. The standard TopBar is hidden in Shift full screen, while the Shift-specific notification popover is fullscreen-aware.
+### Administrative workspace
 
-`ResponsiveDialog` registers a window-level Escape handler per open dialog and does not centralize focus trapping/restoration or scroll locking. Multiple simultaneous dialogs could each react to Escape; this nested case was not runtime-tested. In the tested browser run, Escape closed the open Shift sheet while leaving full screen active. This does not substitute for testing native Escape behavior in every supported browser.
+- Super-admin overview.
+- Stores list and store detail/read-only view.
+- Super-admin settings.
+- Administrative placeholders and error states.
 
-### Recommended overlay design
+### Cross-cutting screens
 
-Use one overlay manager/host with a normal document target and a target inside the active fullscreen element. Switch targets on `fullscreenchange`; route dialogs, sheets, popovers, notifications, app-level prompts, and toasts through it. The manager should own the overlay stack, close only the topmost overlay on Escape, focus entry/return, modal semantics, scroll behavior, and semantic z-index layers. Preserve normal non-fullscreen behavior. Test fullscreen entry/exit, every overlay type, forms, dropdowns, notification actions, keyboard focus, Escape, scrolling, and mobile layouts.
+- Generic loading and access-denied surfaces.
+- Update-required and app-level prompts.
+- Toast and action-feedback presentation.
+- Shared reports, tickets, tab statements, receipts, and other non-frozen views.
+- Any future route or newly added application section.
 
-No fullscreen or shared-dialog tests were found in `tests/`; the findings above are from code inspection and the described browser checks.
+These migration candidates must adopt Crystal Glass through shared tokens and reusable components. They must not copy the legacy CSS or create page-specific theme implementations.
 
-During the browser inspection, the console also emitted a `NotificationsBridge` Realtime error (`cannot add postgres_changes callbacks ... after subscribe()`). The notification popover UI rendered, but Realtime delivery was not validated. This is outside the visual audit and was not changed.
+## 5. Architectural rules
 
-## 8. Likely files for future work
+### One centralized design system
 
-These are candidates for future application work, not current changes. This document itself is the audit deliverable added in this task.
+- Use one source of truth for semantic colors, glass surfaces, borders, radii, shadows, spacing, typography, icon sizing, control heights, motion, breakpoints, and overlay z-index layers.
+- Existing `src/styles.css`, Tailwind configuration, and shared component styles must converge on the centralized tokens; do not add a parallel styling system.
+- No page may define an arbitrary palette or private duplicate token set.
 
-- **Theme/tokens:** `tailwind.config.ts`, `src/styles.css`, `src/main.tsx`, `src/App.tsx`, `src/lib/displaySettings.ts`, `src/services/settingsService.ts`, and a small theme/preferences module.
-- **Per-user persistence, if approved:** a new repository/service and a Supabase migration for `user_preferences`, plus focused type, RLS, and service tests. `src/types/domain.ts` may gain a preference type.
-- **Overlay host:** `src/App.tsx`, `src/components/WorkspaceLayout.tsx`, `src/components/BottomSheet.tsx`, `src/components/layout/ResponsiveDialog.tsx`, `src/components/NotificationsPopoverButton.tsx`, `src/components/ShiftNotificationsButton.tsx`, `src/components/TopBar.tsx`, `src/components/ReportView.tsx`, `src/components/TabStatementView.tsx`, `src/components/TicketView.tsx`, `src/components/PermissionsPrompt.tsx`, `src/components/UpdateRequiredModal.tsx`, and `src/components/ActionFeedbackToast.tsx`.
-- **Selected screen migration only:** the chosen screen and directly dependent shared components. `src/screens/LoginScreen.tsx` is excluded unless a strictly necessary integration change can preserve its approved appearance.
+### Reusable shared components
 
-## 9. Controlled migration roadmap — proposal only
+- Extend and reuse existing primitives and composites such as buttons, inputs, cards, badges, tables, dialogs, sheets, navigation items, loading states, empty states, and feedback components.
+- Common variants belong in shared component APIs, not in page-specific class lists or CSS blocks.
+- Shared components must support all approved responsive, RTL, keyboard, touch, fullscreen, and accessibility requirements.
 
-1. **Foundation approval:** agree on token names, theme/persistence boundary, and overlay/fullscreen behavior. Fix and test the overlay host before relying on fullscreen dialogs.
-2. **Pilot selection:** migrate one low-risk, preferably read-oriented section first (Owner Dashboard is a candidate). Wait for review and approval before starting another section.
-3. **Incremental sections:** proceed one section at a time, prioritizing shared components and lower-risk views before transaction-heavy flows. A possible order is Owner Dashboard, Catalog/Inventory, Staff/Schedule, Reports/Customers/Orders, then POS.
-4. **Per-section gate:** inspect the existing screen; preserve routes, permissions, data and offline behavior; implement only that section; validate desktop, tablet, mobile, RTL, overlays, loading/empty/error/success states, accessibility, and relevant tests/build checks; report the exact changes and stop for review.
+### Centralized theme management
 
-This order is a recommendation, not a decision. No migration starts without approval.
+- Keep color mode and palette/theme selection as separate concerns.
+- Apply semantic theme variables at the document root so Tailwind, shared CSS, and components consume the same values.
+- Theme changes must not require editing Shift, Login, frozen navigation, or frozen notification CSS.
+- Maintain persisted appearance preferences behind one centralized service; do not add ad hoc `localStorage` theme keys or page-specific theme stores.
 
-## 10. Risks and permanent governance rules
+### Responsive and overlay architecture
 
-### Risks to manage
+- Use shared breakpoints and responsive behavior.
+- Use one overlay manager/host for dialogs, bottom sheets, popovers, notifications, prompts, toasts, and app-level feedback.
+- The overlay target must become the active fullscreen element while fullscreen is active and return to the document target when fullscreen ends.
+- The overlay stack must own topmost Escape handling, focus entry/restoration, modal semantics, scroll behavior, and semantic z-index layers.
+- Portals must not be added with arbitrary z-index fixes.
 
-- Translucent surfaces can reduce text contrast against changing content; validate contrast in light/dark modes and on glass backgrounds.
-- Hardcoded Shift colors and CSS cascade order can make future themes inconsistent or cause regressions.
-- Backdrop filters, shadows, and animation can affect rendering cost on lower-powered/mobile devices; preserve reduced-motion and reduced-transparency support.
-- RTL layout, browser zoom, safe-area insets, keyboard operation, touch targets, and screen readers must remain supported.
-- Fullscreen behavior is browser-controlled and sensitive to portal placement; test actual supported browsers rather than relying only on z-index or DOM visibility.
-- User-scoped settings require correct RLS and account-switch behavior; store-wide settings must not accidentally become personal preferences or vice versa.
+## 6. Permanent development rules
 
-### Governance rules
+1. Never redesign or change an approved frozen component.
+2. Never modify more than one unrelated section in a task.
+3. Never migrate a frozen shell, login, shift, notification, or bottom-sheet implementation while visually changing another section.
+4. Never change business logic, authentication, database operations, permissions, routing, offline behavior, data models, or existing workflows during a visual migration.
+5. Preserve existing route paths, role checks, permission checks, API calls, repositories, stores, offline fallbacks, and business calculations.
+6. One source of truth: add or adjust shared tokens and components first; do not duplicate styling in a page.
+7. Keep technical maintenance reversible and minimize its surface area.
+8. Do not remove features or workflows to make a screen easier to migrate.
+9. Do not use the legacy design as a visual reference for migrated sections.
+10. Do not change database migrations or schema. A separate, explicitly approved preferences feature may not be bundled into visual migration work.
+11. Preserve the existing brand assets and Login identity.
+12. Preserve desktop, mobile, tablet, RTL, safe-area, reduced-motion, keyboard, screen-reader, contrast, and browser fullscreen behavior.
+13. Test both normal and fullscreen overlay behavior where the migrated section or shared overlay system participates.
+14. Test loading, empty, error, success, permission-denied, offline, and return-navigation states.
+15. Stop and request separate approval if a requested visual change would affect a frozen component or intentionally alter existing behavior.
+16. Record the exact files changed, verification performed, and remaining risks at the end of each migration task.
+17. No visual migration may start from this document alone; the specific section and scope must be explicitly approved.
 
-1. Crystal Glass, as established in Shift, is the primary visual reference. Do not use legacy styling as the model for new work.
-2. Use semantic shared tokens and existing reusable components; do not add page-specific copies of common UI or hardcode values where a token is appropriate.
-3. Preserve brand name, logo/assets, Login appearance, routing, authentication, permissions, data handling, offline behavior, and all existing features.
-4. Do not simplify by removing workflows or changing business logic during visual work.
-5. Keep overlays on the shared overlay architecture and verify them in normal and fullscreen contexts; do not solve portal problems with arbitrary z-index increases.
-6. Migrate one approved section at a time. Test its desktop/mobile layouts, states, accessibility, overlays, and business behavior before requesting approval for the next section.
-7. Prefer small, reversible changes. Document intentional deviations from Shift and verify every behavioral claim.
+## 7. Exact staged migration process
 
-**Audit outcome:** the Shift design provides a strong visual source, and the app already has useful semantic color tokens and reusable primitives. The main architectural gaps are incomplete token coverage, device-scoped theme persistence, duplicated overlay implementations, and the confirmed `ResponsiveDialog` fullscreen portal failure. No application or Supabase changes are part of this audit.
+### Stage 0 — Freeze and baseline
+
+1. Confirm the approved frozen inventory in this document.
+2. Create a visual baseline for frozen components at supported desktop and mobile sizes.
+3. Record existing Shift, notification, navigation, More menu, and Login behavior.
+4. Do not change source code or application behavior in this stage.
+
+**Exit gate:** The frozen inventory is acknowledged and a baseline exists.
+
+### Stage 1 — Shared foundation without page redesign
+
+1. Audit existing token usage and shared components.
+2. Complete one centralized semantic token and glass token set.
+3. Consolidate theme-mode application in existing theme initialization.
+4. Build or extend shared primitives with existing component patterns.
+5. Implement the centralized overlay host, including document and fullscreen targets.
+6. Add focused foundation tests and run existing build/type checks.
+
+**Exit gate:** Foundation work passes tests and does not change frozen or migrated UI appearance.
+
+### Stage 2 — Technical maintenance and compatibility
+
+1. Move Shift sheets/dialogs and notifications onto the shared overlay behavior only where required.
+2. Verify desktop and mobile navigation, Mobile More, notifications, Login, and Shift full-screen behavior remain pixel-equivalent and interaction-equivalent.
+3. Fix only confirmed technical defects, with no visual restyling.
+
+**Exit gate:** All approved frozen surfaces are visually unchanged and overlays work in normal/fullscreen contexts.
+
+### Stage 3 — Select one pilot migration
+
+The recommended first candidate is the read-oriented Owner Dashboard. It remains only a candidate until the project owner approves it.
+
+1. Define the exact pilot route and exact set of child components.
+2. Inventory every direct and shared dependency.
+3. Capture existing desktop, tablet, and mobile behavior.
+4. Preserve every route, permission, repository call, state, and workflow.
+5. Replace only that screen's styling and directly necessary shared primitives.
+6. Verify Crystal Glass tokens, contrast, breakpoints, RTL, reduced motion, loading/empty/error states, keyboard navigation, and overlays.
+7. Run the smallest relevant tests, then build/type checks and focused browser validation.
+8. Stop after reviewable completion; do not migrate adjacent sections.
+
+**Exit gate:** Owner explicitly approves the pilot against its frozen-surfaces protection and behavior checks.
+
+### Stage 4 — Incremental section migration
+
+Proceed in one-section units only, in this recommended order:
+
+1. Owner Dashboard.
+2. Catalog/Inventory.
+3. Staff/Schedule.
+4. Customers.
+5. Orders.
+6. Reports.
+7. POS.
+8. Remaining owner, staff, authentication/setup, administrative, and cross-cutting screens.
+
+The order may change, but any change must be an explicit scope decision made before work starts.
+
+For each section:
+
+1. Create a scope statement naming the route, components, and exclusions.
+2. Prove no frozen component is included unless it is a technical-maintenance-only dependency.
+3. Inspect direct state/data/permission requirements.
+4. Implement only shared visual migration for that section.
+5. Preserve business logic and workflows line by line.
+6. Review desktop, tablet, mobile, and RTL.
+7. Test all relevant interaction states and overlays.
+8. Run targeted tests and build checks.
+9. Report exact changes and ask for section approval.
+10. Stop. Start no adjacent section in the same task.
+
+**Exit gate:** Every section needs its own approved visual review before the next migration begins.
+
+### Stage 5 — Consolidation
+
+1. Remove obsolete page-specific styling only after migrated sections no longer depend on it.
+2. Reconcile remaining duplicate styles into shared tokens/components.
+3. Run a final cross-section regression pass.
+4. Recheck frozen components unchanged.
+5. Document known exceptions and unresolved technical work.
+
+No mass cleanup or redesign may bypass the per-section gates.
+
+## 8. Verification matrix
+
+Every migration task must verify the following where applicable:
+
+- Approved frozen surfaces remain unchanged.
+- Desktop and mobile navigation remain unchanged.
+- Mobile More and notification presentation remain unchanged.
+- Login remains unchanged.
+- Shift remains unchanged except approved technical-maintenance fixes.
+- Routes, permissions, authentication, database calls, and offline behavior remain unchanged.
+- Light/dark/system behavior follows centralized tokens.
+- Text contrast and glass transparency remain usable.
+- RTL, browser zoom, safe areas, and touch targets remain usable.
+- Keyboard focus, Escape, focus restoration, and modal semantics work.
+- Fullscreen dialogs, sheets, popovers, notifications, and prompts appear in the fullscreen target.
+- Loading, empty, error, success, and access-denied states work.
+- The smallest relevant tests and build/type checks pass.
+
+## 9. Current architectural audit
+
+The existing system includes useful semantic Tailwind tokens, reusable primitives, and a Shift glass-language reference, but it does not yet provide complete centralized governance.
+
+Known areas that require future technical work are:
+
+- Completing token coverage for hardcoded Shift and page values.
+- Centralizing theme/mode initialization and persistence.
+- Consolidating duplicate navigation and styling responsibilities.
+- Centralizing overlay and fullscreen behavior.
+- Consolidating notification/portal behavior.
+- Adding focused tests for dialogs, sheets, navigation, responsive states, and fullscreen.
+
+These findings are technical maintenance or foundation candidates. They do not authorize a redesign or database change.
+
+## 10. Theme foundation and persistence
+
+### Implemented foundation
+
+- The registered initial theme is **Hanouti Crystal Glass**.
+- Theme registration and light/dark token sets are typed in the shared theme module.
+- Palette selection is separate from light/dark/system color mode.
+- Custom primary and accent overrides are supported as display-settings API capabilities.
+- Live preview and reset functions apply or discard theme variables through the same source.
+- Appearance settings provide a theme gallery, curated color presets, light/dark/system mode, and a shared-component preview; edits remain transient until saved.
+- The gallery colorways reuse Crystal Glass tokens and do not create page-specific theme implementations.
+- Existing light/dark/system, compact-density, and large-button behavior remains compatible.
+- Tailwind semantic colors and shadows consume CSS variables updated by the theme engine.
+- The overlay architecture consumes centralized theme z-index tokens instead of an independent overlay registry.
+
+### Personal preference caching
+
+The current implementation uses a user-ID-qualified local cache:
+
+- `hanouti.display-settings.user.v1:<auth-user-id>` contains personal appearance preference state.
+- The legacy `hanouti.display-settings.v1` key remains a fallback for pre-auth initialization and device-level density controls.
+- Display settings are activated only after authentication identifies the user.
+- Account switches load only the target user's cache.
+- Logout and session loss reset active appearance to System mode and the Crystal Glass palette, while preserving device-level density choices.
+- No personal preference is copied from one authenticated account to another.
+- The cache is an offline fallback, not an authoritative server preference.
+
+### Database proposal — not implemented
+
+No appearance preference table currently exists. `notification_preferences` is notification-only, and `store_settings` is explicitly store-scoped. Personal appearance data must not be placed in either table or in sensitive `profiles` columns.
+
+The safest future migration is a dedicated:
+
+```sql
+create table public.user_preferences (
+  user_id uuid primary key references public.profiles(id) on delete cascade,
+  appearance jsonb not null default '{}'::jsonb,
+  revision bigint not null default 1,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.user_preferences enable row level security;
+
+create policy user_preferences_self_select
+  on public.user_preferences
+  for select
+  to authenticated
+  using (user_id = auth.uid());
+
+create policy user_preferences_self_insert
+  on public.user_preferences
+  for insert
+  to authenticated
+  with check (user_id = auth.uid());
+
+create policy user_preferences_self_update
+  on public.user_preferences
+  for update
+  to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+```
+
+The appearance payload should include `themeId`, `mode`, `customPrimary`, `customAccent`, `largeButtons`, and `compactDensity`, with strict application-side validation. Device-only density controls may remain local if product requirements keep them store-terminal settings; the database proposal should not silently change that boundary.
+
+Synchronization requires:
+
+- Auth hydration first loads the server preference.
+- The user-qualified cache is used only as an offline fallback.
+- Server writes use the authenticated user ID and RLS.
+- `updatedAt` plus `revision` define conflict and last-write-wins rules.
+- Account switch removes active variables and loads the target user's preference.
+- Logout clears active variables and removes the active user's visual state from the document.
+- Failed offline writes remain queued and are retried only for the same authenticated user.
+- Cached preferences must expire or be invalidated when authentication or session validity changes.
+
+## 11. Migration boundary
+
+The document does not authorize implementation.
+
+The approved migration sequence is:
+
+1. Foundation and technical maintenance.
+2. One pilot section, if explicitly approved.
+3. One additional section at a time, only after approval of the previous section.
+
+The following are permanently excluded unless explicitly authorized outside this governance document:
+
+- Redesign of frozen components.
+- Multi-section tasks.
+- Database migrations for appearance or any unrelated feature.
+- Changes to authentication, permissions, routing, offline behavior, or business logic for visual reasons.
+- Mixing foundation work, technical maintenance, and unrelated screen migrations in one task.

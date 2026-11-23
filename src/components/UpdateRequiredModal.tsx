@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from './Button';
 import { updateService, type UpdateCheckResult } from '../services/updateService';
 import {
@@ -6,14 +7,26 @@ import {
   UPDATE_REMINDER_DELAY_MS,
   type UpdateReminder,
 } from '../services/updateModalLogic';
+import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
 
 export function UpdateRequiredModal({ result }: { result: UpdateCheckResult | null }) {
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState('');
   const [reminder, setReminder] = useState<UpdateReminder | null>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const portalTarget = useOverlayTarget();
   const updateBuild = result?.latestBuild ?? result?.latestVersion ?? 'unknown';
   const snoozed = reminder?.build === updateBuild;
   const visible = shouldShowUpdateModal(result) && !snoozed;
+  const zIndex = useOverlayLifecycle({
+    open: visible && Boolean(result),
+    kind: 'critical',
+    preventEscape: true,
+    lockScroll: true,
+    trapFocus: true,
+    restoreFocus: true,
+    containerRef: panelRef,
+  });
 
   useEffect(() => {
     if (!reminder) return;
@@ -23,18 +36,6 @@ export function UpdateRequiredModal({ result }: { result: UpdateCheckResult | nu
     );
     return () => window.clearTimeout(timeoutId);
   }, [reminder]);
-
-  useEffect(() => {
-    if (!visible) return;
-    const preventEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-      }
-    };
-    document.addEventListener('keydown', preventEscape, true);
-    return () => document.removeEventListener('keydown', preventEscape, true);
-  }, [visible]);
 
   if (!visible || !result) return null;
   const bundled = result.mode === 'bundled';
@@ -60,9 +61,13 @@ export function UpdateRequiredModal({ result }: { result: UpdateCheckResult | nu
     });
   }
 
-  return (
-    <div className="glass-modal-backdrop required-update-backdrop fixed inset-0 z-[200] flex items-center justify-center bg-primary-dark/70 p-4 backdrop-blur-sm">
+  const modal = (
+    <div
+      className="glass-modal-backdrop required-update-backdrop fixed inset-0 flex items-center justify-center bg-primary-dark/70 p-4 backdrop-blur-sm"
+      style={{ zIndex }}
+    >
       <section
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="required-update-title"
@@ -108,4 +113,6 @@ export function UpdateRequiredModal({ result }: { result: UpdateCheckResult | nu
       </section>
     </div>
   );
+  if (typeof document === 'undefined' || !portalTarget) return modal;
+  return createPortal(modal, portalTarget);
 }

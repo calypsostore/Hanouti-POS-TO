@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import { notificationPath } from '../lib/notificationPath';
@@ -7,6 +7,7 @@ import { useNotificationStore } from '../stores/notificationStore';
 import type { NotificationRecord, NotificationType } from '../types/domain';
 import { MaterialIcon } from './MaterialIcon';
 import { t } from '../i18n/translations';
+import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
 
 type NotificationTone = 'blue' | 'green' | 'red' | 'violet' | 'amber';
 
@@ -63,7 +64,8 @@ export function NotificationsPopoverButton({
   const [activeNotificationId, setActiveNotificationId] = useState('');
   const [pendingBulkAction, setPendingBulkAction] = useState<'read' | null>(null);
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => new Set());
-  const [portalTarget, setPortalTarget] = useState<Element>(() => document.fullscreenElement ?? document.body);
+  const panelRef = useRef<HTMLElement>(null);
+  const portalTarget = useOverlayTarget();
   const isOpen = open ?? uncontrolledOpen;
   const visibleNotifications = recentNotifications.filter((notification) => !dismissedIds.has(notification.id));
 
@@ -76,22 +78,16 @@ export function NotificationsPopoverButton({
     setDismissedIds(new Set());
   }, [user?.id]);
 
-  useEffect(() => {
-    const updatePortalTarget = () => setPortalTarget(document.fullscreenElement ?? document.body);
-    document.addEventListener('fullscreenchange', updatePortalTarget);
-    return () => document.removeEventListener('fullscreenchange', updatePortalTarget);
-  }, []);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.stopPropagation();
-      setPanelOpen(false);
-    };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [isOpen, setPanelOpen]);
+  const closeOnEscape = useCallback(() => setPanelOpen(false), [setPanelOpen]);
+  const zIndex = useOverlayLifecycle({
+    open: isOpen,
+    kind: 'popover',
+    onEscape: closeOnEscape,
+    lockScroll: true,
+    trapFocus: true,
+    restoreFocus: true,
+    containerRef: panelRef,
+  });
 
   function openNotifications() {
     setError('');
@@ -163,10 +159,12 @@ export function NotificationsPopoverButton({
       </button>
       {isOpen && createPortal(
         <div
-          className="glass-modal-backdrop notification-popover-backdrop fixed inset-0 z-50 flex items-center justify-center"
+          className="glass-modal-backdrop notification-popover-backdrop fixed inset-0 flex items-center justify-center"
+          style={{ zIndex }}
           onMouseDown={() => setPanelOpen(false)}
         >
           <section
+            ref={panelRef}
             id={id}
             role="dialog"
             aria-modal="true"

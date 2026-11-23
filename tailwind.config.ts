@@ -49,6 +49,9 @@ const config: Config = {
         'on-error-container': colorToken('on-error-container'),
         secondary: colorToken('secondary'),
         'secondary-container': colorToken('secondary-container'),
+        accent: colorToken('accent'),
+        'accent-container': colorToken('accent-container'),
+        'on-accent': colorToken('on-accent'),
       },
       fontFamily: {
         display: ['Plus Jakarta Sans', 'sans-serif'],
@@ -91,9 +94,9 @@ const config: Config = {
         'margin-tablet': '1.5rem',
       },
       boxShadow: {
-        card: '0 2px 6px -1px rgba(15, 95, 110, 0.06), 0 1px 3px -1px rgba(0, 0, 0, 0.04)',
-        sheet: '0 10px 25px -4px rgba(15, 95, 110, 0.12), 0 4px 6px -2px rgba(15, 95, 110, 0.04)',
-        overlay: '0 20px 30px -6px rgba(16, 27, 32, 0.22)',
+        card: 'var(--shadow-card)',
+        sheet: 'var(--shadow-sheet)',
+        overlay: 'var(--shadow-overlay)',
       },
     },
   },

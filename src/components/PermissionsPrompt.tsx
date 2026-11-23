@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from './Button';
 import { MaterialIcon } from './MaterialIcon';
 import { permissionService, type NotificationPermissionStatus } from '../services/permissionService';
 import { useAuthStore } from '../stores/authStore';
 import { useNotificationStore } from '../stores/notificationStore';
+import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
 
 export function PermissionsPrompt() {
   const user = useAuthStore((state) => state.user);
@@ -18,6 +20,8 @@ export function PermissionsPrompt() {
   const [error, setError] = useState('');
   const [permissionChecked, setPermissionChecked] = useState(false);
   const lastPromptedNotificationKey = useRef('');
+  const panelRef = useRef<HTMLElement>(null);
+  const portalTarget = useOverlayTarget();
 
   useEffect(() => permissionService.subscribe(setStatus), []);
 
@@ -91,20 +95,33 @@ export function PermissionsPrompt() {
     }
   }
 
+  const closeOnEscape = useCallback(() => { void notNow(); }, []);
+  const zIndex = useOverlayLifecycle({
+    open: visible && Boolean(user) && !locked,
+    kind: 'prompt',
+    onEscape: closeOnEscape,
+    lockScroll: true,
+    trapFocus: true,
+    restoreFocus: true,
+    containerRef: panelRef,
+  });
+
   const instructions = permissionService.isNative()
     ? 'Android Settings > Apps > 7anouti-POS > Notifications'
     : 'Open this app’s browser site settings and allow notifications.';
 
   return (
     <>
-      {visible && user && !locked && (
+      {visible && user && !locked && createPortal(
         <div
-          className="glass-modal-backdrop permissions-prompt__backdrop fixed inset-0 z-[150] flex items-center justify-center bg-primary-dark/35 p-4 backdrop-blur-[2px]"
+          className="glass-modal-backdrop permissions-prompt__backdrop fixed inset-0 flex items-center justify-center bg-primary-dark/35 p-4 backdrop-blur-[2px]"
+          style={{ zIndex }}
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) void notNow();
           }}
         >
           <section
+            ref={panelRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="permissions-title"
@@ -172,7 +189,8 @@ export function PermissionsPrompt() {
               </Button>
             </div>
           </section>
-        </div>
+        </div>,
+        portalTarget,
       )}
     </>
   );

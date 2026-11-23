@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { App as CapacitorApp } from '@capacitor/app';
 import { useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
@@ -17,6 +18,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { useFocusRefreshKey } from '../lib/useFocusRefreshKey';
 import { notificationPath } from '../lib/notificationPath';
+import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
 import type { NotificationRecord } from '../types/domain';
 
 const SHOWN_IDS_KEY = '7anouti.notification.shown.v1';
@@ -50,6 +52,14 @@ export function NotificationsBridge() {
   const load = useNotificationStore((state) => state.load);
   const reset = useNotificationStore((state) => state.reset);
   const [banner, setBanner] = useState<NotificationRecord | null>(null);
+  const portalTarget = useOverlayTarget();
+  const bannerZIndex = useOverlayLifecycle({
+    open: Boolean(banner),
+    kind: 'toast',
+    lockScroll: false,
+    trapFocus: false,
+    restoreFocus: false,
+  });
   const appActive = useRef(true);
   const listenerRegistered = useRef(false);
   const refreshKey = useFocusRefreshKey();
@@ -261,7 +271,7 @@ export function NotificationsBridge() {
   }, [acceptInsert, acceptRealtimeUpdate, locked, markRead, navigate, user]);
 
   if (!banner) return null;
-  return (
+  return createPortal(
     <button
       type="button"
       onClick={() => {
@@ -272,10 +282,12 @@ export function NotificationsBridge() {
           navigate(notificationPath(current, user.role));
         }
       }}
-      className="fixed left-3 right-3 top-20 z-[140] mx-auto max-w-xl rounded-xl border border-primary/20 bg-surface-container-highest p-4 text-left shadow-overlay"
+      className="fixed left-3 right-3 top-20 mx-auto max-w-xl rounded-xl border border-primary/20 bg-surface-container-highest p-4 text-left shadow-overlay"
+      style={{ zIndex: bannerZIndex }}
     >
       <p className="font-body text-label-lg text-on-surface">{banner.title}</p>
       <p className="mt-1 font-body text-body-sm text-on-surface-variant">{banner.body}</p>
-    </button>
+    </button>,
+    portalTarget,
   );
 }

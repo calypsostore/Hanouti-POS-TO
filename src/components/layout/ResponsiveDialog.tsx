@@ -1,7 +1,8 @@
-import { useEffect, type ReactNode } from 'react';
+import { useCallback, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { MaterialIcon } from '../MaterialIcon';
 import { t } from '../../i18n/translations';
+import { useOverlayLifecycle, useOverlayTarget } from '../overlay/overlayArchitecture';
 
 interface ResponsiveDialogProps {
   open: boolean;
@@ -13,22 +14,31 @@ interface ResponsiveDialogProps {
   closeIcon?: ReactNode;
   children: ReactNode;
   variant?: 'modal' | 'drawer';
+  overlayKind?: 'dialog' | 'sheet';
   panelClassName?: string;
 }
 
-export function ResponsiveDialog({ open, onClose, title, subtitle, icon = 'tune', iconElement, closeIcon, children, variant = 'modal', panelClassName = '' }: ResponsiveDialogProps) {
-  useEffect(() => {
-    if (!open) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [onClose, open]);
+export function ResponsiveDialog({ open, onClose, title, subtitle, icon = 'tune', iconElement, closeIcon, children, variant = 'modal', overlayKind = 'dialog', panelClassName = '' }: ResponsiveDialogProps) {
+  const panelRef = useRef<HTMLElement>(null);
+  const portalTarget = useOverlayTarget();
+  const closeOnEscape = useCallback(() => onClose(), [onClose]);
+  const zIndex = useOverlayLifecycle({
+    open,
+    kind: overlayKind,
+    onEscape: closeOnEscape,
+    lockScroll: true,
+    trapFocus: true,
+    restoreFocus: true,
+    containerRef: panelRef,
+  });
   if (!open) return null;
   return createPortal(
-    <div className={`glass-modal-backdrop responsive-dialog responsive-dialog--${variant} fixed inset-0 z-50 flex items-center justify-center bg-primary-dark/60 backdrop-blur-sm`} onMouseDown={onClose}>
-      <section role="dialog" aria-modal="true" aria-label={title ?? t('common.dialog')} className={`glass-modal-panel responsive-dialog__panel flex max-h-[calc(100dvh-8px)] w-full flex-col overflow-hidden rounded-t-xl bg-surface-container-lowest p-4 shadow-overlay safe-bottom lg:max-h-[calc(100dvh-48px)] lg:rounded-xl ${panelClassName}`} onMouseDown={(event) => event.stopPropagation()}>
+    <div
+      className={`glass-modal-backdrop responsive-dialog responsive-dialog--${variant} fixed inset-0 flex items-center justify-center bg-primary-dark/60 backdrop-blur-sm`}
+      style={{ zIndex }}
+      onMouseDown={onClose}
+    >
+      <section ref={panelRef} role="dialog" aria-modal="true" aria-label={title ?? t('common.dialog')} className={`glass-modal-panel responsive-dialog__panel flex max-h-[calc(100dvh-8px)] w-full flex-col overflow-hidden rounded-t-xl bg-surface-container-lowest p-4 shadow-overlay safe-bottom lg:max-h-[calc(100dvh-48px)] lg:rounded-xl ${panelClassName}`} onMouseDown={(event) => event.stopPropagation()}>
         <div className="glass-modal-header shrink-0">
           <div className="glass-modal-heading">
             <span className="glass-modal-icon">{iconElement ?? <MaterialIcon name={icon} />}</span>
@@ -48,6 +58,6 @@ export function ResponsiveDialog({ open, onClose, title, subtitle, icon = 'tune'
         </div>
       </section>
     </div>,
-    document.body,
+    portalTarget,
   );
 }

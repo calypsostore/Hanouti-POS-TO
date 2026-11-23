@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { MaterialIcon } from './MaterialIcon';
+import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
 
 interface PullToRefreshProps {
   enabled: boolean;
@@ -106,18 +108,27 @@ export function PullToRefresh({ enabled, children }: PullToRefreshProps) {
 
   const visible = enabled && (pullDistance > 0 || refreshing);
   const readyToRefresh = pullDistance >= REFRESH_THRESHOLD;
+  const portalTarget = useOverlayTarget();
+  const zIndex = useOverlayLifecycle({
+    open: visible,
+    kind: 'toast',
+    lockScroll: false,
+    trapFocus: false,
+    restoreFocus: false,
+  });
 
   return (
     <>
       {children}
-      {visible && (
+      {visible && createPortal(
         <div
           role="status"
           aria-live="polite"
-          className="pointer-events-none fixed left-1/2 z-[120] flex -translate-x-1/2 items-center gap-2 rounded-full bg-surface-container-lowest px-4 py-2 text-sm font-medium text-on-surface shadow-overlay"
+          className="pointer-events-none fixed left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-surface-container-lowest px-4 py-2 text-sm font-medium text-on-surface shadow-overlay"
           style={{
             top: 'calc(env(safe-area-inset-top, 0px) - 3.25rem)',
             transform: `translate(-50%, ${refreshing ? 64 : pullDistance}px)`,
+            zIndex,
           }}
         >
           <MaterialIcon
@@ -125,7 +136,8 @@ export function PullToRefresh({ enabled, children }: PullToRefreshProps) {
             className={refreshing ? 'animate-spin' : ''}
           />
           {refreshing ? 'Refreshing…' : readyToRefresh ? 'Release to refresh' : 'Pull to refresh'}
-        </div>
+        </div>,
+        portalTarget,
       )}
     </>
   );

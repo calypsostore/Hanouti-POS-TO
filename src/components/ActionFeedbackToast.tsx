@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { classifyActionFeedback, type ActionFeedbackKind } from '../lib/actionFeedback';
 import { MaterialIcon } from './MaterialIcon';
+import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
 
 interface ToastMessage {
   kind: ActionFeedbackKind;
@@ -21,6 +23,14 @@ const SWIPE_TO_DISMISS_PX = 48;
 
 export function ActionFeedbackToast() {
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const portalTarget = useOverlayTarget();
+  const zIndex = useOverlayLifecycle({
+    open: Boolean(toast),
+    kind: 'toast',
+    lockScroll: false,
+    trapFocus: false,
+    restoreFocus: false,
+  });
   const timeoutRef = useRef<number | undefined>(undefined);
   const holdTimeoutRef = useRef<number | undefined>(undefined);
   const expiresAtRef = useRef(0);
@@ -165,8 +175,8 @@ export function ActionFeedbackToast() {
     }
   };
 
-  return (
-    <div className="action-feedback-toast-position" data-action-feedback-toast>
+  return createPortal(
+    <div className="action-feedback-toast-position" data-action-feedback-toast style={{ zIndex }}>
       <div
         className={`action-feedback-toast ${toast.exiting ? 'action-feedback-toast--exit' : ''} ${isError ? 'bg-error-dark' : 'bg-success-dark'}`}
         onPointerDown={handlePointerDown}
@@ -206,6 +216,7 @@ export function ActionFeedbackToast() {
         </div>
         <span className="sr-only" role={isError ? 'alert' : 'status'} aria-live={isError ? 'assertive' : 'polite'}>{toast.message}</span>
       </div>
-    </div>
+    </div>,
+    portalTarget,
   );
 }

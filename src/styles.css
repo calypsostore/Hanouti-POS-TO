@@ -12,6 +12,32 @@
 
 :root {
   color-scheme: light;
+  --color-accent: 14 165 233;
+  --color-accent-container: 224 242 254;
+  --color-on-accent: 255 255 255;
+  --glass-surface-alpha: 0.78;
+  --glass-high-surface-alpha: 0.92;
+  --glass-blur: 16px;
+  --glass-saturation: 1.15;
+  --radius-small: 0.25rem;
+  --radius-medium: 0.75rem;
+  --radius-large: 1.5rem;
+  --radius-pill: 9999px;
+  --shadow-card: 0 2px 6px -1px rgba(15, 95, 110, 0.06), 0 1px 3px -1px rgba(0, 0, 0, 0.04);
+  --shadow-sheet: 0 10px 25px -4px rgba(15, 95, 110, 0.12), 0 4px 6px -2px rgba(15, 95, 110, 0.04);
+  --shadow-overlay: 0 20px 30px -6px rgba(16, 27, 32, 0.22);
+  --page-gradient: radial-gradient(circle at top left, rgba(170, 237, 255, 0.32), transparent 28%);
+  --font-display: Plus Jakarta Sans, sans-serif;
+  --font-body: Inter, sans-serif;
+  --motion-fast-ms: 140;
+  --motion-normal-ms: 180;
+  --motion-slow-ms: 300;
+  --z-navigation: 30;
+  --z-popover: 300;
+  --z-dialog: 200;
+  --z-prompt: 500;
+  --z-critical: 600;
+  --z-toast: 400;
   --color-primary: 15 95 110;
   --color-primary-pressed: 9 63 74;
   --color-primary-dark: 16 27 32;
@@ -57,6 +83,9 @@
 
 :root.dark {
   color-scheme: dark;
+  --color-accent: 56 189 248;
+  --color-accent-container: 12 74 110;
+  --color-on-accent: 8 47 73;
   --color-primary: 112 213 230;
   --color-primary-pressed: 142 225 238;
   --color-primary-dark: 16 27 32;
@@ -1621,6 +1650,19 @@ button {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+.hanouti-overlay-root {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.hanouti-overlay-root > .glass-modal-backdrop,
+.hanouti-overlay-root > [role="alert"],
+.hanouti-overlay-root > [role="status"] {
+  pointer-events: auto;
+}
+
 .notification-popover-backdrop {
   animation: notification-popover-backdrop-in 140ms ease-out both;
 }
@@ -2798,10 +2840,12 @@ body .workspace-layout.shift-screen-layout:fullscreen > .workspace-main {
   align-items: center;
   gap: 1rem;
   border: 1px solid rgb(var(--color-outline-variant));
-  border-radius: 1.25rem;
+  border-radius: var(--radius-large);
   background:
     radial-gradient(ellipse at 92% 10%, rgb(var(--color-primary) / 0.1), transparent 42%),
-    rgb(var(--color-surface-container-lowest));
+    rgb(var(--color-surface-container-lowest) / var(--glass-high-surface-alpha));
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
   padding: 1.25rem;
 }
 
@@ -2851,8 +2895,10 @@ body .workspace-layout.shift-screen-layout:fullscreen > .workspace-main {
 .settings-dashboard__count {
   flex: 0 0 auto;
   border: 1px solid rgb(var(--color-outline-variant));
-  border-radius: 999px;
-  background: rgb(var(--color-surface-container-lowest));
+  border-radius: var(--radius-pill);
+  background: rgb(var(--color-surface-container-lowest) / var(--glass-high-surface-alpha));
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
   padding: 0.4rem 0.75rem;
   color: rgb(var(--color-on-surface-variant));
   font-size: 0.75rem;
@@ -2922,19 +2968,24 @@ body .workspace-layout.shift-screen-layout:fullscreen > .workspace-main {
   align-items: center;
   gap: 0.875rem;
   border: 1px solid rgb(var(--color-outline-variant));
-  border-radius: 1rem;
-  background: rgb(var(--color-surface-container-lowest));
+  border-radius: var(--radius-large);
+  background: rgb(var(--color-surface-container-lowest) / var(--glass-high-surface-alpha));
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
   padding: 1rem;
   color: rgb(var(--color-on-surface));
-  text-align: left;
+  text-align: start;
   cursor: pointer;
-  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  transition:
+    border-color calc(var(--motion-fast-ms) * 1ms),
+    box-shadow calc(var(--motion-fast-ms) * 1ms),
+    transform calc(var(--motion-fast-ms) * 1ms);
 }
 
 .settings-dashboard-card:hover,
 .settings-dashboard-card:focus-visible {
   border-color: rgb(var(--color-primary) / 0.55);
-  box-shadow: 0 8px 24px rgb(var(--color-primary-dark) / 0.08);
+  box-shadow: var(--shadow-sheet);
   outline: none;
   transform: translateY(-2px);
 }
@@ -2987,9 +3038,11 @@ body .workspace-layout.shift-screen-layout:fullscreen > .workspace-main {
   min-height: 2.75rem;
   align-items: center;
   gap: 0.4rem;
-  border: 0;
-  border-radius: 0.75rem;
-  background: transparent;
+  border: 1px solid rgb(var(--color-outline-variant));
+  border-radius: var(--radius-medium);
+  background: rgb(var(--color-surface-container-lowest) / var(--glass-high-surface-alpha));
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
   padding: 0 0.75rem;
   color: rgb(var(--color-primary));
   font-size: 0.875rem;
@@ -3012,6 +3065,45 @@ body .workspace-layout.shift-screen-layout:fullscreen > .workspace-main {
 
 .settings-section-content [hidden] {
   display: none !important;
+}
+
+.settings-section-content > section,
+.settings-section-content > form,
+.settings-section-content > div:not([hidden]) > section,
+.settings-section-content > div[class*="settings-owner"] > section {
+  border: 1px solid rgb(var(--color-outline-variant));
+  border-radius: var(--radius-large) !important;
+  background: rgb(var(--color-surface-container-lowest) / var(--glass-high-surface-alpha));
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+}
+
+.settings-section-content input:not([type="checkbox"]):not([type="color"]),
+.settings-section-content select,
+.settings-section-content textarea {
+  border: 1px solid rgb(var(--color-outline-variant));
+  transition:
+    border-color calc(var(--motion-fast-ms) * 1ms),
+    box-shadow calc(var(--motion-fast-ms) * 1ms);
+}
+
+.settings-section-content input:not([type="checkbox"]):not([type="color"]):focus,
+.settings-section-content select:focus,
+.settings-section-content textarea:focus {
+  border-color: rgb(var(--color-primary));
+  box-shadow: 0 0 0 2px rgb(var(--color-primary) / 0.14);
+}
+
+.settings-owner-store-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+@media (max-width: 899px) {
+  .settings-owner-store-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .sales-help-tooltip {

@@ -23,6 +23,7 @@ export function BottomSheet({ open, onClose, title, subtitle, icon, iconElement,
       icon={icon}
       iconElement={iconElement}
       closeIcon={closeIcon}
+      overlayKind="sheet"
       panelClassName={`bottom-sheet-panel ${panelClassName ?? ''}`}
     >
       {children}

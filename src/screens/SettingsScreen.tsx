@@ -24,12 +24,12 @@ import { buildReportDocument } from '../services/reportDocument';
 import { buildTicketDocument } from '../services/ticketDocument';
 import { downloadThermalPdf, printOrSharePdf, shareThermalPdf } from '../services/receiptExport';
 import { useAuthStore } from '../stores/authStore';
-import { updateDisplaySettings, useDisplaySettings, type DisplayTheme } from '../lib/displaySettings';
 import { parseNonNegativeMillimes } from '../lib/millimes';
 import { t, type TranslationKey } from '../i18n/translations';
 import { adminWorkspaceLinks, ownerWorkspaceLinks } from '../app/navigation';
 import { DEFAULT_NOTIFICATION_PREFERENCES, resolveStoreSettings, type CatalogItemRecord, type CategoryRecord, type NotificationRecord, type NotificationType, type OrderRecord, type PositionRecord, type ReportRecord, type ScheduleShiftRecord, type SettlementTerms, type StoreType } from '../types/domain';
 import { getStoreLogoGroups } from '../data/logoCatalog';
+import { AppearanceSettings } from '../components/AppearanceSettings';
 
 const notificationOptions: { type: NotificationType; label: string; description: string }[] = [
   { type: 'void_requested', label: 'Void request received', description: 'Notify the owner when staff request an order void.' },
@@ -233,12 +233,11 @@ export function SettingsScreen() {
   const [searchParams, setSearchParams] = useSearchParams();
   const user = useAuthStore((state) => state.user);
   const updateOwnerProfile = useAuthStore((state) => state.updateOwnerProfile);
-  const displaySettings = useDisplaySettings();
   const storeId = user?.storeId;
   const userRole = user?.role;
   const settingsSections: SettingsSection[] = userRole === 'owner'
     ? [
-        { id: 'display', title: 'Display', description: 'Theme and screen density', icon: 'palette' },
+        { id: 'display', title: 'Appearance & themes', description: 'Personalize colors, theme, and screen density', icon: 'palette' },
         { id: 'store', title: 'Store and profile', description: 'Store details, contact information, and sales target', icon: 'storefront' },
         { id: 'receipts', title: 'Tickets and reports', description: 'Receipt layout, paper size, and previews', icon: 'receipt_long' },
         { id: 'security', title: 'Security', description: 'PIN, passwords, and POS access', icon: 'shield_lock' },
@@ -252,7 +251,7 @@ export function SettingsScreen() {
       ]
     : userRole === 'staff'
       ? [
-          { id: 'display', title: 'Display', description: 'Theme and screen density', icon: 'palette' },
+          { id: 'display', title: 'Appearance & themes', description: 'Personalize colors, theme, and screen density', icon: 'palette' },
           { id: 'security', title: 'Security', description: 'Personal PIN and password', icon: 'shield_lock' },
           { id: 'notifications', title: 'Notifications and schedule', description: 'Alert preferences and upcoming shifts', icon: 'notifications' },
           { id: 'help', title: 'Help', description: 'Usage guides for POS operations', icon: 'help' },
@@ -261,7 +260,7 @@ export function SettingsScreen() {
           { id: 'updates', title: 'App updates', description: 'Check versions and install updates', icon: 'system_update' },
         ]
       : [
-          { id: 'display', title: 'Display', description: 'Theme and screen density', icon: 'palette' },
+          { id: 'display', title: 'Appearance & themes', description: 'Personalize colors, theme, and screen density', icon: 'palette' },
           { id: 'security', title: 'Security', description: 'Password and account access', icon: 'shield_lock' },
           { id: 'help', title: 'Help', description: 'Usage guides for POS operations', icon: 'help' },
           { id: 'language', title: 'Language', description: 'Choose the app language', icon: 'language' },
@@ -326,16 +325,6 @@ export function SettingsScreen() {
     setLastCheck(result.checkedAt);
     setUpdateResult(result);
   }), []);
-
-  function saveDisplayPreference(changes: { theme?: DisplayTheme; largeButtons?: boolean; compactDensity?: boolean }) {
-    setError('');
-    try {
-      updateDisplaySettings(changes);
-    } catch (displayError) {
-      console.error('Unable to save display settings.', displayError);
-      setError('Unable to save display settings. Please try again.');
-    }
-  }
 
   useEffect(() => {
     if (storeId) {
@@ -839,52 +828,7 @@ export function SettingsScreen() {
         All settings
       </button>
       <div className="settings-section-content">
-      <section hidden={activeSection.id !== 'display'} aria-labelledby="display-settings-heading" className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-        <div>
-          <h2 id="display-settings-heading" className="font-display text-headline-md text-on-surface">Display</h2>
-          <p className="mt-1 font-body text-body-sm text-on-surface-variant">Choose how 7anouti-POS looks on this device.</p>
-        </div>
-        <label htmlFor="display-theme" className="font-body text-label-md text-on-surface">Theme</label>
-        <select
-          id="display-theme"
-          value={displaySettings.theme}
-          onChange={(event) => {
-            const theme = event.currentTarget.value;
-            if (theme === 'light' || theme === 'dark' || theme === 'system') {
-              saveDisplayPreference({ theme });
-            }
-          }}
-          className="h-12 w-full rounded-lg bg-surface-container-low px-3 font-body text-body-md text-on-surface outline-none focus:ring-2 focus:ring-primary"
-        >
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
-          <option value="system">System</option>
-        </select>
-        <label className="flex min-h-12 items-center gap-3 rounded-xl bg-surface-container-low p-3 font-body text-label-md text-on-surface">
-          <input
-            type="checkbox"
-            checked={displaySettings.largeButtons}
-            onChange={(event) => saveDisplayPreference({ largeButtons: event.currentTarget.checked })}
-            className="h-5 w-5 accent-primary"
-          />
-          <span>
-            <span className="block">Large buttons</span>
-            <span className="mt-1 block font-body text-body-sm text-on-surface-variant">Use larger product cards, quantity controls and action buttons in the POS.</span>
-          </span>
-        </label>
-        <label className="desktop-density-option flex min-h-12 items-center gap-3 rounded-xl bg-surface-container-low p-3 font-body text-label-md text-on-surface">
-          <input
-            type="checkbox"
-            checked={displaySettings.compactDensity}
-            onChange={(event) => saveDisplayPreference({ compactDensity: event.currentTarget.checked })}
-            className="h-5 w-5 accent-primary"
-          />
-          <span>
-            <span className="block">Compact density</span>
-            <span className="mt-1 block font-body text-body-sm text-on-surface-variant">Reduce desktop card spacing and type size to show more information.</span>
-          </span>
-        </label>
-      </section>
+      {activeSection.id === 'display' && user?.id && <AppearanceSettings key={user.id} userId={user.id} />}
 
       {user?.role === 'staff' && activeSection.id === 'notifications' && (
         <>
@@ -952,7 +896,7 @@ export function SettingsScreen() {
 
       {user?.role === 'owner' && store && (
         <>
-          <div hidden={activeSection.id !== 'store'}>
+          <div className="settings-owner-store-grid" hidden={activeSection.id !== 'store'}>
           <section aria-labelledby="owner-profile-settings-heading" className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
             <h2 id="owner-profile-settings-heading" className="font-display text-headline-md text-on-surface">Owner profile</h2>
             <form onSubmit={(event) => { void saveOwnerProfile(event); }} className="flex flex-col gap-3">

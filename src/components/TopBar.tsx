@@ -9,6 +9,7 @@ import { useAuthStore } from '../stores/authStore';
 import type { ProfileAvatarId, StoreType } from '../types/domain';
 import { getLogoDefinition } from '../data/logoCatalog';
 import { DEFAULT_PROFILE_AVATAR_ID, PROFILE_AVATARS } from '../data/profileAvatars';
+import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
 
 interface TopBarProps {
   title: string;
@@ -33,11 +34,23 @@ export function TopBar({ title, storeName, storeLogoId, storeType = 'general', o
   const [savingAvatar, setSavingAvatar] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const profileButtonRef = useRef<HTMLButtonElement>(null);
+  const profilePanelRef = useRef<HTMLElement>(null);
+  const portalTarget = useOverlayTarget();
   const storeLogo = getLogoDefinition(storeLogoId ?? '');
   const updateProfilePosition = useCallback(() => {
     const buttonBounds = profileButtonRef.current?.getBoundingClientRect();
     if (buttonBounds) setProfilePosition(buttonBounds.bottom + 6);
   }, []);
+  const closeProfileOnEscape = useCallback(() => setProfileOpen(false), []);
+  const profileZIndex = useOverlayLifecycle({
+    open: profileOpen,
+    kind: 'popover',
+    onEscape: closeProfileOnEscape,
+    lockScroll: true,
+    trapFocus: true,
+    restoreFocus: true,
+    containerRef: profilePanelRef,
+  });
 
   function openProfile() {
     setProfileError('');
@@ -76,15 +89,10 @@ export function TopBar({ title, storeName, storeLogoId, storeType = 'general', o
 
   useEffect(() => {
     if (!profileOpen) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setProfileOpen(false);
-    };
     const updateProfileOnViewportChange = () => updateProfilePosition();
-    window.addEventListener('keydown', closeOnEscape);
     window.addEventListener('resize', updateProfileOnViewportChange);
     window.addEventListener('scroll', updateProfileOnViewportChange, true);
     return () => {
-      window.removeEventListener('keydown', closeOnEscape);
       window.removeEventListener('resize', updateProfileOnViewportChange);
       window.removeEventListener('scroll', updateProfileOnViewportChange, true);
     };
@@ -154,8 +162,13 @@ export function TopBar({ title, storeName, storeLogoId, storeType = 'general', o
       </div>
     </header>
     {profileOpen && user && createPortal(
-      <div className="glass-modal-backdrop notification-popover-backdrop fixed inset-0 z-50 bg-primary-dark/30 backdrop-blur-[1px]" onMouseDown={() => setProfileOpen(false)}>
+      <div
+        className="glass-modal-backdrop notification-popover-backdrop fixed inset-0 bg-primary-dark/30 backdrop-blur-[1px]"
+        style={{ zIndex: profileZIndex }}
+        onMouseDown={() => setProfileOpen(false)}
+      >
         <section
+          ref={profilePanelRef}
           id="profile-popover"
           role="dialog"
           aria-modal="true"
@@ -270,7 +283,7 @@ export function TopBar({ title, storeName, storeLogoId, storeType = 'general', o
           </div>
         </section>
       </div>,
-      document.body,
+      portalTarget,
     )}
     </>
   );

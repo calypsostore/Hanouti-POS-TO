@@ -4,6 +4,7 @@ import { Button } from './Button';
 import { formatTnd } from '../lib/format';
 import type { CustomerRecord, OrderRecord, TabRecord } from '../types/domain';
 import { printOrSharePdf } from '../services/receiptExport';
+import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
 
 function money(amountMillimes: number): string {
   return `${formatTnd(Math.abs(amountMillimes) / 1000)} DT`;
@@ -20,6 +21,18 @@ export function TabStatementView({ customer, storeName, balanceMillimes, transac
 }) {
   const [error, setError] = useState('');
   const printTarget = useRef<HTMLElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const portalTarget = useOverlayTarget();
+  const closeOnEscape = useCallback(() => onClose(), [onClose]);
+  const zIndex = useOverlayLifecycle({
+    open: true,
+    kind: 'dialog',
+    onEscape: closeOnEscape,
+    lockScroll: true,
+    trapFocus: true,
+    restoreFocus: true,
+    containerRef: dialogRef,
+  });
   const orderIndex = useMemo(() => new Map(orders.map((order) => [order.id, order])), [orders]);
   const entries = useMemo(() => [...transactions].sort((left, right) => left.createdAt.localeCompare(right.createdAt)), [transactions]);
   const balanceLabel = balanceMillimes < 0 ? `Credit balance ${money(balanceMillimes)}` : `Amount due ${money(balanceMillimes)}`;
@@ -39,8 +52,8 @@ export function TabStatementView({ customer, storeName, balanceMillimes, transac
   }, [autoShare, customer.id, printStatement]);
 
   return createPortal(
-    <div className="glass-modal-backdrop receipt-overlay" onMouseDown={onClose}>
-      <section role="dialog" aria-modal="true" aria-label={`${customer.name} tab statement`} className="glass-modal-panel receipt-dialog" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="glass-modal-backdrop receipt-overlay" style={{ zIndex }} onMouseDown={onClose}>
+      <section ref={dialogRef} role="dialog" aria-modal="true" aria-label={`${customer.name} tab statement`} className="glass-modal-panel receipt-dialog" onMouseDown={(event) => event.stopPropagation()}>
         <div className="receipt-actions no-print">
           <Button variant="secondary" onClick={() => { void printStatement(); }}>Print statement</Button>
           <Button variant="ghost" onClick={onClose}>Close</Button>
@@ -84,7 +97,7 @@ export function TabStatementView({ customer, storeName, balanceMillimes, transac
         </article>
       </section>
     </div>,
-    globalThis.document.body,
+    portalTarget,
   );
 }
 

@@ -2044,7 +2044,7 @@ body .workspace-layout.shift-screen-layout:fullscreen > .workspace-main {
     height: 100dvh;
     min-height: 0;
     overflow: hidden;
-    padding-bottom: 6rem;
+    padding-bottom: 0;
   }
 
   .workspace-layout.shift-screen-layout > .workspace-main {
@@ -6692,6 +6692,7 @@ body .workspace-layout.shift-screen-layout:fullscreen > .workspace-main {
 @media (max-width: 700px) {
   .shift-workspace--owner {
     padding: 14px;
+    padding-bottom: calc(90px + env(safe-area-inset-bottom, 0px));
   }
 
   .shift-workspace--owner .shift-topbar {

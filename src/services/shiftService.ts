@@ -68,7 +68,7 @@ export const shiftService = {
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   },
 
-  async getExpectedCash(shiftId: string): Promise<number> {
+  async getExpectedCash(shiftId: string): Promise<number | null> {
     if (isSupabaseDriver()) return getRemoteExpectedCash(shiftId);
     const shift = await this.getShift(shiftId);
     if (!shift) throw new Error('Shift could not be found.');
@@ -197,6 +197,7 @@ export const shiftService = {
     const shift = shifts.find((candidate) => candidate.id === shiftId && candidate.status === 'open');
     if (!shift) throw new Error('Open shift could not be found.');
     const expectedCashMillimes = await this.getExpectedCash(shiftId);
+    if (expectedCashMillimes === null) throw new Error('Expected cash is not available for blind shift closing.');
     const differenceMillimes = countedCashMillimes - expectedCashMillimes;
     const cleanedDifferenceNote = validateDifferenceNote(differenceMillimes, differenceNote);
     const closedAt = new Date().toISOString();
@@ -241,6 +242,7 @@ export const shiftService = {
     if (!await userService.verifyStorePin(store.id, ownerPin, 'z_report')) throw new Error('Incorrect owner PIN.');
     const autoApproved = await orderService.autoApprovePendingVoids(store.id, actor.id, shift.id);
     const expectedCashMillimes = await this.getExpectedCash(shiftId);
+    if (expectedCashMillimes === null) throw new Error('Expected cash is not available for blind shift closing.');
     const closedAt = new Date().toISOString();
     const updated: ShiftRecord = {
       ...shift,
@@ -297,6 +299,7 @@ export const shiftService = {
       shift.storeId === store.id && shift.status === 'closed' && approvedCounts.has(shift.id));
     for (const shift of openShifts) {
       const expectedCashMillimes = await this.getExpectedCash(shift.id);
+      if (expectedCashMillimes === null) throw new Error('Expected cash is not available for blind shift closing.');
       const count = approvedCounts.get(shift.id) ?? 0;
       const updated: ShiftRecord = {
         ...shift,

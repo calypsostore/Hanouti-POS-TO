@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from './Button';
 import { MaterialIcon } from './MaterialIcon';
 import { ReceiptDocumentView } from './ReceiptDocumentView';
@@ -128,11 +129,12 @@ export function ReportView({
     return <section className="receipt-inline-report" aria-label={`${document.title} preview`}>{content}</section>;
   }
 
-  return (
-    <div className="receipt-overlay" onMouseDown={onClose}>
-      <section role="dialog" aria-modal="true" aria-label={`${document.title} report`} className="receipt-dialog report-dialog" onMouseDown={(event) => event.stopPropagation()}>
+  return createPortal(
+    <div className="glass-modal-backdrop receipt-overlay" onMouseDown={onClose}>
+      <section role="dialog" aria-modal="true" aria-label={`${document.title} report`} className="glass-modal-panel receipt-dialog report-dialog" onMouseDown={(event) => event.stopPropagation()}>
         {content}
       </section>
-    </div>
+    </div>,
+    globalThis.document.body,
   );
 }

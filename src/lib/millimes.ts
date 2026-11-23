@@ -2,7 +2,10 @@ export function parseNonNegativeMillimes(value: string): number | undefined {
   const trimmed = value.trim();
   if (!trimmed) return undefined;
   const commaOnly = trimmed.includes(',') && !trimmed.includes('.');
-  const normalized = commaOnly ? trimmed.replace(/,/g, '.') : trimmed.replace(/,/g, '');
+  const groupedInteger = /^\d{1,3}(?:,\d{3})+$/.test(trimmed) && !trimmed.startsWith('0,');
+  const normalized = commaOnly && !groupedInteger
+    ? trimmed.replace(/,/g, '.')
+    : trimmed.replace(/,/g, '');
   if (!/^(?:\d+)(?:\.\d{0,3})?$/.test(normalized)) return undefined;
 
   const [dinarsText, decimalsText = ''] = normalized.split('.');
@@ -31,13 +34,12 @@ export function formatMillimesWithThousands(amountMillimes: number): string {
 }
 
 export function formatDinarInput(value: string): string {
-  const commaOnly = value.includes(',') && !value.includes('.');
-  const normalized = (commaOnly ? value : value.replace(/,/g, '')).replace(/,/g, '.');
-  if (!/^\d*(?:\.\d{0,3})?$/.test(normalized)) return value;
-  const [rawDinars = '', decimals] = normalized.split('.');
-  const dinars = rawDinars === '' ? '' : rawDinars.replace(/^0+(?=\d)/, '');
-  const grouped = dinars.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return decimals !== undefined ? `${grouped}.${decimals}` : grouped;
+  const digits = value.replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+  if (!digits) return '';
+
+  const millimes = digits.padStart(4, '0');
+  const dinars = millimes.slice(0, -3).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${dinars}.${millimes.slice(-3)}`;
 }
 
 export function preserveDinarInputCursor(

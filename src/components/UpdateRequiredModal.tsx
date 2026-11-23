@@ -61,13 +61,13 @@ export function UpdateRequiredModal({ result }: { result: UpdateCheckResult | nu
   }
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-primary-dark/70 p-4 backdrop-blur-sm">
+    <div className="glass-modal-backdrop required-update-backdrop fixed inset-0 z-[200] flex items-center justify-center bg-primary-dark/70 p-4 backdrop-blur-sm">
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby="required-update-title"
         aria-describedby="required-update-message"
-        className="max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl bg-surface-container-lowest p-6 shadow-overlay"
+        className="glass-modal-panel required-update-dialog-panel max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl bg-surface-container-lowest p-6 shadow-overlay"
       >
         <h1 id="required-update-title" className="font-display text-headline-lg text-on-surface">
           Update required

@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from './Button';
 import { ReceiptDocumentView } from './ReceiptDocumentView';
 import { downloadThermalPdf, printOrSharePdf, shareThermalPdf } from '../services/receiptExport';
@@ -65,9 +66,9 @@ export function TicketView({ order, storeName, staffName, onClose, settings, sto
     }
   }
 
-  return (
-    <div className="receipt-overlay" onMouseDown={onClose}>
-      <section role="dialog" aria-modal="true" aria-label={documentTitle} className="receipt-dialog" onMouseDown={(event) => event.stopPropagation()}>
+  return createPortal(
+    <div className="glass-modal-backdrop receipt-overlay" onMouseDown={onClose}>
+      <section role="dialog" aria-modal="true" aria-label={documentTitle} className="glass-modal-panel receipt-dialog" onMouseDown={(event) => event.stopPropagation()}>
         <div className="receipt-actions no-print">
           <Button variant={copyType === 'customer' ? 'primary' : 'secondary'} aria-pressed={copyType === 'customer'} onClick={() => setCopyType('customer')}>Customer receipt</Button>
           <Button variant={copyType === 'kitchen' ? 'primary' : 'secondary'} aria-pressed={copyType === 'kitchen'} onClick={() => setCopyType('kitchen')}>Kitchen copy</Button>
@@ -79,6 +80,7 @@ export function TicketView({ order, storeName, staffName, onClose, settings, sto
         {shareError && <p role="alert" className="no-print receipt-error">{shareError}</p>}
         <ReceiptDocumentView ref={printTarget} document={ticketDocument} />
       </section>
-    </div>
+    </div>,
+    globalThis.document.body,
   );
 }

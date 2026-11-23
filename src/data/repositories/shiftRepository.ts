@@ -95,13 +95,11 @@ async function adjustmentsForShift(shiftId: string): Promise<AdjustmentRow[]> {
 }
 
 export async function listShifts(storeId: string): Promise<ShiftRecord[]> {
-  const { data, error } = await getSupabaseClient()
-    .from('shifts')
-    .select('*')
-    .eq('store_id', storeId)
-    .order('opened_at', { ascending: false });
+  const { data, error } = await getSupabaseClient().rpc('list_shift_records', {
+    p_store_id: storeId,
+  });
   if (error) workflowError(error, 'Could not load shifts');
-  const rows = (data ?? []) as ShiftRow[];
+  const rows = Array.isArray(data) ? data as unknown as ShiftRow[] : [];
   if (rows.length === 0) return [];
   const { data: adjustments, error: adjustmentError } = await getSupabaseClient()
     .from('shift_void_adjustments')
@@ -120,27 +118,23 @@ export async function listShifts(storeId: string): Promise<ShiftRecord[]> {
 }
 
 export async function getShift(shiftId: string): Promise<ShiftRecord | undefined> {
-  const { data, error } = await getSupabaseClient()
-    .from('shifts')
-    .select('*')
-    .eq('id', shiftId)
-    .maybeSingle();
+  const { data, error } = await getSupabaseClient().rpc('get_shift_record', {
+    p_shift_id: shiftId,
+  });
   if (error) workflowError(error, 'Could not load shift');
   if (!data) return undefined;
   const adjustments = await adjustmentsForShift(shiftId);
-  return mapShift(data as ShiftRow, adjustments);
+  return mapShift(data as unknown as ShiftRow, adjustments);
 }
 
 export async function getOpenShiftForUser(storeId: string, userId: string): Promise<ShiftRecord | undefined> {
-  const { data, error } = await getSupabaseClient()
-    .from('shifts')
-    .select('*')
-    .eq('store_id', storeId)
-    .eq('staff_id', userId)
-    .eq('status', 'open')
-    .maybeSingle();
+  const { data, error } = await getSupabaseClient().rpc('list_shift_records', {
+    p_store_id: storeId,
+  });
   if (error) workflowError(error, 'Could not load open shift');
-  return data ? mapShift(data as ShiftRow) : undefined;
+  const rows = Array.isArray(data) ? data as unknown as ShiftRow[] : [];
+  const open = rows.find((row) => row.staff_id === userId && row.status === 'open');
+  return open ? mapShift(open) : undefined;
 }
 
 export async function listCashMovements(storeId: string, shiftId?: string): Promise<CashMovementRecord[]> {
@@ -223,8 +217,12 @@ export async function recordCashMovement(input: {
   return mapCashMovement(data as CashMovementRow);
 }
 
-export async function getExpectedCash(shiftId: string): Promise<number> {
-  const { data, error } = await getSupabaseClient().rpc('get_shift_expected_cash', { p_shift_id: shiftId });
+export async function getExpectedCash(shiftId: string): Promise<number | null> {
+  const { data, error } = await getSupabaseClient().rpc('get_shift_expected_cash_visible', { p_shift_id: shiftId });
   if (error) workflowError(error, 'Could not calculate expected cash');
-  return Number(data);
+  if (data === null) return null;
+  if (typeof data !== 'number' || !Number.isSafeInteger(data)) {
+    throw new Error('Expected cash response is invalid.');
+  }
+  return data;
 }

@@ -236,7 +236,7 @@ export function TopBar({ title, storeName, storeLogoId, storeType = 'general', o
       </div>
     </header>
     {notificationsOpen && createPortal(
-      <div className="notification-popover-backdrop fixed inset-0 z-50 bg-primary-dark/30 backdrop-blur-[1px]" onMouseDown={() => setNotificationsOpen(false)}>
+      <div className="glass-modal-backdrop notification-popover-backdrop fixed inset-0 z-50 bg-primary-dark/30 backdrop-blur-[1px]" onMouseDown={() => setNotificationsOpen(false)}>
         <section
           id="notifications-popover"
           role="dialog"
@@ -248,7 +248,7 @@ export function TopBar({ title, storeName, storeLogoId, storeType = 'general', o
             transformOrigin: `${notificationPosition.originX}px 0px`,
             maxHeight: `min(68dvh, calc(100dvh - ${notificationPosition.top}px - 1rem))`,
           }}
-          className="notification-popover-panel fixed flex w-[min(22rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-lg border border-outline-variant bg-surface-container-lowest p-3 shadow-overlay safe-bottom"
+          className="glass-modal-panel notification-popover-panel fixed flex w-[min(22rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-lg border border-outline-variant bg-surface-container-lowest p-3 shadow-overlay safe-bottom"
           onMouseDown={(event) => event.stopPropagation()}
         >
           <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
@@ -336,7 +336,7 @@ export function TopBar({ title, storeName, storeLogoId, storeType = 'general', o
       document.body,
     )}
     {profileOpen && user && createPortal(
-      <div className="notification-popover-backdrop fixed inset-0 z-50 bg-primary-dark/30 backdrop-blur-[1px]" onMouseDown={() => setProfileOpen(false)}>
+      <div className="glass-modal-backdrop notification-popover-backdrop fixed inset-0 z-50 bg-primary-dark/30 backdrop-blur-[1px]" onMouseDown={() => setProfileOpen(false)}>
         <section
           id="profile-popover"
           role="dialog"
@@ -347,7 +347,7 @@ export function TopBar({ title, storeName, storeLogoId, storeType = 'general', o
             right: '8px',
             maxHeight: `min(68dvh, calc(100dvh - ${profilePosition}px - 1rem))`,
           }}
-          className="notification-popover-panel fixed flex w-[min(22rem,calc(100vw-1rem))] flex-col overflow-y-auto rounded-lg border border-outline-variant bg-surface-container-lowest p-3 shadow-overlay safe-bottom"
+          className="glass-modal-panel notification-popover-panel fixed flex w-[min(22rem,calc(100vw-1rem))] flex-col overflow-y-auto rounded-lg border border-outline-variant bg-surface-container-lowest p-3 shadow-overlay safe-bottom"
           onMouseDown={(event) => event.stopPropagation()}
         >
           <div className="mb-3 flex items-center justify-between gap-3">

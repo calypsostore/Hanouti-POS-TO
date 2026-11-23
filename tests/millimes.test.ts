@@ -15,7 +15,7 @@ describe('Dinar millimes parsing', () => {
     ['0.250', 250],
     ['1.005', 1005],
     ['100.000', 100000],
-    ['50,000', 50000],
+    ['50,000', 50000000],
     ['1,250.000', 1250000],
     ['0,500', 500],
   ])('parses %s as %i millimes', (input, expected) => {
@@ -36,10 +36,18 @@ describe('Dinar millimes parsing', () => {
     expect(formatMillimesWithThousands(1250000)).toBe('1,250.000');
   });
 
-  it('formats input while preserving decimal and thousands editing', () => {
-    expect(formatDinarInput('1250')).toBe('1,250');
-    expect(formatDinarInput('1250,5')).toBe('1,250.5');
+  it('formats raw millime digits as grouped dinar amounts', () => {
+    expect(formatDinarInput('50')).toBe('0.050');
+    expect(formatDinarInput('1250')).toBe('1.250');
+    expect(formatDinarInput('50000')).toBe('50.000');
+    expect(formatDinarInput('1000000')).toBe('1,000.000');
+    expect(formatDinarInput('50.000')).toBe('50.000');
+    expect(formatDinarInput('1,000.000')).toBe('1,000.000');
     expect(formatDinarInput('0,500')).toBe('0.500');
+
+    expect(parseNonNegativeMillimes(formatDinarInput('50'))).toBe(50);
+    expect(parseNonNegativeMillimes(formatDinarInput('50000'))).toBe(50000);
+    expect(parseNonNegativeMillimes(formatDinarInput('1000000'))).toBe(1000000);
   });
 
   it('preserves the approximate cursor position across thousands formatting', () => {

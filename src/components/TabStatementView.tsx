@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from './Button';
 import { formatTnd } from '../lib/format';
 import type { CustomerRecord, OrderRecord, TabRecord } from '../types/domain';
@@ -37,9 +38,9 @@ export function TabStatementView({ customer, storeName, balanceMillimes, transac
     if (autoShare) void printStatement();
   }, [autoShare, customer.id, printStatement]);
 
-  return (
-    <div className="receipt-overlay" onMouseDown={onClose}>
-      <section role="dialog" aria-modal="true" aria-label={`${customer.name} tab statement`} className="receipt-dialog" onMouseDown={(event) => event.stopPropagation()}>
+  return createPortal(
+    <div className="glass-modal-backdrop receipt-overlay" onMouseDown={onClose}>
+      <section role="dialog" aria-modal="true" aria-label={`${customer.name} tab statement`} className="glass-modal-panel receipt-dialog" onMouseDown={(event) => event.stopPropagation()}>
         <div className="receipt-actions no-print">
           <Button variant="secondary" onClick={() => { void printStatement(); }}>Print statement</Button>
           <Button variant="ghost" onClick={onClose}>Close</Button>
@@ -82,7 +83,8 @@ export function TabStatementView({ customer, storeName, balanceMillimes, transac
           <div className="receipt-center">{balanceLabel}</div>
         </article>
       </section>
-    </div>
+    </div>,
+    globalThis.document.body,
   );
 }
 

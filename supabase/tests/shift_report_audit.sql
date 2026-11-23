@@ -322,6 +322,8 @@ declare
   v_minus_shift uuid;
   v_force_shift uuid;
   v_z_shift uuid;
+  v_cross_shift uuid;
+  v_cross_allowed boolean;
   v_next_z_shift uuid;
   v_order_cash uuid;
   v_order_card uuid;
@@ -611,6 +613,81 @@ begin
     or public.get_shift_summary((v_closed_shift->'shift'->>'id')::uuid) ? 'differenceMillimes' then
     raise exception 'Blind shift closing exposed expected or difference totals to staff.';
   end if;
+  if public.get_shift_expected_cash_visible((v_closed_shift->'shift'->>'id')::uuid) is not null
+    or public.get_shift_record((v_closed_shift->'shift'->>'id')::uuid)->>'counted_cash_millimes' is not null
+    or public.get_shift_record((v_closed_shift->'shift'->>'id')::uuid)->>'difference_millimes' is not null
+    or public.get_shift_record((v_closed_shift->'shift'->>'id')::uuid)->>'difference_note' is not null then
+    raise exception 'Blind shift closing exposed a reconciliation field through a direct RPC.';
+  end if;
+
+  begin
+    set role authenticated;
+    perform (select counted_cash_millimes
+      from public.shifts
+      where id = (v_closed_shift->'shift'->>'id')::uuid);
+    reset role;
+    raise exception 'Blind closing allowed direct staff table access to counted cash.';
+  exception
+    when insufficient_privilege then
+      reset role;
+  end;
+
+  begin
+    set role authenticated;
+    perform public.get_shift_expected_cash((v_closed_shift->'shift'->>'id')::uuid);
+    reset role;
+    raise exception 'Blind closing allowed direct numeric RPC access.';
+  exception
+    when insufficient_privilege then
+      reset role;
+  end;
+
+  perform set_config('request.jwt.claim.sub', report_store.staff_id::text, true);
+  perform set_config('request.jwt.claim.role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', report_store.staff_id, 'role', 'authenticated', 'session_id', report_store.session_id
+  )::text, true);
+  v_cross_shift := (public.open_shift(0)).id;
+  perform set_config('request.jwt.claim.sub', flow.staff_id::text, true);
+  perform set_config('request.jwt.claim.role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', flow.staff_id, 'role', 'authenticated', 'session_id', flow.session_id
+  )::text, true);
+  begin
+    v_cross_allowed := false;
+    perform public.get_shift_record(v_cross_shift);
+    v_cross_allowed := true;
+  exception
+    when others then
+      null;
+  end;
+  if v_cross_allowed then
+    raise exception 'Cross-store staff access to shift reconciliation was allowed.';
+  end if;
+
+  perform set_config('request.jwt.claim.sub', report_store.staff_id::text, true);
+  perform set_config('request.jwt.claim.role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', report_store.staff_id, 'role', 'authenticated', 'session_id', report_store.session_id
+  )::text, true);
+  perform public.close_shift(v_cross_shift, 0, null);
+
+  perform set_config('request.jwt.claim.sub', flow.owner_id::text, true);
+  perform set_config('request.jwt.claim.role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', flow.owner_id, 'role', 'authenticated', 'session_id', flow.owner_session_id
+  )::text, true);
+  if public.get_shift_expected_cash_visible((v_closed_shift->'shift'->>'id')::uuid) is null
+    or public.get_shift_record((v_closed_shift->'shift'->>'id')::uuid)->>'counted_cash_millimes' is null
+    or public.get_shift_record((v_closed_shift->'shift'->>'id')::uuid)->>'difference_millimes' is null then
+    raise exception 'Blind shift closing did not preserve owner reconciliation visibility.';
+  end if;
+
+  perform set_config('request.jwt.claim.sub', flow.staff_id::text, true);
+  perform set_config('request.jwt.claim.role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', flow.staff_id, 'role', 'authenticated', 'session_id', flow.session_id
+  )::text, true);
   insert into public.store_settings (store_id, settings)
   values (flow.store_id, '{"blindShiftClosing":false}'::jsonb)
   on conflict (store_id) do update
@@ -622,6 +699,9 @@ begin
     'sub', flow.staff_id, 'role', 'authenticated', 'session_id', flow.session_id
   )::text, true);
   v_minus_shift := (public.open_shift(0)).id;
+  if public.get_shift_expected_cash_visible(v_minus_shift) is null then
+    raise exception 'Disabling blind shift closing did not restore staff reconciliation visibility.';
+  end if;
   perform public.create_order(v_minus_shift, pg_temp.shift_audit_order_items(flow.item_id), 'cash');
   v_result := public.close_shift(v_minus_shift, 900, 'One hundred millimes short.');
   if v_result->'shift'->>'difference_millimes' <> '-100' then
@@ -1077,6 +1157,19 @@ begin
   if (v_result->'order'->>'number')::integer <> 1
     or (v_result->'order'->>'business_date')::date <> v_next_business_date then
     raise exception 'Overnight order date or ticket counter does not match the business day.';
+  end if;
+
+  perform set_config('request.jwt.claim.sub', flow.staff_id::text, true);
+  perform set_config('request.jwt.claim.role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', flow.staff_id, 'role', 'authenticated', 'session_id', flow.session_id
+  )::text, true);
+  update public.positions
+  set permission_ids = array['view_own_hours']
+  where id = flow.position_id;
+  if jsonb_array_length(public.list_shift_records(flow.store_id)) = 0
+    or public.get_shift_record(v_minus_shift)->>'expected_cash_millimes' is not null then
+    raise exception 'Staff with view-own-hours permission could not read shift summaries.';
   end if;
 end
 $$;

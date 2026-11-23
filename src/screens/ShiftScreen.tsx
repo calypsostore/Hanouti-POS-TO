@@ -11,9 +11,11 @@ import { MaterialIcon } from '../components/MaterialIcon';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { formatTnd } from '../lib/format';
+import { getDailyOverviewTrends, type ShiftOverviewMetricKey, type ShiftOverviewTrend, type ShiftOverviewValues } from '../lib/shiftOverview';
 import { orderService } from '../services/orderService';
 import { CashMovementNotificationError, shiftService } from '../services/shiftService';
 import { compService } from '../services/compService';
+import { expenseService } from '../services/expenseService';
 import { userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
 import { resolveStoreSettings, type CashMovementReason, type CashMovementRecord, type ShiftRecord } from '../types/domain';
@@ -27,8 +29,7 @@ import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository
 import { useFocusRefreshKey } from '../lib/useFocusRefreshKey';
 import { reportService, type ReportDayStatus } from '../services/reportService';
 import { ReportView } from '../components/ReportView';
-import type { ReportRecord, ReportShiftLine, UnresolvedTabReversalRecord } from '../types/domain';
-import type { OrderRecord } from '../types/domain';
+import type { ExpenseRecord, OrderRecord, ReportRecord, ReportShiftLine, UnresolvedTabReversalRecord } from '../types/domain';
 import { Link } from 'react-router-dom';
 import { parseNonNegativeMillimes } from '../lib/millimes';
 import { createLatestRequestGuard } from '../lib/requestGuard';
@@ -72,12 +73,86 @@ function localDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
+function getReportOverviewValues(report: ReportRecord): ShiftOverviewValues {
+  const expenses = report.expensesMillimes
+    ?? report.expenseDetails?.reduce((sum, expense) => sum + expense.amountMillimes, 0)
+    ?? 0;
+  const cash = report.cashSalesMillimes
+    ?? report.paymentSplit?.cash
+    ?? report.shifts?.reduce((sum, shift) => sum + (shift.cashSalesMillimes ?? 0), 0)
+    ?? 0;
+  const cards = report.paymentSplit?.card
+    ?? report.shifts?.reduce((sum, shift) => sum + (shift.cardSalesMillimes ?? 0), 0)
+    ?? 0;
+  const sales = report.grossMillimes ?? report.salesCollectedMillimes ?? report.salesMillimes;
+
+  return {
+    sales,
+    transactions: report.orderCount,
+    cash,
+    cards,
+    expenses,
+    netSales: report.netMillimes ?? report.netProfitMillimes
+      ?? ((report.salesCollectedMillimes ?? report.salesMillimes) - expenses),
+  };
+}
+
+function getOverviewTrends(reports: ReportRecord[], currentReport: ReportRecord): Record<ShiftOverviewMetricKey, ShiftOverviewTrend> {
+  const priorReports = reports
+    .filter((report) => report.type === 'Z' && report.id !== currentReport.id
+      && (report.businessDate < currentReport.businessDate
+        || (report.businessDate === currentReport.businessDate && report.createdAt < currentReport.createdAt)))
+    .sort((left, right) => left.businessDate.localeCompare(right.businessDate) || left.createdAt.localeCompare(right.createdAt))
+    .slice(-5);
+  const series = [...priorReports, currentReport].map(getReportOverviewValues);
+  const getTrend = (key: ShiftOverviewMetricKey): ShiftOverviewTrend => {
+    const values = series.map((metrics) => metrics[key]);
+    const previous = values.length > 1 ? values[values.length - 2] : undefined;
+    const current = values[values.length - 1];
+    return {
+      values,
+      changePercent: previous && previous !== 0 ? ((current - previous) / Math.abs(previous)) * 100 : undefined,
+    };
+  };
+
+  return {
+    sales: getTrend('sales'),
+    transactions: getTrend('transactions'),
+    cash: getTrend('cash'),
+    cards: getTrend('cards'),
+    expenses: getTrend('expenses'),
+    netSales: getTrend('netSales'),
+  };
+}
+
+function getSparklinePath(values: number[]): string {
+  if (values.length < 2) return '';
+  const width = 64;
+  const height = 20;
+  const min = Math.min(...values);
+  const range = Math.max(...values) - min || 1;
+  const points = values.map((value, index) => {
+    const x = (index / (values.length - 1)) * width;
+    const y = height - 2 - ((value - min) / range) * (height - 4);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  return `M${points.join(' L')}`;
+}
+
+function getSparklineAreaPath(values: number[]): string {
+  const path = getSparklinePath(values);
+  return path ? `${path} L64,20 L0,20 Z` : '';
+}
+
 function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const user = useAuthStore((state) => state.user);
   const unreadNotificationCount = useNotificationStore((state) => state.unreadCount);
   const storeId = user?.storeId ?? '';
   const refreshKey = useFocusRefreshKey();
   const [shifts, setShifts] = useState<ShiftRecord[]>([]);
+  const [analyticsOrders, setAnalyticsOrders] = useState<OrderRecord[]>([]);
+  const [analyticsExpenses, setAnalyticsExpenses] = useState<ExpenseRecord[]>([]);
+  const [currentPeriodSummary, setCurrentPeriodSummary] = useState<Awaited<ReturnType<typeof reportService.getCurrentPeriodSummary>>>();
   const [loading, setLoading] = useState(true);
   const [ownOpenShift, setOwnOpenShift] = useState<ShiftRecord>();
   const [startingCash, setStartingCash] = useState('');
@@ -167,7 +242,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
 
   const refresh = useCallback(async () => {
     const generation = refreshGuardRef.current.begin();
-    const [nextShifts, nextOpenShift, nextStore, nextMovements, allOrders, users, cashPermission, shiftPermission, xPermission, comps, nextReports, nextDayStatus] = await Promise.all([
+    const [nextShifts, nextOpenShift, nextStore, nextMovements, allOrders, users, cashPermission, shiftPermission, xPermission, comps, nextReports, nextDayStatus, nextExpenses, nextPeriodSummary] = await Promise.all([
       shiftService.listShifts(storeId),
       user ? shiftService.getOpenShiftForUser(storeId, user.id) : Promise.resolve(undefined),
       userService.getStore(storeId),
@@ -180,9 +255,14 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       compService.listComps(storeId),
       ownerMode ? reportService.listReports(storeId) : Promise.resolve([]),
       reportService.getDayStatus(storeId),
+      ownerMode ? expenseService.list(storeId) : Promise.resolve([]),
+      ownerMode ? reportService.getCurrentPeriodSummary(storeId) : Promise.resolve(undefined),
     ]);
     if (!refreshGuardRef.current.isLatest(generation)) return;
     setShifts(nextShifts);
+    setAnalyticsOrders(allOrders);
+    setAnalyticsExpenses(nextExpenses);
+    setCurrentPeriodSummary(nextPeriodSummary);
     setOwnOpenShift(nextOpenShift);
     setStore(nextStore);
     setCashMovements(nextMovements);
@@ -281,7 +361,13 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       setDifferenceNote('');
       await refresh();
       setCloseShiftSheetOpen(false);
-      setNotice(shift.differenceMillimes === 0 ? t('shift.zeroDifference') : t('shift.cashDifferenceRecorded'));
+      setNotice(
+        shift.differenceMillimes === undefined
+          ? 'Cash reconciliation is available to the owner.'
+          : shift.differenceMillimes === 0
+            ? t('shift.zeroDifference')
+            : t('shift.cashDifferenceRecorded'),
+      );
     } catch (closeError) {
       setError(closeError instanceof Error ? closeError.message : 'Unable to close the shift.');
     }
@@ -714,45 +800,64 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       sales: totals.sales + breakdown.cashSalesMillimes + breakdown.cardSalesMillimes + breakdown.otherSalesMillimes + breakdown.tabSalesMillimes,
     };
   }, { transactions: 0, cash: 0, cards: 0, sales: 0 });
+  const currentPeriodValues: ShiftOverviewValues = {
+    sales: currentPeriodSummary?.salesMillimes ?? liveShiftTotals.sales,
+    transactions: currentPeriodSummary?.orderCount ?? liveShiftTotals.transactions,
+    cash: currentPeriodSummary?.paymentSplit.cash ?? liveShiftTotals.cash,
+    cards: currentPeriodSummary?.paymentSplit.card ?? liveShiftTotals.cards,
+    expenses: currentPeriodSummary?.expensesMillimes ?? 0,
+    netSales: currentPeriodSummary?.netProfitMillimes
+      ?? ((currentPeriodSummary?.salesMillimes ?? liveShiftTotals.sales) - (currentPeriodSummary?.expensesMillimes ?? 0)),
+  };
+  const overviewValues = summaryReport ? getReportOverviewValues(summaryReport) : currentPeriodValues;
+  const overviewTrends = summaryReport
+    ? getOverviewTrends(zReports, summaryReport)
+    : ownerMode
+      ? getDailyOverviewTrends(analyticsOrders, analyticsExpenses, overviewValues)
+      : undefined;
   const metricAmount = (millimes: number) => `${formatTnd(millimes / 1000)} DT`;
-  const summaryExpenses = summaryReport?.expensesMillimes ??
-    summaryReport?.expenseDetails?.reduce((sum, expense) => sum + expense.amountMillimes, 0) ?? 0;
   const summaryMetrics = [
     {
       label: 'Total Sales',
-      value: metricAmount(summaryReport?.grossMillimes ?? summaryReport?.salesCollectedMillimes ?? summaryReport?.salesMillimes ?? liveShiftTotals.sales),
+      value: metricAmount(overviewValues.sales),
       icon: 'shopping_cart',
       tone: 'cyan',
+      trend: overviewTrends?.sales ?? { values: [] },
     },
     {
       label: 'Transactions',
-      value: String(summaryReport?.orderCount ?? liveShiftTotals.transactions),
+      value: String(overviewValues.transactions),
       icon: 'receipt_long',
       tone: 'blue',
+      trend: overviewTrends?.transactions ?? { values: [] },
     },
     {
       label: 'Cash',
-      value: metricAmount(summaryReport?.cashSalesMillimes ?? summaryReport?.paymentSplit?.cash ?? liveShiftTotals.cash),
+      value: metricAmount(overviewValues.cash),
       icon: 'payments',
       tone: 'green',
+      trend: overviewTrends?.cash ?? { values: [] },
     },
     {
       label: 'Cards',
-      value: metricAmount(summaryReport?.paymentSplit?.card ?? summaryReport?.shifts?.reduce((sum, shift) => sum + (shift.cardSalesMillimes ?? 0), 0) ?? liveShiftTotals.cards),
+      value: metricAmount(overviewValues.cards),
       icon: 'credit_card',
       tone: 'purple',
+      trend: overviewTrends?.cards ?? { values: [] },
     },
     {
       label: 'Expenses',
-      value: metricAmount(summaryExpenses),
+      value: metricAmount(overviewValues.expenses),
       icon: 'work',
       tone: 'orange',
+      trend: overviewTrends?.expenses ?? { values: [] },
     },
     {
       label: 'Net Sales',
-      value: metricAmount(summaryReport?.netMillimes ?? summaryReport?.netProfitMillimes ?? ((summaryReport?.salesCollectedMillimes ?? summaryReport?.salesMillimes ?? liveShiftTotals.sales) - summaryExpenses)),
+      value: metricAmount(overviewValues.netSales),
       icon: 'trending_up',
       tone: 'cyan',
+      trend: overviewTrends?.netSales ?? { values: [] },
     },
   ];
   const shiftOverviewMetrics = ownerMode ? summaryMetrics : [
@@ -815,7 +920,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       </div>}
       {ownerMode ? (
         <header className="shift-apple-header items-center justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-3">
+          <div className="shift-owner-header-info">
             <span className="shift-header-mark grid size-12 shrink-0 place-items-center rounded-2xl">
               <MaterialIcon name="payments" className="text-2xl" />
             </span>
@@ -823,19 +928,25 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
               <h1 className="truncate font-display text-headline-md text-on-surface">Shift Management</h1>
               <p className="mt-0.5 truncate font-body text-body-sm text-on-surface-variant">Manage your shifts and view daily reports</p>
             </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
             <span className="shift-location-chip">
               <MaterialIcon name="location_on" />
               <span>{store?.address || store?.name || 'Your store'}</span>
               <MaterialIcon name="expand_more" />
             </span>
+          </div>
+          <div className="shift-owner-header-actions">
             {ownOpenShift ? (
               <>
-                <StatusTag status="started">{`Shift open · ${new Date(ownOpenShift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}</StatusTag>
+                <span className="shift-open-status" aria-label={`Shift open since ${new Date(ownOpenShift.openedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`}>
+                  <span className="shift-open-status__dot" aria-hidden="true" />
+                  <span className="shift-open-status__copy">
+                    <strong>Shift Open</strong>
+                    <small>Since {new Date(ownOpenShift.openedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</small>
+                  </span>
+                </span>
                 {canOpenCloseShift && (
                   <Button className="shift-open-button" onClick={openCountedCashSheet}>
-                    <MaterialIcon name="lock" />Close Shift
+                    <MaterialIcon name="crop_square" />Close Shift
                   </Button>
                 )}
               </>
@@ -856,7 +967,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             : undefined
         } />
       )}
-      {((ownerMode && activeTab !== 'archive') || (dayStatus.dayIsClosed && !ownOpenShift && !ownerMode)) && (
+      {(ownerMode || (dayStatus.dayIsClosed && !ownOpenShift)) && (
         <p role="status" className={`shift-day-status mb-4 rounded-xl p-3 font-body text-body-sm ${dayStatus.dayIsClosed ? 'shift-day-status--warning' : ''}`}>
           {dayStatusMessage}
         </p>
@@ -870,30 +981,65 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
         <FirstRunHint id={`shift-${user?.id ?? 'guest'}`} title={t('hint.title')} message={t('hint.shift')} />
       )}
 
-      {(!ownerMode || activeTab !== 'reports') && (
-        <section className="shift-overview-grid mb-4" aria-label="Shift overview">
-          {shiftOverviewMetrics.map((card) => (
-            <article key={card.label} className={`shift-overview-card shift-overview-card--${card.tone}`}>
-              <span className="shift-overview-icon grid size-11 shrink-0 place-items-center rounded-full">
-                <MaterialIcon name={card.icon} className="text-xl" />
-              </span>
-              <div className="min-w-0">
-                <p className="font-body text-label-sm text-on-surface-variant">{card.label}</p>
-                <strong className="mt-1 block truncate font-display text-title-md tabular-nums text-on-surface">{card.value}</strong>
-              </div>
-            </article>
-          ))}
-        </section>
-      )}
+      <section className="shift-overview-grid mb-4" aria-label="Shift overview">
+        {shiftOverviewMetrics.map((card) => (
+          <article key={card.label} className={`shift-overview-card shift-overview-card--${card.tone}`}>
+            <span className="shift-overview-icon grid size-11 shrink-0 place-items-center rounded-full">
+              <MaterialIcon name={card.icon} className="text-xl" />
+            </span>
+            <div className="shift-overview-copy min-w-0">
+              <p className="font-body text-label-sm text-on-surface-variant">{card.label}</p>
+              <strong className="mt-1 block truncate font-display text-title-md tabular-nums text-on-surface">{card.value}</strong>
+              {'trend' in card && card.trend && (
+                <div className="shift-overview-trend">
+                  <span
+                    className={`shift-overview-trend-value ${typeof card.trend.changePercent !== 'number'
+                      ? card.trend.values.some((value) => value !== 0) ? 'is-new' : 'is-unavailable'
+                      : card.trend.changePercent < 0 ? 'is-negative' : 'is-positive'}`}
+                    aria-label={typeof card.trend.changePercent === 'number'
+                      ? `${Math.round(card.trend.changePercent)} percent change`
+                      : 'Percentage change unavailable without a non-zero previous value'}
+                  >
+                    {typeof card.trend.changePercent === 'number' ? (
+                      <>
+                        <MaterialIcon name={card.trend.changePercent < 0 ? 'trending_down' : 'trending_up'} />
+                        {card.trend.changePercent > 0 ? '+' : ''}{Math.round(card.trend.changePercent)}%
+                      </>
+                    ) : card.trend.values.some((value) => value !== 0) ? 'New' : '—'}
+                  </span>
+                  <svg
+                    className={`shift-overview-sparkline ${card.trend.values.length < 2 ? 'is-empty' : ''}`}
+                    viewBox="0 0 64 20"
+                    aria-hidden="true"
+                  >
+                    <path className="shift-overview-sparkline-area" d={getSparklineAreaPath(card.trend.values)} />
+                    <path d={getSparklinePath(card.trend.values) || 'M0,10 L64,10'} />
+                  </svg>
+                </div>
+              )}
+            </div>
+          </article>
+        ))}
+      </section>
 
       {ownerMode && (
         <nav className="shift-section-tabs mb-4 grid grid-cols-3 gap-1 p-1" aria-label="Shift and report sections">
+          <span
+            className={`shift-section-indicator shift-section-indicator--${activeTab}`}
+            aria-hidden="true"
+          />
           {([
             ['shifts', 'Shift', 'schedule'],
             ['reports', 'Z Reports', 'analytics'],
             ['archive', 'Daily Reports', 'description'],
           ] as const).map(([tab, label, icon]) => (
-            <Button key={tab} variant={activeTab === tab ? 'primary' : 'secondary'} onClick={() => setActiveTab(tab)}>
+            <Button
+              key={tab}
+              variant="ghost"
+              className={`shift-section-tab-button${activeTab === tab ? ' is-active' : ''}`}
+              aria-pressed={activeTab === tab}
+              onClick={() => setActiveTab(tab)}
+            >
               <MaterialIcon name={icon} className="text-lg" />
               {label}
             </Button>
@@ -902,7 +1048,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       )}
 
       {ownerMode && activeTab === 'reports' && (
-        <section className="shift-reports-grid grid gap-4 tablet:grid-cols-2">
+        <section className="shift-tab-panel shift-reports-grid grid gap-4 tablet:grid-cols-2">
           <article className="shift-report-card shift-x-card rounded-2xl p-4">
             <div className="shift-report-card__header flex items-start justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
@@ -980,7 +1126,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       )}
 
       {ownerMode && activeTab === 'archive' && (
-        <section className="shift-archive-page">
+        <section className="shift-tab-panel shift-archive-page">
           <div className="shift-archive-toolbar-panel">
             <div className="shift-date-segments" role="group" aria-label="Quick date filters">
               {([
@@ -1148,44 +1294,62 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       )}
 
       {(!ownerMode || activeTab === 'shifts') && (
-        <div className="shift-management-layout">
+        <div className="shift-tab-panel shift-management-layout">
           {ownOpenShift ? (
         <div className="shift-current-layout grid gap-3 tablet:grid-cols-2 lg:grid-cols-1">
           <section className="shift-current-card shift-glass-card rounded-2xl p-4">
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <div>
-                <p className="font-body text-label-sm uppercase text-outline">{t('shift.openSince', { time: new Date(ownOpenShift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })}</p>
-                <h2 className="mt-1 font-display text-headline-md text-primary">{t('shift.title')}</h2>
-              </div>
-              <StatusTag status="open">Open</StatusTag>
+            <div className={ownerMode ? 'shift-current-heading' : 'mb-4 flex items-start justify-between gap-3'}>
+              {ownerMode ? (
+                <>
+                  <div className="shift-current-heading__top">
+                    <span className="shift-current-clock"><MaterialIcon name="schedule" /></span>
+                    <p className="font-body text-label-sm uppercase text-outline">{t('shift.openSince', { time: new Date(ownOpenShift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })}</p>
+                    <StatusTag status="open">Open</StatusTag>
+                  </div>
+                  <h2 className="font-display text-headline-md text-primary">{t('shift.title')}</h2>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <p className="font-body text-label-sm uppercase text-outline">{t('shift.openSince', { time: new Date(ownOpenShift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })}</p>
+                    <h2 className="mt-1 font-display text-headline-md text-primary">{t('shift.title')}</h2>
+                  </div>
+                  <StatusTag status="open">Open</StatusTag>
+                </>
+              )}
             </div>
             <div className="space-y-3">
-              <Metric label={t('shift.startingCash')} amount={ownOpenShift.startingCashMillimes} />
-              <Metric label="Cash sales" amount={ownBreakdown.cashSalesMillimes} />
-              <Metric label="Card sales" amount={ownBreakdown.cardSalesMillimes} />
-              {store?.allowOtherPayments && <Metric label="Other sales" amount={ownBreakdown.otherSalesMillimes} />}
-              <Metric label="Tab sales" amount={ownBreakdown.tabSalesMillimes} />
-              <Metric label="Tab payments received in cash" amount={ownBreakdown.tabPaymentsMillimes} />
-              <Metric label="Cash in" amount={ownMovementTotals.cashInMillimes} />
-              <Metric label="Cash out" amount={ownMovementTotals.cashOutMillimes} />
-              <Metric label={t('shift.expectedCash')} amount={getExpectedCash(ownOpenShift, ownBreakdown, cashMovements)} prominent />
+              <Metric icon={ownerMode ? 'account_balance_wallet' : undefined} label={t('shift.startingCash')} amount={ownOpenShift.startingCashMillimes} />
+              <Metric icon={ownerMode ? 'payments' : undefined} label="Cash sales" amount={ownBreakdown.cashSalesMillimes} />
+              <Metric icon={ownerMode ? 'credit_card' : undefined} label="Card sales" amount={ownBreakdown.cardSalesMillimes} />
+              {store?.allowOtherPayments && <Metric icon={ownerMode ? 'currency_exchange' : undefined} label="Other sales" amount={ownBreakdown.otherSalesMillimes} />}
+              <Metric icon={ownerMode ? 'receipt_long' : undefined} label="Tab sales" amount={ownBreakdown.tabSalesMillimes} />
+              <Metric icon={ownerMode ? 'payments' : undefined} label="Tab payments received in cash" amount={ownBreakdown.tabPaymentsMillimes} />
+              <Metric icon={ownerMode ? 'add' : undefined} label="Cash in" amount={ownMovementTotals.cashInMillimes} />
+              <Metric icon={ownerMode ? 'remove' : undefined} label="Cash out" amount={ownMovementTotals.cashOutMillimes} />
+              {(!resolveStoreSettings(store?.settings).blindShiftClosing || ownerMode) && (
+                <Metric icon={ownerMode ? 'calculate' : undefined} label={t('shift.expectedCash')} amount={getExpectedCash(ownOpenShift, ownBreakdown, cashMovements)} prominent />
+              )}
             </div>
             {canCashInOut && (
               <div className="mt-4 grid grid-cols-2 gap-2">
-                <Button type="button" variant="secondary" onClick={() => openCashMovement('in', ownOpenShift.id)}><MaterialIcon name="add" />Cash in</Button>
-                <Button type="button" variant="secondary" onClick={() => openCashMovement('out', ownOpenShift.id)}><MaterialIcon name="remove" />Cash out</Button>
+                <Button type="button" className="shift-cash-in" variant="secondary" onClick={() => openCashMovement('in', ownOpenShift.id)}><MaterialIcon name="add" />Cash in</Button>
+                <Button type="button" className="shift-cash-out" variant="secondary" onClick={() => openCashMovement('out', ownOpenShift.id)}><MaterialIcon name="remove" />Cash out</Button>
               </div>
             )}
-            <CashMovementList movements={movementsForShift(ownOpenShift.id)} staffNames={staffNames} />
+            <CashMovementList className={ownerMode ? 'shift-current-cash-movements' : ''} movements={movementsForShift(ownOpenShift.id)} staffNames={staffNames} />
+            {ownerMode && canOpenCloseShift && <Button className="shift-current-close-button" onClick={openCountedCashSheet}>
+              <MaterialIcon name="lock" />{t('shift.closeShift')}
+            </Button>}
           </section>
-          <div className="flex flex-col gap-2">
+          {(canPrintOwnX || (!ownerMode && canOpenCloseShift)) && <div className="flex flex-col gap-2">
             {canPrintOwnX && <Button variant="secondary" onClick={() => { void createXReport(); }}>
               <MaterialIcon name="summarize" />Print X for my shift
             </Button>}
-            {canOpenCloseShift && <Button className="w-full lg:w-auto" onClick={openCountedCashSheet}>
+            {!ownerMode && canOpenCloseShift && <Button className="w-full lg:w-auto" onClick={openCountedCashSheet}>
               <MaterialIcon name="lock" />{t('shift.closeShift')}
             </Button>}
-          </div>
+          </div>}
         </div>
       ) : null}
 
@@ -1194,7 +1358,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       </div>}
 
       {(!ownerMode || activeTab === 'shifts') && <section className="shift-history mt-6">
-        <h2 className="mb-3 font-display text-headline-md text-on-surface">{t('shift.history')}</h2>
+        <h2 className="mb-3 font-display text-headline-md text-on-surface">{ownerMode && <span className="shift-history-mark"><MaterialIcon name="history" /></span>}{t('shift.history')}</h2>
         <div className="shift-history-toolbar mb-3 grid gap-2">
           <label className="relative">
             <MaterialIcon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-lg text-outline" />
@@ -1547,6 +1711,8 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
         open={movementSheetOpen}
         onClose={() => setMovementSheetOpen(false)}
         title={movementKind === 'in' ? 'Cash in' : 'Cash out'}
+        subtitle={movementKind === 'in' ? 'Add cash to the shift' : 'Withdraw cash from the shift'}
+        icon="account_balance_wallet"
       >
         <form onSubmit={(event) => { void submitCashMovement(event); }} className="flex flex-col gap-3">
           <label htmlFor="cash-movement-amount" className="font-body text-label-md text-on-surface">Amount (TND)</label>
@@ -1580,12 +1746,13 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   );
 }
 
-function Metric({ label, amount, prominent = false, signed = false }: { label: string; amount: number; prominent?: boolean; signed?: boolean }) {
+function Metric({ label, amount, prominent = false, signed = false, icon }: { label: string; amount: number; prominent?: boolean; signed?: boolean; icon?: string }) {
   const formatted = formatTnd(Math.abs(amount) / 1000);
   const prefix = signed && amount > 0 ? '+' : signed && amount < 0 ? '−' : '';
   return (
-    <div className="flex items-baseline justify-between gap-2">
-      <span className="font-body text-body-sm text-on-surface-variant">{label}</span>
+    <div className={icon ? `shift-current-metric${prominent ? ' shift-current-metric--prominent' : ''}` : 'flex items-baseline justify-between gap-2'}>
+      {icon && <span className="shift-current-metric__icon"><MaterialIcon name={icon} /></span>}
+      <span className={`font-body text-body-sm text-on-surface-variant${icon ? ' shift-current-metric__label' : ''}`}>{label}</span>
       <span className={`font-display tabular-nums ${prominent ? 'text-headline-md text-primary' : 'text-title-md text-on-surface'} ${signed && amount !== 0 ? 'text-error-dark' : ''}`}>{prefix}{formatted} DT</span>
     </div>
   );
@@ -1735,50 +1902,72 @@ function ClosedShiftSummary({
   const durationMinutes = Math.floor(durationMs / 60_000);
   const difference = shift.differenceMillimes ?? 0;
   return (
-    <section className="shift-glass-card mb-4 rounded-2xl p-4">
-      <div className="mb-3">
-        <h2 className="font-display text-headline-md text-on-surface">Shift closed</h2>
-        <p className="font-body text-body-sm text-on-surface-variant">
-          {durationMinutes >= 60 ? `${Math.floor(durationMinutes / 60)}h ` : ''}{durationMinutes % 60}m duration
-        </p>
+    <section className="shift-glass-card closed-shift-summary mb-4 rounded-2xl p-4">
+      <div className="closed-shift-summary__identity">
+        <span className="closed-shift-summary__icon" aria-hidden="true">
+          <MaterialIcon name="task_alt" />
+        </span>
+        <div>
+          <h2 className="font-display text-headline-md text-on-surface">Shift closed</h2>
+          <p className="font-body text-body-sm text-on-surface-variant">
+            {durationMinutes >= 60 ? `${Math.floor(durationMinutes / 60)}h ` : ''}{durationMinutes % 60}m duration
+          </p>
+        </div>
       </div>
-      <div className="grid grid-cols-2 gap-3 tablet:grid-cols-5">
-        <SummaryValue label="Orders" value={String(breakdown.orderCount)} />
+      <div className="closed-shift-summary__metrics">
+        <SummaryValue icon="receipt_long" label="Orders" value={String(breakdown.orderCount)} />
         <SummaryValue
+          icon="payments"
           label="Cash"
-          value={`${formatTnd((shift.countedCashMillimes ?? 0) / 1000)} DT`}
-          detail={blind ? 'Reconciliation available to the owner' : `Expected ${formatTnd((shift.expectedCashMillimes ?? 0) / 1000)} DT`}
+          value={blind
+            ? 'Hidden'
+            : shift.countedCashMillimes === undefined
+              ? 'Not recorded'
+              : `${formatTnd(shift.countedCashMillimes / 1000)} DT`}
+          detail={blind
+            ? 'Reconciliation available to the owner'
+            : shift.expectedCashMillimes === undefined
+              ? 'Expected cash not recorded'
+              : `Expected ${formatTnd(shift.expectedCashMillimes / 1000)} DT`}
         />
-        <SummaryValue label="Tabs" value={`${formatTnd(breakdown.tabSalesMillimes / 1000)} DT`} />
+        <SummaryValue icon="account_balance" label="Tabs" value={`${formatTnd(breakdown.tabSalesMillimes / 1000)} DT`} />
         <SummaryValue
+          icon="balance"
           label="Difference"
           value={blind ? 'Hidden' : `${difference < 0 ? 'Short ' : difference > 0 ? 'Over ' : ''}${formatTnd(Math.abs(difference) / 1000)} DT`}
           valueClass={blind ? 'text-on-surface-variant' : difference === 0 ? 'text-success-dark' : difference < 0 ? 'text-error-dark' : 'text-warning'}
         />
       </div>
-      <Button type="button" className="mt-4 w-full" onClick={onDone}>Done</Button>
+      <Button type="button" className="closed-shift-summary__done" onClick={onDone}>Done</Button>
     </section>
   );
 }
 
-function SummaryValue({ label, value, valueClass = 'text-on-surface', detail }: {
+function SummaryValue({ icon, label, value, valueClass = 'text-on-surface', detail }: {
+  icon: string;
   label: string;
   value: string;
   valueClass?: string;
   detail?: string;
 }) {
   return (
-    <div className="rounded-lg bg-surface-container-low p-3">
-      <p className="font-body text-label-sm text-on-surface-variant">{label}</p>
-      <p className={`mt-1 font-display text-title-md tabular-nums ${valueClass}`}>{value}</p>
-      {detail && <p className="mt-0.5 font-body text-body-sm text-on-surface-variant">{detail}</p>}
+    <div className="closed-shift-summary__metric">
+      <span className="closed-shift-summary__metric-icon" aria-hidden="true">
+        <MaterialIcon name={icon} />
+      </span>
+      <div className="min-w-0">
+        <p className="font-body text-label-sm text-on-surface-variant">{label}</p>
+        <p className={`mt-0.5 font-display text-title-md tabular-nums ${valueClass}`}>{value}</p>
+        {detail && <p className="closed-shift-summary__detail font-body text-body-sm text-on-surface-variant">{detail}</p>}
+      </div>
     </div>
   );
 }
 
-function CashMovementList({ movements, staffNames }: {
+function CashMovementList({ movements, staffNames, className = '' }: {
   movements: CashMovementRecord[];
   staffNames: Record<string, string>;
+  className?: string;
 }) {
   const reasonLabel = (reason: CashMovementReason) => {
     if (reason === 'supplier') return 'Bought milk';
@@ -1787,7 +1976,7 @@ function CashMovementList({ movements, staffNames }: {
     return 'Other';
   };
   return (
-    <section className="mt-4 border-t border-outline-variant pt-3">
+    <section className={`mt-4 border-t border-outline-variant pt-3 ${className}`}>
       <h3 className="mb-2 font-body text-label-md text-on-surface">Cash movements</h3>
       {movements.length > 0 ? (
         <ul className="flex flex-col gap-2">

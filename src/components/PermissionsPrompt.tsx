@@ -100,7 +100,7 @@ export function PermissionsPrompt() {
     <>
       {visible && user && !locked && (
         <div
-          className="permissions-prompt__backdrop fixed inset-0 z-[150] flex items-center justify-center bg-primary-dark/35 p-4 backdrop-blur-[2px]"
+          className="glass-modal-backdrop permissions-prompt__backdrop fixed inset-0 z-[150] flex items-center justify-center bg-primary-dark/35 p-4 backdrop-blur-[2px]"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) void notNow();
           }}
@@ -110,7 +110,7 @@ export function PermissionsPrompt() {
             aria-modal="true"
             aria-labelledby="permissions-title"
             aria-describedby="permissions-description"
-            className="permissions-prompt__dialog relative w-full max-w-sm overflow-hidden rounded-2xl border border-outline-variant bg-surface-container-lowest p-4 shadow-overlay"
+            className="glass-modal-panel permissions-prompt__dialog relative w-full max-w-sm overflow-hidden rounded-2xl border border-outline-variant bg-surface-container-lowest p-4 shadow-overlay"
             onMouseDown={(event) => event.stopPropagation()}
           >
             <button

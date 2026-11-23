@@ -22,7 +22,7 @@ export function StaffDashboardScreen() {
   const [openShift, setOpenShift] = useState<ShiftRecord>();
   const [latestShift, setLatestShift] = useState<ShiftRecord>();
   const [cashSales, setCashSales] = useState(0);
-  const [expectedCash, setExpectedCash] = useState(0);
+  const [expectedCash, setExpectedCash] = useState<number | null>(null);
   const [todayOrders, setTodayOrders] = useState<OrderRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [personalSales, setPersonalSales] = useState(0);
@@ -68,7 +68,7 @@ export function StaffDashboardScreen() {
         setExpectedCash(cashExpected);
       } else {
         setCashSales(0);
-        setExpectedCash(0);
+        setExpectedCash(null);
       }
     } catch (loadError) {
       console.error('Unable to load staff dashboard.', loadError);
@@ -186,12 +186,12 @@ export function StaffDashboardScreen() {
               {openShift ? (
                 <>
                   <Metric label="Cash sales + tab payments" value={cashSales} />
-                  <Metric label="Expected cash" value={expectedCash} accent />
+                  <Metric label="Expected cash" value={expectedCash === null ? 'Hidden' : expectedCash} accent />
                 </>
               ) : (
                 <>
-                  <Metric label="Counted cash" value={shiftSummary.countedCashMillimes ?? 0} />
-                  <Metric label="Difference" value={shiftSummary.differenceMillimes ?? 0} accent />
+                  <Metric label="Counted cash" value={shiftSummary.countedCashMillimes === undefined ? 'Hidden' : shiftSummary.countedCashMillimes} />
+                  <Metric label="Difference" value={shiftSummary.differenceMillimes === undefined ? 'Hidden' : shiftSummary.differenceMillimes} accent />
                 </>
               )}
             </div>
@@ -247,12 +247,13 @@ export function StaffDashboardScreen() {
   );
 }
 
-function Metric({ label, value, accent = false }: { label: string; value: number; accent?: boolean }) {
+function Metric({ label, value, accent = false }: { label: string; value: number | string; accent?: boolean }) {
+  const displayValue = typeof value === 'number' ? `${formatTnd(value / 1000)} DT` : value;
   return (
     <div className="rounded-xl bg-surface-container-low p-3">
       <p className="font-body text-body-sm text-on-surface-variant">{label}</p>
       <p className={`mt-1 font-display text-title-md tabular-nums ${accent ? 'text-primary' : 'text-on-surface'}`}>
-        {formatTnd(value / 1000)} DT
+        {displayValue}
       </p>
     </div>
   );

@@ -209,9 +209,11 @@ async function summarizeLocal(
     const cashOutMillimes = shiftMovements
       .filter((movement) => movement.kind === 'out')
       .reduce((sum, movement) => sum + movement.amountMillimes, 0);
-    const expected = !inProgress && shift.expectedCashMillimes !== undefined
-      ? expectedCash + voidAdjustmentMillimes
-      : expectedCash;
+    const expected = typeof expectedCash === 'number'
+      ? (!inProgress && shift.expectedCashMillimes !== undefined
+        ? expectedCash + voidAdjustmentMillimes
+        : expectedCash)
+      : undefined;
     const counted = shift.countedCashMillimes;
     const staffName = staff.find((user) => user.id === shift.staffId)?.name ?? 'Staff';
     const shiftOrders = orders.filter((order) => order.shiftId === shift.id);
@@ -237,9 +239,11 @@ async function summarizeLocal(
       cashInMillimes,
       cashOutMillimes,
       expectedCashMillimes: expected,
-      cashFlowExFloatMillimes: expected - shift.startingCashMillimes,
+      cashFlowExFloatMillimes: expected === undefined ? undefined : expected - shift.startingCashMillimes,
       countedCashMillimes: inProgress ? undefined : counted,
-      differenceMillimes: inProgress ? undefined : (counted ?? 0) - expected,
+      differenceMillimes: inProgress || counted === undefined || expected === undefined
+        ? undefined
+        : counted - expected,
       forceClosedByOwner: shift.forceClosedByOwner ?? false,
       voidsAutoApprovedCount: shift.voidsAutoApprovedCount ?? 0,
       voidAdjustmentMillimes: voidAdjustmentMillimes || undefined,
@@ -1070,7 +1074,7 @@ export const reportService = {
       ]);
       if (!remoteStore) throw new Error('The store could not be found.');
       const requiredNumbers = [
-        'orderCount', 'salesMillimes', 'expectedCashMillimes', 'cashInMillimes', 'cashOutMillimes',
+        'orderCount', 'salesMillimes', 'cashInMillimes', 'cashOutMillimes',
         'tabPaymentsMillimes', 'cashSalesMillimes', 'cardSalesMillimes', 'otherSalesMillimes', 'tabSalesMillimes',
       ];
       for (const key of requiredNumbers) {
@@ -1111,7 +1115,10 @@ export const reportService = {
           throw new Error(`Shift summary is missing a valid ${key}.`);
         }
       }
-      const expectedCashMillimes = getNumber('expectedCashMillimes');
+      const expectedCashValue = summary.expectedCashMillimes;
+      const expectedCashMillimes = typeof expectedCashValue === 'number' && Number.isFinite(expectedCashValue)
+        ? expectedCashValue
+        : undefined;
       const cashInMillimes = getNumber('cashInMillimes');
       const cashOutMillimes = getNumber('cashOutMillimes');
       const tabPaymentsMillimes = getNumber('tabPaymentsMillimes');
@@ -1134,7 +1141,9 @@ export const reportService = {
         cashInMillimes,
         cashOutMillimes,
         expectedCashMillimes,
-        cashFlowExFloatMillimes: expectedCashMillimes - shift.startingCashMillimes,
+        cashFlowExFloatMillimes: expectedCashMillimes === undefined
+          ? undefined
+          : expectedCashMillimes - shift.startingCashMillimes,
         forceClosedByOwner: false,
       };
       return {
@@ -1158,7 +1167,9 @@ export const reportService = {
         tabSalesMillimes: Number(summary.tabSalesMillimes),
         tabPaymentsReceivedMillimes: tabPaymentsMillimes,
         cashFloatMillimes: shift.startingCashMillimes,
-        expectedCashExFloatMillimes: expectedCashMillimes - shift.startingCashMillimes,
+        expectedCashExFloatMillimes: expectedCashMillimes === undefined
+          ? undefined
+          : expectedCashMillimes - shift.startingCashMillimes,
         totalExpectedCashMillimes: expectedCashMillimes,
         cashInMillimes,
         cashOutMillimes,
@@ -1194,7 +1205,11 @@ export const reportService = {
       .reduce((sum, movement) => sum + movement.amountMillimes, 0);
     const cashOutMillimes = cashMovementsForShift.filter((movement) => movement.kind === 'out')
       .reduce((sum, movement) => sum + movement.amountMillimes, 0);
-    const expectedCashMillimes = await shiftService.getExpectedCash(shift.id);
+    const expectedCashResult = await shiftService.getExpectedCash(shift.id);
+    const expectedCashMillimes = expectedCashResult === null ? undefined : expectedCashResult;
+    const cashFlowExFloatMillimes = expectedCashMillimes === undefined
+      ? undefined
+      : expectedCashMillimes - shift.startingCashMillimes;
     const staffName = users.find((user) => user.id === staffId)?.name ?? generatedBy;
     const shiftLine: ReportShiftLine = {
       shiftId: shift.id,
@@ -1212,13 +1227,15 @@ export const reportService = {
       cashInMillimes,
       cashOutMillimes,
       expectedCashMillimes,
-      cashFlowExFloatMillimes: expectedCashMillimes - shift.startingCashMillimes,
+      cashFlowExFloatMillimes,
       forceClosedByOwner: false,
     };
     const comps = allComps.filter((comp) => comp.shiftId === shift.id &&
       new Date(comp.createdAt).getTime() >= periodFrom && new Date(comp.createdAt).getTime() <= periodTo);
     const cashFloatMillimes = shift.startingCashMillimes;
-    const expectedCashExFloatMillimes = expectedCashMillimes - cashFloatMillimes;
+    const expectedCashExFloatMillimes = expectedCashMillimes === undefined
+      ? undefined
+      : expectedCashMillimes - cashFloatMillimes;
     const timeZone = store?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
     const dateParts = datePartsInTimezone(now, timeZone);
     const chronologicalCompleted = [...completed].sort((a, b) => a.createdAt.localeCompare(b.createdAt));

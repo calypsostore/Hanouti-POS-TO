@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getSupabaseClient } from '../src/data/supabaseClient';
-import { listShifts } from '../src/data/repositories/shiftRepository';
+import { getExpectedCash, listShifts } from '../src/data/repositories/shiftRepository';
 
 vi.mock('../src/data/supabaseClient', () => ({
   getSupabaseClient: vi.fn(),
@@ -41,13 +41,15 @@ describe('shiftRepository listShifts', () => {
       difference_note: null,
     },
   ];
-  const shiftQuery = {
-    select: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    order: vi.fn().mockReturnThis(),
-    then: vi.fn((resolve: (result: { data: typeof shiftRows; error: null }) => unknown) =>
-      Promise.resolve({ data: shiftRows, error: null }).then(resolve)),
-  };
+  const rpc = vi.fn((name: string) => {
+    if (name === 'list_shift_records') {
+      return Promise.resolve({ data: shiftRows, error: null });
+    }
+    if (name === 'get_shift_expected_cash_visible') {
+      return Promise.resolve({ data: null, error: null });
+    }
+    return Promise.resolve({ data: null, error: null });
+  });
   const adjustmentRows = [{
     shift_id: 'shift-1',
     order_id: 'order-1',
@@ -64,7 +66,8 @@ describe('shiftRepository listShifts', () => {
       Promise.resolve({ data: adjustmentRows, error: null }).then(resolve)),
   };
   const client = {
-    from: vi.fn((table: string) => table === 'shifts' ? shiftQuery : adjustmentQuery),
+    from: vi.fn(() => adjustmentQuery),
+    rpc,
   };
 
   beforeEach(() => {
@@ -75,7 +78,8 @@ describe('shiftRepository listShifts', () => {
   it('loads all listed shift adjustments in one batched query', async () => {
     const shifts = await listShifts('store-1');
 
-    expect(client.from).toHaveBeenCalledTimes(2);
+    expect(client.rpc).toHaveBeenCalledWith('list_shift_records', { p_store_id: 'store-1' });
+    expect(client.from).toHaveBeenCalledTimes(1);
     expect(adjustmentQuery.in).toHaveBeenCalledOnce();
     expect(adjustmentQuery.in).toHaveBeenCalledWith('shift_id', ['shift-1', 'shift-2']);
     expect(shifts[0].voidAdjustments).toEqual([{
@@ -85,5 +89,9 @@ describe('shiftRepository listShifts', () => {
       kind: 'approved',
       createdAt: '2026-01-01T16:30:00.000Z',
     }]);
+  });
+
+  it('preserves NULL for hidden blind-closing expected cash', async () => {
+    await expect(getExpectedCash('shift-1')).resolves.toBeNull();
   });
 });

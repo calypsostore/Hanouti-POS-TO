@@ -55,6 +55,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { parseNonNegativeMillimes } from '../lib/millimes';
 import { createLatestRequestGuard } from '../lib/requestGuard';
 import { ShiftNotificationsButton } from '../components/ShiftNotificationsButton';
+import { getReportCloseDate } from '../lib/reportArchive';
+import { dateKeyInTimezone } from '../lib/date';
 
 type ShiftCloseBreakdown = ShiftSalesBreakdown & {
   pendingVoidCount: number;
@@ -90,17 +92,6 @@ const cashMovementReasons: { reason: CashMovementReason; label: string }[] = [
 
 function localDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-function dateKeyInTimezone(date: Date, timeZone: string): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function getSparklinePath(values: number[]): string {
@@ -161,9 +152,10 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [store, setStore] = useState<Awaited<ReturnType<typeof userService.getStore>>>();
+  const reportTimeZone = store?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
   const todayOverviewDate = dateKeyInTimezone(
     new Date(),
-    store?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+    reportTimeZone,
   );
   const overviewRange = useMemo(
     () => getShiftOverviewDateRange(overviewFilter, todayOverviewDate, customOverviewFrom, customOverviewTo),
@@ -236,7 +228,8 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     }
   }, []);
   const [archiveReports, setArchiveReports] = useState<ReportRecord[]>([]);
-  const [archiveDate, setArchiveDate] = useState(() => localDateKey(new Date()));
+  const [archiveDateOverride, setArchiveDateOverride] = useState<string>();
+  const archiveDate = archiveDateOverride ?? todayOverviewDate;
   const [archiveSort, setArchiveSort] = useState<'newest' | 'oldest' | 'amount-desc' | 'amount-asc'>('newest');
   const [previewZoom, setPreviewZoom] = useState(100);
   const [dayStatus, setDayStatus] = useState<ReportDayStatus>({
@@ -688,6 +681,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       setZReviewed(false);
       setZSheetOpen(false);
       setReportPreview(report);
+      setArchiveDateOverride(getReportCloseDate(report, reportTimeZone));
       setDayStatus({
         dayIsClosed: true,
         hasActivity: false,
@@ -801,7 +795,8 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   });
 
   const zReports = archiveReports.filter((report) => report.type === 'Z');
-  const filteredArchiveReports = zReports.filter((report) => report.businessDate === archiveDate).sort((left, right) => {
+  const filteredArchiveReports = zReports.filter((report) =>
+    getReportCloseDate(report, reportTimeZone) === archiveDate).sort((left, right) => {
     if (archiveSort === 'oldest') return left.createdAt.localeCompare(right.createdAt);
     if (archiveSort === 'amount-desc' || archiveSort === 'amount-asc') {
       const leftAmount = left.salesCollectedMillimes ?? left.salesMillimes;
@@ -827,7 +822,8 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     }
   }
 
-  const isArchivePreview = reportPreview?.type === 'Z' && reportPreview.businessDate === archiveDate
+  const isArchivePreview = reportPreview?.type === 'Z' &&
+    getReportCloseDate(reportPreview, reportTimeZone) === archiveDate
     ? reportPreview
     : archivePreviewDismissed
       ? undefined
@@ -1301,17 +1297,17 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             <div className="shift-archive-date-filter">
               <label htmlFor="shift-archive-date">
                 <MaterialIcon name="calendar_month" />
-                <span>Report date</span>
+                <span>Closed date</span>
               </label>
               <input
                 id="shift-archive-date"
                 type="date"
                 value={archiveDate}
-                aria-label="Filter Z reports by date"
+                aria-label="Filter Z reports by close date"
                 onChange={(event) => {
                   const nextDate = event.currentTarget.value;
                   if (!nextDate) return;
-                  setArchiveDate(nextDate);
+                  setArchiveDateOverride(nextDate);
                   setReportPreview(undefined);
                   setArchivePreviewDismissed(false);
                 }}
@@ -1346,15 +1342,16 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
               <div className="shift-archive-list flex flex-col gap-2">
                 {filteredArchiveReports.map((report) => {
                   const selected = isArchivePreview?.id === report.id;
-                  const now = new Date();
-                  const reportDate = new Date(`${report.businessDate}T00:00:00`);
-                  const reportDateLabel = !Number.isNaN(reportDate.getTime())
-                    && reportDate.getFullYear() === now.getFullYear()
-                    && reportDate.getMonth() === now.getMonth()
-                    && reportDate.getDate() === now.getDate()
+                  const closedDate = getReportCloseDate(report, reportTimeZone);
+                  const reportDateLabel = closedDate === todayOverviewDate
                     ? 'Today'
-                    : report.businessDate;
-                  const reportTime = new Date(report.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+                    : closedDate;
+                  const reportTime = new Date(report.createdAt).toLocaleTimeString([], {
+                    timeZone: reportTimeZone,
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false,
+                  });
                   return (
                     <button
                       key={report.id}
@@ -1368,7 +1365,9 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
                       </span>
                       <span className="shift-archive-row-copy">
                         <strong className="text-on-surface">{report.reportNumber ?? `Z-${String(report.zNumber ?? 0).padStart(6, '0')}`}</strong>
-                        <span className="font-body text-body-sm text-on-surface-variant">{reportDateLabel} · {reportTime}</span>
+                        <span className="font-body text-body-sm text-on-surface-variant">
+                          {reportDateLabel} · {reportTime} · Business date {report.businessDate}
+                        </span>
                       </span>
                       <span className="shift-archive-row-summary">
                         <strong>{formatTnd((report.salesCollectedMillimes ?? report.salesMillimes) / 1000)} DT</strong>
@@ -1383,7 +1382,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
                 {filteredArchiveReports.length === 0 && (
                   <div className="shift-archive-empty">
                     <MaterialIcon name="event_busy" className="text-2xl text-outline" />
-                    <p className="font-body text-body-sm text-on-surface-variant">No Z reports found for this date.</p>
+                    <p className="font-body text-body-sm text-on-surface-variant">No Z reports found closed on this date.</p>
                   </div>
                 )}
               </div>

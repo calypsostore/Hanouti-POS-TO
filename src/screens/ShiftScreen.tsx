@@ -11,7 +11,7 @@ import { MaterialIcon } from '../components/MaterialIcon';
 import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { formatTnd } from '../lib/format';
-import { getDailyOverviewTrends, type ShiftOverviewMetricKey, type ShiftOverviewTrend, type ShiftOverviewValues } from '../lib/shiftOverview';
+import { getDailyOverviewTrends, type ShiftOverviewValues } from '../lib/shiftOverview';
 import { orderService } from '../services/orderService';
 import { CashMovementNotificationError, shiftService } from '../services/shiftService';
 import { compService } from '../services/compService';
@@ -33,7 +33,7 @@ import type { ExpenseRecord, OrderRecord, ReportRecord, ReportShiftLine, Unresol
 import { Link } from 'react-router-dom';
 import { parseNonNegativeMillimes } from '../lib/millimes';
 import { createLatestRequestGuard } from '../lib/requestGuard';
-import { useNotificationStore } from '../stores/notificationStore';
+import { ShiftNotificationsButton } from '../components/ShiftNotificationsButton';
 
 type ShiftCloseBreakdown = ShiftSalesBreakdown & {
   pendingVoidCount: number;
@@ -67,62 +67,8 @@ const cashMovementReasons: { reason: CashMovementReason; label: string }[] = [
   { reason: 'other', label: 'Other' },
 ];
 
-type ArchiveQuickDate = 'today' | 'yesterday' | '7days' | '30days' | 'month' | 'custom';
-
 function localDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-function getReportOverviewValues(report: ReportRecord): ShiftOverviewValues {
-  const expenses = report.expensesMillimes
-    ?? report.expenseDetails?.reduce((sum, expense) => sum + expense.amountMillimes, 0)
-    ?? 0;
-  const cash = report.cashSalesMillimes
-    ?? report.paymentSplit?.cash
-    ?? report.shifts?.reduce((sum, shift) => sum + (shift.cashSalesMillimes ?? 0), 0)
-    ?? 0;
-  const cards = report.paymentSplit?.card
-    ?? report.shifts?.reduce((sum, shift) => sum + (shift.cardSalesMillimes ?? 0), 0)
-    ?? 0;
-  const sales = report.grossMillimes ?? report.salesCollectedMillimes ?? report.salesMillimes;
-
-  return {
-    sales,
-    transactions: report.orderCount,
-    cash,
-    cards,
-    expenses,
-    netSales: report.netMillimes ?? report.netProfitMillimes
-      ?? ((report.salesCollectedMillimes ?? report.salesMillimes) - expenses),
-  };
-}
-
-function getOverviewTrends(reports: ReportRecord[], currentReport: ReportRecord): Record<ShiftOverviewMetricKey, ShiftOverviewTrend> {
-  const priorReports = reports
-    .filter((report) => report.type === 'Z' && report.id !== currentReport.id
-      && (report.businessDate < currentReport.businessDate
-        || (report.businessDate === currentReport.businessDate && report.createdAt < currentReport.createdAt)))
-    .sort((left, right) => left.businessDate.localeCompare(right.businessDate) || left.createdAt.localeCompare(right.createdAt))
-    .slice(-5);
-  const series = [...priorReports, currentReport].map(getReportOverviewValues);
-  const getTrend = (key: ShiftOverviewMetricKey): ShiftOverviewTrend => {
-    const values = series.map((metrics) => metrics[key]);
-    const previous = values.length > 1 ? values[values.length - 2] : undefined;
-    const current = values[values.length - 1];
-    return {
-      values,
-      changePercent: previous && previous !== 0 ? ((current - previous) / Math.abs(previous)) * 100 : undefined,
-    };
-  };
-
-  return {
-    sales: getTrend('sales'),
-    transactions: getTrend('transactions'),
-    cash: getTrend('cash'),
-    cards: getTrend('cards'),
-    expenses: getTrend('expenses'),
-    netSales: getTrend('netSales'),
-  };
 }
 
 function getSparklinePath(values: number[]): string {
@@ -146,7 +92,6 @@ function getSparklineAreaPath(values: number[]): string {
 
 function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const user = useAuthStore((state) => state.user);
-  const unreadNotificationCount = useNotificationStore((state) => state.unreadCount);
   const storeId = user?.storeId ?? '';
   const refreshKey = useFocusRefreshKey();
   const [shifts, setShifts] = useState<ShiftRecord[]>([]);
@@ -182,8 +127,15 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const [forceCloseShiftTarget, setForceCloseShiftTarget] = useState<ShiftRecord | null>(null);
   const [activeTab, setActiveTab] = useState<'shifts' | 'reports' | 'archive'>(() => {
     if (!ownerMode) return 'shifts';
-    return new URLSearchParams(window.location.search).get('tab') === 'reports' ? 'reports' : 'archive';
+    const tab = new URLSearchParams(window.location.search).get('tab');
+    return tab === 'reports' || tab === 'archive' ? tab : 'shifts';
   });
+  const changeActiveTab = (tab: 'shifts' | 'reports' | 'archive') => {
+    setActiveTab(tab);
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', tab);
+    window.history.replaceState(window.history.state, '', `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
+  };
   const [historySearch, setHistorySearch] = useState('');
   const [historyStatus, setHistoryStatus] = useState<'all' | 'open' | 'closed'>('all');
   const [historyStaff, setHistoryStaff] = useState('all');
@@ -212,28 +164,25 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const [reportPreview, setReportPreview] = useState<ReportRecord>();
   const [archivePreviewDismissed, setArchivePreviewDismissed] = useState(false);
   const [archiveReports, setArchiveReports] = useState<ReportRecord[]>([]);
-  const [archiveSearch, setArchiveSearch] = useState('');
-  const [archiveQuickDate, setArchiveQuickDate] = useState<ArchiveQuickDate>('today');
-  const [archiveCustomFrom, setArchiveCustomFrom] = useState('');
-  const [archiveCustomTo, setArchiveCustomTo] = useState('');
-  const [archiveStatus, setArchiveStatus] = useState<'all' | 'verified' | 'unverified'>('all');
-  const [archiveEmployee, setArchiveEmployee] = useState('all');
-  const [archiveMinAmount, setArchiveMinAmount] = useState('');
-  const [archiveMaxAmount, setArchiveMaxAmount] = useState('');
+  const [archiveDate, setArchiveDate] = useState(() => localDateKey(new Date()));
   const [archiveSort, setArchiveSort] = useState<'newest' | 'oldest' | 'amount-desc' | 'amount-asc'>('newest');
-  const [archiveFiltersOpen, setArchiveFiltersOpen] = useState(false);
   const [previewZoom, setPreviewZoom] = useState(100);
   const [dayStatus, setDayStatus] = useState<ReportDayStatus>({
     dayIsClosed: false,
     hasActivity: false,
     openShiftCount: 0,
   });
+  const [dismissedDayStatusMessage, setDismissedDayStatusMessage] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const refreshGuardRef = useRef(createLatestRequestGuard());
   const zSubmissionRef = useRef(false);
 
   useEffect(() => {
-    const updateFullscreenState = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    const updateFullscreenState = () => {
+      const workspace = document.querySelector<HTMLElement>('.workspace-layout.shift-screen-layout');
+      const fullscreenActive = document.fullscreenElement === workspace;
+      setIsFullscreen(fullscreenActive);
+    };
     document.addEventListener('fullscreenchange', updateFullscreenState);
     return () => document.removeEventListener('fullscreenchange', updateFullscreenState);
   }, []);
@@ -303,6 +252,48 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       setError(t('common.refreshFailed'));
     });
   }), [refresh, storeId]);
+
+  useEffect(() => {
+    if (loading) return;
+    const storageKey = '7anouti-pos:shift-screen-position:v1';
+    const getSavedPositions = (): Record<string, { windowY: number; containerY: number }> => {
+      try {
+        const parsed = JSON.parse(window.sessionStorage.getItem(storageKey) ?? '{}');
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch {
+        return {};
+      }
+    };
+    const savePosition = () => {
+      const container = document.querySelector<HTMLElement>('.shift-workspace--owner');
+      const positions = getSavedPositions();
+      positions[activeTab] = {
+        windowY: window.scrollY,
+        containerY: container?.scrollTop ?? 0,
+      };
+      window.sessionStorage.setItem(storageKey, JSON.stringify(positions));
+    };
+    const saved = getSavedPositions()[activeTab];
+    const firstFrame = window.requestAnimationFrame(() => {
+      const container = document.querySelector<HTMLElement>('.shift-workspace--owner');
+      window.scrollTo({ top: saved?.windowY ?? 0, behavior: 'auto' });
+      if (container) container.scrollTop = saved?.containerY ?? 0;
+    });
+
+    window.addEventListener('scroll', savePosition, { passive: true });
+    window.addEventListener('pagehide', savePosition);
+    window.addEventListener('beforeunload', savePosition);
+    const container = document.querySelector<HTMLElement>('.shift-workspace--owner');
+    container?.addEventListener('scroll', savePosition, { passive: true });
+    return () => {
+      savePosition();
+      window.cancelAnimationFrame(firstFrame);
+      window.removeEventListener('scroll', savePosition);
+      window.removeEventListener('pagehide', savePosition);
+      window.removeEventListener('beforeunload', savePosition);
+      container?.removeEventListener('scroll', savePosition);
+    };
+  }, [activeTab, loading]);
 
   async function openShift(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -690,58 +681,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   });
 
   const zReports = archiveReports.filter((report) => report.type === 'Z');
-  const filteredArchiveReports = zReports.filter((report) => {
-    const today = new Date();
-    const reportDate = report.businessDate;
-    let dateMatches = true;
-    if (archiveQuickDate === 'today') dateMatches = reportDate === localDateKey(today);
-    if (archiveQuickDate === 'yesterday') {
-      const yesterday = new Date(today);
-      yesterday.setDate(today.getDate() - 1);
-      dateMatches = reportDate === localDateKey(yesterday);
-    }
-    if (archiveQuickDate === '7days') {
-      const start = new Date(today);
-      start.setDate(today.getDate() - 6);
-      dateMatches = reportDate >= localDateKey(start) && reportDate <= localDateKey(today);
-    }
-    if (archiveQuickDate === '30days') {
-      const start = new Date(today);
-      start.setDate(today.getDate() - 29);
-      dateMatches = reportDate >= localDateKey(start) && reportDate <= localDateKey(today);
-    }
-    if (archiveQuickDate === 'month') {
-      dateMatches = reportDate.startsWith(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-`);
-    }
-    if (archiveQuickDate === 'custom') {
-      dateMatches = (!archiveCustomFrom || reportDate >= archiveCustomFrom)
-        && (!archiveCustomTo || reportDate <= archiveCustomTo);
-    }
-
-    const employeeNames = [
-      ...(report.employeeBreakdown ?? []).map((employee) => employee.name),
-      ...(report.shifts ?? []).map((shift) => shift.staffName),
-    ].filter(Boolean);
-    const employeeMatches = archiveEmployee === 'all' || employeeNames.includes(archiveEmployee);
-    const statusMatches = archiveStatus === 'all'
-      || (archiveStatus === 'verified' && report.pinVerified !== false)
-      || (archiveStatus === 'unverified' && report.pinVerified === false);
-    const amount = report.salesCollectedMillimes ?? report.salesMillimes;
-    const minAmount = archiveMinAmount.trim() ? Number(archiveMinAmount) * 1000 : undefined;
-    const maxAmount = archiveMaxAmount.trim() ? Number(archiveMaxAmount) * 1000 : undefined;
-    const amountMatches = (minAmount === undefined || amount >= minAmount)
-      && (maxAmount === undefined || amount <= maxAmount);
-    const searchText = [
-      report.reportNumber,
-      report.id,
-      report.businessDate,
-      report.generatedBy,
-      ...employeeNames,
-    ].filter(Boolean).join(' ').toLocaleLowerCase();
-    const searchMatches = !archiveSearch.trim() || searchText.includes(archiveSearch.trim().toLocaleLowerCase());
-
-    return dateMatches && employeeMatches && statusMatches && amountMatches && searchMatches;
-  }).sort((left, right) => {
+  const filteredArchiveReports = zReports.filter((report) => report.businessDate === archiveDate).sort((left, right) => {
     if (archiveSort === 'oldest') return left.createdAt.localeCompare(right.createdAt);
     if (archiveSort === 'amount-desc' || archiveSort === 'amount-asc') {
       const leftAmount = left.salesCollectedMillimes ?? left.salesMillimes;
@@ -751,31 +691,15 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     return right.createdAt.localeCompare(left.createdAt);
   });
 
-  const archiveEmployeeOptions = Array.from(new Set(
-    zReports.flatMap((report) => [
-      ...(report.employeeBreakdown ?? []).map((employee) => employee.name),
-      ...(report.shifts ?? []).map((shift) => shift.staffName),
-    ].filter(Boolean)),
-  ));
-
-  function clearArchiveFilters() {
-    setArchiveSearch('');
-    setArchiveQuickDate('today');
-    setArchiveCustomFrom('');
-    setArchiveCustomTo('');
-    setArchiveStatus('all');
-    setArchiveEmployee('all');
-    setArchiveMinAmount('');
-    setArchiveMaxAmount('');
-    setArchiveSort('newest');
-  }
-
   async function toggleFullscreen() {
     try {
-      if (document.fullscreenElement) {
+      const workspace = document.querySelector<HTMLElement>('.workspace-layout.shift-screen-layout');
+      if (!workspace) throw new Error('Shift workspace is unavailable.');
+
+      if (document.fullscreenElement === workspace) {
         await document.exitFullscreen();
       } else {
-        await document.documentElement.requestFullscreen();
+        await workspace.requestFullscreen();
       }
     } catch (fullscreenError) {
       console.error('Unable to toggle full-screen shift view.', fullscreenError);
@@ -783,14 +707,11 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     }
   }
 
-  const isArchivePreview = reportPreview?.type === 'Z'
+  const isArchivePreview = reportPreview?.type === 'Z' && reportPreview.businessDate === archiveDate
     ? reportPreview
     : archivePreviewDismissed
       ? undefined
       : filteredArchiveReports[0];
-  const summaryReport = ownerMode && activeTab === 'archive'
-    ? isArchivePreview ?? filteredArchiveReports[0]
-    : undefined;
   const liveShiftTotals = openShifts.reduce((totals, shift) => {
     const breakdown = breakdownsByShift[shift.id] ?? emptyShiftBreakdown;
     return {
@@ -809,12 +730,10 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     netSales: currentPeriodSummary?.netProfitMillimes
       ?? ((currentPeriodSummary?.salesMillimes ?? liveShiftTotals.sales) - (currentPeriodSummary?.expensesMillimes ?? 0)),
   };
-  const overviewValues = summaryReport ? getReportOverviewValues(summaryReport) : currentPeriodValues;
-  const overviewTrends = summaryReport
-    ? getOverviewTrends(zReports, summaryReport)
-    : ownerMode
-      ? getDailyOverviewTrends(analyticsOrders, analyticsExpenses, overviewValues)
-      : undefined;
+  const overviewValues = currentPeriodValues;
+  const overviewTrends = ownerMode
+    ? getDailyOverviewTrends(analyticsOrders, analyticsExpenses, overviewValues)
+    : undefined;
   const metricAmount = (millimes: number) => `${formatTnd(millimes / 1000)} DT`;
   const summaryMetrics = [
     {
@@ -871,7 +790,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   return (
     <div className={`shift-workspace ${ownerMode ? 'shift-workspace--owner' : ''}`}>
       {ownerMode && (
-        <div className="shift-topbar">
+        <div className={`shift-topbar${activeTab === 'shifts' ? ' shift-topbar--search' : ''}`}>
           <Link to="/owner/dashboard" className="shift-topbar-brand" aria-label="Go to 7anouti-POS dashboard">
             <span className="shift-topbar-logo" aria-hidden="true">
               <svg viewBox="0 0 48 48" focusable="false">
@@ -885,20 +804,20 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
               <span>Smart Business</span>
             </span>
           </Link>
-          <label className="shift-topbar-search">
-            <MaterialIcon name="search" />
-            <input
-              value={archiveSearch}
-              onChange={(event) => setArchiveSearch(event.target.value)}
-              placeholder="Search in reports..."
-              aria-label="Search in reports"
-            />
-          </label>
+          {activeTab === 'shifts' && (
+            <label className="shift-topbar-search">
+              <MaterialIcon name="search" className="shift-topbar-search__icon" />
+              <input
+                className="shift-topbar-search__input"
+                value={historySearch}
+                onChange={(event) => setHistorySearch(event.target.value)}
+                placeholder="Search staff or date"
+                aria-label="Search shift history"
+              />
+            </label>
+          )}
           <div className="shift-topbar-actions">
-            <Link to="/notifications" className="shift-topbar-icon-button" aria-label={`Notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ''}`}>
-              <MaterialIcon name="notifications" />
-              {unreadNotificationCount > 0 && <span className="shift-topbar-badge">{unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}</span>}
-            </Link>
+            <ShiftNotificationsButton />
             <button type="button" className="shift-topbar-icon-button" onClick={() => { void toggleFullscreen(); }} aria-label={isFullscreen ? 'Exit full screen' : 'Enter full screen'}>
               <MaterialIcon name={isFullscreen ? 'fullscreen_exit' : 'fullscreen'} />
             </button>
@@ -967,9 +886,12 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             : undefined
         } />
       )}
-      {(ownerMode || (dayStatus.dayIsClosed && !ownOpenShift)) && (
+      {(ownerMode || (dayStatus.dayIsClosed && !ownOpenShift)) && dayStatusMessage !== dismissedDayStatusMessage && (
         <p role="status" className={`shift-day-status mb-4 rounded-xl p-3 font-body text-body-sm ${dayStatus.dayIsClosed ? 'shift-day-status--warning' : ''}`}>
-          {dayStatusMessage}
+          <span className="shift-day-status__message">{dayStatusMessage}</span>
+          <button type="button" className="shift-day-status__dismiss" aria-label="Dismiss shift status" onClick={() => setDismissedDayStatusMessage(dayStatusMessage)}>
+            <MaterialIcon name="close" className="text-lg" />
+          </button>
         </p>
       )}
       {(error || notice) && (
@@ -993,7 +915,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
               variant="ghost"
               className={`shift-section-tab-button${activeTab === tab ? ' is-active' : ''}`}
               aria-pressed={activeTab === tab}
-              onClick={() => setActiveTab(tab)}
+              onClick={() => changeActiveTab(tab)}
             >
               <MaterialIcon name={icon} className="text-lg" />
               {label}
@@ -1029,7 +951,12 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
                         <MaterialIcon name={card.trend.changePercent < 0 ? 'trending_down' : 'trending_up'} />
                         {card.trend.changePercent > 0 ? '+' : ''}{Math.round(card.trend.changePercent)}%
                       </>
-                    ) : card.trend.values.some((value) => value !== 0) ? 'New' : '—'}
+                    ) : card.trend.values.some((value) => value !== 0) ? (
+                      <>
+                        <MaterialIcon name="trending_up" />
+                        New
+                      </>
+                    ) : '—'}
                   </span>
                   <svg
                     className={`shift-overview-sparkline ${card.trend.values.length < 2 ? 'is-empty' : ''}`}
@@ -1066,10 +993,10 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
               <div><p>Open shifts</p><strong>{openCount}</strong></div>
               <div><p>Pending voids</p><strong>{pendingVoidOrders.length}</strong></div>
             </div>
+            {reportDisabledReason && <p className="mt-2 font-body text-body-sm text-outline">{reportDisabledReason}</p>}
             <Button disabled={Boolean(reportDisabledReason)} className="shift-report-action mt-4 w-full" onClick={() => { void createXReport(); }}>
               <MaterialIcon name="summarize" />Print X report
             </Button>
-            {reportDisabledReason && <p className="mt-2 font-body text-body-sm text-outline">{reportDisabledReason}</p>}
           </article>
           <article className="shift-report-card shift-z-card rounded-2xl p-4">
             <div className="shift-report-card__header flex items-start justify-between gap-3">
@@ -1126,82 +1053,29 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
 
       {ownerMode && activeTab === 'archive' && (
         <section className="shift-tab-panel shift-archive-page">
-          <div className="shift-archive-toolbar-panel">
-            <div className="shift-date-segments" role="group" aria-label="Quick date filters">
-              {([
-                ['today', 'Today'],
-                ['yesterday', 'Yesterday'],
-                ['7days', '7 Days'],
-                ['30days', '30 Days'],
-                ['month', 'This Month'],
-                ['custom', 'Custom Range'],
-              ] as const).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  aria-pressed={archiveQuickDate === value}
-                  onClick={() => setArchiveQuickDate(value)}
-                >
-                  {value === 'custom' && <MaterialIcon name="calendar_month" />}
-                  {label}
-                </button>
-              ))}
-            </div>
-            <label className="shift-spotlight relative">
-              <MaterialIcon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-lg text-outline" />
+          <div className="shift-archive-toolbar-panel shift-archive-toolbar-panel--date-only">
+            <div className="shift-archive-date-filter">
+              <label htmlFor="shift-archive-date">
+                <MaterialIcon name="calendar_month" />
+                <span>Report date</span>
+              </label>
               <input
-                value={archiveSearch}
-                onChange={(event) => setArchiveSearch(event.target.value)}
-                placeholder="Search reports..."
-                aria-label="Search daily reports"
-                className="h-11 w-full rounded-xl pl-10 pr-3 font-body text-body-md outline-none"
+                id="shift-archive-date"
+                type="date"
+                value={archiveDate}
+                aria-label="Filter Z reports by date"
+                onChange={(event) => {
+                  const nextDate = event.currentTarget.value;
+                  if (!nextDate) return;
+                  setArchiveDate(nextDate);
+                  setReportPreview(undefined);
+                  setArchivePreviewDismissed(false);
+                }}
               />
-            </label>
-            {archiveQuickDate === 'custom' && (
-              <div className="shift-custom-dates">
-                <label>From<input type="date" value={archiveCustomFrom} onChange={(event) => setArchiveCustomFrom(event.target.value)} /></label>
-                <label>To<input type="date" value={archiveCustomTo} onChange={(event) => setArchiveCustomTo(event.target.value)} /></label>
-              </div>
-            )}
-            <div className="shift-archive-filter-area">
-              <span className="sr-only">{filteredArchiveReports.length} report{filteredArchiveReports.length === 1 ? '' : 's'}</span>
-              <button type="button" className="shift-filter-trigger" onClick={() => setArchiveFiltersOpen((open) => !open)} aria-label="Filter reports" aria-expanded={archiveFiltersOpen}>
-                <MaterialIcon name="tune" className="text-xl" />
-                {(archiveStatus !== 'all' || archiveEmployee !== 'all' || archiveMinAmount || archiveMaxAmount) && <span className="shift-filter-count">•</span>}
-              </button>
+              <span className="shift-archive-date-count">
+                {filteredArchiveReports.length} Z {filteredArchiveReports.length === 1 ? 'report' : 'reports'}
+              </span>
             </div>
-            {archiveFiltersOpen && (
-              <div className="shift-advanced-filters">
-                <label>Status
-                  <select value={archiveStatus} onChange={(event) => setArchiveStatus(event.target.value as 'all' | 'verified' | 'unverified')}>
-                    <option value="all">All statuses</option>
-                    <option value="verified">Verified</option>
-                    <option value="unverified">Unverified</option>
-                  </select>
-                </label>
-                <label>Employee
-                  <select value={archiveEmployee} onChange={(event) => setArchiveEmployee(event.target.value)}>
-                    <option value="all">All employees</option>
-                    {archiveEmployeeOptions.map((employee) => <option key={employee} value={employee}>{employee}</option>)}
-                  </select>
-                </label>
-                <label>Minimum amount
-                  <input type="number" min="0" step="0.001" value={archiveMinAmount} onChange={(event) => setArchiveMinAmount(event.target.value)} placeholder="0.000" />
-                </label>
-                <label>Maximum amount
-                  <input type="number" min="0" step="0.001" value={archiveMaxAmount} onChange={(event) => setArchiveMaxAmount(event.target.value)} placeholder="0.000" />
-                </label>
-              </div>
-            )}
-            {(archiveQuickDate !== 'today' || archiveSearch || archiveStatus !== 'all' || archiveEmployee !== 'all' || archiveMinAmount || archiveMaxAmount) && (
-              <div className="shift-active-filters">
-                {archiveSearch && <button type="button" onClick={() => setArchiveSearch('')}>“{archiveSearch}” <MaterialIcon name="close" className="text-base" /></button>}
-                {archiveStatus !== 'all' && <button type="button" onClick={() => setArchiveStatus('all')}>{archiveStatus} <MaterialIcon name="close" className="text-base" /></button>}
-                {archiveEmployee !== 'all' && <button type="button" onClick={() => setArchiveEmployee('all')}>{archiveEmployee} <MaterialIcon name="close" className="text-base" /></button>}
-                {archiveQuickDate !== 'today' && <button type="button" onClick={() => setArchiveQuickDate('today')}>{archiveQuickDate === 'custom' ? 'Custom range' : archiveQuickDate} <MaterialIcon name="close" className="text-base" /></button>}
-                <button type="button" className="shift-clear-filters" onClick={clearArchiveFilters}>Clear all</button>
-              </div>
-            )}
           </div>
           <div className="shift-archive-layout">
             <div className="shift-archive-card rounded-2xl p-4">
@@ -1228,7 +1102,15 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
               <div className="shift-archive-list flex flex-col gap-2">
                 {filteredArchiveReports.map((report) => {
                   const selected = isArchivePreview?.id === report.id;
-                  const reportTime = new Date(report.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                  const now = new Date();
+                  const reportDate = new Date(`${report.businessDate}T00:00:00`);
+                  const reportDateLabel = !Number.isNaN(reportDate.getTime())
+                    && reportDate.getFullYear() === now.getFullYear()
+                    && reportDate.getMonth() === now.getMonth()
+                    && reportDate.getDate() === now.getDate()
+                    ? 'Today'
+                    : report.businessDate;
+                  const reportTime = new Date(report.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
                   return (
                     <button
                       key={report.id}
@@ -1242,11 +1124,11 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
                       </span>
                       <span className="shift-archive-row-copy">
                         <strong className="text-on-surface">{report.reportNumber ?? `Z-${String(report.zNumber ?? 0).padStart(6, '0')}`}</strong>
-                        <span className="font-body text-body-sm text-on-surface-variant">{report.businessDate} · {reportTime}</span>
+                        <span className="font-body text-body-sm text-on-surface-variant">{reportDateLabel} · {reportTime}</span>
                       </span>
                       <span className="shift-archive-row-summary">
                         <strong>{formatTnd((report.salesCollectedMillimes ?? report.salesMillimes) / 1000)} DT</strong>
-                        <StatusTag status={report.pinVerified === false ? 'pending' : 'started'}>
+                        <StatusTag className="shift-archive-status" status={report.pinVerified === false ? 'pending' : 'started'}>
                           {report.pinVerified === false ? 'PIN unavailable' : 'Verified'}
                         </StatusTag>
                       </span>
@@ -1256,9 +1138,8 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
                 })}
                 {filteredArchiveReports.length === 0 && (
                   <div className="shift-archive-empty">
-                    <MaterialIcon name="search_off" className="text-2xl text-outline" />
-                    <p className="font-body text-body-sm text-on-surface-variant">No reports match these filters.</p>
-                    <button type="button" onClick={clearArchiveFilters}>Clear filters</button>
+                    <MaterialIcon name="event_busy" className="text-2xl text-outline" />
+                    <p className="font-body text-body-sm text-on-surface-variant">No Z reports found for this date.</p>
                   </div>
                 )}
               </div>
@@ -1359,16 +1240,18 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       {(!ownerMode || activeTab === 'shifts') && <section className="shift-history mt-6">
         <h2 className="mb-3 font-display text-headline-md text-on-surface">{ownerMode && <span className="shift-history-mark"><MaterialIcon name="history" /></span>}{t('shift.history')}</h2>
         <div className="shift-history-toolbar mb-3 grid gap-2">
-          <label className="relative">
-            <MaterialIcon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-lg text-outline" />
-            <input
-              value={historySearch}
-              onChange={(event) => setHistorySearch(event.target.value)}
-              placeholder="Search staff or date"
-              aria-label="Search shift history"
-              className="h-11 w-full rounded-lg bg-surface-container-lowest pl-10 pr-3 font-body text-body-md shadow-card outline-none focus:ring-2 focus:ring-primary"
-            />
-          </label>
+          {!ownerMode && (
+            <label className="relative">
+              <MaterialIcon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-lg text-outline" />
+              <input
+                value={historySearch}
+                onChange={(event) => setHistorySearch(event.target.value)}
+                placeholder="Search staff or date"
+                aria-label="Search shift history"
+                className="h-11 w-full rounded-lg bg-surface-container-lowest pl-10 pr-3 font-body text-body-md shadow-card outline-none focus:ring-2 focus:ring-primary"
+              />
+            </label>
+          )}
           <div className="shift-status-filters flex items-center gap-1 rounded-xl bg-surface-container-lowest p-1 shadow-card" role="group" aria-label="Filter shift status">
             {([
               ['all', 'All'],
@@ -1420,7 +1303,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             { key: 'counted', label: 'Counted', sortValue: (shift) => shift.countedCashMillimes ?? 0, render: (shift) => shift.countedCashMillimes === undefined ? '—' : `${formatTnd(shift.countedCashMillimes / 1000)} DT` },
             { key: 'status', label: 'Status', render: (shift) => (
               <div className="flex flex-col items-start gap-1">
-                <StatusTag status={shift.status === 'open' ? 'started' : 'closed'}>{shift.status === 'open' ? 'Open' : 'Closed'}</StatusTag>
+                <StatusTag className="shift-history-status" status={shift.status === 'open' ? 'started' : 'closed'}>{shift.status === 'open' ? 'Open' : 'Closed'}</StatusTag>
                 {shift.forceClosedByOwner && <span className="font-body text-label-sm text-warning">Closed by force</span>}
                 {(shift.voidsAutoApprovedCount ?? 0) > 0 && <span className="font-body text-label-sm text-warning">Voids auto-approved: {shift.voidsAutoApprovedCount}</span>}
               </div>
@@ -1434,32 +1317,37 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             ) },
           ] satisfies DataTableColumn<ShiftRecord>[]}
           mobileCards={(shift) => (
-            <article key={shift.id} className="shift-history-card flex flex-wrap items-center justify-between gap-3 rounded-2xl p-4">
-              <div>
-                <p className="font-body text-label-lg text-on-surface">{staffNames[shift.staffId] ?? 'Staff'}</p>
-                <p className="mt-1 font-body text-body-sm text-outline">
-                  {new Date(shift.openedAt).toLocaleString()} {shift.closedAt ? ` • Closed ${new Date(shift.closedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
-                </p>
-                <p className="mt-1 font-body text-label-sm text-on-surface-variant">
-                  Start {formatTnd(shift.startingCashMillimes / 1000)} DT
-                  {shift.countedCashMillimes !== undefined ? ` • Counted ${formatTnd(shift.countedCashMillimes / 1000)} DT` : ''}
-                </p>
-                {shift.forceClosedByOwner && <p className="mt-1 font-body text-label-sm text-warning">Closed by force</p>}
-                {(shift.voidsAutoApprovedCount ?? 0) > 0 && <p className="mt-1 font-body text-label-sm text-warning">Voids auto-approved: {shift.voidsAutoApprovedCount}</p>}
+            <article key={shift.id} className={`shift-history-card shift-history-card--${shift.status === 'open' ? 'open' : 'closed'} flex flex-wrap items-center justify-between gap-3 rounded-2xl p-4`}>
+              <div className="shift-history-card__identity">
+                <span className="shift-history-card__staff-icon" aria-hidden="true">
+                  <MaterialIcon name={shift.status === 'open' ? 'schedule' : 'person'} />
+                </span>
+                <div className="shift-history-card__identity-copy">
+                  <p className="font-body text-label-lg text-on-surface">{staffNames[shift.staffId] ?? 'Staff'}</p>
+                  <p className="mt-1 font-body text-body-sm text-outline">
+                    {new Date(shift.openedAt).toLocaleString()} {shift.closedAt ? ` • Closed ${new Date(shift.closedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+                  </p>
+                  <p className="mt-1 font-body text-label-sm text-on-surface-variant">
+                    Start {formatTnd(shift.startingCashMillimes / 1000)} DT
+                    {shift.countedCashMillimes !== undefined ? ` • Counted ${formatTnd(shift.countedCashMillimes / 1000)} DT` : ''}
+                  </p>
+                  {shift.forceClosedByOwner && <p className="mt-1 font-body text-label-sm text-warning">Closed by force</p>}
+                  {(shift.voidsAutoApprovedCount ?? 0) > 0 && <p className="mt-1 font-body text-label-sm text-warning">Voids auto-approved: {shift.voidsAutoApprovedCount}</p>}
+                </div>
               </div>
               <div className="text-right">
-                <StatusTag status={shift.status === 'open' ? 'started' : 'closed'}>{shift.status === 'open' ? 'Started' : 'Closed'}</StatusTag>
+                <StatusTag className="shift-history-status" status={shift.status === 'open' ? 'started' : 'closed'}>{shift.status === 'open' ? 'Started' : 'Closed'}</StatusTag>
                 {shift.differenceMillimes !== undefined && <p className={`mt-1 font-body text-label-sm tabular-nums ${shift.differenceMillimes === 0 ? 'text-success-dark' : 'text-error-dark'}`}>{t('shift.difference')}: {formatTnd(shift.differenceMillimes / 1000)} DT</p>}
               </div>
               {ownerMode && canCashInOut && shift.status === 'open' && user?.role === 'owner' && (
                 <div className="flex w-full gap-2">
-                  <Button type="button" variant="secondary" onClick={() => openCashMovement('in', shift.id)}><MaterialIcon name="add" />Cash in</Button>
-                  <Button type="button" variant="secondary" onClick={() => openCashMovement('out', shift.id)}><MaterialIcon name="remove" />Cash out</Button>
+                  <Button type="button" variant="secondary" className="shift-cash-in flex-1" onClick={() => openCashMovement('in', shift.id)}><MaterialIcon name="add" />Cash in</Button>
+                  <Button type="button" variant="secondary" className="shift-cash-out flex-1" onClick={() => openCashMovement('out', shift.id)}><MaterialIcon name="remove" />Cash out</Button>
                 </div>
               )}
               <CashMovementList movements={movementsForShift(shift.id)} staffNames={staffNames} />
               {ownerMode && shift.status === 'open' && user?.role === 'owner' && (
-                <Button variant="danger" className="w-full" onClick={() => {
+                <Button variant="danger" className="shift-history-force-close-button w-full" onClick={() => {
                   setForceCloseShiftTarget(shift);
                   setForceShiftPin('');
                   setForceShiftConfirmed(false);
@@ -1975,7 +1863,7 @@ function CashMovementList({ movements, staffNames, className = '' }: {
     return 'Other';
   };
   return (
-    <section className={`mt-4 border-t border-outline-variant pt-3 ${className}`}>
+    <section className={`mt-4 w-full border-t border-outline-variant pt-3 ${className}`}>
       <h3 className="mb-2 font-body text-label-md text-on-surface">Cash movements</h3>
       {movements.length > 0 ? (
         <ul className="flex flex-col gap-2">

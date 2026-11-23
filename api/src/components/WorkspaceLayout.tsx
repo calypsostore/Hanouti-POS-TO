@@ -209,7 +209,7 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
             )}
           </button>
           <button type="button" className="desktop-sidebar__collapse" onClick={toggleSidebar} aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
-            <MaterialIcon name={sidebarCollapsed ? 'keyboard_arrow_up' : 'keyboard_arrow_down'} />
+            <MaterialIcon name={sidebarCollapsed ? 'keyboard_arrow_right' : 'keyboard_arrow_left'} />
           </button>
         </div>
       </aside>

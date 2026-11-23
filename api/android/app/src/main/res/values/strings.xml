@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">7anouti-POS</string>
-    <string name="title_activity_main">7anouti-POS</string>
-    <string name="package_name">com.hanouti.pos</string>
-    <string name="custom_url_scheme">com.hanouti.pos</string>
-</resources>

@@ -187,10 +187,17 @@ artifact cannot be restored.
 
 ## Deploy to Vercel
 
-Import the Git repository into Vercel and deploy the Vite project with the
-default build command `npm run build` and output directory `dist`. Pushes to the
-connected production branch trigger a web deployment. Set `VITE_APP_URL` to the
-production URL only if it differs from `https://hanoutipos.vercel.app`.
+Configure the Vercel project to use the repository root (`.`) as its Root
+Directory, Vite as its Framework Preset, `npm ci` as its Install Command,
+`npm run build` as its Build Command, and `dist` as its Output Directory. Set
+`VITE_DATA_DRIVER=supabase`, `VITE_SUPABASE_URL`, and `VITE_SUPABASE_ANON_KEY`
+in the Vercel environment for each deployment target. These are frontend
+variables; never use a Supabase service-role key in the frontend.
+
+The root `vercel.json` preserves the SPA rewrite and asset cache rules. The
+`/api/update-manifest` endpoint is provided by `api/update-manifest.js`. Pushes
+to the connected production branch trigger a web deployment. Set `VITE_APP_URL`
+to the production URL only if it differs from `https://hanoutipos.vercel.app`.
 
 ## Android / Capacitor
 

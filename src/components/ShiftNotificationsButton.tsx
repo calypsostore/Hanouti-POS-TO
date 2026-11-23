@@ -21,6 +21,7 @@ export function ShiftNotificationsButton() {
   const [error, setError] = useState('');
   const [activeNotificationId, setActiveNotificationId] = useState('');
   const [position, setPosition] = useState({ top: 64, originX: 320 });
+  const [portalTarget, setPortalTarget] = useState<Element>(() => document.fullscreenElement ?? document.body);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   const updatePosition = useCallback(() => {
@@ -30,6 +31,12 @@ export function ShiftNotificationsButton() {
     const panelLeft = window.innerWidth - 8 - panelWidth;
     const centerX = bounds.left + bounds.width / 2;
     setPosition({ top: bounds.bottom + 6, originX: Math.min(panelWidth - 16, Math.max(16, centerX - panelLeft)) });
+  }, []);
+
+  useEffect(() => {
+    const updatePortalTarget = () => setPortalTarget(document.fullscreenElement ?? document.body);
+    document.addEventListener('fullscreenchange', updatePortalTarget);
+    return () => document.removeEventListener('fullscreenchange', updatePortalTarget);
   }, []);
 
   const openNotifications = () => {
@@ -85,10 +92,12 @@ export function ShiftNotificationsButton() {
     window.addEventListener('keydown', closeOnEscape);
     window.addEventListener('resize', updateOnViewportChange);
     window.addEventListener('scroll', updateOnViewportChange, true);
+    document.addEventListener('fullscreenchange', updateOnViewportChange);
     return () => {
       window.removeEventListener('keydown', closeOnEscape);
       window.removeEventListener('resize', updateOnViewportChange);
       window.removeEventListener('scroll', updateOnViewportChange, true);
+      document.removeEventListener('fullscreenchange', updateOnViewportChange);
     };
   }, [open, updatePosition]);
 
@@ -183,7 +192,7 @@ export function ShiftNotificationsButton() {
             </div>
           </section>
         </div>,
-        document.body,
+        portalTarget,
       )}
     </>
   );

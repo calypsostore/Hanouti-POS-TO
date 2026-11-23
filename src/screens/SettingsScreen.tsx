@@ -277,6 +277,7 @@ export function SettingsScreen() {
   const [dailySalesTarget, setDailySalesTarget] = useState('');
   const [adminPin, setAdminPin] = useState('');
   const [staffAutoLockMinutes, setStaffAutoLockMinutes] = useState('');
+  const [ownerAutoLockMinutes, setOwnerAutoLockMinutes] = useState('');
   const [cashOutAlertThreshold, setCashOutAlertThreshold] = useState('');
   const [storeAddress, setStoreAddress] = useState('');
   const [storePhone, setStorePhone] = useState('');
@@ -348,7 +349,8 @@ export function SettingsScreen() {
         setStore(nextStore);
         setStoreName(nextStore?.name ?? '');
         setDailySalesTarget('');
-        setStaffAutoLockMinutes('');
+        setStaffAutoLockMinutes(String(nextStore?.staffAutoLockMinutes ?? 5));
+        setOwnerAutoLockMinutes(String(nextStore?.ownerAutoLockMinutes ?? 0));
         setCashOutAlertThreshold('');
         setStoreAddress(nextStore?.address ?? '');
         setStorePhone(nextStore?.phone ?? '');
@@ -576,16 +578,16 @@ export function SettingsScreen() {
     }
   }
 
-  async function saveAutoLockTimeout(event: FormEvent<HTMLFormElement>) {
+  async function saveAutoLockTimeout(event: FormEvent<HTMLFormElement>, audience: 'staff' | 'owner') {
     event.preventDefault();
     if (!store || !user || user.role !== 'owner') return;
     setError('');
     setNotice('');
     setSavingAutoLock(true);
     try {
-      const minutes = Number(staffAutoLockMinutes);
-      setStore(await userService.updateStoreAutoLockMinutes(store.id, user.id, minutes));
-      setNotice('Staff auto-lock timeout saved.');
+      const minutes = Number(audience === 'staff' ? staffAutoLockMinutes : ownerAutoLockMinutes);
+      setStore(await userService.updateStoreAutoLockMinutes(store.id, user.id, audience, minutes));
+      setNotice(`${audience === 'staff' ? 'Staff' : 'Owner'} auto-lock timeout saved.`);
     } catch (settingsError) {
       setError(settingsError instanceof Error ? settingsError.message : 'Unable to save the auto-lock timeout.');
     } finally {
@@ -1046,15 +1048,28 @@ export function SettingsScreen() {
               <Keypad onPress={(digit) => setAdminPin((current) => current.length < 4 ? `${current}${digit}` : current)} onClear={() => setAdminPin('')} onBackspace={() => setAdminPin((current) => current.slice(0, -1))} />
               <Button type="submit" variant="secondary">{t('common.save')}</Button>
             </form>
-            <form onSubmit={(event) => { void saveAutoLockTimeout(event); }} className="flex flex-col gap-3 rounded-xl bg-surface-container-low p-3">
-              <div>
-                <h3 className="font-body text-label-lg text-on-surface">Staff auto-lock</h3>
-                <p className="mt-1 font-body text-body-sm text-on-surface-variant">Lock staff sessions after inactivity. Default is 5 minutes.</p>
-              </div>
-              <label htmlFor="staff-auto-lock" className="font-body text-label-md text-on-surface">Minutes (1–60)</label>
-              <input id="staff-auto-lock" type="number" min={1} max={60} step={1} required value={staffAutoLockMinutes} onChange={(event) => setStaffAutoLockMinutes(event.target.value)} className="h-12 rounded-lg bg-surface-container-lowest px-3 outline-none focus:ring-2 focus:ring-primary" />
-              <Button type="submit" variant="secondary" disabled={savingAutoLock}>{savingAutoLock ? 'Saving…' : t('common.save')}</Button>
-            </form>
+            {user?.role === 'owner' && (
+              <>
+                <form onSubmit={(event) => { void saveAutoLockTimeout(event, 'staff'); }} className="flex flex-col gap-3 rounded-xl bg-surface-container-low p-3">
+                  <div>
+                    <h3 className="font-body text-label-lg text-on-surface">Staff auto-lock</h3>
+                    <p className="mt-1 font-body text-body-sm text-on-surface-variant">Lock staff sessions after inactivity. Default is 5 minutes; set to 0 to never lock.</p>
+                  </div>
+                  <label htmlFor="staff-auto-lock" className="font-body text-label-md text-on-surface">Minutes (0–60)</label>
+                  <input id="staff-auto-lock" type="number" min={0} max={60} step={1} required value={staffAutoLockMinutes} onChange={(event) => setStaffAutoLockMinutes(event.target.value)} className="h-12 rounded-lg bg-surface-container-lowest px-3 outline-none focus:ring-2 focus:ring-primary" />
+                  <Button type="submit" variant="secondary" disabled={savingAutoLock}>{savingAutoLock ? 'Saving…' : t('common.save')}</Button>
+                </form>
+                <form onSubmit={(event) => { void saveAutoLockTimeout(event, 'owner'); }} className="flex flex-col gap-3 rounded-xl bg-surface-container-low p-3">
+                  <div>
+                    <h3 className="font-body text-label-lg text-on-surface">Owner auto-lock</h3>
+                    <p className="mt-1 font-body text-body-sm text-on-surface-variant">Lock your owner session after inactivity. Set to 0 to never lock. Your personal PIN is used to unlock.</p>
+                  </div>
+                  <label htmlFor="owner-auto-lock" className="font-body text-label-md text-on-surface">Minutes (0–60)</label>
+                  <input id="owner-auto-lock" type="number" min={0} max={60} step={1} required value={ownerAutoLockMinutes} onChange={(event) => setOwnerAutoLockMinutes(event.target.value)} className="h-12 rounded-lg bg-surface-container-lowest px-3 outline-none focus:ring-2 focus:ring-primary" />
+                  <Button type="submit" variant="secondary" disabled={savingAutoLock}>{savingAutoLock ? 'Saving…' : t('common.save')}</Button>
+                </form>
+              </>
+            )}
             <div className="flex flex-col gap-3 rounded-xl bg-surface-container-low p-3">
               <div>
                 <h3 className="font-body text-label-lg text-on-surface">POS payment methods</h3>

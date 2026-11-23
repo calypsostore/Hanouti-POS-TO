@@ -7,12 +7,13 @@ interface KeypadProps {
   onBackspace: () => void;
   disabled?: boolean;
   decimal?: boolean;
+  className?: string;
 }
 
-export function Keypad({ onPress, onClear, onBackspace, disabled = false, decimal = false }: KeypadProps) {
+export function Keypad({ onPress, onClear, onBackspace, disabled = false, decimal = false, className = '' }: KeypadProps) {
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
   return (
-    <div className={`grid gap-2 ${decimal ? 'grid-cols-4' : 'grid-cols-3'}`}>
+    <div className={`grid gap-2 ${decimal ? 'grid-cols-4' : 'grid-cols-3'} ${className}`}>
       {keys.map((key) => (
         <button key={key} type="button" disabled={disabled} onClick={() => onPress(key)} className="flex h-14 items-center justify-center rounded-xl bg-surface-container font-display text-headline-md text-on-surface active:bg-primary-fixed disabled:opacity-40">
           {key}

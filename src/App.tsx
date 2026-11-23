@@ -7,7 +7,7 @@ import { UpdateRequiredModal } from './components/UpdateRequiredModal';
 import { PermissionsPrompt } from './components/PermissionsPrompt';
 import { NotificationsBridge } from './components/NotificationsBridge';
 import { useAuthStore } from './stores/authStore';
-import { PERMISSIONS_CHANGED_EVENT, userService } from './services/userService';
+import { PERMISSIONS_CHANGED_EVENT, STORE_AUTO_LOCK_CHANGED_EVENT, userService } from './services/userService';
 import type { UserRole } from './types/domain';
 import { Button } from './components/Button';
 import { MaterialIcon } from './components/MaterialIcon';
@@ -156,7 +156,7 @@ function LockRoute() {
   const location = useLocation();
   if (!user) return <Navigate to="/" replace />;
   if (user.mustChangePassword || user.mustSetPin) return <Navigate to="/set-password" replace />;
-  if (user.role !== 'staff') return <Navigate to={homeForRole(user.role)} replace />;
+  if (user.role !== 'staff' && user.role !== 'owner') return <Navigate to={homeForRole(user.role)} replace />;
   if (!locked) return <Navigate to={homeForRole(user.role)} replace />;
   const stateFrom = typeof location.state === 'object' && location.state !== null && 'from' in location.state
     ? location.state.from
@@ -262,15 +262,16 @@ export default function App() {
   }, [ready, user?.id, user?.role, user?.storeId]);
 
   useEffect(() => {
-    if (!ready || locked || user?.role !== 'staff' || user.mustChangePassword || user.mustSetPin || !user.storeId) return;
+    if (!ready || locked || (user?.role !== 'staff' && user?.role !== 'owner') || user.mustChangePassword || user.mustSetPin || !user.storeId) return;
     let active = true;
     let timeoutId = 0;
-    let timeoutMs = 5 * 60_000;
+    let timeoutMs = (user.role === 'staff' ? 5 : 0) * 60_000;
     let lastActivityAt = Date.now();
     const storeId = user.storeId;
 
     const scheduleLock = () => {
       window.clearTimeout(timeoutId);
+      if (timeoutMs <= 0) return;
       const remaining = Math.max(0, timeoutMs - (Date.now() - lastActivityAt));
       timeoutId = window.setTimeout(() => {
         if (!active) return;
@@ -288,6 +289,7 @@ export default function App() {
       scheduleLock();
     };
     const checkForIdleLock = () => {
+      if (timeoutMs <= 0) return;
       if (Date.now() - lastActivityAt >= timeoutMs) {
         void useAuthStore.getState().lock().catch((error: unknown) => {
           console.error('Unable to lock the inactive staff session.', error);
@@ -297,6 +299,18 @@ export default function App() {
     const checkVisibility = () => {
       if (document.visibilityState === 'visible') checkForIdleLock();
     };
+    const loadAutoLockTimeout = () => {
+      void userService.getStore(storeId).then((store) => {
+        if (!active) return;
+        const minutes = user.role === 'staff'
+          ? store?.staffAutoLockMinutes ?? 5
+          : store?.ownerAutoLockMinutes ?? 0;
+        timeoutMs = minutes * 60_000;
+        scheduleLock();
+      }).catch((error: unknown) => {
+        console.error(`Unable to load the ${user.role} auto-lock timeout; using the default.`, error);
+      });
+    };
 
     scheduleLock();
     document.addEventListener('pointerdown', noteActivity);
@@ -305,13 +319,8 @@ export default function App() {
     document.addEventListener('touchstart', noteActivity);
     document.addEventListener('visibilitychange', checkVisibility);
     window.addEventListener('focus', checkForIdleLock);
-    void userService.getStore(storeId).then((store) => {
-      if (!active) return;
-      timeoutMs = Math.max(1, store?.staffAutoLockMinutes ?? 5) * 60_000;
-      scheduleLock();
-    }).catch((error: unknown) => {
-      console.error('Unable to load the staff auto-lock timeout; using 5 minutes.', error);
-    });
+    window.addEventListener(STORE_AUTO_LOCK_CHANGED_EVENT, loadAutoLockTimeout);
+    loadAutoLockTimeout();
 
     return () => {
       active = false;
@@ -322,6 +331,7 @@ export default function App() {
       document.removeEventListener('touchstart', noteActivity);
       document.removeEventListener('visibilitychange', checkVisibility);
       window.removeEventListener('focus', checkForIdleLock);
+      window.removeEventListener(STORE_AUTO_LOCK_CHANGED_EVENT, loadAutoLockTimeout);
     };
   }, [ready, locked, user?.id, user?.mustChangePassword, user?.mustSetPin, user?.role, user?.storeId]);
 

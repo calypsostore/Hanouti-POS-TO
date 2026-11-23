@@ -110,6 +110,21 @@ export async function getDashboardSummary(
   return requireSummary(data, 'Dashboard summary');
 }
 
+export async function getShiftKpiAnalytics(
+  storeId: string,
+  range: { from: string; to: string; previousFrom: string; previousTo: string },
+): Promise<Record<string, unknown>> {
+  const { data, error } = await getSupabaseClient().rpc('get_shift_kpi_analytics', {
+    p_store_id: storeId,
+    p_from: range.from,
+    p_to: range.to,
+    p_previous_from: range.previousFrom,
+    p_previous_to: range.previousTo,
+  });
+  if (error) fail(error, 'Could not load shift KPI analytics');
+  return requireSummary(data, 'Shift KPI analytics');
+}
+
 export async function getShiftSummary(shiftId: string): Promise<Record<string, unknown>> {
   const { data, error } = await getSupabaseClient().rpc('get_shift_summary', {
     p_shift_id: shiftId,

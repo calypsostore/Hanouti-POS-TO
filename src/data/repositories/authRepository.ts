@@ -175,7 +175,7 @@ export const authRepository = {
   async lockCurrentSession(): Promise<void> {
     const user = await currentUser();
     if (!user) throw new Error('You must sign in before locking the terminal.');
-    if (user.role !== 'staff' || !user.storeId) throw new Error('Only staff sessions can be locked.');
+    if ((user.role !== 'staff' && user.role !== 'owner') || !user.storeId) throw new Error('Only store sessions can be locked.');
     if (typeof window !== 'undefined') window.sessionStorage.setItem(SESSION_LOCK_KEY, user.id);
     await writeActivity(user, 'lock.locked', `${user.name}'s session was locked.`);
   },
@@ -214,7 +214,7 @@ export const authRepository = {
   async unlockWithPin(pin: string): Promise<UserSummary> {
     if (!/^\d{4}$/.test(pin)) throw new Error('Enter your 4-digit PIN.');
     const user = await currentUser();
-    if (!user || user.role !== 'staff' || !user.storeId) throw new Error('The staff account could not be found.');
+    if (!user || (user.role !== 'staff' && user.role !== 'owner') || !user.storeId) throw new Error('The account could not be found.');
     if (this.pinLockRemainingMs() > 0) throw new Error(`PIN locked. Try again in ${Math.ceil(this.pinLockRemainingMs() / 1000)} seconds.`);
     const { data, error } = await getSupabaseClient().rpc('verify_personal_pin', { p_pin: pin });
     if (error) {
@@ -233,7 +233,7 @@ export const authRepository = {
 
   async unlockWithPassword(password: string): Promise<UserSummary> {
     const user = await currentUser();
-    if (!user || user.role !== 'staff' || !user.storeId) throw new Error('The staff account could not be found.');
+    if (!user || (user.role !== 'staff' && user.role !== 'owner') || !user.storeId) throw new Error('The account could not be found.');
     await verifyCurrentPassword(password);
     clearSessionLock();
     await writeActivity(user, 'lock.unlocked', `${user.name}'s session was unlocked.`);

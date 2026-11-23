@@ -62,6 +62,7 @@ const saveStores = (value: StoreRecord[]) => writeData('stores', value);
 const savePositions = (value: PositionRecord[]) => writeData('positions', value);
 
 export const PERMISSIONS_CHANGED_EVENT = '7anouti-permissions-changed';
+export const STORE_AUTO_LOCK_CHANGED_EVENT = '7anouti-store-auto-lock-changed';
 
 function notifyPermissionsChanged(): void {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(PERMISSIONS_CHANGED_EVENT));
@@ -1435,25 +1436,34 @@ export const userService = {
     return updated;
   },
 
-  async updateStoreAutoLockMinutes(storeId: string, ownerId: string, minutes: number): Promise<StoreRecord> {
-    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 60) {
-      throw new Error('Auto-lock timeout must be between 1 and 60 minutes.');
+  async updateStoreAutoLockMinutes(
+    storeId: string,
+    ownerId: string,
+    audience: 'staff' | 'owner',
+    minutes: number,
+  ): Promise<StoreRecord> {
+    if (!Number.isInteger(minutes) || minutes < 0 || minutes > 60) {
+      throw new Error('Auto-lock timeout must be between 0 and 60 minutes.');
     }
+    const settingName = audience === 'staff' ? 'staffAutoLockMinutes' : 'ownerAutoLockMinutes';
+    const columnName = audience === 'staff' ? 'staff_auto_lock_minutes' : 'owner_auto_lock_minutes';
+    const summary = `Updated ${audience} auto-lock timeout.`;
     if (isSupabaseDriver()) {
       const store = await getRemoteStore(storeId);
-      if (!store || store.ownerId !== ownerId) throw new Error('Only this store owner can change the staff auto-lock timeout.');
-      const { error } = await getSupabaseClient().from('stores').update({ staff_auto_lock_minutes: minutes }).eq('store_id', storeId);
+      if (!store || store.ownerId !== ownerId) throw new Error(`Only this store owner can change the ${audience} auto-lock timeout.`);
+      const { error } = await getSupabaseClient().from('stores').update({ [columnName]: minutes }).eq('store_id', storeId);
       if (error) throw new Error(`Could not update auto-lock timeout: ${error.message}`, { cause: error });
       invalidateQueryCache(['stores']);
-      const updated = { ...store, staffAutoLockMinutes: minutes };
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event(STORE_AUTO_LOCK_CHANGED_EVENT));
+      const updated = { ...store, [settingName]: minutes };
       await activityService.log({
         storeId,
         actorId: ownerId,
         action: 'store.settings_changed',
-        summary: 'Updated staff auto-lock timeout.',
+        summary,
         entityType: 'store',
         entityId: storeId,
-        meta: { before: { staffAutoLockMinutes: store.staffAutoLockMinutes }, after: { staffAutoLockMinutes: minutes } },
+        meta: { before: { [settingName]: store[settingName] }, after: { [settingName]: minutes } },
       });
       return updated;
     }
@@ -1461,19 +1471,20 @@ export const userService = {
     const store = stores.find((candidate) => candidate.id === storeId);
     const owner = getUsers().find((candidate) => candidate.id === ownerId);
     if (!store || !owner || owner.role !== 'owner' || store.ownerId !== owner.id || owner.storeId !== store.id) {
-      throw new Error('Only this store owner can change the staff auto-lock timeout.');
+      throw new Error(`Only this store owner can change the ${audience} auto-lock timeout.`);
     }
-    const updated = { ...store, staffAutoLockMinutes: minutes };
+    const updated = { ...store, [settingName]: minutes };
     saveStores(stores.map((candidate) => candidate.id === storeId ? updated : candidate));
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event(STORE_AUTO_LOCK_CHANGED_EVENT));
     await logUserMutation({
       storeId,
       actorId: ownerId,
       action: 'store.settings_changed',
-      summary: 'Updated staff auto-lock timeout.',
+      summary,
       entityType: 'store',
       entityId: store.id,
-      before: { staffAutoLockMinutes: store.staffAutoLockMinutes },
-      after: { staffAutoLockMinutes: updated.staffAutoLockMinutes },
+      before: { [settingName]: store[settingName] },
+      after: { [settingName]: updated[settingName] },
     });
     return updated;
   },

@@ -31,6 +31,11 @@ function todayKey(): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
+function initialExpensesMonth(): string {
+  const month = new URLSearchParams(window.location.search).get('month');
+  return month && /^\d{4}-\d{2}$/.test(month) ? month : todayKey().slice(0, 7);
+}
+
 function amountToMillimes(value: string): number {
   const millimes = parseNonNegativeMillimes(value);
   if (millimes === undefined || millimes <= 0) throw new Error('Enter a positive TND amount with up to three decimal places.');
@@ -49,7 +54,7 @@ export function OwnerExpensesScreen() {
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
   const [storeName, setStoreName] = useState('');
   const [category, setCategory] = useState<ExpenseCategory | ''>('');
-  const [month, setMonth] = useState(todayKey().slice(0, 7));
+  const [month, setMonth] = useState(initialExpensesMonth);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [newCategory, setNewCategory] = useState<ExpenseCategory>('other');
   const [supplierId, setSupplierId] = useState('');

@@ -46,6 +46,9 @@ describe('credential lifecycle', () => {
     expect(pinUpdated.mustSetPin).toBe(false);
 
     await authService.changePersonalPin(owner.id, '1234', '5678');
+    await authService.lockCurrentSession();
+    expect(await authService.isSessionLocked(owner.id)).toBe(true);
+    expect((await authService.unlockCurrentSessionWithPin('5678')).id).toBe(owner.id);
     await userService.updateOwnerProfile(owner.id, { name: 'Updated Owner', phone: '55512345' });
     const updatedOwner = await userService.getUser(owner.id);
     expect(updatedOwner?.name).toBe('Updated Owner');
@@ -56,6 +59,23 @@ describe('credential lifecycle', () => {
       id: store.id,
       name: 'Updated Store',
     });
+  });
+
+  it('lets the owner configure separate staff and owner auto-lock timeouts, including never', async () => {
+    const { owner, store } = await userService.createOwnerAccount({
+      name: 'Timeout Owner',
+      email: 'timeout-owner@example.com',
+      storeName: 'Timeout Store',
+    });
+
+    await expect(userService.updateStoreAutoLockMinutes(store.id, owner.id, 'staff', 0)).resolves.toMatchObject({
+      staffAutoLockMinutes: 0,
+    });
+    await expect(userService.updateStoreAutoLockMinutes(store.id, owner.id, 'owner', 0)).resolves.toMatchObject({
+      ownerAutoLockMinutes: 0,
+      staffAutoLockMinutes: 0,
+    });
+    await expect(userService.updateStoreAutoLockMinutes(store.id, owner.id, 'owner', 61)).rejects.toThrow('between 0 and 60');
   });
 
   it('migrates the local demo store and its staff usernames', async () => {

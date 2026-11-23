@@ -17,7 +17,7 @@ import { useFocusRefreshKey } from '../lib/useFocusRefreshKey';
 type DashboardSummary = Awaited<ReturnType<typeof reportService.getDashboard>>;
 type InsightsData = Awaited<ReturnType<typeof reportService.getInsights>>;
 type Period = 'day' | 'week' | 'month' | 'year';
-type InsightRange = 'today' | 'yesterday' | 'week' | 'month' | 'custom';
+type InsightRange = 'today' | 'yesterday' | 'last7' | 'last30' | 'month' | 'custom';
 const ReportSalesByDayChart = lazy(() => import('../components/PerformanceCharts').then((module) => ({ default: module.ReportSalesByDayChart })));
 const ReportSalesByHourChart = lazy(() => import('../components/PerformanceCharts').then((module) => ({ default: module.ReportSalesByHourChart })));
 const periodLabels: Record<Period, TranslationKey> = {
@@ -51,42 +51,105 @@ function dateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-function getInsightRange(range: InsightRange, customFrom: string, customTo: string): { from: number; to: number } | null {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  if (range === 'yesterday') start.setDate(start.getDate() - 1);
-  if (range === 'week') start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
-  if (range === 'month') start.setDate(1);
-  if (range === 'custom') {
-    if (!customFrom || !customTo || customFrom > customTo) return null;
-    const [fromYear, fromMonth, fromDay] = customFrom.split('-').map(Number);
-    const [toYear, toMonth, toDay] = customTo.split('-').map(Number);
-    start.setFullYear(fromYear, fromMonth - 1, fromDay);
-    end.setFullYear(toYear, toMonth - 1, toDay);
-    start.setHours(0, 0, 0, 0);
+function validDateKey(value: string | null): value is string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function shiftDateKey(value: string, days: number): string {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function dateKeyInTimezone(date: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function startOfDateKeyInTimezone(dateKeyValue: string, timeZone: string): number {
+  const [year, month, day] = dateKeyValue.split('-').map(Number);
+  const targetMidnight = Date.UTC(year, month - 1, day);
+  let timestamp = targetMidnight;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(new Date(timestamp));
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    const represented = Date.UTC(
+      Number(values.year),
+      Number(values.month) - 1,
+      Number(values.day),
+      Number(values.hour),
+      Number(values.minute),
+      Number(values.second),
+    );
+    const correction = targetMidnight - represented;
+    timestamp += correction;
+    if (correction === 0) break;
   }
-  end.setDate(end.getDate() + 1);
-  return { from: start.getTime(), to: end.getTime() };
+  return timestamp;
+}
+
+function getInsightRange(
+  range: InsightRange,
+  customFrom: string,
+  customTo: string,
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone,
+): { from: number; to: number } | null {
+  const today = dateKeyInTimezone(new Date(), timeZone);
+  let from = today;
+  let to = today;
+  if (range === 'yesterday') from = to = shiftDateKey(today, -1);
+  if (range === 'last7') from = shiftDateKey(today, -6);
+  if (range === 'last30') from = shiftDateKey(today, -29);
+  if (range === 'month') from = `${today.slice(0, 7)}-01`;
+  if (range === 'custom') {
+    if (!validDateKey(customFrom) || !validDateKey(customTo) || customFrom > customTo) return null;
+    from = customFrom;
+    to = customTo;
+  }
+  return {
+    from: startOfDateKeyInTimezone(from, timeZone),
+    to: startOfDateKeyInTimezone(shiftDateKey(to, 1), timeZone),
+  };
 }
 
 function OwnerReportsContent() {
   const user = useAuthStore((state) => state.user);
   const storeId = user?.storeId ?? '';
   const refreshKey = useFocusRefreshKey();
+  const routeParams = new URLSearchParams(window.location.search);
+  const routeFrom = routeParams.get('from');
+  const routeTo = routeParams.get('to');
+  const hasRouteRange = validDateKey(routeFrom) && validDateKey(routeTo) && routeFrom <= routeTo;
   const [store, setStore] = useState<StoreRecord>();
   const [reports, setReports] = useState<ReportRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [liveSummary, setLiveSummary] = useState<DashboardSummary>(emptySummary);
   const [selectedReport, setSelectedReport] = useState<ReportRecord | null>(null);
   const [period, setPeriod] = useState<Period>('day');
-  const [insightRangeType, setInsightRangeType] = useState<InsightRange>('today');
-  const [customFrom, setCustomFrom] = useState(() => dateKey(new Date()));
-  const [customTo, setCustomTo] = useState(() => dateKey(new Date()));
+  const [insightRangeType, setInsightRangeType] = useState<InsightRange>(hasRouteRange ? 'custom' : 'today');
+  const [customFrom, setCustomFrom] = useState(() => hasRouteRange ? routeFrom ?? dateKey(new Date()) : dateKey(new Date()));
+  const [customTo, setCustomTo] = useState(() => hasRouteRange ? routeTo ?? dateKey(new Date()) : dateKey(new Date()));
   const [insights, setInsights] = useState<InsightsData | null>(null);
   const [insightsError, setInsightsError] = useState('');
   const [error, setError] = useState('');
-  const insightRange = getInsightRange(insightRangeType, customFrom, customTo);
+  const insightRange = getInsightRange(insightRangeType, customFrom, customTo, store?.timezone);
   const insightFrom = insightRange?.from;
   const insightTo = insightRange?.to;
 
@@ -156,7 +219,8 @@ function OwnerReportsContent() {
           {([
             ['today', 'Today'],
             ['yesterday', 'Yesterday'],
-            ['week', 'Week'],
+            ['last7', 'Last 7 days'],
+            ['last30', 'Last 30 days'],
             ['month', 'Month'],
             ['custom', 'Custom'],
           ] as [InsightRange, string][]).map(([value, label]) => (

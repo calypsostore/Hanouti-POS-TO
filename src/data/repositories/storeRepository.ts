@@ -18,6 +18,7 @@ interface StoreRow {
   allow_card_payments: boolean;
   allow_other_payments: boolean;
   staff_auto_lock_minutes: number;
+  owner_auto_lock_minutes: number;
   cash_out_alert_threshold_millimes: number;
   daily_sales_target_millimes: number;
   pin_must_change: boolean;
@@ -52,6 +53,7 @@ export function mapStore(row: StoreRow, settings?: StoreSettings): StoreRecord {
     },
     archivedAt: row.archived_at ?? undefined,
     staffAutoLockMinutes: row.staff_auto_lock_minutes,
+    ownerAutoLockMinutes: row.owner_auto_lock_minutes,
     cashOutAlertThresholdMillimes: Number(row.cash_out_alert_threshold_millimes),
     dailySalesTargetMillimes: Number(row.daily_sales_target_millimes),
     pinMustChange: row.pin_must_change,
@@ -66,7 +68,7 @@ export async function getStore(storeId: string): Promise<StoreRecord | undefined
   const [storeResult, settingsResult] = await Promise.all([
     client
       .from('stores')
-      .select('id, store_id, owner_id, code, name, timezone, address, phone, tax_id, is_active, archived_at, day_closed_on, allow_customer_credit_balance, allow_card_payments, allow_other_payments, staff_auto_lock_minutes, cash_out_alert_threshold_millimes, daily_sales_target_millimes, pin_must_change, subscription_plan, subscription_paid_until, subscription_notes, created_at')
+      .select('id, store_id, owner_id, code, name, timezone, address, phone, tax_id, is_active, archived_at, day_closed_on, allow_customer_credit_balance, allow_card_payments, allow_other_payments, staff_auto_lock_minutes, owner_auto_lock_minutes, cash_out_alert_threshold_millimes, daily_sales_target_millimes, pin_must_change, subscription_plan, subscription_paid_until, subscription_notes, created_at')
       .eq('store_id', storeId)
       .maybeSingle(),
     client
@@ -90,7 +92,7 @@ export async function listStores(): Promise<StoreRecord[]> {
   const client = getSupabaseClient();
   const { data: rows, error } = await client
     .from('stores')
-    .select('id, store_id, owner_id, code, name, timezone, address, phone, tax_id, is_active, archived_at, day_closed_on, allow_customer_credit_balance, allow_card_payments, allow_other_payments, staff_auto_lock_minutes, cash_out_alert_threshold_millimes, daily_sales_target_millimes, pin_must_change, subscription_plan, subscription_paid_until, subscription_notes, created_at')
+    .select('id, store_id, owner_id, code, name, timezone, address, phone, tax_id, is_active, archived_at, day_closed_on, allow_customer_credit_balance, allow_card_payments, allow_other_payments, staff_auto_lock_minutes, owner_auto_lock_minutes, cash_out_alert_threshold_millimes, daily_sales_target_millimes, pin_must_change, subscription_plan, subscription_paid_until, subscription_notes, created_at')
     .order('created_at', { ascending: false });
   if (error) throw new Error(`Could not load stores: ${error.message}`, { cause: error });
   if (!rows?.length) return [];

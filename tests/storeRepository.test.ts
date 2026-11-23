@@ -28,6 +28,7 @@ const storeRow = {
   allow_card_payments: false,
   allow_other_payments: false,
   staff_auto_lock_minutes: 5,
+  owner_auto_lock_minutes: 0,
   cash_out_alert_threshold_millimes: 50_000,
   daily_sales_target_millimes: 0,
   pin_must_change: false,
@@ -60,6 +61,8 @@ describe('store repository', () => {
 
     await expect(getStore('store-1')).resolves.toMatchObject({
       id: 'store-1',
+      staffAutoLockMinutes: 5,
+      ownerAutoLockMinutes: 0,
       settings: {
         quickPickMode: 'manual',
         quickPickItemIds: ['item-1'],

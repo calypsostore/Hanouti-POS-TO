@@ -162,7 +162,7 @@ export const authService = {
     const session = readData<AuthSession | null>(SESSION_KEY, null);
     if (!session) throw new Error('You must sign in before locking the terminal.');
     const user = getUsers().find((candidate) => candidate.id === session.userId);
-    if (!user || user.role !== 'staff' || !user.storeId) throw new Error('Only staff sessions can be locked.');
+    if (!user || (user.role !== 'staff' && user.role !== 'owner') || !user.storeId) throw new Error('Only store sessions can be locked.');
     if (await this.isSessionLocked(user.id)) return;
     if (typeof window !== 'undefined') window.sessionStorage.setItem(SESSION_LOCK_KEY, user.id);
     writeData(SESSION_KEY, { ...session, locked: true });
@@ -239,7 +239,7 @@ export const authService = {
     const session = readData<AuthSession | null>(SESSION_KEY, null);
     if (!session) throw new Error('The staff session could not be found.');
     const user = getUsers().find((candidate) => candidate.id === session.userId);
-    if (!user || user.role !== 'staff' || !user.storeId) throw new Error('The staff account could not be found.');
+    if (!user || (user.role !== 'staff' && user.role !== 'owner') || !user.storeId) throw new Error('The account could not be found.');
     await verifyPersonalPin(user, pin);
     await this.unlockSession(session, user);
     return withoutPassword(user);
@@ -250,7 +250,7 @@ export const authService = {
     const session = readData<AuthSession | null>(SESSION_KEY, null);
     if (!session) throw new Error('The staff session could not be found.');
     const user = getUsers().find((candidate) => candidate.id === session.userId);
-    if (!user || user.role !== 'staff' || !user.storeId) throw new Error('The staff account could not be found.');
+    if (!user || (user.role !== 'staff' && user.role !== 'owner') || !user.storeId) throw new Error('The account could not be found.');
     if (!(await verifySecret(user.passwordHash ?? user.password, password)).valid) {
       throw new Error('Password is incorrect.');
     }

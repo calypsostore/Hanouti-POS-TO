@@ -9,12 +9,14 @@ interface ResponsiveDialogProps {
   title?: string;
   subtitle?: string;
   icon?: string;
+  iconElement?: ReactNode;
+  closeIcon?: ReactNode;
   children: ReactNode;
   variant?: 'modal' | 'drawer';
   panelClassName?: string;
 }
 
-export function ResponsiveDialog({ open, onClose, title, subtitle, icon = 'tune', children, variant = 'modal', panelClassName = '' }: ResponsiveDialogProps) {
+export function ResponsiveDialog({ open, onClose, title, subtitle, icon = 'tune', iconElement, closeIcon, children, variant = 'modal', panelClassName = '' }: ResponsiveDialogProps) {
   useEffect(() => {
     if (!open) return;
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -29,7 +31,7 @@ export function ResponsiveDialog({ open, onClose, title, subtitle, icon = 'tune'
       <section role="dialog" aria-modal="true" aria-label={title ?? t('common.dialog')} className={`glass-modal-panel responsive-dialog__panel flex max-h-[calc(100dvh-8px)] w-full flex-col overflow-hidden rounded-t-xl bg-surface-container-lowest p-4 shadow-overlay safe-bottom lg:max-h-[calc(100dvh-48px)] lg:rounded-xl ${panelClassName}`} onMouseDown={(event) => event.stopPropagation()}>
         <div className="glass-modal-header shrink-0">
           <div className="glass-modal-heading">
-            <span className="glass-modal-icon"><MaterialIcon name={icon} /></span>
+            <span className="glass-modal-icon">{iconElement ?? <MaterialIcon name={icon} />}</span>
             {title && (
               <div className="glass-modal-heading-copy">
                 <h2 className="glass-modal-title font-display text-headline-md">{title}</h2>
@@ -38,7 +40,7 @@ export function ResponsiveDialog({ open, onClose, title, subtitle, icon = 'tune'
             )}
           </div>
           <button type="button" aria-label={t('common.close')} onClick={onClose} className="glass-modal-close">
-            <MaterialIcon name="close" />
+            {closeIcon ?? <MaterialIcon name="close" />}
           </button>
         </div>
         <div className="glass-modal-content min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">

@@ -14,6 +14,14 @@ import type {
   UnresolvedTabReversalRecord,
 } from '../types/domain';
 import { resolveStoreSettings } from '../types/domain';
+import {
+  getShiftOverviewAnalyticsFromRecords,
+  getTabReversalStatus,
+  type ShiftOverviewAnalytics,
+  type ShiftOverviewDateRange,
+  type ShiftOverviewPeriodValues,
+  type ShiftOverviewPoint,
+} from '../lib/shiftOverview';
 import { catalogService } from './catalogService';
 import { compService } from './compService';
 import { orderService } from './orderService';
@@ -29,6 +37,7 @@ import { isSupabaseDriver } from '../data/driver';
 import {
   getBusinessDayStatus as getRemoteBusinessDayStatus,
   getDashboardSummary as getRemoteDashboardSummary,
+  getShiftKpiAnalytics as getRemoteShiftKpiAnalytics,
   getShiftSummary as getRemoteShiftSummary,
   listReports as listRemoteReports,
   saveReport as saveRemoteReport,
@@ -300,18 +309,11 @@ async function summarizeLocal(
   const nonCashSettlements = settlements.filter((tab) => tab.paymentMethod !== undefined && tab.paymentMethod !== 'cash');
   const cashReversals = reversals.filter((tab) => (tab.paymentMethod ?? 'cash') === 'cash');
   const nonCashReversals = reversals.filter((tab) => tab.paymentMethod !== undefined && tab.paymentMethod !== 'cash');
-  const getReversalStatus = (reversal: TabRecord): 'included' | 'proven_post_close' | 'ambiguous' => {
-    if (reversal.reversalAttribution === 'same_shift') return 'included';
-    if (reversal.reversalAttribution === 'post_close') return 'proven_post_close';
-    const reversalShift = shifts.find((shift) => shift.id === reversal.shiftId);
-    if (reversalShift?.includedTabReversalIds?.includes(reversal.id)) return 'included';
-    return 'ambiguous';
-  };
   const tabsSettledMillimes = cashSettlements.reduce((sum, tab) => sum + tab.amountMillimes, 0) -
-    cashReversals.filter((reversal) => getReversalStatus(reversal) !== 'ambiguous')
+    cashReversals.filter((reversal) => getTabReversalStatus(reversal, shifts) !== 'ambiguous')
       .reduce((sum, tab) => sum + tab.amountMillimes, 0);
   const nonCashTabPaymentsMillimes = nonCashSettlements.reduce((sum, tab) => sum + tab.amountMillimes, 0) -
-    nonCashReversals.filter((reversal) => getReversalStatus(reversal) !== 'ambiguous')
+    nonCashReversals.filter((reversal) => getTabReversalStatus(reversal, shifts) !== 'ambiguous')
       .reduce((sum, tab) => sum + tab.amountMillimes, 0);
   const cardTabPaymentsMillimes = allCustomerTransactions
     .filter((tab) => tab.storeId === storeId && tab.paymentMethod === 'card' &&
@@ -320,7 +322,7 @@ async function summarizeLocal(
     .reduce((sum, tab) => sum + (
       tab.kind === 'settled'
         ? tab.amountMillimes
-        : getReversalStatus(tab) === 'ambiguous'
+        : getTabReversalStatus(tab, shifts) === 'ambiguous'
           ? 0
           : -tab.amountMillimes
     ), 0);
@@ -331,7 +333,7 @@ async function summarizeLocal(
     .reduce((sum, tab) => sum + (
       tab.kind === 'settled'
         ? tab.amountMillimes
-        : getReversalStatus(tab) === 'ambiguous'
+        : getTabReversalStatus(tab, shifts) === 'ambiguous'
           ? 0
           : -tab.amountMillimes
     ), 0);
@@ -395,13 +397,13 @@ async function summarizeLocal(
     .filter((adjustment) => !includedShiftIds.has(adjustment.shiftId))
     .reduce((sum, adjustment) => sum + adjustment.amountMillimes, 0);
   const cashRefundsMillimes = cashReversals
-    .filter((reversal) => getReversalStatus(reversal) === 'proven_post_close')
+    .filter((reversal) => getTabReversalStatus(reversal, shifts) === 'proven_post_close')
     .reduce((sum, reversal) => sum + reversal.amountMillimes, 0);
   const ambiguousTabReversalIds = reversals
-    .filter((reversal) => getReversalStatus(reversal) === 'ambiguous')
+    .filter((reversal) => getTabReversalStatus(reversal, shifts) === 'ambiguous')
     .map((reversal) => reversal.id);
   const unresolvedTabReversals: UnresolvedTabReversalRecord[] = reversals
-    .filter((reversal) => getReversalStatus(reversal) === 'ambiguous')
+    .filter((reversal) => getTabReversalStatus(reversal, shifts) === 'ambiguous')
     .map((reversal) => {
       const original = allCustomerTransactions.find((tab) => tab.id === reversal.reversesTabId);
       return {
@@ -673,6 +675,48 @@ async function summarize(
   return summarizeLocal(storeId, from, to, excludedExpenseIds, useExpenseCreationPeriod, excludedShiftIds);
 }
 
+function parseOverviewValues(value: unknown, context: string): ShiftOverviewPeriodValues {
+  if (!isRecord(value)) throw new Error(`Shift KPI analytics is missing ${context} values.`);
+  const keys: (keyof ShiftOverviewPeriodValues)[] = [
+    'sales', 'transactions', 'cash', 'cards', 'other', 'expenses', 'netSales',
+  ];
+  const values: ShiftOverviewPeriodValues = {
+    sales: 0,
+    transactions: 0,
+    cash: 0,
+    cards: 0,
+    other: 0,
+    expenses: 0,
+    netSales: 0,
+  };
+  for (const key of keys) {
+    const field = value[key];
+    if (typeof field !== 'number' || !Number.isFinite(field)) {
+      throw new Error(`Shift KPI analytics returned an invalid ${context} ${key} value.`);
+    }
+    values[key] = field;
+  }
+  return values;
+}
+
+function parseRemoteShiftKpiAnalytics(value: Record<string, unknown>): ShiftOverviewAnalytics {
+  if (typeof value.comparisonAvailable !== 'boolean' || !Array.isArray(value.series)) {
+    throw new Error('Shift KPI analytics returned an incomplete response.');
+  }
+  const series = value.series.map((point, index): ShiftOverviewPoint => {
+    if (!isRecord(point) || typeof point.label !== 'string') {
+      throw new Error(`Shift KPI analytics returned an invalid trend point at index ${index}.`);
+    }
+    return { label: point.label, ...parseOverviewValues(point, `trend point ${index}`) };
+  });
+  return {
+    current: parseOverviewValues(value.current, 'current period'),
+    previous: parseOverviewValues(value.previous, 'previous period'),
+    comparisonAvailable: value.comparisonAvailable,
+    series,
+  };
+}
+
 async function createReport(
   storeId: string,
   type: 'X' | 'Z',
@@ -928,6 +972,37 @@ export const reportService = {
             (closedAt !== undefined && closedAt >= periodFrom && closedAt <= periodTo));
       }),
     };
+  },
+
+  async getShiftKpiAnalytics(storeId: string, range: ShiftOverviewDateRange): Promise<ShiftOverviewAnalytics> {
+    const dates = [range.from, range.to, range.previousFrom, range.previousTo];
+    if (!storeId || dates.some((date) => !/^\d{4}-\d{2}-\d{2}$/.test(date)) ||
+      range.from > range.to || range.previousFrom > range.previousTo) {
+      throw new Error('Choose a valid shift KPI date range.');
+    }
+
+    if (isSupabaseDriver()) {
+      return parseRemoteShiftKpiAnalytics(await getRemoteShiftKpiAnalytics(storeId, range));
+    }
+
+    const [store, orders, expenses, tabs, shifts] = await Promise.all([
+      userService.getStore(storeId),
+      orderService.listAll(storeId),
+      expenseService.list(storeId),
+      Promise.resolve(readData<TabRecord[]>('tabs', []).filter((tab) => tab.storeId === storeId)),
+      shiftService.listShifts(storeId),
+    ]);
+    if (!store) throw new Error('The store could not be found.');
+    const timeZone = store.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return getShiftOverviewAnalyticsFromRecords(
+      range,
+      orders,
+      expenses,
+      tabs,
+      shifts,
+      timeZone,
+      store.createdAt,
+    );
   },
 
   async getInsights(storeId: string, from: number, to: number) {

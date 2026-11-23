@@ -179,6 +179,7 @@ export interface StoreRecord {
   subscription?: StoreSubscription;
   archivedAt?: string;
   staffAutoLockMinutes?: number;
+  ownerAutoLockMinutes?: number;
   cashOutAlertThresholdMillimes?: number;
   dailySalesTargetMillimes?: number;
   adminPin?: string;

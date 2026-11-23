@@ -13,6 +13,15 @@ interface BottomSheetProps {
 
 export function BottomSheet({ open, onClose, title, subtitle, icon, children, panelClassName }: BottomSheetProps) {
   return (
-    <ResponsiveDialog open={open} onClose={onClose} title={title} subtitle={subtitle} icon={icon} panelClassName={panelClassName}>{children}</ResponsiveDialog>
+    <ResponsiveDialog
+      open={open}
+      onClose={onClose}
+      title={title}
+      subtitle={subtitle}
+      icon={icon}
+      panelClassName={`bottom-sheet-panel ${panelClassName ?? ''}`}
+    >
+      {children}
+    </ResponsiveDialog>
   );
 }

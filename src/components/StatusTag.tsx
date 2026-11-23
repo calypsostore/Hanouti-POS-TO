@@ -3,6 +3,7 @@ type Status = 'done' | 'pending' | 'voided' | 'open' | 'closed' | 'started' | 's
 interface StatusTagProps {
   status: Status;
   children: string;
+  className?: string;
 }
 
 const statusStyles: Record<Status, string> = {
@@ -15,9 +16,10 @@ const statusStyles: Record<Status, string> = {
   suspended: 'bg-error-container text-on-error-container',
 };
 
-export function StatusTag({ status, children }: StatusTagProps) {
+export function StatusTag({ status, children, className = '' }: StatusTagProps) {
+  const variantClass = className ? `${className} ${className}--${status}` : '';
   return (
-    <span className={`inline-flex min-h-7 items-center gap-1.5 rounded-full px-2.5 py-1 font-body text-label-sm ${statusStyles[status]}`}>
+    <span className={`inline-flex min-h-7 items-center gap-1.5 rounded-full px-2.5 py-1 font-body text-label-sm ${statusStyles[status]} ${variantClass}`}>
       <span className="h-1.5 w-1.5 rounded-full bg-current" />
       {children}
     </span>

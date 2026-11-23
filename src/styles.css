@@ -975,6 +975,53 @@ button {
   position: relative;
 }
 
+.shift-report-card .shift-report-status {
+  min-height: 30px;
+  flex: 0 0 auto;
+  border: 1px solid rgb(57 128 194 / 24%);
+  background: linear-gradient(135deg, rgb(255 255 255 / 88%), rgb(215 237 255 / 82%));
+  padding: 5px 11px;
+  color: #245c91;
+  font-size: 10px;
+  letter-spacing: .035em;
+  box-shadow: 0 4px 12px rgb(46 108 163 / 9%), inset 0 1px 0 rgb(255 255 255 / 90%);
+}
+
+.shift-report-card .shift-report-status--closed {
+  border-color: rgb(103 131 166 / 22%);
+  background: linear-gradient(135deg, rgb(255 255 255 / 82%), rgb(226 235 246 / 78%));
+  color: #536d8b;
+  box-shadow: 0 4px 12px rgb(46 77 115 / 7%), inset 0 1px 0 rgb(255 255 255 / 88%);
+}
+
+.shift-report-card .shift-report-status > span {
+  width: 7px;
+  height: 7px;
+  box-shadow: 0 0 0 3px rgb(49 142 210 / 12%);
+}
+
+.shift-report-card .shift-report-status--started > span {
+  animation: shift-report-live-dot 1800ms ease-in-out infinite;
+}
+
+@keyframes shift-report-live-dot {
+  50% {
+    box-shadow: 0 0 0 5px rgb(49 142 210 / 8%);
+  }
+}
+
+:root.dark .shift-report-card .shift-report-status--started {
+  border-color: rgb(100 185 255 / 24%);
+  background: linear-gradient(135deg, rgb(36 77 115 / 88%), rgb(30 64 98 / 90%));
+  color: #b7dcff;
+}
+
+:root.dark .shift-report-card .shift-report-status--closed {
+  border-color: rgb(139 163 190 / 20%);
+  background: linear-gradient(135deg, rgb(50 65 84 / 88%), rgb(40 54 72 / 92%));
+  color: #c1ccda;
+}
+
 .shift-z-card {
   background:
     linear-gradient(145deg, rgb(255 255 255 / 62%), rgb(255 255 255 / 16%)),
@@ -1081,6 +1128,23 @@ button {
   box-shadow:
     0 8px 16px rgb(var(--color-primary) / 18%),
     inset 0 1px 0 rgb(255 255 255 / 24%);
+}
+
+.shift-workspace--owner .shift-report-action.bg-primary.text-on-primary {
+  border: 1px solid rgb(255 255 255 / 52%);
+  background: linear-gradient(145deg, #11bdc4, #057891);
+  box-shadow:
+    0 10px 20px rgb(6 128 151 / 20%),
+    inset 0 1px 0 rgb(255 255 255 / 28%);
+}
+
+.shift-workspace--owner .shift-report-action.bg-primary.text-on-primary:hover {
+  background: linear-gradient(145deg, #0daeb7, #046e83);
+}
+
+.page-container .shift-workspace--owner button.shift-report-action.w-full:not(.text-left):not(.h-full):not([aria-pressed]):not([role="switch"]) {
+  width: 100% !important;
+  min-width: 0;
 }
 
 .shift-resolution-panel {
@@ -1197,6 +1261,24 @@ button {
     padding: 10px;
   }
 
+  .shift-workspace--owner .shift-archive-card-heading {
+    flex-wrap: wrap;
+  }
+
+  .shift-workspace--owner .shift-archive-card-heading h2 {
+    max-width: 100%;
+  }
+
+  .shift-workspace--owner .shift-archive-card-heading .shift-sort-control {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .shift-workspace--owner .shift-archive-card-heading .shift-sort-control select {
+    width: min(160px, calc(100% - 64px));
+    min-width: 0;
+  }
+
   .shift-overview-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1218,6 +1300,12 @@ button {
     width: 100%;
     max-width: none;
     margin-left: 0;
+  }
+
+  .shift-archive-layout > .shift-archive-card,
+  .shift-archive-layout > .shift-archive-preview {
+    grid-column: 1;
+    grid-row: auto;
   }
 
   .shift-archive-list {
@@ -1429,7 +1517,7 @@ button {
   min-height: 58px;
   margin-bottom: 12px;
   border: 1px solid rgb(255 255 255 / 76%);
-  border-radius: 999px;
+  border-radius: 18px 18px 0 0;
   background: rgb(255 255 255 / 44%);
   padding: 6px 12px;
   box-shadow: 0 10px 24px rgb(42 104 154 / 6%), inset 0 1px 0 rgb(255 255 255 / 84%);
@@ -1760,6 +1848,8 @@ button {
     grid-template-columns: 1fr auto;
     gap: 8px;
     border-radius: 20px;
+    border-bottom-right-radius: 0;
+    border-bottom-left-radius: 0;
     padding: 8px;
   }
 
@@ -6216,13 +6306,13 @@ button {
 }
 
 .shift-workspace--owner .shift-open-button.bg-primary.text-on-primary {
-  border: 1px solid rgb(255 255 255 / 45%);
-  background: linear-gradient(145deg, #18cbd0, #079daa);
-  box-shadow: 0 9px 20px rgb(9 157 170 / 22%), inset 0 1px 0 rgb(255 255 255 / 40%);
+  border: 1px solid rgb(255 255 255 / 52%);
+  background: linear-gradient(145deg, #11bdc4, #057891);
+  box-shadow: 0 10px 20px rgb(6 128 151 / 20%), inset 0 1px 0 rgb(255 255 255 / 28%);
 }
 
 .shift-workspace--owner .shift-open-button.bg-primary.text-on-primary:hover {
-  background: linear-gradient(145deg, #12bfc5, #078f99);
+  background: linear-gradient(145deg, #0daeb7, #046e83);
 }
 
 .shift-workspace--owner .shift-apple-header {
@@ -7297,6 +7387,10 @@ button {
   font-weight: 700;
 }
 
+.shift-workspace--owner .shift-current-card .shift-current-close-button:hover {
+  background: linear-gradient(145deg, #0daeb7, #046e83);
+}
+
 .shift-workspace--owner .shift-history {
   display: block;
   min-width: 0;
@@ -7543,6 +7637,42 @@ button {
 
 .workspace-layout.shift-screen-layout .shift-workspace--owner nav[aria-label="Shift and report sections"] {
   margin-bottom: 12px;
+}
+
+@media (min-width: 1024px) {
+  .workspace-layout.shift-screen-layout > .workspace-main {
+    position: fixed;
+    z-index: 20;
+    top: 16px;
+    right: 16px;
+    bottom: 16px;
+    left: 256px;
+    width: auto;
+    margin: 0;
+    padding: 0;
+  }
+
+  .sidebar-collapsed.shift-screen-layout > .workspace-main {
+    left: 104px;
+  }
+
+  .shift-screen-layout .workspace-main > .page-container {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .shift-screen-layout .shift-workspace--owner .shift-topbar {
+    position: sticky;
+    z-index: 30;
+    top: -26px;
+  }
+
+  .shift-screen-layout .shift-workspace--owner {
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
 }
 
 .responsive-dialog,
@@ -7982,10 +8112,18 @@ button {
     border-radius: var(--glass-popup-radius);
   }
 
+  .responsive-dialog .glass-modal-panel.bottom-sheet-panel {
+    border-radius: var(--glass-popup-radius) var(--glass-popup-radius) 0 0;
+  }
+
   .responsive-dialog--drawer .glass-modal-panel {
     width: min(420px, calc(100% - 12px));
     max-width: calc(100% - 12px);
     border-radius: var(--glass-popup-radius);
+  }
+
+  .responsive-dialog .glass-modal-panel.bottom-sheet-panel {
+    max-height: calc(100dvh - 4.5rem - env(safe-area-inset-bottom, 0px));
   }
 
   .responsive-dialog .glass-modal-panel .sheet-action-bar {

@@ -3,79 +3,78 @@ import { Button } from './Button';
 import { MaterialIcon } from './MaterialIcon';
 import { permissionService, type NotificationPermissionStatus } from '../services/permissionService';
 import { useAuthStore } from '../stores/authStore';
+import { useNotificationStore } from '../stores/notificationStore';
 
 export function PermissionsPrompt() {
   const user = useAuthStore((state) => state.user);
+  const userId = user?.id;
   const locked = useAuthStore((state) => state.locked);
+  const latestNotificationId = useNotificationStore((state) => state.items[0]?.id);
+  const canPromptUser = Boolean(user && !locked && !user.mustChangePassword && !user.mustSetPin);
   const [status, setStatus] = useState<NotificationPermissionStatus>('prompt');
   const [visible, setVisible] = useState(false);
   const [showInstructions, setShowInstructions] = useState(false);
   const [requesting, setRequesting] = useState(false);
   const [error, setError] = useState('');
-  const shownThisOpen = useRef(false);
+  const [permissionChecked, setPermissionChecked] = useState(false);
+  const lastPromptedNotificationKey = useRef('');
 
   useEffect(() => permissionService.subscribe(setStatus), []);
 
   useEffect(() => {
-    if (
-      !user
-      || locked
-      || user.mustChangePassword
-      || user.mustSetPin
-      || shownThisOpen.current
-    ) {
-      if (!user || locked || user.mustChangePassword || user.mustSetPin) setVisible(false);
+    if (!canPromptUser) {
+      setPermissionChecked(false);
+      setVisible(false);
       return;
     }
     let active = true;
-    void permissionService.getStatus().then((nextStatus) => {
-      if (!active) return;
-      setStatus(nextStatus);
-      if (nextStatus === 'prompt' || nextStatus === 'denied') {
-        shownThisOpen.current = true;
-        setVisible(true);
-      }
-    }).catch((permissionError: unknown) => {
-      console.error('[permissions] Could not check notification permission.', permissionError);
-    });
+    const checkPermission = () => {
+      void permissionService.getStatus().then((nextStatus) => {
+        if (!active) return;
+        setStatus(nextStatus);
+        setPermissionChecked(true);
+        setVisible(nextStatus === 'prompt' || nextStatus === 'denied');
+      }).catch((permissionError: unknown) => {
+        console.error('[permissions] Could not check notification permission.', permissionError);
+      });
+    };
+    checkPermission();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') checkPermission();
+    };
+    window.addEventListener('focus', checkPermission);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
       active = false;
+      window.removeEventListener('focus', checkPermission);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [locked, user, user?.id, user?.mustChangePassword, user?.mustSetPin]);
+  }, [canPromptUser, user?.id]);
+
+  useEffect(() => {
+    if (!permissionChecked || !latestNotificationId || !canPromptUser || !userId) return;
+    const notificationKey = `${userId}:${latestNotificationId}`;
+    if (lastPromptedNotificationKey.current === notificationKey) return;
+    lastPromptedNotificationKey.current = notificationKey;
+    if (status === 'prompt' || status === 'denied') setVisible(true);
+  }, [canPromptUser, latestNotificationId, permissionChecked, status, userId]);
 
   async function allowNotifications() {
     setRequesting(true);
     setError('');
+    setShowInstructions(false);
     try {
       const nextStatus = await permissionService.request();
       setStatus(nextStatus);
       if (nextStatus === 'granted' || nextStatus === 'unsupported') {
         setVisible(false);
       } else if (nextStatus === 'denied') {
-        setError('Notifications are still blocked. Please enable them in your browser or device settings.');
+        setError('Notifications are still blocked. You can enable them in your browser or device settings.');
+        setShowInstructions(true);
       }
     } catch (permissionError) {
       console.error('[permissions] Could not request notification permission.', permissionError);
       setError(permissionError instanceof Error ? permissionError.message : 'Could not request notification permission.');
-    } finally {
-      setRequesting(false);
-    }
-  }
-
-  async function checkEnabled() {
-    setRequesting(true);
-    setError('');
-    try {
-      const nextStatus = await permissionService.getStatus();
-      setStatus(nextStatus);
-      if (nextStatus === 'granted') {
-        setVisible(false);
-      } else if (nextStatus === 'denied') {
-        setError('Notifications are still blocked. Follow the settings steps below, then try again.');
-      }
-    } catch (permissionError) {
-      console.error('[permissions] Could not check notification permission.', permissionError);
-      setError(permissionError instanceof Error ? permissionError.message : 'Could not check notification permission.');
     } finally {
       setRequesting(false);
     }
@@ -94,7 +93,7 @@ export function PermissionsPrompt() {
 
   const instructions = permissionService.isNative()
     ? 'Android Settings > Apps > 7anouti-POS > Notifications'
-    : 'Open your browser site settings for hanoutipos.vercel.app and enable Notifications.';
+    : 'Open this app’s browser site settings and allow notifications.';
 
   return (
     <>
@@ -131,21 +130,19 @@ export function PermissionsPrompt() {
               </div>
               <div className="min-w-0">
                 <p className="permissions-prompt__eyebrow font-body text-label-sm font-semibold text-primary">
-                  {status === 'denied' ? 'Notifications blocked' : 'Notification reminder'}
+                  Notifications are off
                 </p>
                 <h1 id="permissions-title" className="permissions-prompt__title mt-0.5 font-display text-headline-sm text-on-surface">
-                  {status === 'denied' ? 'Enable app alerts' : 'Turn on notifications'}
+                  Enable app alerts
                 </h1>
               </div>
             </div>
 
             <p id="permissions-description" className="permissions-prompt__description mt-3 font-body text-body-sm text-on-surface-variant">
-              {status === 'denied'
-                ? 'Enable notifications in browser or device settings to receive important app alerts.'
-                : 'Get important alerts for stock, void requests, tabs and end-of-day updates.'}
+              Get important alerts for stock, void requests, tabs and end-of-day updates.
             </p>
 
-            {status === 'denied' ? (
+            {error && status === 'denied' ? (
               <button
                 type="button"
                 className="permissions-prompt__instructions mt-3 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2 text-left"
@@ -170,19 +167,9 @@ export function PermissionsPrompt() {
               >
                 Maybe later
               </button>
-              {status === 'denied' ? (
-                <Button
-                  onClick={() => { void checkEnabled(); }}
-                  disabled={requesting}
-                  className="permissions-prompt__action min-h-11 flex-[1.35]"
-                >
-                  {requesting ? 'Checking…' : 'I’ve enabled it'}
-                </Button>
-              ) : (
-                <Button onClick={() => { void allowNotifications(); }} disabled={requesting} className="permissions-prompt__action min-h-11 flex-[1.35]">
-                  {requesting ? 'Requesting…' : 'Allow'}
-                </Button>
-              )}
+              <Button onClick={() => { void allowNotifications(); }} disabled={requesting} className="permissions-prompt__action min-h-11 flex-[1.35]">
+                {requesting ? 'Requesting…' : 'Enable notifications'}
+              </Button>
             </div>
           </section>
         </div>

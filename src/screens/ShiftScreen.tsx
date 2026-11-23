@@ -977,6 +977,30 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           {error || notice}
         </p>
       )}
+      {ownerMode && (
+        <nav className="shift-section-tabs mb-4 grid grid-cols-3 gap-1 p-1" aria-label="Shift and report sections">
+          <span
+            className={`shift-section-indicator shift-section-indicator--${activeTab}`}
+            aria-hidden="true"
+          />
+          {([
+            ['shifts', 'Shift', 'schedule'],
+            ['reports', 'Z Reports', 'analytics'],
+            ['archive', 'Daily Reports', 'description'],
+          ] as const).map(([tab, label, icon]) => (
+            <Button
+              key={tab}
+              variant="ghost"
+              className={`shift-section-tab-button${activeTab === tab ? ' is-active' : ''}`}
+              aria-pressed={activeTab === tab}
+              onClick={() => setActiveTab(tab)}
+            >
+              <MaterialIcon name={icon} className="text-lg" />
+              {label}
+            </Button>
+          ))}
+        </nav>
+      )}
       {(!ownerMode || activeTab !== 'archive') && (
         <FirstRunHint id={`shift-${user?.id ?? 'guest'}`} title={t('hint.title')} message={t('hint.shift')} />
       )}
@@ -1022,31 +1046,6 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
         ))}
       </section>
 
-      {ownerMode && (
-        <nav className="shift-section-tabs mb-4 grid grid-cols-3 gap-1 p-1" aria-label="Shift and report sections">
-          <span
-            className={`shift-section-indicator shift-section-indicator--${activeTab}`}
-            aria-hidden="true"
-          />
-          {([
-            ['shifts', 'Shift', 'schedule'],
-            ['reports', 'Z Reports', 'analytics'],
-            ['archive', 'Daily Reports', 'description'],
-          ] as const).map(([tab, label, icon]) => (
-            <Button
-              key={tab}
-              variant="ghost"
-              className={`shift-section-tab-button${activeTab === tab ? ' is-active' : ''}`}
-              aria-pressed={activeTab === tab}
-              onClick={() => setActiveTab(tab)}
-            >
-              <MaterialIcon name={icon} className="text-lg" />
-              {label}
-            </Button>
-          ))}
-        </nav>
-      )}
-
       {ownerMode && activeTab === 'reports' && (
         <section className="shift-tab-panel shift-reports-grid grid gap-4 tablet:grid-cols-2">
           <article className="shift-report-card shift-x-card rounded-2xl p-4">
@@ -1060,7 +1059,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
                   <h2 className="font-display text-headline-md text-on-surface">X report</h2>
                 </div>
               </div>
-              <StatusTag status={reportDisabledReason ? 'closed' : 'started'}>{reportDisabledReason ? 'Unavailable' : 'Live'}</StatusTag>
+              <StatusTag className="shift-report-status" status={reportDisabledReason ? 'closed' : 'started'}>{reportDisabledReason ? 'Unavailable' : 'Live'}</StatusTag>
             </div>
             <p className="mt-3 font-body text-body-sm text-on-surface-variant">A frozen cash snapshot for review. The business day remains open.</p>
             <div className="shift-report-meta mt-4 grid grid-cols-2 gap-2">
@@ -1083,7 +1082,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
                   <h2 className="font-display text-headline-md text-on-surface">Z report</h2>
                 </div>
               </div>
-              <StatusTag status={zDisabledReason ? 'closed' : 'started'}>{zDisabledReason ? 'Blocked' : 'Ready'}</StatusTag>
+              <StatusTag className="shift-report-status" status={zDisabledReason ? 'closed' : 'started'}>{zDisabledReason ? 'Blocked' : 'Ready'}</StatusTag>
             </div>
             <p className="mt-3 font-body text-body-sm text-on-surface-variant">Requires your owner PIN. All shifts and voids must be resolved first.</p>
             {(openShifts.length > 0 || pendingVoidOrders.length > 0) && (

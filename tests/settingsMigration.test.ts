@@ -27,9 +27,14 @@ describe('Settings Crystal Glass migration', () => {
   it('uses shared glass section and popup styling hooks', () => {
     expect(settingsScreen).toContain('SettingsGlassSection');
     expect(settingsScreen).toContain('settings-logo-picker-panel');
+    expect(settingsScreen).not.toContain('settings-page-header');
+    expect(settingsScreen).toContain('settings-workspace');
+    expect(settingsScreen).toContain('settings-overview');
     expect(logoPicker).toContain('panelClassName');
     expect(settingsStyles).toContain('.settings-glass-section');
     expect(settingsStyles).toContain('.settings-logo-picker-panel');
     expect(settingsStyles).toContain('.workspace-layout.settings-screen-layout');
+    expect(settingsStyles).not.toContain('.settings-page-header');
+    expect(settingsStyles).not.toContain('.settings-dashboard');
   });
 });

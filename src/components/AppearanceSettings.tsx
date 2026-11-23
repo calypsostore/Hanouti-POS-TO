@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from './Button';
 import { MaterialIcon } from './MaterialIcon';
+import { SettingsGlassSection } from './settings/SettingsGlassSection';
 import {
   getRegisteredThemeIds,
   getTheme,
@@ -82,20 +83,12 @@ export function AppearanceSettings({ userId }: { userId: string }) {
 
   return (
     <div className="flex flex-col gap-5">
-      <section aria-labelledby="appearance-heading" className="rounded-2xl bg-surface-container-lowest p-4 shadow-card sm:p-6">
-        <div className="mb-5">
-          <div className="flex items-start gap-3">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-fixed text-primary">
-              <MaterialIcon name="palette" className="text-2xl" />
-            </span>
-            <div className="min-w-0">
-              <h2 id="appearance-heading" className="font-display text-headline-md text-on-surface">Appearance &amp; themes</h2>
-              <p className="mt-1 font-body text-body-sm text-on-surface-variant">
-                Make the workspace yours. Changes preview instantly and are saved only when you choose Save.
-              </p>
-            </div>
-          </div>
-        </div>
+      <SettingsGlassSection
+        heading="Appearance & themes"
+        description="Make the workspace yours. Changes preview instantly and are saved only when you choose Save."
+        icon="palette"
+        headingId="appearance-heading"
+      >
 
         <fieldset>
           <legend className="mb-3 font-body text-label-md text-on-surface">Choose a theme</legend>
@@ -227,16 +220,15 @@ export function AppearanceSettings({ userId }: { userId: string }) {
             </span>
           </label>
         </fieldset>
-      </section>
+      </SettingsGlassSection>
 
-      <section aria-labelledby="appearance-preview-heading" className="rounded-2xl bg-surface-container-lowest p-4 shadow-card sm:p-6">
-        <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
-          <div>
-            <h2 id="appearance-preview-heading" className="font-display text-headline-md text-on-surface">Live preview</h2>
-            <p className="mt-1 font-body text-body-sm text-on-surface-variant">Your selection updates these shared interface elements immediately.</p>
-          </div>
-          <span className="rounded-full bg-success-container px-3 py-1 font-body text-label-sm text-on-success-container">Preview only</span>
-        </div>
+      <SettingsGlassSection
+        heading="Live preview"
+        description="Your selection updates these shared interface elements immediately."
+        icon="visibility"
+        headingId="appearance-preview-heading"
+        actions={<span className="settings-preview-badge">Preview only</span>}
+      >
 
         <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface">
           <nav aria-label="Preview navigation" className="flex items-center justify-between gap-3 border-b border-outline-variant bg-surface-container-lowest px-4 py-3">
@@ -293,7 +285,7 @@ export function AppearanceSettings({ userId }: { userId: string }) {
             </div>
           </div>
         </div>
-      </section>
+      </SettingsGlassSection>
 
       <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Button variant="ghost" onClick={reset}>Reset to default</Button>

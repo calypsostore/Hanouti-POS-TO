@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { authService } from '../services/authService';
 import { Button } from './Button';
 import { MaterialIcon } from './MaterialIcon';
+import { SettingsGlassSection } from './settings/SettingsGlassSection';
 
 interface ChangePersonalPinFormProps {
   userId: string;
@@ -38,11 +39,8 @@ export function ChangePersonalPinForm({ userId }: ChangePersonalPinFormProps) {
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-      <div>
-        <h2 className="font-display text-headline-md text-on-surface">Change personal PIN</h2>
-        <p className="mt-1 font-body text-body-sm text-on-surface-variant">Enter your current PIN, then choose a new 4-digit PIN.</p>
-      </div>
+    <SettingsGlassSection heading="Change personal PIN" description="Enter your current PIN, then choose a new 4-digit PIN." icon="pin">
+      <form onSubmit={submit} className="settings-glass-form flex flex-col gap-3">
       {[
         { label: 'Current PIN', value: currentPin, onChange: setCurrentPin },
         { label: 'New PIN', value: newPin, onChange: setNewPin },
@@ -69,6 +67,7 @@ export function ChangePersonalPinForm({ userId }: ChangePersonalPinFormProps) {
         <MaterialIcon name="lock_reset" />
         {busy ? 'Changing PIN...' : 'Change PIN'}
       </Button>
-    </form>
+      </form>
+    </SettingsGlassSection>
   );
 }

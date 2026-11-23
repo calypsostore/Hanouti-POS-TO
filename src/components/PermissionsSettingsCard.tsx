@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from './Button';
 import { permissionService, type NotificationPermissionStatus } from '../services/permissionService';
+import { SettingsGlassSection } from './settings/SettingsGlassSection';
 
 const statusLabels: Record<NotificationPermissionStatus, string> = {
   granted: 'Allowed',
@@ -42,8 +43,7 @@ export function PermissionsSettingsCard() {
     : 'Open your browser site settings for hanoutipos.vercel.app and enable Notifications.';
 
   return (
-    <section className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-      <h2 className="font-display text-headline-md text-on-surface">Permissions</h2>
+    <SettingsGlassSection heading="Permissions" description="Manage notification access for this device." icon="lock_open">
       <div className="flex items-center justify-between gap-2 font-body text-body-sm">
         <span className="text-on-surface-variant">Notifications</span>
         <span className="font-semibold text-on-surface">{statusLabels[status]}</span>
@@ -70,6 +70,6 @@ export function PermissionsSettingsCard() {
           {showInstructions && <p className="font-body text-body-sm text-on-surface-variant">{instructions}</p>}
         </>
       )}
-    </section>
+    </SettingsGlassSection>
   );
 }

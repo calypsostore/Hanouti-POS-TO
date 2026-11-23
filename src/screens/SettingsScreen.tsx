@@ -783,41 +783,23 @@ export function SettingsScreen() {
     return buildReportDocument(makeSampleReport(reportType), previewStore, previewSettings);
   })();
   const content = (
-    <div className="settings-content flex flex-col gap-4">
-      <header className="settings-page-header">
-        <div className="settings-page-header__icon"><MaterialIcon name={activeSection?.icon ?? 'tune'} /></div>
-        <div className="min-w-0">
-          <p className="settings-page-header__eyebrow">{user?.name}</p>
-          <h1 className="font-display text-headline-lg text-on-surface">{t('settings.title')}</h1>
-          <p className="mt-1 font-body text-body-md text-on-surface-variant">
-            {activeSection ? activeSection.description : 'Manage your preferences and workspace settings.'}
-          </p>
-        </div>
-      </header>
-
+    <div className="settings-content settings-workspace">
       {!activeSection ? (
-        <section className="settings-dashboard" aria-label="Settings categories">
-          <div className="settings-dashboard__intro">
-            <div>
-              <p className="settings-dashboard__eyebrow">YOUR WORKSPACE</p>
-              <h2 className="font-display text-headline-md text-on-surface">What would you like to update?</h2>
-            </div>
-            <span className="settings-dashboard__count">{settingsSections.length} categories</span>
-          </div>
-          <div className="settings-dashboard-grid">
+        <section className="settings-overview" aria-label="Settings categories">
+          <div className="settings-overview-grid">
             {settingsSections.map((section) => (
               <button
                 key={section.id}
                 type="button"
-                className="settings-dashboard-card"
+                className="settings-overview-card"
                 onClick={() => setSearchParams({ section: section.id })}
               >
-                <span className="settings-dashboard-card__icon"><MaterialIcon name={section.icon} /></span>
-                <span className="settings-dashboard-card__content">
-                  <span className="settings-dashboard-card__title">{section.title}</span>
-                  <span className="settings-dashboard-card__description">{section.description}</span>
+                <span className="settings-overview-card__icon"><MaterialIcon name={section.icon} /></span>
+                <span className="settings-overview-card__content">
+                  <span className="settings-overview-card__title">{section.title}</span>
+                  <span className="settings-overview-card__description">{section.description}</span>
                 </span>
-                <MaterialIcon name="arrow_forward" className="settings-dashboard-card__arrow" />
+                <MaterialIcon name="arrow_forward" className="settings-overview-card__arrow" />
               </button>
             ))}
           </div>
@@ -857,8 +839,7 @@ export function SettingsScreen() {
               </label>
             ))}
           </SettingsGlassSection>
-          <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-            <h2 className="mb-3 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="calendar_month" className="text-primary" />My schedule</h2>
+          <SettingsGlassSection heading="My schedule" description="Upcoming published shifts." icon="calendar_month">
             {scheduleLoading ? <ListSkeleton rows={2} label="Loading your schedule" /> : upcomingSchedule.length > 0 ? (
               <div className="flex flex-col gap-2">
                 {upcomingSchedule.map((shift) => (
@@ -872,11 +853,10 @@ export function SettingsScreen() {
                 ))}
               </div>
             ) : <p className="font-body text-body-sm text-outline">No published shifts coming up.</p>}
-          </section>
+          </SettingsGlassSection>
 
           {scheduleNotifications.length > 0 && (
-            <section className="rounded-2xl bg-warning-container p-4">
-              <h2 className="mb-2 flex items-center gap-2 font-display text-headline-sm text-on-warning-container"><MaterialIcon name="notifications_active" />Notifications</h2>
+            <SettingsGlassSection heading="Notifications" description="Recent schedule updates." icon="notifications_active" className="settings-warning-section">
               <div className="flex flex-col gap-2">
                 {scheduleNotifications.slice(0, 3).map((notification) => (
                   <article key={notification.id}>
@@ -885,7 +865,7 @@ export function SettingsScreen() {
                   </article>
                 ))}
               </div>
-            </section>
+            </SettingsGlassSection>
           )}
         </>
       )}
@@ -899,17 +879,15 @@ export function SettingsScreen() {
       {user?.role === 'owner' && store && (
         <>
           <div className="settings-owner-store-grid" hidden={activeSection.id !== 'store'}>
-          <section aria-labelledby="owner-profile-settings-heading" className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-            <h2 id="owner-profile-settings-heading" className="font-display text-headline-md text-on-surface">Owner profile</h2>
+          <SettingsGlassSection heading="Owner profile" icon="account_circle" headingId="owner-profile-settings-heading">
             <form onSubmit={(event) => { void saveOwnerProfile(event); }} className="flex flex-col gap-3">
               <label className="font-body text-label-md">Owner name<input required maxLength={200} value={ownerName} onChange={(event) => setOwnerName(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
               <label className="font-body text-label-md">Owner email<input readOnly value={user.email ?? ''} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 text-on-surface-variant" /></label>
               <label className="font-body text-label-md">Owner phone<input type="tel" maxLength={100} value={ownerPhone} onChange={(event) => setOwnerPhone(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
               <Button type="submit" variant="secondary">{t('common.save')}</Button>
             </form>
-          </section>
-          <section aria-labelledby="store-settings-heading" className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-            <h2 id="store-settings-heading" className="font-display text-headline-md text-on-surface">Store</h2>
+          </SettingsGlassSection>
+          <SettingsGlassSection heading="Store" icon="storefront" headingId="store-settings-heading">
             <form id="store-settings-form" onSubmit={(event) => { void saveStoreInfo(event); }} className="flex flex-col gap-3">
               <label className="font-body text-label-md">{t('settings.storeName')}<input required value={storeName} onChange={(event) => setStoreName(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
               <label className="font-body text-label-md">Store type
@@ -943,11 +921,10 @@ export function SettingsScreen() {
               <p className="-mt-2 font-body text-body-sm text-outline">{t('settings.dailySalesTargetHelp')}</p>
               <Button type="submit" variant="secondary">{t('common.save')}</Button>
             </form>
-          </section>
+          </SettingsGlassSection>
           </div>
 
-          <section hidden={activeSection.id !== 'receipts'} aria-labelledby="ticket-report-settings-heading" className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-            <h2 id="ticket-report-settings-heading" className="font-display text-headline-md text-on-surface">Tickets and reports</h2>
+          <SettingsGlassSection hidden={activeSection.id !== 'receipts'} heading="Tickets and reports" description="Configure thermal layouts and live document previews." icon="receipt_long" headingId="ticket-report-settings-heading">
             <label className="font-body text-label-md">Ticket header line 1<input maxLength={60} value={ticketHeaderText[0] ?? ''} onChange={(event) => setTicketHeaderText([event.target.value, ticketHeaderText[1] ?? ''])} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
             <label className="font-body text-label-md">Ticket header line 2<input maxLength={60} value={ticketHeaderText[1] ?? ''} onChange={(event) => setTicketHeaderText([ticketHeaderText[0] ?? '', event.target.value])} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
             <label className="font-body text-label-md">Ticket footer line 1<input maxLength={60} value={ticketFooterText[0] ?? ''} onChange={(event) => setTicketFooterText([event.target.value, ticketFooterText[1] ?? ''])} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
@@ -984,10 +961,9 @@ export function SettingsScreen() {
               </div>
             )}
             <Button type="submit" form="store-settings-form" variant="secondary">Save ticket and report settings</Button>
-          </section>
+          </SettingsGlassSection>
 
-          <section hidden={activeSection.id !== 'security'} aria-labelledby="security-settings-heading" className="flex flex-col gap-4 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-            <h2 id="security-settings-heading" className="font-display text-headline-md text-on-surface">Security</h2>
+          <SettingsGlassSection hidden={activeSection.id !== 'security'} heading="Security" description="Manage POS access, auto-lock, and payment options." icon="shield_lock" headingId="security-settings-heading">
             {store.pinMustChange && <p role="alert" className="flex items-center gap-2 rounded-xl bg-warning-container p-3 font-body text-body-md text-on-warning-container"><MaterialIcon name="warning" />Set your admin PIN</p>}
             <form onSubmit={(event) => { void savePin(event); }} className="flex flex-col gap-3">
               <label className="font-body text-label-md">{t('settings.adminPin')}<input aria-label={t('settings.adminPin')} required pattern="[0-9]{4}" maxLength={4} inputMode="numeric" value={adminPin} onChange={(event) => setAdminPin(event.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="••••" className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 tracking-[0.5em] outline-none focus:ring-2 focus:ring-primary" /></label>
@@ -1047,10 +1023,9 @@ export function SettingsScreen() {
                 </span>
               </label>
             </div>
-          </section>
+          </SettingsGlassSection>
 
-          <section hidden={activeSection.id !== 'customers'} aria-labelledby="customer-settings-heading" className="flex flex-col gap-4 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-            <h2 id="customer-settings-heading" className="font-display text-headline-md text-on-surface">Customers</h2>
+          <SettingsGlassSection hidden={activeSection.id !== 'customers'} heading="Customers" description="Control credit and settlement defaults." icon="groups" headingId="customer-settings-heading">
             <label className="flex min-h-12 items-start gap-3 rounded-xl bg-surface-container-low p-3">
               <input type="checkbox" checked={store.allowCustomerCreditBalance ?? false} disabled={savingCreditPolicy} onChange={(event) => { void changeCustomerCreditBalance(event.target.checked); }} className="mt-1 h-5 w-5 accent-primary" />
               <span>
@@ -1068,13 +1043,9 @@ export function SettingsScreen() {
               </label>
               <Button type="submit" variant="secondary" disabled={savingSettlementTerms}>{savingSettlementTerms ? 'Saving…' : t('common.save')}</Button>
             </form>
-          </section>
+          </SettingsGlassSection>
 
-          <section hidden={activeSection.id !== 'staff'} aria-labelledby="staff-rules-heading" className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-            <div>
-              <h2 id="staff-rules-heading" className="font-display text-headline-md text-on-surface">Staff rules</h2>
-              <p className="mt-1 font-body text-body-sm text-on-surface-variant">Configure staff-drink comp limits and eligible items for each position.</p>
-            </div>
+          <SettingsGlassSection hidden={activeSection.id !== 'staff'} heading="Staff rules" description="Configure staff-drink comp limits and eligible items for each position." icon="badge" headingId="staff-rules-heading">
             {positions.map((position) => {
               const draft = staffRuleDrafts[position.id];
               if (!draft) return null;
@@ -1121,13 +1092,9 @@ export function SettingsScreen() {
               );
             })}
             {positions.length === 0 && <p className="rounded-xl bg-surface-container-low p-3 font-body text-body-sm text-outline">Create a staff position before setting staff-item rules.</p>}
-          </section>
+          </SettingsGlassSection>
 
-          <section hidden={activeSection.id !== 'notifications'} aria-labelledby="notification-settings-heading" className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-            <div>
-              <h2 id="notification-settings-heading" className="font-display text-headline-md text-on-surface">Notifications</h2>
-              <p className="mt-1 font-body text-body-sm text-on-surface-variant">Choose which notification types are created. All are enabled by default.</p>
-            </div>
+          <SettingsGlassSection hidden={activeSection.id !== 'notifications'} heading="Notifications" description="Choose which notification types are created. All are enabled by default." icon="notifications" headingId="notification-settings-heading">
             {notificationOptions.map((option) => (
               <label key={option.type} className="flex min-h-14 items-start gap-3 rounded-xl bg-surface-container-low p-3">
                 <input
@@ -1152,7 +1119,7 @@ export function SettingsScreen() {
               <DinarInput id="cash-out-alert-threshold" required value={cashOutAlertThreshold} onChange={(event) => setCashOutAlertThreshold(event.target.value)} className="h-12 rounded-lg bg-surface-container-lowest px-3 outline-none focus:ring-2 focus:ring-primary" />
               <Button type="submit" variant="secondary" disabled={savingCashOutThreshold}>{savingCashOutThreshold ? 'Saving…' : t('common.save')}</Button>
             </form>
-          </section>
+          </SettingsGlassSection>
         </>
       )}
 

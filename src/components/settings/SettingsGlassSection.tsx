@@ -12,6 +12,14 @@ interface SettingsGlassSectionProps {
   hidden?: boolean;
 }
 
+export function SettingsGlassCard({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <div className={`settings-glass-card ${className}`}>{children}</div>;
+}
+
+export function SettingsGlassList({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <div className={`settings-glass-list ${className}`}>{children}</div>;
+}
+
 export function SettingsGlassSection({
   heading,
   description,

@@ -795,11 +795,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
         <div className={`shift-topbar${activeTab === 'shifts' ? ' shift-topbar--search' : ''}`}>
           <Link to="/owner/dashboard" className="shift-topbar-brand" aria-label="Go to 7anouti-POS dashboard">
             <span className="shift-topbar-logo" aria-hidden="true">
-              <svg viewBox="0 0 48 48" focusable="false">
-                <path d="M17 18v-3.5a7 7 0 0 1 14 0V18" />
-                <path d="M13 18h22l-2 21H15z" />
-                <path d="m19 28 4 4 7-8" />
-              </svg>
+              <img src="/logo1.png" alt="" />
             </span>
             <span className="shift-topbar-brand-copy">
               <strong>7anouti-POS</strong>
@@ -1341,20 +1337,28 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
                   <p className="mt-1 font-body text-body-sm text-outline">
                     {new Date(shift.openedAt).toLocaleString()} {shift.closedAt ? ` • Closed ${new Date(shift.closedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
                   </p>
-                  <p className="mt-1 font-body text-label-sm text-on-surface-variant">
-                    Start {formatTnd(shift.startingCashMillimes / 1000)} DT
-                    {shift.countedCashMillimes !== undefined ? ` • Counted ${formatTnd(shift.countedCashMillimes / 1000)} DT` : ''}
-                  </p>
                   {shift.forceClosedByOwner && <p className="mt-1 font-body text-label-sm text-warning">Closed by force</p>}
                   {(shift.voidsAutoApprovedCount ?? 0) > 0 && <p className="mt-1 font-body text-label-sm text-warning">Voids auto-approved: {shift.voidsAutoApprovedCount}</p>}
                 </div>
               </div>
-              <div className="text-right">
+              <div className="shift-history-card__cash-summary">
+                <div>
+                  <span>Starting cash</span>
+                  <strong>{formatTnd(shift.startingCashMillimes / 1000)} DT</strong>
+                </div>
+                {shift.countedCashMillimes !== undefined && (
+                  <div>
+                    <span>Counted cash</span>
+                    <strong>{formatTnd(shift.countedCashMillimes / 1000)} DT</strong>
+                  </div>
+                )}
+              </div>
+              <div className="shift-history-card__status">
                 <StatusTag className="shift-history-status" status={shift.status === 'open' ? 'started' : 'closed'}>{shift.status === 'open' ? 'Started' : 'Closed'}</StatusTag>
                 {shift.differenceMillimes !== undefined && <p className={`mt-1 font-body text-label-sm tabular-nums ${shift.differenceMillimes === 0 ? 'text-success-dark' : 'text-error-dark'}`}>{t('shift.difference')}: {formatTnd(shift.differenceMillimes / 1000)} DT</p>}
               </div>
               {ownerMode && canCashInOut && shift.status === 'open' && user?.role === 'owner' && (
-                <div className="flex w-full gap-2">
+                <div className="shift-history-card__cash-actions flex w-full gap-2">
                   <Button type="button" variant="secondary" className="shift-cash-in flex-1" onClick={() => openCashMovement('in', shift.id)}><MaterialIcon name="add" />Cash in</Button>
                   <Button type="button" variant="secondary" className="shift-cash-out flex-1" onClick={() => openCashMovement('out', shift.id)}><MaterialIcon name="remove" />Cash out</Button>
                 </div>
@@ -1882,8 +1886,8 @@ function CashMovementList({ movements, staffNames, className = '' }: {
       {movements.length > 0 ? (
         <ul className="flex flex-col gap-2">
           {movements.map((movement) => (
-            <li key={movement.id} className="flex items-start justify-between gap-3 rounded-lg bg-surface-container-low p-3">
-              <div className="min-w-0">
+            <li key={movement.id} className="shift-history-card__movement flex items-start justify-between gap-3 rounded-lg bg-surface-container-low p-3">
+              <div className="shift-history-card__movement-copy min-w-0">
                 <p className="font-body text-label-md text-on-surface">
                   {movement.kind === 'in' ? 'Cash in' : 'Cash out'} · {reasonLabel(movement.reason)}
                 </p>

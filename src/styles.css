@@ -6612,13 +6612,40 @@ button {
 }
 
 .owner-dashboard .owner-kpi-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.8rem;
+  display: block;
+  /* The multi-column fallback fills down each column before moving across. */
+  columns: 2;
+  column-gap: 0.8rem;
+}
+
+.owner-dashboard .owner-kpi-grid > .stat-card {
+  break-inside: avoid;
+  margin-bottom: 0.8rem;
+  width: 100%;
+}
+
+@supports (display: grid-lanes) {
+  .owner-dashboard .owner-kpi-grid {
+    display: grid-lanes;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.8rem;
+  }
+
+  .owner-dashboard .owner-kpi-grid > .stat-card {
+    margin-bottom: 0;
+  }
 }
 
 .owner-dashboard .owner-kpi-grid > .dashboard-glass-kpi {
   border-radius: 1.5rem;
+  height: auto;
   padding: 1.15rem;
+}
+
+.owner-dashboard .owner-kpi-grid > .stat-card img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
 }
 
 .owner-dashboard .owner-kpi-grid > .dashboard-glass-kpi .font-body.text-body-sm {
@@ -6974,7 +7001,13 @@ button {
 
 @media (min-width: 768px) {
   .owner-dashboard .owner-kpi-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    columns: 3;
+  }
+
+  @supports (display: grid-lanes) {
+    .owner-dashboard .owner-kpi-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
   }
 
   .owner-dashboard .quick-access-grid {
@@ -6994,10 +7027,6 @@ button {
 }
 
 @media (min-width: 1280px) {
-  .owner-dashboard .owner-kpi-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
   .owner-dashboard .quick-access-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
@@ -13485,5 +13514,191 @@ body:has(.shift-screen-layout) {
 
   .pos-screen .pos-terminal-layout > .pos-order-pane {
     width: 420px;
+  }
+}
+
+.settings-workspace {
+  gap: 0.75rem;
+}
+
+.settings-workspace .settings-page-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 1rem;
+  border: 1px solid rgb(var(--color-outline-variant));
+  border-radius: 1.25rem;
+  background:
+    radial-gradient(ellipse at 92% 10%, rgb(var(--color-primary) / 10%), transparent 42%),
+    rgb(var(--color-surface-container-lowest));
+  padding: 1.25rem;
+}
+
+.settings-workspace .settings-page-header__icon {
+  display: flex;
+  width: 3.25rem;
+  height: 3.25rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 1rem;
+  background: rgb(var(--color-primary) / 12%);
+  color: rgb(var(--color-primary));
+}
+
+.settings-workspace .settings-page-header__icon .material-symbols-outlined {
+  font-size: 1.75rem;
+}
+
+.settings-workspace .settings-page-header__eyebrow,
+.settings-workspace .settings-dashboard__eyebrow {
+  margin: 0 0 0.2rem;
+  color: rgb(var(--color-primary));
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.settings-workspace .settings-overview {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.settings-workspace .settings-dashboard__intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.settings-workspace .settings-dashboard__intro h2 {
+  margin: 0;
+}
+
+.settings-workspace .settings-dashboard__count {
+  flex: 0 0 auto;
+  border: 1px solid rgb(var(--color-outline-variant));
+  border-radius: 999px;
+  background: rgb(var(--color-surface-container-lowest));
+  padding: 0.4rem 0.75rem;
+  color: rgb(var(--color-on-surface-variant));
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.settings-workspace .settings-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+  gap: 0.875rem;
+}
+
+.settings-workspace .settings-overview-card {
+  display: flex;
+  min-width: 0;
+  min-height: 7.25rem;
+  align-items: center;
+  gap: 0.875rem;
+  border: 1px solid rgb(var(--color-outline-variant));
+  border-radius: 1rem;
+  background: rgb(var(--color-surface-container-lowest));
+  padding: 1rem;
+  color: rgb(var(--color-on-surface));
+  text-align: start;
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.settings-workspace .settings-overview-card:hover,
+.settings-workspace .settings-overview-card:focus-visible {
+  border-color: rgb(var(--color-primary) / 55%);
+  box-shadow: 0 8px 24px rgb(var(--color-primary-dark) / 8%);
+  outline: none;
+  transform: translateY(-2px);
+}
+
+.settings-workspace .settings-overview-card__icon {
+  display: flex;
+  width: 2.875rem;
+  height: 2.875rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.875rem;
+  background: rgb(var(--color-primary) / 10%);
+  color: rgb(var(--color-primary));
+}
+
+.settings-workspace .settings-overview-card__content {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.settings-workspace .settings-overview-card__title {
+  font-size: 0.95rem;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.settings-workspace .settings-overview-card__description {
+  color: rgb(var(--color-on-surface-variant));
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.settings-workspace .settings-overview-card__arrow {
+  flex: 0 0 auto;
+  color: rgb(var(--color-outline));
+  font-size: 1.25rem;
+}
+
+@media (max-width: 599px) {
+  .settings-workspace .settings-page-header {
+    gap: 0.75rem;
+    padding: 0.75rem;
+  }
+
+  .settings-workspace .settings-page-header__icon {
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 0.75rem;
+  }
+
+  .settings-workspace .settings-page-header h1 {
+    font-size: 1.5rem;
+    line-height: 1.2;
+  }
+
+  .settings-workspace .settings-page-header p.mt-1 {
+    margin-top: 0.125rem;
+    font-size: 0.8125rem;
+    line-height: 1.2rem;
+  }
+
+  .settings-workspace .settings-dashboard__intro {
+    gap: 0.5rem;
+  }
+
+  .settings-workspace .settings-dashboard__intro h2 {
+    font-size: 1.125rem;
+    line-height: 1.35;
+  }
+
+  .settings-workspace .settings-dashboard__count {
+    padding: 0.3rem 0.5rem;
+    font-size: 0.6875rem;
+  }
+
+  .settings-workspace .settings-overview-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-workspace .settings-overview-card {
+    min-height: 4.75rem;
   }
 }

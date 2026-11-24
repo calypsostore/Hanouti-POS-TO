@@ -777,8 +777,26 @@ export function SettingsScreen() {
   })();
   const content = (
     <div className="settings-content settings-workspace">
+      <header className="settings-page-header">
+        <div className="settings-page-header__icon"><MaterialIcon name="tune" /></div>
+        <div className="min-w-0">
+          <p className="settings-page-header__eyebrow">{user?.name}</p>
+          <h1 className="font-display text-headline-lg text-on-surface">{t('settings.title')}</h1>
+          <p className="mt-1 font-body text-body-md text-on-surface-variant">
+            {activeSection?.description ?? 'Manage your preferences and workspace settings.'}
+          </p>
+        </div>
+      </header>
+
       {!activeSection ? (
         <section className="settings-overview" aria-label="Settings categories">
+          <div className="settings-dashboard__intro">
+            <div>
+              <p className="settings-dashboard__eyebrow">YOUR WORKSPACE</p>
+              <h2 className="font-display text-headline-md text-on-surface">What would you like to update?</h2>
+            </div>
+            <span className="settings-dashboard__count">{settingsSections.length} categories</span>
+          </div>
           <div className="settings-overview-grid">
             {settingsSections.map((section) => (
               <button

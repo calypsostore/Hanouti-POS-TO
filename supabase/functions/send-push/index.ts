@@ -1,14 +1,9 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
-
 interface NotificationWebhook {
-  type?: string;
-  record?: Record<string, unknown>;
+  record?: {
+    id?: unknown;
+  };
 }
 
 function channelForType(type: string): string {
@@ -17,15 +12,30 @@ function channelForType(type: string): string {
   return 'system_v2';
 }
 
+function constantTimeEqual(expected: string, actual: string): boolean {
+  let difference = expected.length ^ actual.length;
+  for (let index = 0; index < 64; index += 1) {
+    difference |= expected.charCodeAt(index) ^ actual.charCodeAt(index);
+  }
+  return difference === 0;
+}
+
 function response(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json' },
   });
 }
 
 Deno.serve(async (request) => {
-  if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+  const webhookSecret = Deno.env.get('PUSH_WEBHOOK_SECRET');
+  if (!webhookSecret || !/^[\da-f]{64}$/i.test(webhookSecret)) {
+    return response(500, { error: 'Push webhook secret must be a 32-byte hex value.' });
+  }
+  if (!constantTimeEqual(webhookSecret, request.headers.get('x-webhook-secret') ?? '')) {
+    return response(401, { error: 'Unauthorized.' });
+  }
+
   if (request.method !== 'POST') return response(405, { error: 'Method not allowed.' });
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
@@ -37,25 +47,39 @@ Deno.serve(async (request) => {
 
   let payload: NotificationWebhook;
   try {
-    payload = await request.json() as NotificationWebhook;
+    const parsedPayload: unknown = await request.json();
+    if (typeof parsedPayload !== 'object' || parsedPayload === null) {
+      return response(400, { error: 'Invalid webhook payload.' });
+    }
+    payload = parsedPayload as NotificationWebhook;
   } catch {
     return response(400, { error: 'Invalid webhook payload.' });
   }
-  if (payload.type !== 'INSERT' || !payload.record) return response(200, { ignored: true });
-
-  const record = payload.record;
-  const storeId = typeof record.store_id === 'string' ? record.store_id : '';
-  const userId = typeof record.user_id === 'string' ? record.user_id : null;
-  const targetRole = typeof record.target_role === 'string' ? record.target_role : null;
-  if (!storeId || (!userId && !targetRole)) return response(200, { ignored: true });
+  if (!payload.record || typeof payload.record !== 'object') return response(200, { ignored: true });
+  const notificationId = typeof payload.record.id === 'string' ? payload.record.id : '';
+  if (!notificationId) return response(200, { ignored: true });
 
   const admin = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
+  const { data: record, error: notificationError } = await admin
+    .from('notifications')
+    .select('id, store_id, user_id, target_role, title, body, type')
+    .eq('id', notificationId)
+    .maybeSingle();
+  if (notificationError) return response(500, { error: notificationError.message });
+  if (!record) return response(404, { error: 'Notification not found.' });
+
+  const storeId = typeof record.store_id === 'string' ? record.store_id : '';
+  const userId = typeof record.user_id === 'string' ? record.user_id : null;
+  const targetRole = typeof record.target_role === 'string' ? record.target_role : null;
+  if (!storeId || (!userId && !targetRole)) return response(200, { ignored: true });
+
   let recipientQuery = admin.from('profiles').select('id').eq('store_id', storeId).eq('is_active', true);
   if (userId) recipientQuery = recipientQuery.eq('id', userId);
-  else recipientQuery = recipientQuery.eq('role', targetRole!);
+  else if (targetRole) recipientQuery = recipientQuery.eq('role', targetRole);
+  else return response(200, { ignored: true });
   const { data: recipients, error: recipientError } = await recipientQuery;
   if (recipientError) return response(500, { error: recipientError.message });
   const recipientIds = (recipients ?? []).map((row) => row.id as string);

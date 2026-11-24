@@ -193,7 +193,7 @@ function OwnerReportsContent() {
   }, [customFrom, customTo, insightFrom, insightTo, insightRangeType, period, refreshKey, storeId]);
 
   return (
-    <WorkspaceLayout title={t('reports.title')} storeName={store?.name} links={ownerWorkspaceLinks}>
+    <WorkspaceLayout title={t('reports.title')} storeName={store?.name} links={ownerWorkspaceLinks} legacyAppearance>
       <PageHeader title={t('reports.title')} subtitle="X reports are live snapshots. Z reports close the current reporting period." />
 
       <section className="mb-4 rounded-2xl bg-surface-container-lowest p-4 shadow-card">

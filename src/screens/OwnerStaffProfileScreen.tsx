@@ -410,7 +410,7 @@ function ProfileContent() {
   const performance30 = statsForDays(30);
 
   return (
-    <WorkspaceLayout title="Staff profile" storeName={storeName} links={ownerWorkspaceLinks}>
+    <WorkspaceLayout title="Staff profile" storeName={storeName} links={ownerWorkspaceLinks} legacyAppearance>
       <Link to="/owner/staff" className="mb-4 inline-flex min-h-12 items-center gap-2 rounded-lg pr-3 font-body text-label-md text-primary hover:bg-surface-container-low">
         <MaterialIcon name="arrow_back" />
         Back to staff

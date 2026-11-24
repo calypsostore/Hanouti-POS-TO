@@ -5,12 +5,14 @@ const settingsScreen = readFileSync('src/screens/SettingsScreen.tsx', 'utf8');
 const settingsStyles = readFileSync('src/styles.css', 'utf8');
 const logoPicker = readFileSync('src/components/LogoPicker.tsx', 'utf8');
 const settingsSection = readFileSync('src/components/settings/SettingsGlassSection.tsx', 'utf8');
+const appearanceSettings = readFileSync('src/components/AppearanceSettings.tsx', 'utf8');
 
 describe('Settings legacy layout', () => {
   it('renders the historical category overview and opens one section at a time', () => {
-    expect(settingsScreen).toContain('<div className="settings-content settings-workspace">');
-    expect(settingsScreen).toContain('className="settings-overview"');
-    expect(settingsScreen).toContain('className="settings-overview-card"');
+    expect(settingsScreen).toContain('<div className="settings-content">');
+    expect(settingsScreen).toContain('className="settings-dashboard"');
+    expect(settingsScreen).toContain('className="settings-dashboard-grid"');
+    expect(settingsScreen).toContain('className="settings-dashboard-card"');
     expect(settingsScreen).toContain('<div className="settings-section-content">');
     expect(settingsScreen).toContain('className="settings-back-button"');
     expect(settingsScreen).toContain("activeSection.id === 'display'");
@@ -39,11 +41,20 @@ describe('Settings legacy layout', () => {
     expect(settingsScreen).toContain('settings-logo-picker-panel');
     expect(settingsScreen).toContain('setSearchParams({ section: section.id })');
     expect(settingsSection).toContain('id={id}');
+    expect(settingsSection).toContain('className={`settings-section ');
     expect(logoPicker).toContain('panelClassName');
-    expect(settingsStyles).toContain('.settings-glass-section');
+    expect(settingsSection).not.toContain('settings-glass-section');
+    expect(settingsStyles).not.toContain('.settings-glass-section');
     expect(settingsStyles).toContain('.settings-logo-picker-panel');
-    expect(settingsStyles).toContain('.workspace-layout.settings-screen-layout');
-    expect(settingsStyles).toContain('.settings-overview-card');
+    expect(settingsStyles).not.toContain('.workspace-layout.settings-screen-layout');
+    expect(settingsStyles).toContain('.settings-dashboard-card');
+    expect(settingsStyles).not.toContain('.settings-overview-card');
     expect(settingsStyles).toContain('.settings-section-content [hidden]');
+    expect(appearanceSettings).toContain('value={settings.theme}');
+    expect(appearanceSettings).toContain('checked={settings.largeButtons}');
+    expect(appearanceSettings).toContain('checked={settings.compactDensity}');
+    expect(appearanceSettings).not.toContain('type="color"');
+    expect(appearanceSettings).not.toContain('customPrimary');
+    expect(appearanceSettings).not.toContain('customAccent');
   });
 });

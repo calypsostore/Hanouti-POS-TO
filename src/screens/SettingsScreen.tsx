@@ -231,7 +231,7 @@ export function SettingsScreen() {
   const userRole = user?.role;
   const settingsSections = userRole === 'owner'
     ? [
-        { id: 'display', title: 'Appearance & themes', description: 'Personalize colors, theme, and screen density', icon: 'palette' },
+        { id: 'display', title: 'Display', description: 'Theme and screen density', icon: 'palette' },
         { id: 'store', title: 'Store and profile', description: 'Store details, contact information, and sales target', icon: 'storefront' },
         { id: 'receipts', title: 'Tickets and reports', description: 'Receipt layout, paper size, and previews', icon: 'receipt_long' },
         { id: 'security', title: 'Security', description: 'PIN, passwords, and POS access', icon: 'shield_lock' },
@@ -245,7 +245,7 @@ export function SettingsScreen() {
       ]
     : userRole === 'staff'
       ? [
-          { id: 'display', title: 'Appearance & themes', description: 'Personalize colors, theme, and screen density', icon: 'palette' },
+          { id: 'display', title: 'Display', description: 'Theme and screen density', icon: 'palette' },
           { id: 'security', title: 'Security', description: 'Personal PIN and password', icon: 'shield_lock' },
           { id: 'notifications', title: 'Notifications and schedule', description: 'Alert preferences and upcoming shifts', icon: 'notifications' },
           { id: 'help', title: 'Help', description: 'Usage guides for POS operations', icon: 'help' },
@@ -254,7 +254,7 @@ export function SettingsScreen() {
           { id: 'updates', title: 'App updates', description: 'Check versions and install updates', icon: 'system_update' },
         ]
       : [
-          { id: 'display', title: 'Appearance & themes', description: 'Personalize colors, theme, and screen density', icon: 'palette' },
+          { id: 'display', title: 'Display', description: 'Theme and screen density', icon: 'palette' },
           { id: 'security', title: 'Security', description: 'Password and account access', icon: 'shield_lock' },
           { id: 'help', title: 'Help', description: 'Usage guides for POS operations', icon: 'help' },
           { id: 'language', title: 'Language', description: 'Choose the app language', icon: 'language' },
@@ -776,7 +776,7 @@ export function SettingsScreen() {
     return buildReportDocument(makeSampleReport(reportType), previewStore, previewSettings);
   })();
   const content = (
-    <div className="settings-content settings-workspace">
+    <div className="settings-content">
       <header className="settings-page-header">
         <div className="settings-page-header__icon"><MaterialIcon name="tune" /></div>
         <div className="min-w-0">
@@ -789,7 +789,7 @@ export function SettingsScreen() {
       </header>
 
       {!activeSection ? (
-        <section className="settings-overview" aria-label="Settings categories">
+        <section className="settings-dashboard" aria-label="Settings categories">
           <div className="settings-dashboard__intro">
             <div>
               <p className="settings-dashboard__eyebrow">YOUR WORKSPACE</p>
@@ -797,20 +797,20 @@ export function SettingsScreen() {
             </div>
             <span className="settings-dashboard__count">{settingsSections.length} categories</span>
           </div>
-          <div className="settings-overview-grid">
+          <div className="settings-dashboard-grid">
             {settingsSections.map((section) => (
               <button
                 key={section.id}
                 type="button"
-                className="settings-overview-card"
+                className="settings-dashboard-card"
                 onClick={() => setSearchParams({ section: section.id })}
               >
-                <span className="settings-overview-card__icon"><MaterialIcon name={section.icon} /></span>
-                <span className="settings-overview-card__content">
-                  <span className="settings-overview-card__title">{section.title}</span>
-                  <span className="settings-overview-card__description">{section.description}</span>
+                <span className="settings-dashboard-card__icon"><MaterialIcon name={section.icon} /></span>
+                <span className="settings-dashboard-card__content">
+                  <span className="settings-dashboard-card__title">{section.title}</span>
+                  <span className="settings-dashboard-card__description">{section.description}</span>
                 </span>
-                <MaterialIcon name="arrow_forward" className="settings-overview-card__arrow" />
+                <MaterialIcon name="arrow_forward" className="settings-dashboard-card__arrow" />
               </button>
             ))}
           </div>
@@ -822,7 +822,7 @@ export function SettingsScreen() {
         All settings
       </button>
       <div className="settings-section-content">
-      {activeSection.id === 'display' && user?.id && <AppearanceSettings key={user.id} userId={user.id} />}
+      {activeSection.id === 'display' && user?.id && <AppearanceSettings key={user.id} />}
 
       {user?.role === 'staff' && activeSection.id === 'notifications' && (
         <>
@@ -1235,9 +1235,9 @@ export function SettingsScreen() {
     </div>
   );
 
-  if (user?.role === 'owner') return <WorkspaceLayout title={t('settings.title')} storeName={store?.name} links={ownerWorkspaceLinks}>{content}</WorkspaceLayout>;
-  if (user?.role === 'super_admin') return <WorkspaceLayout title={t('settings.title')} links={adminWorkspaceLinks}>{content}</WorkspaceLayout>;
-  return <div className="min-h-screen bg-surface pb-24"><main className="p-0"><PageContainer>{content}</PageContainer></main><BottomNav /></div>;
+  if (user?.role === 'owner') return <WorkspaceLayout title={t('settings.title')} storeName={store?.name} links={ownerWorkspaceLinks} legacyAppearance>{content}</WorkspaceLayout>;
+  if (user?.role === 'super_admin') return <WorkspaceLayout title={t('settings.title')} links={adminWorkspaceLinks} legacyAppearance>{content}</WorkspaceLayout>;
+  return <div className="legacy-workspace min-h-screen bg-surface pb-24"><main className="p-0"><PageContainer>{content}</PageContainer></main><BottomNav /></div>;
 }
 
 function HelpGuide({ title, steps }: { title: string; steps: HelpStep[] }) {

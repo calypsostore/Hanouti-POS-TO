@@ -340,7 +340,7 @@ function OwnerDashboardContent() {
 
   return (
     <>
-    <WorkspaceLayout title={t('owner.dashboard')} storeName={store?.name} links={ownerWorkspaceLinks}>
+    <WorkspaceLayout title={t('owner.dashboard')} storeName={store?.name} links={ownerWorkspaceLinks} legacyAppearance>
       <div className="role-dashboard owner-dashboard">
       <PageHeader title={t('owner.dashboard')} subtitle={store?.name} className="dashboard-welcome" actions={
         <div className="dashboard-period-switcher dashboard-segmented-control flex gap-1 rounded-xl bg-surface-container-high p-1">

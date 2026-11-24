@@ -142,10 +142,10 @@ export function NotificationsScreen() {
   );
 
   if (user?.role === 'owner') {
-    return <WorkspaceLayout title={t('nav.notifications')} storeName={storeName} links={ownerWorkspaceLinks}>{content}</WorkspaceLayout>;
+    return <WorkspaceLayout title={t('nav.notifications')} storeName={storeName} links={ownerWorkspaceLinks} legacyAppearance>{content}</WorkspaceLayout>;
   }
   if (user?.role === 'super_admin') {
-    return <WorkspaceLayout title={t('nav.notifications')} links={adminWorkspaceLinks}>{content}</WorkspaceLayout>;
+    return <WorkspaceLayout title={t('nav.notifications')} links={adminWorkspaceLinks} legacyAppearance>{content}</WorkspaceLayout>;
   }
   return (
     <div className="min-h-screen bg-surface pb-24">

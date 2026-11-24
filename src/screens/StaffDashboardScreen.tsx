@@ -97,7 +97,7 @@ export function StaffDashboardScreen() {
   const dateLabel = new Intl.DateTimeFormat([], { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
 
   return (
-    <div className="min-h-screen bg-surface pb-24 staff-dashboard">
+    <div className="legacy-workspace min-h-screen bg-surface pb-24 staff-dashboard">
       <TopBar title="Staff dashboard" storeName={store?.name} onProfileClick={() => navigate('/profile')} />
       <main className="mx-auto w-full p-0">
       <PageContainer className="staff-dashboard-container role-dashboard staff-dashboard-content">

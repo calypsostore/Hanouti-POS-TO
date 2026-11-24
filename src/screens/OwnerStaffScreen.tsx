@@ -480,7 +480,7 @@ function OwnerStaffContent() {
   const inheritedPermissions = positions.find((position) => position.id === positionId)?.permissionIds ?? [];
 
   return (
-    <WorkspaceLayout title={t('staff.title')} storeName={storeName} links={ownerWorkspaceLinks}>
+    <WorkspaceLayout title={t('staff.title')} storeName={storeName} links={ownerWorkspaceLinks} legacyAppearance>
       <PageHeader title={t('staff.title')} subtitle="Manage staff accounts and permission-based positions." actions={
         <>
           <Button variant="secondary" onClick={openNewPosition}><MaterialIcon name="badge" />{t('staff.newPosition')}</Button>

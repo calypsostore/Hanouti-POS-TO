@@ -164,7 +164,7 @@ export function StaffProfileScreen() {
   const initials = user?.name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toLocaleUpperCase()).join('') || '?';
 
   return (
-    <div className="min-h-screen bg-surface px-4 pb-24 pt-5">
+    <div className="legacy-workspace min-h-screen bg-surface px-4 pb-24 pt-5">
       <main className="mx-auto w-full p-0">
       <PageContainer className="mx-auto flex flex-col gap-4">
         <header className="rounded-2xl bg-surface-container-lowest p-5 shadow-card">

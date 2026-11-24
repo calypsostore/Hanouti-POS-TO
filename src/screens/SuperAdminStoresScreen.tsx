@@ -91,7 +91,7 @@ export function SuperAdminOverviewScreen() {
     : 0;
 
   return (
-    <WorkspaceLayout title="Platform overview" links={adminWorkspaceLinks}>
+    <WorkspaceLayout title="Platform overview" links={adminWorkspaceLinks} legacyAppearance>
       <div className="role-dashboard super-admin-dashboard">
       <header className="dashboard-welcome mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
@@ -382,7 +382,7 @@ function SuperAdminStoresContent() {
     : '';
 
   return (
-    <WorkspaceLayout title={t('admin.storeList')} links={adminWorkspaceLinks}>
+    <WorkspaceLayout title={t('admin.storeList')} links={adminWorkspaceLinks} legacyAppearance>
       <header className="mb-4">
         <h1 className="font-display text-headline-lg text-on-surface">{t('admin.storeList')}</h1>
         <p className="mt-1 font-body text-body-md text-on-surface-variant">Manage stores, subscriptions, and owner accounts.</p>

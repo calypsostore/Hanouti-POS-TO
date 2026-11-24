@@ -112,7 +112,7 @@ export function StoreReadOnlyScreen() {
   }
 
   return (
-    <WorkspaceLayout title={store.name} links={adminWorkspaceLinks}>
+    <WorkspaceLayout title={store.name} links={adminWorkspaceLinks} legacyAppearance>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="font-display text-headline-lg text-on-surface">{store.name}</h1>

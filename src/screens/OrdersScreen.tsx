@@ -595,6 +595,6 @@ export function OrdersScreen() {
     </div>
   );
   return user?.role === 'owner'
-    ? <WorkspaceLayout title={t('orders.title')} storeName={store?.name} links={ownerWorkspaceLinks}>{content}</WorkspaceLayout>
+    ? <WorkspaceLayout title={t('orders.title')} storeName={store?.name} links={ownerWorkspaceLinks} legacyAppearance>{content}</WorkspaceLayout>
     : content;
 }

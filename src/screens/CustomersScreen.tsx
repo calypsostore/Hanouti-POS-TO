@@ -801,7 +801,7 @@ export function CustomersScreen() {
   return (
     <>
       {isOwner ? (
-        <WorkspaceLayout title="Customers" storeName={store?.name} links={ownerWorkspaceLinks}>
+        <WorkspaceLayout title="Customers" storeName={store?.name} links={ownerWorkspaceLinks} legacyAppearance>
           {isDetail ? (
             <div className="customer-split-view">
               <SplitView list={<div className="customer-split-list">{listContent}</div>} detail={detailContent} />

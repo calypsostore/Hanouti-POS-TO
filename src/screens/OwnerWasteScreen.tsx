@@ -77,7 +77,7 @@ export function OwnerWasteScreen() {
   const totalValue = filteredComps.reduce((sum, comp) => sum + comp.valueMillimes, 0);
 
   return (
-    <WorkspaceLayout title="Waste log" storeName={storeName} links={ownerWorkspaceLinks}>
+    <WorkspaceLayout title="Waste log" storeName={storeName} links={ownerWorkspaceLinks} legacyAppearance>
       <PageHeader title="Waste log" subtitle="Review comps and waste recorded during staff shifts." />
 
       <section aria-label="Waste log filters" className="mb-4 grid gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card sm:grid-cols-2 lg:grid-cols-4">

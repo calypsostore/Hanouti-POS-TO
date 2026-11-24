@@ -25,9 +25,10 @@ interface WorkspaceLayoutProps {
   storeName?: string;
   links: WorkspaceLink[];
   children: ReactNode;
+  legacyAppearance?: boolean;
 }
 
-export function WorkspaceLayout({ title, storeName, links, children }: WorkspaceLayoutProps) {
+export function WorkspaceLayout({ title, storeName, links, children, legacyAppearance = false }: WorkspaceLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const user = useAuthStore((state) => state.user);
@@ -146,7 +147,7 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
     : [{ title: 'System', links }];
 
   return (
-    <div className={`workspace-layout min-h-screen bg-surface pb-6${isOwnerWorkspace ? ' owner-workspace' : ''}${isDashboardWorkspace ? ' dashboard-workspace' : ''}${isShiftWorkspace ? ' shift-screen-layout' : ''}${isSettingsWorkspace ? ' settings-screen-layout' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
+    <div className={`workspace-layout min-h-screen bg-surface pb-6${legacyAppearance ? ' legacy-workspace' : ''}${isOwnerWorkspace ? ' owner-workspace' : ''}${isDashboardWorkspace ? ' dashboard-workspace' : ''}${isShiftWorkspace ? ' shift-screen-layout' : ''}${isSettingsWorkspace ? ' settings-screen-layout' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
       <TopBar title={title} storeName={storeName} storeLogoId={storeLogoId} storeType={storeType} onProfileClick={() => navigate('/settings')} />
       <aside className="desktop-sidebar" aria-label={t('common.workspaceNavigation')}>
         <div className="desktop-sidebar__brand">

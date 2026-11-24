@@ -10,6 +10,7 @@ describe('orderRepository list queries', () => {
   const query = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
+    in: vi.fn().mockReturnThis(),
     gte: vi.fn().mockReturnThis(),
     lte: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
@@ -41,6 +42,19 @@ describe('orderRepository list queries', () => {
 
     expect(query.range).toHaveBeenCalledWith(60, 89);
     expect(query.eq).toHaveBeenCalledWith('status', 'pending_void');
+    expect(query.select.mock.calls[0][0]).not.toContain('order_lines');
+  });
+
+  it('filters customer order reads at the database', async () => {
+    await listOrders('store-id', { customerId: 'customer-id' });
+
+    expect(query.eq).toHaveBeenCalledWith('customer_id', 'customer-id');
+  });
+
+  it('filters batched customer order reads at the database', async () => {
+    await listOrderSummaries('store-id', { customerIds: ['customer-1', 'customer-2'] });
+
+    expect(query.in).toHaveBeenCalledWith('customer_id', ['customer-1', 'customer-2']);
     expect(query.select.mock.calls[0][0]).not.toContain('order_lines');
   });
 

@@ -87,6 +87,8 @@ function mapOrderSummary(row: OrderRow): OrderSummaryRecord {
 
 export interface OrderListOptions {
   staffId?: string;
+  customerId?: string;
+  customerIds?: string[];
   businessDate?: string;
   createdAfter?: string;
   createdBefore?: string;
@@ -121,6 +123,8 @@ function orderQuery(storeId: string, options: OrderListOptions, includeItems: bo
     .order('id', { ascending: false })
     .range(from, to);
   if (options.staffId) query = query.eq('staff_id', options.staffId);
+  if (options.customerId) query = query.eq('customer_id', options.customerId);
+  if (options.customerIds) query = query.in('customer_id', options.customerIds);
   if (options.businessDate) query = query.eq('business_date', options.businessDate);
   if (options.createdAfter) query = query.gte('created_at', options.createdAfter);
   if (options.createdBefore) query = query.lte('created_at', options.createdBefore);

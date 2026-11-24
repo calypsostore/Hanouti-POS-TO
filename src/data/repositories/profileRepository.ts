@@ -75,6 +75,18 @@ export async function listProfileNames(
   return data ?? [];
 }
 
+export async function listProfileNamesForStore(
+  storeId: string,
+): Promise<Array<{ id: string; name: string }>> {
+  if (!storeId) return [];
+  const { data, error } = await getSupabaseClient()
+    .from('profiles')
+    .select('id, name')
+    .eq('store_id', storeId);
+  if (error) throw new Error(`Could not load store profile names: ${error.message}`, { cause: error });
+  return data ?? [];
+}
+
 export async function getPermissionOverrides(userId: string): Promise<PermissionOverrides | undefined> {
   const { data, error } = await getSupabaseClient()
     .from('permission_overrides')

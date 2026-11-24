@@ -658,6 +658,7 @@ function ProfileContent() {
           <input
             id="staff-pin-reset"
             required
+            type="password"
             pattern="[0-9]{4}"
             maxLength={4}
             inputMode="numeric"

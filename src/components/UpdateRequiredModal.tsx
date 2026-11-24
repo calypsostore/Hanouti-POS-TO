@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from './Button';
-import { updateService, type UpdateCheckResult } from '../services/updateService';
+import type { UpdateCheckResult } from '../services/updateService';
 import {
   shouldShowUpdateModal,
   UPDATE_REMINDER_DELAY_MS,
@@ -12,6 +12,7 @@ import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitec
 export function UpdateRequiredModal({ result }: { result: UpdateCheckResult | null }) {
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState('');
+  const [hasUnsavedWork, setHasUnsavedWork] = useState(false);
   const [reminder, setReminder] = useState<UpdateReminder | null>(null);
   const panelRef = useRef<HTMLElement>(null);
   const portalTarget = useOverlayTarget();
@@ -37,14 +38,29 @@ export function UpdateRequiredModal({ result }: { result: UpdateCheckResult | nu
     return () => window.clearTimeout(timeoutId);
   }, [reminder]);
 
+  useEffect(() => {
+    if (!visible) {
+      setHasUnsavedWork(false);
+      return;
+    }
+    let active = true;
+    void import('../services/updateService').then(({ updateService }) => {
+      if (active) setHasUnsavedWork(updateService.hasUnsavedChanges());
+    }).catch((loadError: unknown) => {
+      console.error('[updates] Could not check for unsaved work.', loadError);
+      if (active) setError('Could not check whether there is unsaved work.');
+    });
+    return () => { active = false; };
+  }, [visible]);
+
   if (!visible || !result) return null;
   const bundled = result.mode === 'bundled';
-  const hasUnsavedWork = updateService.hasUnsavedChanges();
 
   async function updateNow() {
     setUpdating(true);
     setError('');
     try {
+      const { updateService } = await import('../services/updateService');
       await updateService.applyUpdate();
     } catch (updateError) {
       console.error('[updates] Could not apply the required update.', updateError);

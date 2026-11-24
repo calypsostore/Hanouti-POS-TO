@@ -1,6 +1,12 @@
-import type { CustomerRecord, OrderRecord, SettlementTerms, TabRecord } from '../../types/domain';
+import type { CustomerRecord, OrderRecord, OrderSummaryRecord, SettlementTerms, TabRecord } from '../../types/domain';
 import { getSupabaseClient } from '../supabaseClient';
-import { listOrders } from './orderRepository';
+import { listOrderSummaries, listOrders } from './orderRepository';
+
+const CUSTOMER_ID_BATCH_SIZE = 50;
+const CUSTOMER_ORDER_LIMIT = 200;
+const CUSTOMER_TRANSACTION_LIMIT = 1000;
+const QUERY_PAGE_SIZE = 1000;
+const TAB_COLUMNS = 'id, store_id, customer_id, order_id, shift_id, staff_id, kind, payment_method, amount_millimes, note, reverses_tab_id, created_at, reversal_attribution, reversal_post_close_at' as const;
 
 interface CustomerRow {
   id: string;
@@ -79,7 +85,11 @@ function repositoryError(error: { message: string }, context: string): never {
 }
 
 export async function listCustomers(storeId: string, activeOnly = true): Promise<CustomerRecord[]> {
-  let query = getSupabaseClient().from('customers').select('*').eq('store_id', storeId).order('name');
+  let query = getSupabaseClient()
+    .from('customers')
+    .select('id, store_id, name, phone, email, notes, credit_limit_millimes, settlement_terms, is_active, last_payment_at, created_at')
+    .eq('store_id', storeId)
+    .order('name');
   if (activeOnly) query = query.eq('is_active', true);
   const { data, error } = await query;
   if (error) repositoryError(error, 'Could not load customers');
@@ -87,7 +97,10 @@ export async function listCustomers(storeId: string, activeOnly = true): Promise
 }
 
 export async function getCustomer(customerId: string, storeId?: string): Promise<CustomerRecord | undefined> {
-  let query = getSupabaseClient().from('customers').select('*').eq('id', customerId);
+  let query = getSupabaseClient()
+    .from('customers')
+    .select('id, store_id, name, phone, email, notes, credit_limit_millimes, settlement_terms, is_active, last_payment_at, created_at')
+    .eq('id', customerId);
   if (storeId) query = query.eq('store_id', storeId);
   const { data, error } = await query.maybeSingle();
   if (error) repositoryError(error, 'Could not load customer');
@@ -146,16 +159,104 @@ export async function listCreditBalances(storeId: string): Promise<CustomerCredi
 }
 
 export async function listTransactions(customerId: string): Promise<TabRecord[]> {
-  const { data, error } = await getSupabaseClient().from('tabs').select('*')
+  const { data, error } = await getSupabaseClient().from('tabs')
+    .select(TAB_COLUMNS)
     .eq('customer_id', customerId).order('created_at', { ascending: false });
   if (error) repositoryError(error, 'Could not load customer tab transactions');
   return (data ?? []).map((row) => mapTab(row as TabRow));
 }
 
-export async function listCustomerOrders(customerId: string): Promise<OrderRecord[]> {
-  const customer = await getCustomer(customerId);
-  if (!customer) return [];
-  return (await listOrders(customer.storeId)).filter((order) => order.customerId === customerId);
+export async function listCustomerOrderSummaries(
+  storeId: string,
+  customerIds: string[],
+): Promise<OrderSummaryRecord[]> {
+  const summaries: OrderSummaryRecord[] = [];
+  for (let start = 0; start < customerIds.length; start += CUSTOMER_ID_BATCH_SIZE) {
+    const batch = customerIds.slice(start, start + CUSTOMER_ID_BATCH_SIZE);
+    const counts = new Map<string, number>();
+    const seenOrderIds = new Set<string>();
+    let remainingCustomerIds = batch;
+    let offset = 0;
+    while (remainingCustomerIds.length > 0) {
+      const page = await listOrderSummaries(storeId, {
+        customerIds: remainingCustomerIds,
+        limit: QUERY_PAGE_SIZE,
+        range: { from: offset, to: offset + QUERY_PAGE_SIZE - 1 },
+      });
+      for (const order of page) {
+        const customerId = order.customerId;
+        if (!customerId || seenOrderIds.has(order.id)) continue;
+        seenOrderIds.add(order.id);
+        const count = counts.get(customerId) ?? 0;
+        if (count < CUSTOMER_ORDER_LIMIT) {
+          summaries.push(order);
+          counts.set(customerId, count + 1);
+        }
+      }
+      const nextRemainingCustomerIds = remainingCustomerIds.filter((customerId) =>
+        (counts.get(customerId) ?? 0) < CUSTOMER_ORDER_LIMIT,
+      );
+      if (nextRemainingCustomerIds.length === 0) break;
+      if (nextRemainingCustomerIds.length < remainingCustomerIds.length) {
+        remainingCustomerIds = nextRemainingCustomerIds;
+        offset = 0;
+      } else {
+        if (page.length < QUERY_PAGE_SIZE) break;
+        offset += page.length;
+      }
+    }
+  }
+  return summaries;
+}
+
+export async function listTransactionsForCustomers(customerIds: string[]): Promise<TabRecord[]> {
+  const transactions: TabRecord[] = [];
+  const client = getSupabaseClient();
+  for (let start = 0; start < customerIds.length; start += CUSTOMER_ID_BATCH_SIZE) {
+    const batch = customerIds.slice(start, start + CUSTOMER_ID_BATCH_SIZE);
+    const counts = new Map<string, number>();
+    const seenTransactionIds = new Set<string>();
+    let remainingCustomerIds = batch;
+    let offset = 0;
+    while (remainingCustomerIds.length > 0) {
+      const { data, error } = await client.from('tabs')
+        .select(TAB_COLUMNS)
+        .in('customer_id', remainingCustomerIds)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(offset, offset + QUERY_PAGE_SIZE - 1);
+      if (error) repositoryError(error, 'Could not load customer tab transactions');
+      const page = (data ?? []).map((row) => mapTab(row as TabRow));
+      for (const transaction of page) {
+        if (seenTransactionIds.has(transaction.id)) continue;
+        seenTransactionIds.add(transaction.id);
+        const count = counts.get(transaction.customerId) ?? 0;
+        if (count < CUSTOMER_TRANSACTION_LIMIT) {
+          transactions.push(transaction);
+          counts.set(transaction.customerId, count + 1);
+        }
+      }
+      const nextRemainingCustomerIds = remainingCustomerIds.filter((customerId) =>
+        (counts.get(customerId) ?? 0) < CUSTOMER_TRANSACTION_LIMIT,
+      );
+      if (nextRemainingCustomerIds.length === 0) break;
+      if (nextRemainingCustomerIds.length < remainingCustomerIds.length) {
+        remainingCustomerIds = nextRemainingCustomerIds;
+        offset = 0;
+      } else {
+        if (page.length < QUERY_PAGE_SIZE) break;
+        offset += page.length;
+      }
+    }
+  }
+  return transactions;
+}
+
+export async function listCustomerOrders(customerId: string, storeId?: string): Promise<OrderRecord[]> {
+  const customer = storeId ? undefined : await getCustomer(customerId);
+  const resolvedStoreId = storeId ?? customer?.storeId;
+  if (!resolvedStoreId) return [];
+  return listOrders(resolvedStoreId, { customerId });
 }
 
 export async function settleTab(input: {

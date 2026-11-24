@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { getCustomerCreditTone, loadCustomerCreditStatuses } from '../src/lib/customerCredit';
+import { customerService } from '../src/services/customerService';
 
 describe('getCustomerCreditTone', () => {
   it.each([
@@ -29,5 +30,30 @@ describe('loadCustomerCreditStatuses', () => {
     } finally {
       consoleError.mockRestore();
     }
+  });
+});
+
+describe('customerService.getAccountsSummaryFromData', () => {
+  it('summarizes the already-loaded millime balances without counting settled customers as overdue', () => {
+    const customers = [
+      { id: 'owing', storeId: 'store-1', name: 'Owing', settlementTerms: 'weekly' as const, isActive: true, createdAt: '' },
+      { id: 'settled', storeId: 'store-1', name: 'Settled', settlementTerms: 'weekly' as const, isActive: true, createdAt: '' },
+    ];
+
+    expect(customerService.getAccountsSummaryFromData(
+      customers,
+      {
+        owing: { balance: 12_500, limit: 20_000, state: 'ok' },
+        settled: { balance: 0, limit: 20_000, state: 'ok' },
+      },
+      {
+        owing: { overdue: true },
+        settled: { overdue: true },
+      },
+    )).toEqual({
+      totalOutstandingMillimes: 12_500,
+      customersOwing: 1,
+      overdueCount: 1,
+    });
   });
 });

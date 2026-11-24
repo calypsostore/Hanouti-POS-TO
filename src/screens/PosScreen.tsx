@@ -61,6 +61,21 @@ function formatOutOfStockTime(timestamp?: string): string {
   return Number.isNaN(date.getTime()) ? 'unknown time' : date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
+function OrderElapsedTime({ startedAt }: { startedAt: number | null }) {
+  const [now, setNow] = useState(0);
+
+  useEffect(() => {
+    if (startedAt === null) return;
+    setNow(Date.now());
+    const intervalId = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(intervalId);
+  }, [startedAt]);
+
+  const elapsedSeconds = startedAt === null ? 0 : Math.max(0, Math.floor((now - startedAt) / 1000));
+  const label = `${String(Math.floor(elapsedSeconds / 60)).padStart(2, '0')}:${String(elapsedSeconds % 60).padStart(2, '0')}`;
+  return <>{label}</>;
+}
+
 function toProductView(item: CatalogItemRecord): ProductView {
   return {
     id: item.id,
@@ -104,7 +119,6 @@ export function PosScreen() {
   const [toast, setToast] = useState('');
   const [undoSnapshot, setUndoSnapshot] = useState<CartSnapshot | null>(null);
   const [clearConfirmationOpen, setClearConfirmationOpen] = useState(false);
-  const [timerNow, setTimerNow] = useState(Date.now());
   const [catalogRecords, setCatalogRecords] = useState<CatalogItemRecord[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState('');
@@ -355,12 +369,6 @@ export function PosScreen() {
   useEffect(() => updateService.registerUnsavedState(() => cart.length > 0 || note.trim().length > 0), [cart.length, note]);
 
   useEffect(() => {
-    if (firstItemAddedAt === null) return;
-    const intervalId = window.setInterval(() => setTimerNow(Date.now()), 1000);
-    return () => window.clearInterval(intervalId);
-  }, [firstItemAddedAt]);
-
-  useEffect(() => {
     if (!preselectedCustomerId || !canUseTabs || !customers.some((customer) => customer.id === preselectedCustomerId)) return;
     const preselectionKey = `${location.key}:${preselectedCustomerId}`;
     if (appliedPreselectionRef.current === preselectionKey) return;
@@ -380,10 +388,20 @@ export function PosScreen() {
   }, []);
 
   const allProducts = useMemo(() => catalogRecords.map(toProductView), [catalogRecords]);
+  const cartQuantities = useMemo(() => {
+    const quantities = new Map<string, number>();
+    for (const line of cart) quantities.set(line.itemId, (quantities.get(line.itemId) ?? 0) + line.quantity);
+    return quantities;
+  }, [cart]);
+  const productSearchIndex = useMemo(
+    () => new Map(allProducts.map((item) => [item.id, item.name.toLocaleLowerCase()])),
+    [allProducts],
+  );
+  const normalizedSearch = search.toLocaleLowerCase();
   const filteredItems = useMemo(() => allProducts.filter((item) =>
-    item.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()) &&
+    (productSearchIndex.get(item.id) ?? '').includes(normalizedSearch) &&
     (category === 'all' || item.categoryId === category),
-  ), [allProducts, category, search]);
+  ), [allProducts, category, normalizedSearch, productSearchIndex]);
   const quickPicks = useMemo(() => {
     const settings = resolveStoreSettings(store?.settings);
     if (settings.quickPickMode === 'manual') {
@@ -407,17 +425,23 @@ export function PosScreen() {
 
   const totalMillimes = cart.reduce((sum, line) => sum + line.quantity * line.unitPriceMillimes, 0);
   const count = cart.reduce((sum, line) => sum + line.quantity, 0);
-  const elapsedSeconds = firstItemAddedAt === null ? 0 : Math.max(0, Math.floor((timerNow - firstItemAddedAt) / 1000));
-  const timerLabel = `${String(Math.floor(elapsedSeconds / 60)).padStart(2, '0')}:${String(elapsedSeconds % 60).padStart(2, '0')}`;
   const creditStatusPending = paymentMethod === 'tab' && Boolean(selectedCustomerId) && creditStatusCustomerId !== selectedCustomerId;
   const creditLimitExceeded = paymentMethod === 'tab' && creditStatusCustomerId === selectedCustomerId &&
     creditStatus?.limit !== undefined && creditStatus.balance > creditStatus.limit;
   const tabCheckoutBlocked = paymentMethod === 'tab' &&
     (!canUseTabs || !selectedCustomerId || creditStatusPending || (creditLimitExceeded && !canOverrideCreditLimit));
   const selectedCustomer = customers.find((customer) => customer.id === selectedCustomerId);
-  const filteredCustomers = customers.filter((customer) =>
-    `${customer.name} ${customer.phone ?? ''}`.toLocaleLowerCase().includes(customerSearch.toLocaleLowerCase().trim()),
+  const customerSearchIndex = useMemo(
+    () => new Map(customers.map((customer) => [
+      customer.id,
+      `${customer.name} ${customer.phone ?? ''}`.toLocaleLowerCase(),
+    ])),
+    [customers],
   );
+  const normalizedCustomerSearch = customerSearch.toLocaleLowerCase().trim();
+  const filteredCustomers = useMemo(() => customers.filter((customer) =>
+    (customerSearchIndex.get(customer.id) ?? '').includes(normalizedCustomerSearch),
+  ), [customerSearchIndex, customers, normalizedCustomerSearch]);
   const selectedCustomerStatus = creditStatusCustomerId === selectedCustomerId ? creditStatus : null;
   const selectedCustomerRemaining = !selectedCustomerStatus
     ? 'Checking...'
@@ -731,7 +755,7 @@ export function PosScreen() {
           <h2 className="font-display text-headline-md text-on-surface">{t('pos.orderTicket')}</h2>
         </div>
         <div className="flex items-center gap-1">
-          <span className="rounded-full bg-surface-container-high px-2 py-1 font-body text-label-sm tabular-nums text-on-surface-variant" aria-label="Order elapsed time">{timerLabel}</span>
+          <span className="rounded-full bg-surface-container-high px-2 py-1 font-body text-label-sm tabular-nums text-on-surface-variant" aria-label="Order elapsed time"><OrderElapsedTime startedAt={firstItemAddedAt} /></span>
           <span className="rounded-full bg-secondary-container px-2 py-1 font-body text-label-sm text-on-surface">
             {count} {t(count === 1 ? 'common.item' : 'common.items')}
           </span>
@@ -958,9 +982,7 @@ export function PosScreen() {
               </div>
               <div className="scrollbar-hidden flex gap-2.5 overflow-x-auto px-3 pb-1">
                 {quickPicks.map((item) => {
-                  const quantity = cart
-                    .filter((line) => line.itemId === item.id)
-                    .reduce((sum, line) => sum + line.quantity, 0);
+                  const quantity = cartQuantities.get(item.id) ?? 0;
                   return (
                     <article key={item.id} className={`flex ${largeButtons ? 'min-h-40 w-40' : 'min-h-32 w-36'} shrink-0 flex-col justify-between rounded-2xl bg-surface-container-lowest p-3 text-left shadow-card`}>
                       <button type="button" aria-label={t('pos.addItem', { item: item.name })} onClick={() => addItem(item)} className="flex min-h-0 flex-1 flex-col justify-between text-left active:scale-[0.98]">
@@ -1012,8 +1034,8 @@ export function PosScreen() {
                   renderItem={(item) => (
                     <ItemCard
                       key={item.id}
-                      item={{ id: item.id, name: item.name, price: item.priceMillimes / 1000, icon: item.icon, outOfStock: item.outOfStock, outOfStockBy: item.outOfStockBy, outOfStockAt: item.outOfStockAt }}
-                      quantity={cart.filter((line) => line.itemId === item.id).reduce((sum, line) => sum + line.quantity, 0)}
+                      item={item}
+                      quantity={cartQuantities.get(item.id) ?? 0}
                       onAdd={() => addItem(item)}
                       onRemove={() => changeProductQuantity(item.id, -1)}
                       canToggleStock={user?.role === 'owner' || can86Items}

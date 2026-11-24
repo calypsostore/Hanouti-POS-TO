@@ -1,7 +1,6 @@
 import { Browser } from '@capacitor/browser';
 import { App } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { notificationService } from './notificationService';
 import { PRODUCTION_URL } from '../config/appConfig';
 import { parseAppUpdateManifest } from './appUpdateManifest';
 import { UPDATE_GITHUB_REPOSITORY } from '../config/updateConfig';
@@ -73,7 +72,9 @@ function setUpdateAvailable(version: string, build: string): void {
   availableVersion = version;
   availableBuild = build;
   if (!shouldNotify) return;
-  void notificationService.notifyAppUpdate(version, build).catch((error: unknown) => {
+  void import('./notificationService').then(({ notificationService }) =>
+    notificationService.notifyAppUpdate(version, build),
+  ).catch((error: unknown) => {
     console.error('[updates] Could not create in-app update notifications.', error);
   });
 }

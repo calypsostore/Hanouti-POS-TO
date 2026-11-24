@@ -1,6 +1,7 @@
 import {
   resolveStoreSettings,
   type CashMovementRecord,
+  type CustomerRecord,
   type NotificationRecord,
   type NotificationType,
   type OrderRecord,
@@ -10,6 +11,7 @@ import {
 import { formatTnd } from '../lib/format';
 import { readData, writeData } from './storage';
 import { customerService } from './customerService';
+import type { CustomerCreditStatus, CustomerDueInfo } from './customerService';
 import { userService } from './userService';
 import { getSupabaseClient } from '../data/supabaseClient';
 import { isSupabaseDriver } from '../data/driver';
@@ -584,13 +586,28 @@ export const notificationService = {
     }
   },
 
-  async listCustomerCreditAlerts(storeId: string): Promise<CustomerCreditAlert[]> {
-    const customers = await customerService.listCustomers(storeId);
-    const alerts = await Promise.all(customers.map(async (customer): Promise<CustomerCreditAlert | undefined> => {
-      const [credit, due] = await Promise.all([
-        customerService.getCreditStatus(customer.id),
-        customerService.getDueInfo(customer),
+  async listCustomerCreditAlerts(
+    storeId: string,
+    loadedCustomers?: CustomerRecord[],
+    loadedData?: {
+      creditStatuses: Record<string, CustomerCreditStatus>;
+      dueInfos: Record<string, CustomerDueInfo>;
+    },
+  ): Promise<CustomerCreditAlert[]> {
+    const customers = loadedCustomers ?? await customerService.listCustomers(storeId);
+    if (customers.some((customer) => customer.storeId !== storeId)) {
+      throw new Error('Customer credit alert request contains a customer from another store.');
+    }
+    const [creditStatuses, dueInfos] = loadedData
+      ? [loadedData.creditStatuses, loadedData.dueInfos]
+      : await Promise.all([
+        customerService.getCreditStatuses(storeId, customers),
+        customerService.getDueInfos(storeId, customers),
       ]);
+    const alerts = customers.map((customer): CustomerCreditAlert | undefined => {
+      const credit = creditStatuses[customer.id];
+      const due = dueInfos[customer.id];
+      if (!credit || !due) throw new Error(`Customer credit alert data is missing for "${customer.id}".`);
       if (due.overdue) {
         return { customerId: customer.id, customerName: customer.name, severity: 'error', message: 'Customer tab payment is overdue.' };
       }
@@ -601,7 +618,7 @@ export const notificationService = {
         return { customerId: customer.id, customerName: customer.name, severity: 'warning', message: 'Customer is near their credit limit.' };
       }
       return undefined;
-    }));
+    });
     return alerts.filter((alert): alert is CustomerCreditAlert => alert !== undefined);
   },
 };

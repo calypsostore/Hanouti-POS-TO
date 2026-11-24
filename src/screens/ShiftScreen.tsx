@@ -1627,7 +1627,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             </label>
             <label className="z-force-close-pin font-body text-label-md">
               <span className="z-force-close-pin__label"><MaterialIcon name="lock" />Owner PIN</span>
-              <input readOnly value={ownerPin} placeholder="••••" className="z-force-close-pin__input mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 tracking-[0.5em]" />
+              <input readOnly type="password" value={ownerPin} placeholder="••••" className="z-force-close-pin__input mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 tracking-[0.5em]" />
             </label>
             <Keypad className="z-force-close-keypad" onPress={(digit) => setOwnerPin((current) => current.length < 4 ? `${current}${digit}` : current)} onClear={() => setOwnerPin('')} onBackspace={() => setOwnerPin((current) => current.slice(0, -1))} />
             {error && <p role="alert" className="z-force-close-error rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
@@ -1657,7 +1657,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
             {error && <p role="alert" className="rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
             <label className="z-force-close-pin font-body text-label-md">
               <span className="z-force-close-pin__label"><MaterialIcon name="lock" />Owner PIN</span>
-              <input readOnly value={ownerPin} placeholder="••••" className="z-force-close-pin__input mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 tracking-[0.5em]" />
+              <input readOnly type="password" value={ownerPin} placeholder="••••" className="z-force-close-pin__input mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 tracking-[0.5em]" />
             </label>
             <Keypad className="z-force-close-keypad" onPress={(digit) => setOwnerPin((current) => current.length < 4 ? `${current}${digit}` : current)} onClear={() => setOwnerPin('')} onBackspace={() => setOwnerPin((current) => current.slice(0, -1))} />
             <div className="sheet-action-bar z-force-close-actions">
@@ -1823,7 +1823,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
               Confirm force close at zero difference.
             </label>
             <label className="font-body text-label-md">Owner PIN
-              <input readOnly value={forceShiftPin} placeholder="••••" className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 tracking-[0.5em]" />
+              <input readOnly type="password" value={forceShiftPin} placeholder="••••" className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 tracking-[0.5em]" />
             </label>
             <Keypad onPress={(digit) => setForceShiftPin((current) => current.length < 4 ? `${current}${digit}` : current)} onClear={() => setForceShiftPin('')} onBackspace={() => setForceShiftPin((current) => current.slice(0, -1))} />
             {error && <p role="alert" className="rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}

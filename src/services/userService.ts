@@ -9,11 +9,14 @@ import { getSupabaseClient } from '../data/supabaseClient';
 import { isSupabaseDriver } from '../data/driver';
 import { fetchCachedQuery, invalidateQueryCache } from '../lib/queryCache';
 import { createOwnerAccount, createStaff, resetPassword } from '../data/repositories/accountRepository';
-import { getPermissionOverrides, getProfile, listProfileNames, listProfiles } from '../data/repositories/profileRepository';
+import { getPermissionOverrides, getProfile, listProfileNames, listProfileNamesForStore, listProfiles } from '../data/repositories/profileRepository';
 import { getStore as getRemoteStore, getSuperAdminStoreOverview, listStores as listRemoteStores } from '../data/repositories/storeRepository';
 import { formatStaffUsername, generateStoreCode, migrateLegacyDemoStoreIdentity } from './accountIdentity';
 import { isProfileAvatarId } from '../data/profileAvatars';
 import { mergeStoreAppearance } from '../theme/themeRegistry';
+import { PERMISSIONS_CHANGED_EVENT, STORE_AUTO_LOCK_CHANGED_EVENT } from './userEvents';
+
+export { PERMISSIONS_CHANGED_EVENT, STORE_AUTO_LOCK_CHANGED_EVENT } from './userEvents';
 
 const PERMISSIONS: PermissionDefinition[] = [
   { id: 'take_orders', group: 'Orders', label: 'Take orders' },
@@ -61,9 +64,6 @@ const getPositions = () => {
 const saveUsers = (value: UserRecord[]) => writeData('users', value);
 const saveStores = (value: StoreRecord[]) => writeData('stores', value);
 const savePositions = (value: PositionRecord[]) => writeData('positions', value);
-
-export const PERMISSIONS_CHANGED_EVENT = '7anouti-permissions-changed';
-export const STORE_AUTO_LOCK_CHANGED_EVENT = '7anouti-store-auto-lock-changed';
 
 function notifyStoreSettingsChanged(): void {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event('hanouti:store-settings-updated'));
@@ -220,6 +220,17 @@ export const userService = {
     const requestedIds = new Set(staffIds);
     return new Map(getUsers()
       .filter((user) => user.storeId === storeId && requestedIds.has(user.id))
+      .map((user) => [user.id, user.name]));
+  },
+
+  async listProfileNamesForStore(storeId: string): Promise<Map<string, string>> {
+    if (!storeId) return new Map();
+    if (isSupabaseDriver()) {
+      const profiles = await listProfileNamesForStore(storeId);
+      return new Map(profiles.map((profile) => [profile.id, profile.name]));
+    }
+    return new Map(getUsers()
+      .filter((user) => user.storeId === storeId)
       .map((user) => [user.id, user.name]));
   },
 

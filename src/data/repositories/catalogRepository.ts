@@ -52,6 +52,9 @@ interface ItemHistoryRow {
   reason: ItemHistoryRecord['reason'] | null;
 }
 
+const CATEGORY_COLUMNS = 'id, store_id, name, icon, sort_order, is_active' as const;
+const CATALOG_ITEM_COLUMNS = 'id, store_id, category_id, name, icon, price_millimes, stock_count, low_stock_threshold, description, sku, modifier_group_name, modifiers_required, modifier_selection_mode, out_of_stock, out_of_stock_by, out_of_stock_at, is_active' as const;
+
 function mapCategory(row: CategoryRow): CategoryRecord {
   return {
     id: row.id,
@@ -97,7 +100,7 @@ function errorWithContext(error: { message: string }, context: string): never {
 export async function listCategories(storeId: string, includeInactive = false): Promise<CategoryRecord[]> {
   let query = getSupabaseClient()
     .from('categories')
-    .select('id, store_id, name, icon, sort_order, is_active')
+    .select(CATEGORY_COLUMNS)
     .eq('store_id', storeId)
     .order('sort_order');
   if (!includeInactive) query = query.eq('is_active', true);
@@ -114,7 +117,7 @@ export async function listItems(
 ): Promise<CatalogItemRecord[]> {
   let query = getSupabaseClient()
     .from('catalog_items')
-    .select('*')
+    .select(CATALOG_ITEM_COLUMNS)
     .eq('store_id', storeId)
     .order('name');
   if (!includeInactive) query = query.eq('is_active', true);
@@ -141,7 +144,7 @@ export async function listItems(
 }
 
 export async function getItem(itemId: string): Promise<CatalogItemRecord | undefined> {
-  const { data, error } = await getSupabaseClient().from('catalog_items').select('*').eq('id', itemId).maybeSingle();
+  const { data, error } = await getSupabaseClient().from('catalog_items').select(CATALOG_ITEM_COLUMNS).eq('id', itemId).maybeSingle();
   if (error) errorWithContext(error, 'Could not load catalog item');
   if (!data) return undefined;
   const { data: modifiers, error: modifierError } = await getSupabaseClient()
@@ -219,15 +222,13 @@ function itemChangesToRow(changes: Partial<CatalogItemRecord>): Record<string, u
   };
 }
 
-async function replaceModifiers(itemId: string, modifiers: CatalogModifierRecord[]): Promise<void> {
+async function replaceModifiers(itemId: string, storeId: string, modifiers: CatalogModifierRecord[]): Promise<void> {
   const client = getSupabaseClient();
   const { error: deleteError } = await client.from('catalog_modifiers').delete().eq('item_id', itemId);
   if (deleteError) errorWithContext(deleteError, 'Could not update modifiers');
   if (!modifiers.length) return;
-  const { data: item, error: itemError } = await client.from('catalog_items').select('store_id').eq('id', itemId).single();
-  if (itemError) errorWithContext(itemError, 'Could not load item store');
   const { error } = await client.from('catalog_modifiers').insert(modifiers.map((modifier, index) => ({
-    store_id: item.store_id,
+    store_id: storeId,
     item_id: itemId,
     name: modifier.name.trim(),
     price_millimes: modifier.priceMillimes,
@@ -252,15 +253,16 @@ export async function createItem(input: Omit<CatalogItemRecord, 'id'>): Promise<
     modifier_selection_mode: input.modifierSelectionMode ?? 'multiple',
     out_of_stock: input.outOfStock,
     is_active: input.isActive,
-  }).select('*').single();
+  }).select(CATALOG_ITEM_COLUMNS).single();
   if (error) errorWithContext(error, 'Could not create catalog item');
   try {
-    if (input.modifiers?.length) await replaceModifiers(data.id, input.modifiers);
+    if (input.modifiers?.length) await replaceModifiers(data.id, input.storeId, input.modifiers);
   } catch (error) {
     const { error: rollbackError } = await getSupabaseClient().from('catalog_items').delete().eq('id', data.id);
     if (rollbackError) console.error('Could not roll back catalog item after modifier creation failed.', rollbackError);
     throw error;
   }
+  if (!input.modifiers?.length) return mapItem(data as CatalogItemRow);
   const item = await getItem(data.id);
   if (!item) throw new Error('The new catalog item could not be reloaded.');
   return item;
@@ -271,13 +273,11 @@ export async function updateItem(
   changes: Partial<CatalogItemRecord>,
 ): Promise<CatalogItemRecord> {
   const { data, error } = await getSupabaseClient().from('catalog_items').update(itemChangesToRow(changes))
-    .eq('id', itemId).select('*').single();
+    .eq('id', itemId).select(CATALOG_ITEM_COLUMNS).single();
   if (error) errorWithContext(error, 'Could not update catalog item');
-  if (changes.modifiers !== undefined) await replaceModifiers(itemId, changes.modifiers);
+  if (changes.modifiers !== undefined) await replaceModifiers(itemId, data.store_id, changes.modifiers);
   if (changes.modifiers !== undefined) return mapItem(data as CatalogItemRow, changes.modifiers);
-  const updated = await getItem(itemId);
-  if (!updated) throw new Error('The updated catalog item could not be reloaded.');
-  return updated;
+  return mapItem(data as CatalogItemRow);
 }
 
 export async function setAvailability(itemId: string, outOfStock: boolean): Promise<CatalogItemRecord> {

@@ -170,18 +170,23 @@ export function CustomersScreen() {
       customerService.listCustomers(storeId),
       userService.getStore(storeId),
     ]);
-    const [statusEntries, dueEntries, nextSummary, nextAlerts, nextCreditNotifications] = await Promise.all([
-      Promise.all(records.map(async (customer) => [customer.id, await customerService.getCreditStatus(customer.id)] as const)),
-      Promise.all(records.map(async (customer) => [customer.id, await customerService.getDueInfo(customer)] as const)),
-      customerService.getAccountsSummary(storeId),
-      notificationService.listCustomerCreditAlerts(storeId),
+    const creditStatusesPromise = customerService.getCreditStatuses(storeId, records);
+    const dueInfosPromise = customerService.getDueInfos(storeId, records);
+    const alertsPromise = Promise.all([creditStatusesPromise, dueInfosPromise]).then(([creditStatuses, dueInfos]) =>
+      notificationService.listCustomerCreditAlerts(storeId, records, { creditStatuses, dueInfos }),
+    );
+    const [nextCreditStatuses, nextDueInfos, nextAlerts, nextCreditNotifications] = await Promise.all([
+      creditStatusesPromise,
+      dueInfosPromise,
+      alertsPromise,
       user?.role === 'owner'
         ? notificationService.listFor(user).then((entries) => entries.filter((entry) => entry.type.startsWith('customer_credit_') || entry.type === 'customer_overdue'))
         : Promise.resolve([]),
     ]);
+    const nextSummary = customerService.getAccountsSummaryFromData(records, nextCreditStatuses, nextDueInfos);
     setCustomers(records);
-    setCreditStatuses(Object.fromEntries(statusEntries));
-    setDueInfos(Object.fromEntries(dueEntries));
+    setCreditStatuses(nextCreditStatuses);
+    setDueInfos(nextDueInfos);
     setSummary(nextSummary);
     setCreditAlerts(nextAlerts);
     setCreditNotifications(nextCreditNotifications);
@@ -191,8 +196,8 @@ export function CustomersScreen() {
       const customer = await customerService.getCustomer(customerId, storeId);
       if (customer) {
         const [status, due, nextLedger, nextOrders, nextTransactions, reconciliation] = await Promise.all([
-          customerService.getCreditStatus(customer.id),
-          customerService.getDueInfo(customer),
+          nextCreditStatuses[customer.id] ? Promise.resolve(nextCreditStatuses[customer.id]) : customerService.getCreditStatus(customer.id),
+          nextDueInfos[customer.id] ? Promise.resolve(nextDueInfos[customer.id]) : customerService.getDueInfo(customer),
           customerService.listLedger(customer.id),
           customerService.getOrderHistory(customer.id),
           customerService.listTransactions(customer.id),
@@ -272,13 +277,22 @@ export function CustomersScreen() {
     };
   }, [customerId, refresh]);
 
+  const customerSearchIndex = useMemo(
+    () => new Map(customers.map((customer) => [
+      customer.id,
+      [customer.name, customer.phone, customer.email]
+        .filter((value): value is string => value !== undefined)
+        .map((value) => value.toLocaleLowerCase()),
+    ])),
+    [customers],
+  );
   const filteredCustomers = useMemo(() => {
     const normalizedSearch = search.trim().toLocaleLowerCase();
     const result = customers.filter((customer) => {
       const status = creditStatuses[customer.id];
       const balance = status?.balance ?? 0;
-      const matchesSearch = !normalizedSearch || [customer.name, customer.phone, customer.email]
-        .some((value) => value?.toLocaleLowerCase().includes(normalizedSearch));
+      const matchesSearch = !normalizedSearch || (customerSearchIndex.get(customer.id)
+        ?.some((value) => value.includes(normalizedSearch)) ?? false);
       const matchesFilter = filter === 'all' ||
         (filter === 'owes' && balance > 0) ||
         (filter === 'near' && status?.state === 'near') ||
@@ -298,7 +312,7 @@ export function CustomersScreen() {
       return (creditStatuses[right.id]?.balance ?? 0) - (creditStatuses[left.id]?.balance ?? 0);
     });
     return result;
-  }, [creditStatuses, customers, dueInfos, filter, search, sort]);
+  }, [creditStatuses, customerSearchIndex, customers, dueInfos, filter, search, sort]);
 
   async function openOverdueStatement(customer: CustomerRecord) {
     setOverdueAction({ customerId: customer.id, action: 'statement' });

@@ -4,7 +4,6 @@ import { Button } from '../components/Button';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { ToggleSwitch } from '../components/ToggleSwitch';
 import { t } from '../i18n/translations';
-import { updateService } from '../services/updateService';
 import { useAuthStore } from '../stores/authStore';
 
 type LoginRole = 'staff' | 'admin';
@@ -212,7 +211,7 @@ export function LoginScreen() {
       <div className={`login-content${logoMotion ? ' login-content--logo-playing' : ''}`}>
         <header className="login-brand">
           <span className="login-version">
-            {t('login.versionLabel', { version: updateService.getCurrentVersion() })}
+            {t('login.versionLabel', { version: __APP_VERSION__ })}
           </span>
           <div className={`login-logo-orbit${logoMotion ? ' login-logo-orbit--playing' : ''}`}>
             <div

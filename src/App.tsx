@@ -2,19 +2,14 @@ import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { LoginScreen } from './screens/LoginScreen';
-import { updateService, type UpdateCheckResult } from './services/updateService';
-import { notificationService } from './services/notificationService';
+import type { UpdateCheckResult } from './services/updateService';
 import { UpdateRequiredModal } from './components/UpdateRequiredModal';
-import { PermissionsPrompt } from './components/PermissionsPrompt';
-import { NotificationsBridge } from './components/NotificationsBridge';
 import { useAuthStore } from './stores/authStore';
-import { PERMISSIONS_CHANGED_EVENT, STORE_AUTO_LOCK_CHANGED_EVENT, userService } from './services/userService';
+import { PERMISSIONS_CHANGED_EVENT, STORE_AUTO_LOCK_CHANGED_EVENT } from './services/userEvents';
 import type { UserRole } from './types/domain';
 import { Button } from './components/Button';
 import { MaterialIcon } from './components/MaterialIcon';
 import { t } from './i18n/translations';
-import { LockScreen } from './components/LockScreen';
-import { permissionService } from './services/permissionService';
 import { classifyInitializationError } from './services/serverErrorService';
 import { PullToRefresh } from './components/PullToRefresh';
 import { ActionFeedbackToast } from './components/ActionFeedbackToast';
@@ -24,6 +19,9 @@ import { applyStoreAppearance, resetStoreAppearance } from './lib/storeAppearanc
 import { resolveStoreSettings } from './types/domain';
 
 const SetNewPasswordScreen = lazy(() => import('./screens/SetNewPasswordScreen').then((module) => ({ default: module.SetNewPasswordScreen })));
+const LockScreen = lazy(() => import('./components/LockScreen').then((module) => ({ default: module.LockScreen })));
+const PermissionsPrompt = lazy(() => import('./components/PermissionsPrompt').then((module) => ({ default: module.PermissionsPrompt })));
+const NotificationsBridge = lazy(() => import('./components/NotificationsBridge').then((module) => ({ default: module.NotificationsBridge })));
 const PosScreen = lazy(() => import('./screens/PosScreen').then((module) => ({ default: module.PosScreen })));
 const OrdersScreen = lazy(() => import('./screens/OrdersScreen').then((module) => ({ default: module.OrdersScreen })));
 const ShiftScreen = lazy(() => import('./screens/ShiftScreen').then((module) => ({ default: module.ShiftScreen })));
@@ -47,6 +45,8 @@ const NotificationsScreen = lazy(() => import('./screens/NotificationsScreen').t
 const CustomersScreen = lazy(() => import('./screens/CustomersScreen').then((module) => ({ default: module.CustomersScreen })));
 const SuperAdminStoresScreen = lazy(() => import('./screens/SuperAdminStoresScreen').then((module) => ({ default: module.SuperAdminStoresScreen })));
 const SuperAdminOverviewScreen = lazy(() => import('./screens/SuperAdminStoresScreen').then((module) => ({ default: module.SuperAdminOverviewScreen })));
+
+const loadUpdateService = () => import('./services/updateService');
 
 function homeForRole(role: UserRole): string {
   if (role === 'staff') return '/dashboard';
@@ -210,8 +210,8 @@ export default function App() {
   const initializationError = useAuthStore((state) => state.initializationError);
   const hydrate = useAuthStore((state) => state.hydrate);
   const [storeAppearanceError, setStoreAppearanceError] = useState<Error | null>(null);
-  const [updateReloadError, setUpdateReloadError] = useState(() => updateService.getPostUpdateMessage());
-  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(() => updateService.getLastResult());
+  const [updateReloadError, setUpdateReloadError] = useState<string | null>(null);
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
   const portalTarget = useOverlayTarget();
   const updateBannerZIndex = useOverlayLifecycle({
     open: Boolean(updateReloadError),
@@ -221,7 +221,22 @@ export default function App() {
     restoreFocus: false,
   });
 
-  useEffect(() => updateService.subscribeResults(setUpdateResult), []);
+  useEffect(() => {
+    let active = true;
+    let unsubscribe: () => void = () => {};
+    void loadUpdateService().then(({ updateService }) => {
+      if (!active) return;
+      setUpdateReloadError(updateService.getPostUpdateMessage());
+      setUpdateResult(updateService.getLastResult());
+      unsubscribe = updateService.subscribeResults(setUpdateResult);
+    }).catch((error: unknown) => {
+      console.error('[updates] Could not load update status.', error);
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     void hydrate();
@@ -236,7 +251,7 @@ export default function App() {
 
     let active = true;
     const refreshAppearance = () => {
-      void userService.getStore(user.storeId!).then((store) => {
+      void import('./services/userService').then(({ userService }) => userService.getStore(user.storeId!)).then((store) => {
         if (!active) return;
         if (!store) throw new Error('The active store could not be found.');
         applyStoreAppearance(resolveStoreSettings(store.settings).appearance);
@@ -261,7 +276,9 @@ export default function App() {
 
   useEffect(() => {
     if (!ready) return;
-    void permissionService.createDefaultChannel().catch((error: unknown) => {
+    void import('./services/permissionService').then(({ permissionService }) =>
+      permissionService.createDefaultChannel(),
+    ).catch((error: unknown) => {
       console.error('[permissions] Could not create the default notification channel.', error);
     });
   }, [ready]);
@@ -299,12 +316,21 @@ export default function App() {
 
   useEffect(() => {
     if (!ready || user?.role !== 'owner' || !user.storeId) return;
-    void notificationService.checkOverdueCustomers(user.storeId, user.id).catch((error: unknown) => {
-      console.error('[customers] Overdue check on owner sign-in failed.', error);
+    let active = true;
+    const storeId = user.storeId;
+    const userId = user.id;
+    void import('./services/notificationService').then(({ notificationService }) => {
+      if (!active) return;
+      void notificationService.checkOverdueCustomers(storeId, userId).catch((error: unknown) => {
+        console.error('[customers] Overdue check on owner sign-in failed.', error);
+      });
+      void notificationService.checkSubscriptionExpiring(storeId).catch((error: unknown) => {
+        console.error('[subscription] Expiry notification check failed.', error);
+      });
+    }).catch((error: unknown) => {
+      if (active) console.error('[notifications] Could not load owner notification checks.', error);
     });
-    void notificationService.checkSubscriptionExpiring(user.storeId).catch((error: unknown) => {
-      console.error('[subscription] Expiry notification check failed.', error);
-    });
+    return () => { active = false; };
   }, [ready, user?.id, user?.role, user?.storeId]);
 
   useEffect(() => {
@@ -346,7 +372,7 @@ export default function App() {
       if (document.visibilityState === 'visible') checkForIdleLock();
     };
     const loadAutoLockTimeout = () => {
-      void userService.getStore(storeId).then((store) => {
+      void import('./services/userService').then(({ userService }) => userService.getStore(storeId)).then((store) => {
         if (!active) return;
         const minutes = user.role === 'staff'
           ? store?.staffAutoLockMinutes ?? 5
@@ -388,17 +414,27 @@ export default function App() {
     const checkOverdueCustomers = async () => {
       const currentUser = useAuthStore.getState().user;
       if (currentUser?.role === 'owner' && currentUser.storeId) {
-        await Promise.all([
-          notificationService.checkOverdueCustomers(currentUser.storeId, currentUser.id),
-          notificationService.checkSubscriptionExpiring(currentUser.storeId),
-        ]);
+        try {
+          const { notificationService } = await import('./services/notificationService');
+          await Promise.all([
+            notificationService.checkOverdueCustomers(currentUser.storeId, currentUser.id),
+            notificationService.checkSubscriptionExpiring(currentUser.storeId),
+          ]);
+        } catch (error) {
+          console.error('[notifications] Scheduled owner checks failed.', error);
+        }
       }
     };
-    void updateService.register().then(() => {
-      if (active) stopMonitoring = updateService.startMonitoring(checkOverdueCustomers);
+    void loadUpdateService().then(({ updateService }) => {
+      if (!active) return;
+      return updateService.register().then(() => {
+        if (active) stopMonitoring = updateService.startMonitoring(checkOverdueCustomers);
+      }).catch((error: unknown) => {
+        console.error('Could not register the application service worker.', error);
+        if (active) stopMonitoring = updateService.startMonitoring(checkOverdueCustomers);
+      });
     }).catch((error: unknown) => {
-      console.error('Could not register the application service worker.', error);
-      if (active) stopMonitoring = updateService.startMonitoring(checkOverdueCustomers);
+      console.error('[updates] Could not load update monitoring.', error);
     });
     return () => {
       active = false;
@@ -409,6 +445,7 @@ export default function App() {
   async function reloadWithAvailableUpdate() {
     setUpdateReloadError('');
     try {
+      const { updateService } = await loadUpdateService();
       await updateService.applyUpdate();
     } catch (error) {
       setUpdateReloadError(error instanceof Error ? error.message : 'Unable to reload the update.');
@@ -436,8 +473,10 @@ export default function App() {
         </div>,
         portalTarget,
       )}
-      <PermissionsPrompt />
-      {user && !locked && <NotificationsBridge />}
+      <Suspense fallback={null}>
+        {user && <PermissionsPrompt />}
+        {user && !locked && <NotificationsBridge />}
+      </Suspense>
       <PullToRefresh enabled={Boolean(user && !locked && !user.mustChangePassword && !user.mustSetPin)}>
         <Suspense fallback={<LoadingScreen message={t('app.loading')} />}>
           <Routes>

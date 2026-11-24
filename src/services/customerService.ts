@@ -1,4 +1,4 @@
-import { resolveStoreSettings, type CustomerRecord, type OrderRecord, type PaymentMethod, type TabRecord } from '../types/domain';
+import { resolveStoreSettings, type CustomerRecord, type OrderRecord, type OrderSummaryRecord, type PaymentMethod, type TabRecord } from '../types/domain';
 import { activityService } from './activityService';
 import { userService } from './userService';
 import { shiftService } from './shiftService';
@@ -11,9 +11,11 @@ import {
   getBalance as getRemoteBalance,
   getCustomer as getRemoteCustomer,
   listCreditBalances as listRemoteCreditBalances,
+  listCustomerOrderSummaries as listRemoteCustomerOrderSummaries,
   listCustomerOrders,
   listCustomers as listRemoteCustomers,
   listTransactions as listRemoteTransactions,
+  listTransactionsForCustomers as listRemoteTransactionsForCustomers,
   reversePayment as reverseRemotePayment,
   settleTab as settleRemoteTab,
   updateCustomer as updateRemoteCustomer,
@@ -141,7 +143,11 @@ function validateSettlementTerms(value: string): asserts value is CustomerRecord
   if (!['weekly', 'monthly', 'anytime'].includes(value)) throw new Error('Select valid customer settlement terms.');
 }
 
-function getLedgerEvents(customerId: string, orders = getOrders(), tabs = getTabs()): LedgerEvent[] {
+function getLedgerEvents(
+  customerId: string,
+  orders: OrderSummaryRecord[] = getOrders(),
+  tabs = getTabs(),
+): LedgerEvent[] {
   const allCustomerOrders = orders.filter((order) => order.customerId === customerId && order.paymentMethod === 'tab');
   const tabOrders = allCustomerOrders.filter((order) =>
     order.customerId === customerId && order.paymentMethod === 'tab' && order.status === 'done',
@@ -209,10 +215,10 @@ function ledgerBalance(customerId: string): number {
   }, 0);
 }
 
-async function getLedgerEventsForCustomer(customerId: string): Promise<LedgerEvent[]> {
+async function getLedgerEventsForCustomer(customerId: string, storeId?: string): Promise<LedgerEvent[]> {
   if (!isSupabaseDriver()) return getLedgerEvents(customerId);
   const [orders, tabs] = await Promise.all([
-    listCustomerOrders(customerId),
+    listCustomerOrders(customerId, storeId),
     listRemoteTransactions(customerId),
   ]);
   return getLedgerEvents(customerId, orders, tabs);
@@ -255,6 +261,17 @@ function dueDateFor(issueAt: string, terms: CustomerRecord['settlementTerms']): 
   const lastDay = new Date(Date.UTC(due.getUTCFullYear(), due.getUTCMonth() + 1, 0)).getUTCDate();
   due.setUTCDate(Math.min(day, lastDay));
   return due;
+}
+
+function getDueInfoFromEvents(customer: CustomerRecord, events: LedgerEvent[]): CustomerDueInfo {
+  const oldestIssue = oldestUnpaidIssue(events);
+  if (!oldestIssue) return { overdue: false };
+  const due = dueDateFor(oldestIssue.occurredAt, customer.settlementTerms);
+  return {
+    oldestUnpaidAt: oldestIssue.occurredAt,
+    nextDueAt: due?.toISOString(),
+    overdue: due ? Date.now() > due.getTime() : false,
+  };
 }
 
 async function getCachedCreditStatus(customerId: string, additionalMillimes: number): Promise<CustomerCreditStatus> {
@@ -490,6 +507,7 @@ export const customerService = {
     storeId: string,
     customers: CustomerRecord[],
   ): Promise<Record<string, CustomerCreditStatus>> {
+    if (!customers.length) return {};
     if (customers.some((customer) => customer.storeId !== storeId)) {
       throw new Error('Customer credit status request contains a customer from another store.');
     }
@@ -556,11 +574,22 @@ export const customerService = {
 
   async getAccountsSummary(storeId: string): Promise<AccountsSummary> {
     const customers = await this.listCustomers(storeId);
-    const summaries = await Promise.all(customers.map(async (customer) => ({
-      status: await this.getCreditStatus(customer.id),
-      due: await this.getDueInfo(customer),
-    })));
-    return summaries.reduce<AccountsSummary>((summary, { status, due }) => {
+    const [statuses, dueInfos] = await Promise.all([
+      this.getCreditStatuses(storeId, customers),
+      this.getDueInfos(storeId, customers),
+    ]);
+    return this.getAccountsSummaryFromData(customers, statuses, dueInfos);
+  },
+
+  getAccountsSummaryFromData(
+    customers: CustomerRecord[],
+    statuses: Record<string, CustomerCreditStatus>,
+    dueInfos: Record<string, CustomerDueInfo>,
+  ): AccountsSummary {
+    return customers.reduce<AccountsSummary>((summary, customer) => {
+      const status = statuses[customer.id];
+      const due = dueInfos[customer.id];
+      if (!status || !due) throw new Error(`Account summary is missing customer data for "${customer.id}".`);
       if (status.balance > 0) {
         summary.totalOutstandingMillimes += status.balance;
         summary.customersOwing += 1;
@@ -571,25 +600,68 @@ export const customerService = {
   },
 
   async getDueInfo(customer: CustomerRecord): Promise<CustomerDueInfo> {
-    const oldestIssue = oldestUnpaidIssue(await getLedgerEventsForCustomer(customer.id));
-    if (!oldestIssue) return { overdue: false };
-    const due = dueDateFor(oldestIssue.occurredAt, customer.settlementTerms);
-    return {
-      oldestUnpaidAt: oldestIssue.occurredAt,
-      nextDueAt: due?.toISOString(),
-      overdue: due ? Date.now() > due.getTime() : false,
-    };
+    return getDueInfoFromEvents(
+      customer,
+      await getLedgerEventsForCustomer(customer.id, customer.storeId),
+    );
+  },
+
+  async getDueInfos(
+    storeId: string,
+    customers: CustomerRecord[],
+  ): Promise<Record<string, CustomerDueInfo>> {
+    if (customers.some((customer) => customer.storeId !== storeId)) {
+      throw new Error('Customer due-info request contains a customer from another store.');
+    }
+    if (!customers.length) return {};
+    if (!isSupabaseDriver()) {
+      return Object.fromEntries(await Promise.all(customers.map(async (customer) => [
+        customer.id,
+        await this.getDueInfo(customer),
+      ] as const)));
+    }
+
+    const customerIds = customers.map((customer) => customer.id);
+    const [orders, tabs] = await Promise.all([
+      listRemoteCustomerOrderSummaries(storeId, customerIds),
+      listRemoteTransactionsForCustomers(customerIds),
+    ]);
+    const ordersByCustomer = new Map<string, OrderSummaryRecord[]>();
+    for (const order of orders) {
+      if (!order.customerId) continue;
+      const customerOrders = ordersByCustomer.get(order.customerId) ?? [];
+      customerOrders.push(order);
+      ordersByCustomer.set(order.customerId, customerOrders);
+    }
+    const tabsByCustomer = new Map<string, TabRecord[]>();
+    for (const tab of tabs) {
+      const customerTabs = tabsByCustomer.get(tab.customerId) ?? [];
+      customerTabs.push(tab);
+      tabsByCustomer.set(tab.customerId, customerTabs);
+    }
+
+    return Object.fromEntries(customers.map((customer) => [
+      customer.id,
+      getDueInfoFromEvents(customer, getLedgerEvents(
+        customer.id,
+        ordersByCustomer.get(customer.id) ?? [],
+        tabsByCustomer.get(customer.id) ?? [],
+      )),
+    ]));
   },
 
   async listOverdueCustomers(storeId: string): Promise<OverdueCustomerRecord[]> {
     const customers = await this.listCustomers(storeId);
-    const entries = await Promise.all(customers.map(async (customer) => {
-      const [status, dueInfo] = await Promise.all([
-        this.getCreditStatus(customer.id),
-        this.getDueInfo(customer),
-      ]);
+    const [statuses, dueInfos] = await Promise.all([
+      this.getCreditStatuses(storeId, customers),
+      this.getDueInfos(storeId, customers),
+    ]);
+    const entries = customers.map((customer) => {
+      const status = statuses[customer.id];
+      const dueInfo = dueInfos[customer.id];
+      if (!status || !dueInfo) throw new Error(`Overdue customer data is missing for "${customer.id}".`);
       return { customer, dueInfo, balanceMillimes: status.balance };
-    }));
+    });
     return entries
       .filter((entry) => entry.dueInfo.overdue && entry.balanceMillimes > 0)
       .sort((left, right) =>
@@ -610,9 +682,10 @@ export const customerService = {
   },
 
   async listLedger(customerId: string): Promise<CustomerLedgerEntry[]> {
-    if (!await this.getCustomer(customerId)) throw new Error('Customer could not be found.');
+    const customer = await this.getCustomer(customerId);
+    if (!customer) throw new Error('Customer could not be found.');
     let balance = 0;
-    return (await getLedgerEventsForCustomer(customerId)).map((event) => {
+    return (await getLedgerEventsForCustomer(customerId, customer.storeId)).map((event) => {
       const amountMillimes = event.kind === 'payment' ? -event.amountMillimes : event.amountMillimes;
       balance += amountMillimes;
       return {

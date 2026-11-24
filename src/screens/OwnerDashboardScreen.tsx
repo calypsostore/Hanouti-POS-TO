@@ -23,7 +23,7 @@ import { catalogService } from '../services/catalogService';
 import { useAuthStore } from '../stores/authStore';
 import { createLatestRequestGuard } from '../lib/requestGuard';
 import type { CustomerStatementData, OverdueCustomerRecord } from '../services/customerService';
-import type { CatalogItemRecord, NotificationRecord, ShiftRecord, StoreRecord, UserSummary } from '../types/domain';
+import type { CatalogItemRecord, NotificationRecord, ShiftRecord, StoreRecord } from '../types/domain';
 
 type Period = 'day' | 'week' | 'month' | 'year';
 
@@ -106,7 +106,7 @@ function OwnerDashboardContent() {
     openShiftCount: 0,
   });
   const [runningShifts, setRunningShifts] = useState<ShiftRecord[]>([]);
-  const [staff, setStaff] = useState<UserSummary[]>([]);
+  const [profileNames, setProfileNames] = useState<Map<string, string>>(() => new Map());
   const [catalogItems, setCatalogItems] = useState<CatalogItemRecord[]>([]);
   const [overdueCustomers, setOverdueCustomers] = useState<OverdueCustomerRecord[]>([]);
   const [ownerNotifications, setOwnerNotifications] = useState<NotificationRecord[]>([]);
@@ -115,6 +115,27 @@ function OwnerDashboardContent() {
   const [overdueStatement, setOverdueStatement] = useState<CustomerStatementData | null>(null);
   const [overdueAction, setOverdueAction] = useState<{ customerId: string; action: 'statement' | 'share' } | null>(null);
   const [overdueActionError, setOverdueActionError] = useState('');
+  const [chartsNearViewport, setChartsNearViewport] = useState(false);
+  const chartSectionRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (chartsNearViewport) return;
+    const section = chartSectionRef.current;
+    if (!section) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      setChartsNearViewport(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry?.isIntersecting) {
+        setChartsNearViewport(true);
+        observer.disconnect();
+      }
+    }, { rootMargin: '600px 0px' });
+    observer.observe(section);
+    return () => observer.disconnect();
+  }, [chartsNearViewport]);
 
   useEffect(() => {
     let active = true;
@@ -125,17 +146,17 @@ function OwnerDashboardContent() {
       try {
         const critical = await Promise.allSettled([
           reportService.getDashboard(storeId, period),
-          userService.listUsers(storeId),
+          userService.listProfileNamesForStore(storeId),
           userService.getStore(storeId),
           catalogService.listItems(storeId),
           reportService.getDayStatus(storeId),
           shiftService.listOpenShifts(storeId),
         ]);
         if (!active || !refreshGuardRef.current.isLatest(requestGeneration)) return;
-        const [summaryResult, usersResult, storeResult, catalogResult, dayStatusResult, openShiftsResult] = critical;
+        const [summaryResult, profileNamesResult, storeResult, catalogResult, dayStatusResult, openShiftsResult] = critical;
         if (!active) return;
         if (summaryResult.status === 'fulfilled') setSummary(summaryResult.value);
-        if (usersResult.status === 'fulfilled') setStaff(usersResult.value.filter((member) => member.role === 'staff'));
+        if (profileNamesResult.status === 'fulfilled') setProfileNames(profileNamesResult.value);
         if (storeResult.status === 'fulfilled') setStore(storeResult.value);
         if (catalogResult.status === 'fulfilled') setCatalogItems(catalogResult.value);
         if (dayStatusResult.status === 'fulfilled') setDayStatus(dayStatusResult.value);
@@ -238,26 +259,38 @@ function OwnerDashboardContent() {
     }
   }
 
-  const itemSales = new Map((summary.itemsSold ?? []).map((item) => [item.itemId, item]));
-  const rankedItems = catalogItems.map((item) => ({
+  const itemSales = useMemo(
+    () => new Map((summary.itemsSold ?? []).map((item) => [item.itemId, item])),
+    [summary.itemsSold],
+  );
+  const rankedItems = useMemo(() => catalogItems.map((item) => ({
     id: item.id,
     name: item.name,
     quantity: itemSales.get(item.id)?.quantity ?? 0,
     totalMillimes: itemSales.get(item.id)?.totalMillimes ?? 0,
-  })).sort((left, right) => right.quantity - left.quantity || left.name.localeCompare(right.name));
-  const bestSellers = rankedItems.filter((item) => item.quantity > 0).slice(0, 5);
-  const bestSellerIds = new Set(bestSellers.map((item) => item.id));
-  const slowSellers = rankedItems
+  })).sort((left, right) => right.quantity - left.quantity || left.name.localeCompare(right.name)),
+  [catalogItems, itemSales]);
+  const bestSellers = useMemo(() => rankedItems.filter((item) => item.quantity > 0).slice(0, 5), [rankedItems]);
+  const bestSellerIds = useMemo(() => new Set(bestSellers.map((item) => item.id)), [bestSellers]);
+  const slowSellers = useMemo(() => rankedItems
     .filter((item) => !bestSellerIds.has(item.id))
     .sort((left, right) => left.quantity - right.quantity || left.name.localeCompare(right.name))
-    .slice(0, 5);
-  const lowStockItems = catalogItems.filter((item) =>
+    .slice(0, 5), [bestSellerIds, rankedItems]);
+  const lowStockItems = useMemo(() => catalogItems.filter((item) =>
     item.stockCount !== null && item.stockCount <= (item.lowStockThreshold ?? 5),
-  ).sort((left, right) => (left.stockCount ?? 0) - (right.stockCount ?? 0));
-  const openShifts = summary.shifts.filter((shift) => shift.status === 'open');
-  const currentlyWorking = openShifts.filter((shift, index, all) =>
-    all.findIndex((candidate) => candidate.staffId === shift.staffId) === index,
+  ).sort((left, right) => (left.stockCount ?? 0) - (right.stockCount ?? 0)), [catalogItems]);
+  const openShifts = useMemo(
+    () => summary.shifts.filter((shift) => shift.status === 'open'),
+    [summary.shifts],
   );
+  const currentlyWorking = useMemo(() => {
+    const seenStaff = new Set<string>();
+    return openShifts.filter((shift) => {
+      if (seenStaff.has(shift.staffId)) return false;
+      seenStaff.add(shift.staffId);
+      return true;
+    });
+  }, [openShifts]);
   const salesByStaff = useMemo(() => {
     return summary.employeeBreakdown
       .map((employee) => ({
@@ -267,11 +300,11 @@ function OwnerDashboardContent() {
       }))
       .sort((left, right) => right.sales - left.sales);
   }, [summary.employeeBreakdown]);
-  const salesByDate = summary.salesByDay.map(({ date, salesMillimes }) => ({
+  const salesByDate = useMemo(() => summary.salesByDay.map(({ date, salesMillimes }) => ({
     date,
     label: new Date(`${date}T00:00:00`).toLocaleDateString([], { month: 'short', day: 'numeric' }),
     sales: salesMillimes / 1000,
-  }));
+  })), [summary.salesByDay]);
   const recentOrders = summary.recentOrders;
   const peakHours = summary.salesByHour;
   const todaySalesMillimes = summary.salesTodayMillimes;
@@ -323,7 +356,7 @@ function OwnerDashboardContent() {
   );
   const dayStatusMessage = dayStatus.openShiftCount > 0
     ? `Day open - ${dayStatus.openShiftCount} ${dayStatus.openShiftCount === 1 ? 'shift' : 'shifts'} running: ${runningShifts.map((shift) =>
-      shift.staffId === user?.id ? user?.name ?? 'Owner' : staff.find((member) => member.id === shift.staffId)?.name ?? 'Staff',
+      shift.staffId === user?.id ? user?.name ?? 'Owner' : profileNames.get(shift.staffId) ?? 'Staff',
     ).join(', ')}`
     : dayStatus.dayIsClosed
       ? `Day closed - ${dayStatus.lastZ?.reportNumber ?? 'Z report'} at ${dayStatus.lastZ ? new Date(dayStatus.lastZ.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}. Open a shift to start a new day.`
@@ -418,7 +451,7 @@ function OwnerDashboardContent() {
           <div className="mt-2 flex flex-col gap-2">
             {currentlyWorking.map((shift) => (
               <p key={shift.id} className="flex justify-between gap-3 font-body text-body-sm text-on-surface-variant">
-                <span>{staff.find((member) => member.id === shift.staffId)?.name ?? 'Staff'}</span>
+                <span>{profileNames.get(shift.staffId) ?? 'Staff'}</span>
                 <span className="shrink-0">{new Date(shift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
               </p>
             ))}
@@ -469,16 +502,18 @@ function OwnerDashboardContent() {
         <p className="mt-3 font-body text-body-xs text-on-surface-variant">Share opens your device or browser share sheet. No message is sent automatically.</p>
       </section>
 
-      <section className="owner-chart-grid mobile-gap-3 mt-4 grid grid-cols-1 gap-4 lg:grid-cols-12">
+      <section ref={chartSectionRef} className="owner-chart-grid mobile-gap-3 mt-4 grid grid-cols-1 gap-4 lg:grid-cols-12">
         {renderTargetCard('hidden lg:block dashboard-target-card--desktop')}
 
         <article className="dashboard-peak-chart dashboard-glass dashboard-glass-tint--blue rounded-2xl p-4 shadow-card">
           <h2 className="font-display text-headline-md text-on-surface">{t('owner.peakHours')} · {t(periodLabels[period])}</h2>
           <p className="mt-1 font-body text-body-sm text-on-surface-variant">Completed orders by hour of day.</p>
           <div className="mt-3 h-64 min-w-0">
-            <Suspense fallback={<div className="h-full" aria-hidden="true" />}>
-              <PeakHoursChart data={peakHours} />
-            </Suspense>
+            {chartsNearViewport && (
+              <Suspense fallback={<div className="h-full" aria-hidden="true" />}>
+                <PeakHoursChart data={peakHours} />
+              </Suspense>
+            )}
           </div>
         </article>
 
@@ -487,9 +522,11 @@ function OwnerDashboardContent() {
           <p className="mt-1 font-body text-body-sm text-on-surface-variant">Completed order sales by day.</p>
           {salesByDate.length ? (
             <div className="mt-3 h-64 min-w-0">
-              <Suspense fallback={<div className="h-full" aria-hidden="true" />}>
-                <DashboardSalesByDateChart data={salesByDate} />
-              </Suspense>
+              {chartsNearViewport && (
+                <Suspense fallback={<div className="h-full" aria-hidden="true" />}>
+                  <DashboardSalesByDateChart data={salesByDate} />
+                </Suspense>
+              )}
             </div>
           ) : <p className="mt-3 rounded-xl bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('common.noData')}</p>}
         </article>
@@ -514,9 +551,11 @@ function OwnerDashboardContent() {
           <h2 className="mb-3 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="group" className="text-primary" />Sales by staff member · {t(periodLabels[period])}</h2>
           {salesByStaff.length ? (
             <div className="h-64">
-              <Suspense fallback={<div className="h-full" aria-hidden="true" />}>
-                <DashboardSalesByStaffChart data={salesByStaff} />
-              </Suspense>
+              {chartsNearViewport && (
+                <Suspense fallback={<div className="h-full" aria-hidden="true" />}>
+                  <DashboardSalesByStaffChart data={salesByStaff} />
+                </Suspense>
+              )}
             </div>
           ) : <p className="rounded-xl bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('common.noData')}</p>}
         </article>
@@ -557,7 +596,9 @@ function OwnerDashboardContent() {
             <p className="mb-3 font-body text-body-sm text-outline">{reportDisabledReason || zDisabledReason}</p>
           )}
           <div className="flex flex-col gap-2">
-            {summary.shifts.map((shift) => <ShiftSummary key={shift.id} shift={shift} />)}
+            {summary.shifts.map((shift) => (
+              <ShiftSummary key={shift.id} shift={shift} staffName={profileNames.get(shift.staffId) ?? 'Staff'} />
+            ))}
             {summary.shifts.length === 0 && <p className="rounded-xl bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('common.noData')}</p>}
           </div>
         </article>
@@ -619,11 +660,7 @@ function SummaryCard({ icon, label, value, tone }: {
   );
 }
 
-function ShiftSummary({ shift }: { shift: ShiftRecord }) {
-  const [staffName, setStaffName] = useState('Staff');
-  useEffect(() => {
-    void userService.getUser(shift.staffId).then((staff) => setStaffName(staff?.name ?? 'Staff'));
-  }, [shift.staffId]);
+function ShiftSummary({ shift, staffName }: { shift: ShiftRecord; staffName: string }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-low p-3">
       <div>

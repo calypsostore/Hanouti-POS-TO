@@ -6,7 +6,6 @@ import { useCartStore } from './cartStore';
 import { getSupabaseClient } from '../data/supabaseClient';
 import { isSupabaseDriver } from '../data/driver';
 import { assertExpectedSchemaVersion } from '../services/schemaVersionService';
-import { userService } from '../services/userService';
 import { resetStoreAppearance } from '../lib/storeAppearance';
 
 let authStateSubscription: { unsubscribe: () => void } | undefined;
@@ -41,6 +40,11 @@ function normalizeError(error: unknown): Error {
   return new Error('An unexpected error occurred.', { cause: error });
 }
 
+async function getEffectivePermissions(userId: string): Promise<string[]> {
+  const { userService } = await import('../services/userService');
+  return userService.getEffectivePermissions(userId);
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   cachedUserDisplay: authService.getCachedUserDisplay(),
@@ -57,7 +61,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const requestGeneration = ++permissionRefreshGeneration;
       const [locked, permissions] = await Promise.all([
         user ? authService.isSessionLocked(user.id) : Promise.resolve(false),
-        user?.role === 'staff' ? userService.getEffectivePermissions(user.id) : Promise.resolve([]),
+        user?.role === 'staff' ? getEffectivePermissions(user.id) : Promise.resolve([]),
       ]);
       if (requestGeneration !== permissionRefreshGeneration) return;
       set({
@@ -98,7 +102,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const permissionGeneration = ++permissionRefreshGeneration;
       const [locked, permissions] = await Promise.all([
         user ? authService.isSessionLocked(user.id) : Promise.resolve(false),
-        user?.role === 'staff' ? userService.getEffectivePermissions(user.id) : Promise.resolve([]),
+        user?.role === 'staff' ? getEffectivePermissions(user.id) : Promise.resolve([]),
       ]);
       if (permissionGeneration !== permissionRefreshGeneration || requestGeneration !== authRefreshGeneration) return;
       set({ user, cachedUserDisplay: user ? { name: user.name } : null, locked, permissions, permissionsReady: true, initializationError: null });
@@ -118,7 +122,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return;
     }
     try {
-      const permissions = await userService.getEffectivePermissions(user.id);
+      const permissions = await getEffectivePermissions(user.id);
       if (requestGeneration === permissionRefreshGeneration && get().user?.id === user.id) {
         set({ permissions, permissionsReady: true });
       }
@@ -154,6 +158,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   updateOwnerProfile: async (changes) => {
     const user = get().user;
     if (!user || user.role !== 'owner') throw new Error('Only a signed-in store owner can update this profile.');
+    const { userService } = await import('../services/userService');
     const updatedUser = await userService.updateOwnerProfile(user.id, changes);
     set({ user: updatedUser, cachedUserDisplay: { name: updatedUser.name } });
     return updatedUser;
@@ -161,6 +166,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   updateProfileAvatar: async (avatarId) => {
     const user = get().user;
     if (!user) throw new Error('You must sign in before choosing an avatar.');
+    const { userService } = await import('../services/userService');
     const updatedUser = await userService.updateProfileAvatar(user.id, avatarId);
     set({ user: updatedUser, cachedUserDisplay: { name: updatedUser.name } });
     return updatedUser;

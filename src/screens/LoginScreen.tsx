@@ -190,7 +190,7 @@ export function LoginScreen() {
         ? ['owner', 'super_admin'] as const
         : ['staff'] as const;
       const user = await login(identifier, password, [...allowedRoles]);
-      navigate(user.mustChangePassword ? '/set-password' : user.role === 'staff' ? '/dashboard' : user.role === 'owner' ? '/owner/dashboard' : '/admin/overview');
+      navigate(user.mustChangePassword || user.mustSetPin || user.mustSetVoidPin ? '/set-password' : user.role === 'staff' ? '/dashboard' : user.role === 'owner' ? '/owner/dashboard' : '/admin/overview');
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : t('login.unableToSignIn'));
     } finally {

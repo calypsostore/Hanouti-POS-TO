@@ -12,7 +12,7 @@ export function PermissionsPrompt() {
   const userId = user?.id;
   const locked = useAuthStore((state) => state.locked);
   const latestNotificationId = useNotificationStore((state) => state.items[0]?.id);
-  const canPromptUser = Boolean(user && !locked && !user.mustChangePassword && !user.mustSetPin);
+  const canPromptUser = Boolean(user && !locked && !user.mustChangePassword && !user.mustSetPin && !user.mustSetVoidPin);
   const [status, setStatus] = useState<NotificationPermissionStatus>('prompt');
   const [visible, setVisible] = useState(false);
   const [showInstructions, setShowInstructions] = useState(false);

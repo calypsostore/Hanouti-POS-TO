@@ -38,17 +38,24 @@ describe('credential lifecycle', () => {
     const signedIn = await authService.login(owner.email ?? '', temporaryPassword, ['owner']);
     expect(signedIn.mustChangePassword).toBe(true);
     expect(signedIn.mustSetPin).toBe(true);
+    expect(signedIn.mustSetVoidPin).toBe(true);
 
     const passwordUpdated = await authService.setInitialPassword(owner.id, 'OwnerPassword1');
     expect(passwordUpdated.mustChangePassword).toBe(false);
     expect(passwordUpdated.mustSetPin).toBe(true);
     const pinUpdated = await authService.setPersonalPin(owner.id, '1234');
     expect(pinUpdated.mustSetPin).toBe(false);
+    expect(pinUpdated.mustSetVoidPin).toBe(true);
+    await userService.updateStorePin(store.id, '2468');
+    expect((await authService.getCurrentUser())?.mustSetVoidPin).toBe(false);
+    await expect(userService.verifyStorePin(store.id, '2468', 'void')).resolves.toBe(true);
 
     await authService.changePersonalPin(owner.id, '1234', '5678');
     await authService.lockCurrentSession();
     expect(await authService.isSessionLocked(owner.id)).toBe(true);
     expect((await authService.unlockCurrentSessionWithPin('5678')).id).toBe(owner.id);
+    await authService.lockCurrentSession();
+    expect((await authService.unlockCurrentSessionWithPassword('OwnerPassword1')).id).toBe(owner.id);
     await userService.updateOwnerProfile(owner.id, { name: 'Updated Owner', phone: '55512345' });
     const updatedOwner = await userService.getUser(owner.id);
     expect(updatedOwner?.name).toBe('Updated Owner');
@@ -59,6 +66,8 @@ describe('credential lifecycle', () => {
       id: store.id,
       name: 'Updated Store',
     });
+    await authService.logout();
+    expect(await authService.getCurrentUser()).toBeNull();
   });
 
   it('lets the owner configure separate staff and owner auto-lock timeouts, including never', async () => {
@@ -122,6 +131,7 @@ describe('credential lifecycle', () => {
     const signedIn = await authService.login(staff.username ?? '', temporaryPassword);
     expect(signedIn.mustChangePassword).toBe(true);
     expect(signedIn.mustSetPin).toBe(true);
+    expect(signedIn.mustSetVoidPin).toBe(false);
 
     const passwordUpdated = await authService.setInitialPassword(staff.id, 'StaffPassword1');
     expect(passwordUpdated.mustChangePassword).toBe(false);
@@ -148,7 +158,8 @@ describe('credential lifecycle', () => {
 
   it('lets only the super admin issue owner password resets without requiring a staff PIN', async () => {
     await expect(userService.resetOwnerPassword('owner-lamarsa', 'owner-lamarsa')).rejects.toThrow('Only an active platform owner');
-    await authService.login('owner@cafelamarsa.tn', 'owner123', ['owner']);
+    const seedOwner = await authService.login('owner@cafelamarsa.tn', 'owner123', ['owner']);
+    expect(seedOwner.mustSetPin).toBe(true);
     const temporaryPassword = await userService.resetOwnerPassword('owner-lamarsa', 'super-admin');
     expect(await authService.getCurrentUser()).toBeNull();
     const owner = await authService.login('owner@cafelamarsa.tn', temporaryPassword, ['owner']);

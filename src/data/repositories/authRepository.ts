@@ -112,6 +112,10 @@ async function currentUser(): Promise<UserSummary | null> {
       return null;
     }
     if (isSubscriptionExpired(store)) throw new Error('Subscription expired, contact 7anouti');
+    profile = {
+      ...profile,
+      mustSetVoidPin: profile.role === 'owner' && Boolean(store.pinMustChange),
+    };
   }
   cacheUserDisplay(profile);
   return profile;

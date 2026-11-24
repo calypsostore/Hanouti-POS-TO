@@ -65,7 +65,9 @@ export interface UserRecord {
   createdAt: string;
 }
 
-export type UserSummary = Omit<UserRecord, 'password' | 'passwordHash' | 'pinHash'>;
+export type UserSummary = Omit<UserRecord, 'password' | 'passwordHash' | 'pinHash'> & {
+  mustSetVoidPin?: boolean;
+};
 
 export type SettlementTerms = 'weekly' | 'monthly' | 'anytime';
 export type StoreType = 'general' | 'coffee' | 'restaurant' | 'bakery' | 'grocery';

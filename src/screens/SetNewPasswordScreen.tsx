@@ -18,33 +18,80 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
   const setInitialPin = useAuthStore((state) => state.setInitialPin);
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
-  const [pinStep, setPinStep] = useState(Boolean(
-    (user?.role === 'staff' || user?.role === 'owner') && user.mustSetPin && !user.mustChangePassword,
-  ));
   const [pin, setPin] = useState('');
+  const [voidPin, setVoidPin] = useState('');
   const [visible, setVisible] = useState(false);
   const [error, setError] = useState('');
+  const setupStep = user?.mustChangePassword
+    ? 'password'
+    : user?.mustSetPin
+      ? 'personal-pin'
+      : user?.mustSetVoidPin
+        ? 'void-pin'
+        : 'complete';
+  const pinStep = setupStep === 'personal-pin' || setupStep === 'void-pin';
+  const activePin = setupStep === 'void-pin' ? voidPin : pin;
+  const setupSteps = user?.role === 'owner'
+    ? [
+      { id: 'password', label: t('password.stepPassword') },
+      { id: 'personal-pin', label: t('password.stepPersonalPin') },
+      { id: 'void-pin', label: t('password.stepVoidPin') },
+    ]
+    : user?.role === 'staff'
+      ? [
+        { id: 'password', label: t('password.stepPassword') },
+        { id: 'personal-pin', label: t('password.stepPersonalPin') },
+      ]
+      : [{ id: 'password', label: t('password.stepPassword') }];
+  const activeStepIndex = setupSteps.findIndex((step) => step.id === setupStep);
+  const completedSteps = activeStepIndex < 0 ? setupSteps.length : activeStepIndex;
+  const stepCounter = activeStepIndex < 0
+    ? 'Setup complete'
+    : t('password.stepCounter', { current: String(activeStepIndex + 1), total: String(setupSteps.length) });
 
   const longEnough = password.length >= 6;
   const matching = password.length > 0 && password === confirmation;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (pinStep) {
-      if (!/^\d{4}$/.test(pin)) {
-        setError('PIN must contain exactly 4 digits.');
+    if (setupStep === 'personal-pin') {
+      if (!/^\d{4}$/.test(activePin)) {
+        setError('Personal PIN must contain exactly 4 digits.');
         return;
       }
       setError('');
       try {
-        await setInitialPin(pin);
-        onSetupComplete();
-        navigate(user?.role === 'staff' ? '/dashboard' : user?.role === 'owner' ? '/owner/dashboard' : '/admin/overview');
+        const updatedUser = await setInitialPin(pin);
+        if (!updatedUser.mustSetVoidPin) {
+          onSetupComplete();
+          navigate(updatedUser.role === 'staff' ? '/dashboard' : updatedUser.role === 'owner' ? '/owner/dashboard' : '/admin/overview');
+        }
       } catch (pinError) {
         setError(pinError instanceof Error ? pinError.message : 'Unable to set your PIN.');
       }
       return;
     }
+    if (setupStep === 'void-pin') {
+      if (!/^\d{4}$/.test(activePin)) {
+        setError('Store void PIN must contain exactly 4 digits.');
+        return;
+      }
+      if (!user?.storeId || user.role !== 'owner') {
+        setError('Only a signed-in store owner can set the store void PIN.');
+        return;
+      }
+      setError('');
+      try {
+        await userService.updateStorePin(user.storeId, voidPin);
+        await useAuthStore.getState().refreshCurrentUser();
+        onSetupComplete();
+        navigate('/owner/dashboard');
+      } catch (pinError) {
+        setError(pinError instanceof Error ? pinError.message : 'Unable to set the store void PIN.');
+      }
+      return;
+    }
+    if (setupStep !== 'password') return;
     if (!longEnough) {
       setError(t('password.useSixCharacters'));
       return;
@@ -57,12 +104,11 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
     try {
       const updatedUser = await setInitialPassword(password);
       if (!user) throw new Error(t('auth.signInBeforePassword'));
-      if ((updatedUser.role === 'staff' || updatedUser.role === 'owner') && updatedUser.mustSetPin) {
-        setPinStep(true);
+      if (updatedUser.mustSetPin || updatedUser.mustSetVoidPin) {
         return;
       }
       onSetupComplete();
-      navigate(updatedUser.role === 'owner' ? '/owner/dashboard' : '/admin/overview');
+      navigate(updatedUser.role === 'staff' ? '/dashboard' : updatedUser.role === 'owner' ? '/owner/dashboard' : '/admin/overview');
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : t('password.unableToUpdate'));
     }
@@ -71,9 +117,26 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
   const accountName = user?.username ?? user?.email ?? '';
   const [store, setStore] = useState<Awaited<ReturnType<typeof userService.getStore>>>();
   useEffect(() => {
-    if (user?.storeId) void userService.getStore(user.storeId).then(setStore);
+    if (!user?.storeId) return;
+    let active = true;
+    void userService.getStore(user.storeId).then((loadedStore) => {
+      if (active) setStore(loadedStore);
+    }).catch((storeError: unknown) => {
+      if (active) setError(storeError instanceof Error ? storeError.message : 'Unable to load store details.');
+    });
+    return () => { active = false; };
   }, [user?.storeId]);
   const accountRole = user?.role === 'staff' ? t('password.verifiedStaff') : user?.role === 'owner' ? t('password.verifiedOwner') : t('password.verifiedAdmin');
+  const heading = setupStep === 'personal-pin'
+    ? t('password.setPersonalPin')
+    : setupStep === 'void-pin'
+      ? t('password.setVoidPin')
+      : t('password.setNew');
+  const description = setupStep === 'personal-pin'
+    ? t('password.personalPinDescription')
+    : setupStep === 'void-pin'
+      ? t('password.voidPinDescription')
+      : t('password.firstLoginRequirement', { account: user?.role === 'staff' ? t('password.storeTerminal') : t('password.account') });
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-surface via-surface-container-low to-surface px-4 pb-8 pt-3">
@@ -92,11 +155,35 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
               <MaterialIcon name="key" className="text-base" />
             </span>
           </div>
-          <h1 className="font-display text-headline-lg text-on-surface">{pinStep ? 'Set your PIN' : t('password.setNew')}</h1>
-          <p className="mt-1.5 max-w-sm font-body text-body-md text-on-surface-variant">
-            {pinStep ? 'Set your personal 4-digit PIN to finish securing your account.' : t('password.firstLoginRequirement', { account: user?.role === 'staff' ? t('password.storeTerminal') : t('password.account') })}
-          </p>
+          <h1 className="font-display text-headline-lg text-on-surface">{heading}</h1>
+          <p className="mt-1.5 max-w-sm font-body text-body-md text-on-surface-variant">{description}</p>
         </header>
+
+        <p role="status" className="mb-2 font-body text-label-sm text-on-surface-variant">
+          {stepCounter}
+        </p>
+        <ol aria-label="Account setup steps" className="mb-5 grid gap-2">
+          {setupSteps.map((step, index) => {
+            const isComplete = index < completedSteps;
+            const isCurrent = index === activeStepIndex;
+            return (
+              <li
+                key={step.id}
+                aria-current={isCurrent ? 'step' : undefined}
+                className={`flex items-center gap-3 rounded-xl px-4 py-3 font-body text-label-md ${
+                  isCurrent ? 'bg-primary-fixed text-primary' : isComplete ? 'bg-success-container text-success-dark' : 'bg-surface-container-low text-on-surface-variant'
+                }`}
+              >
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-surface-container-lowest font-display text-label-md">
+                  {isComplete ? <MaterialIcon name="check" className="text-base" /> : index + 1}
+                </span>
+                <span className="flex-1">{step.label}</span>
+                {isCurrent && <span className="text-label-sm">{t('password.currentStep')}</span>}
+                {isComplete && <span className="text-label-sm">{t('password.stepComplete')}</span>}
+              </li>
+            );
+          })}
+        </ol>
 
         <section className="mb-5 rounded-xl bg-surface-container-lowest p-4 shadow-card">
           <div className="mb-2 flex items-center justify-between gap-2">
@@ -120,7 +207,9 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           {pinStep ? (
             <div>
-              <label htmlFor="personal-pin" className="mb-1.5 block font-body text-label-lg text-on-surface">Personal 4-digit PIN</label>
+              <label htmlFor="personal-pin" className="mb-1.5 block font-body text-label-lg text-on-surface">
+                {setupStep === 'void-pin' ? 'Store void PIN (4 digits)' : 'Personal 4-digit PIN'}
+              </label>
               <input
                 id="personal-pin"
                 required
@@ -129,15 +218,23 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
                 maxLength={4}
                 inputMode="numeric"
                 autoComplete="new-password"
-                value={pin}
-                onChange={(event) => setPin(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                value={activePin}
+                onChange={(event) => {
+                  const nextPin = event.target.value.replace(/\D/g, '').slice(0, 4);
+                  if (setupStep === 'void-pin') setVoidPin(nextPin);
+                  else setPin(nextPin);
+                }}
                 placeholder="••••"
                 className="h-14 w-full rounded-xl bg-surface-container-lowest px-4 text-center font-display text-headline-md tracking-[0.5em] shadow-card outline-none focus:ring-2 focus:ring-primary"
               />
               <Keypad
-                onPress={(digit) => setPin((current) => current.length < 4 ? `${current}${digit}` : current)}
-                onClear={() => setPin('')}
-                onBackspace={() => setPin((current) => current.slice(0, -1))}
+                onPress={(digit) => {
+                  const updatePin = (current: string) => current.length < 4 ? `${current}${digit}` : current;
+                  if (setupStep === 'void-pin') setVoidPin(updatePin);
+                  else setPin(updatePin);
+                }}
+                onClear={() => setupStep === 'void-pin' ? setVoidPin('') : setPin('')}
+                onBackspace={() => setupStep === 'void-pin' ? setVoidPin((current) => current.slice(0, -1)) : setPin((current) => current.slice(0, -1))}
               />
             </div>
           ) : (
@@ -205,9 +302,9 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
           )}
 
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
-          <Button type="submit" disabled={pinStep ? !/^\d{4}$/.test(pin) : !matching || !longEnough} className="mt-1 min-h-14 w-full text-body-lg">
+          <Button type="submit" disabled={pinStep ? !/^\d{4}$/.test(activePin) : !matching || !longEnough} className="mt-1 min-h-14 w-full text-body-lg">
             <MaterialIcon name="check" filled />
-            {pinStep ? 'Set PIN and continue' : t('password.saveContinue')}
+            {setupStep === 'personal-pin' ? 'Set personal PIN and continue' : setupStep === 'void-pin' ? 'Set store void PIN and finish' : t('password.saveContinue')}
           </Button>
         </form>
 

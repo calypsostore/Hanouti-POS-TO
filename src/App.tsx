@@ -107,14 +107,14 @@ function GuestRoute() {
   const locked = useAuthStore((state) => state.locked);
   if (!user) return <LoginScreen />;
   if (locked) return <Navigate to="/lock" replace state={{ from: location.pathname }} />;
-  return <Navigate to={user.mustChangePassword || user.mustSetPin ? '/set-password' : homeForRole(user.role)} replace />;
+  return <Navigate to={user.mustChangePassword || user.mustSetPin || user.mustSetVoidPin ? '/set-password' : homeForRole(user.role)} replace />;
 }
 
 function SetPasswordRoute() {
   const user = useAuthStore((state) => state.user);
-  const [setupActive, setSetupActive] = useState(Boolean(user?.mustChangePassword || user?.mustSetPin));
+  const [setupActive, setSetupActive] = useState(Boolean(user?.mustChangePassword || user?.mustSetPin || user?.mustSetVoidPin));
   if (!user) return <Navigate to="/" replace />;
-  if (!user.mustChangePassword && !user.mustSetPin && !setupActive) return <Navigate to={homeForRole(user.role)} replace />;
+  if (!user.mustChangePassword && !user.mustSetPin && !user.mustSetVoidPin && !setupActive) return <Navigate to={homeForRole(user.role)} replace />;
   return <SetNewPasswordScreen onSetupComplete={() => setSetupActive(false)} />;
 }
 
@@ -146,7 +146,7 @@ function ProtectedRoute({ roles, children, permission }: ProtectedRouteProps) {
 
   if (!user) return <Navigate to="/" replace state={{ from: location.pathname }} />;
   if (locked) return <Navigate to="/lock" replace />;
-  if (user.mustChangePassword || user.mustSetPin) return <Navigate to="/set-password" replace />;
+  if (user.mustChangePassword || user.mustSetPin || user.mustSetVoidPin) return <Navigate to="/set-password" replace />;
   if (!roles.includes(user.role)) return <Navigate to={homeForRole(user.role)} replace />;
   const permissionAllowed = permissionKey.split('|').some((permissionId) => permissions.includes(permissionId));
   if (permission && user.role === 'staff' && !permissionsReady) return <LoadingScreen message={t('app.loading')} />;
@@ -160,7 +160,7 @@ function LockRoute() {
   const locked = useAuthStore((state) => state.locked);
   const location = useLocation();
   if (!user) return <Navigate to="/" replace />;
-  if (user.mustChangePassword || user.mustSetPin) return <Navigate to="/set-password" replace />;
+  if (user.mustChangePassword || user.mustSetPin || user.mustSetVoidPin) return <Navigate to="/set-password" replace />;
   if (user.role !== 'staff' && user.role !== 'owner') return <Navigate to={homeForRole(user.role)} replace />;
   if (!locked) return <Navigate to={homeForRole(user.role)} replace />;
   const stateFrom = typeof location.state === 'object' && location.state !== null && 'from' in location.state
@@ -334,7 +334,7 @@ export default function App() {
   }, [ready, user?.id, user?.role, user?.storeId]);
 
   useEffect(() => {
-    if (!ready || locked || (user?.role !== 'staff' && user?.role !== 'owner') || user.mustChangePassword || user.mustSetPin || !user.storeId) return;
+    if (!ready || locked || (user?.role !== 'staff' && user?.role !== 'owner') || user.mustChangePassword || user.mustSetPin || user.mustSetVoidPin || !user.storeId) return;
     let active = true;
     let timeoutId = 0;
     let timeoutMs = (user.role === 'staff' ? 5 : 0) * 60_000;
@@ -405,7 +405,7 @@ export default function App() {
       window.removeEventListener('focus', checkForIdleLock);
       window.removeEventListener(STORE_AUTO_LOCK_CHANGED_EVENT, loadAutoLockTimeout);
     };
-  }, [ready, locked, user?.id, user?.mustChangePassword, user?.mustSetPin, user?.role, user?.storeId]);
+  }, [ready, locked, user?.id, user?.mustChangePassword, user?.mustSetPin, user?.mustSetVoidPin, user?.role, user?.storeId]);
 
   useEffect(() => {
     if (!ready) return;
@@ -477,7 +477,7 @@ export default function App() {
         {user && <PermissionsPrompt />}
         {user && !locked && <NotificationsBridge />}
       </Suspense>
-      <PullToRefresh enabled={Boolean(user && !locked && !user.mustChangePassword && !user.mustSetPin)}>
+      <PullToRefresh enabled={Boolean(user && !locked && !user.mustChangePassword && !user.mustSetPin && !user.mustSetVoidPin)}>
         <Suspense fallback={<LoadingScreen message={t('app.loading')} />}>
           <Routes>
           <Route path="/" element={<GuestRoute />} />

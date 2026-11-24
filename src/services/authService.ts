@@ -49,11 +49,15 @@ function isAccountActive(user: UserRecord): boolean {
 
 function withoutPassword(user: UserRecord): UserSummary {
   const { password: _password, passwordHash: _passwordHash, pinHash: _pinHash, ...safeUser } = user;
+  const store = user.role === 'owner' && user.storeId
+    ? readData('stores', seedStores).find((candidate) => candidate.id === user.storeId)
+    : undefined;
   return {
     ...safeUser,
-    mustSetPin: user.role === 'staff'
+    mustSetPin: (user.role === 'staff' || user.role === 'owner')
       ? user.mustSetPin ?? (user.mustChangePassword || !user.pinHash)
-      : user.role === 'owner' && (user.mustSetPin ?? false),
+      : false,
+    mustSetVoidPin: user.role === 'owner' && Boolean(store?.pinMustChange),
   };
 }
 
@@ -272,7 +276,7 @@ export const authService = {
       passwordHash: await hashSecret(newPassword),
       mustChangePassword: false,
       pinHash: user.role === 'staff' && user.mustChangePassword ? undefined : user.pinHash,
-      mustSetPin: user.role === 'staff' && user.mustChangePassword ? true : user.mustSetPin,
+      mustSetPin: (user.role === 'staff' || user.role === 'owner') && user.mustChangePassword ? true : user.mustSetPin,
     };
     saveUsers(users.map((candidate) => candidate.id === userId ? updatedUser : candidate));
     if (user.storeId) {

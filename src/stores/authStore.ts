@@ -25,7 +25,7 @@ interface AuthState {
   refreshPermissions: () => Promise<void>;
   login: (identifier: string, password: string, roles?: UserRole[]) => Promise<UserSummary>;
   setInitialPassword: (password: string) => Promise<UserSummary>;
-  setInitialPin: (pin: string) => Promise<void>;
+  setInitialPin: (pin: string) => Promise<UserSummary>;
   updateOwnerProfile: (changes: { name: string; phone: string }) => Promise<UserSummary>;
   updateProfileAvatar: (avatarId: ProfileAvatarId) => Promise<UserSummary>;
   lock: () => Promise<void>;
@@ -154,6 +154,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (!user) throw new Error('You must sign in before setting a PIN.');
     const updatedUser = await authService.setPersonalPin(user.id, pin);
     set({ user: updatedUser, cachedUserDisplay: { name: updatedUser.name } });
+    return updatedUser;
   },
   updateOwnerProfile: async (changes) => {
     const user = get().user;

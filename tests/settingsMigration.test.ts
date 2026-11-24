@@ -4,9 +4,19 @@ import { describe, expect, it } from 'vitest';
 const settingsScreen = readFileSync('src/screens/SettingsScreen.tsx', 'utf8');
 const settingsStyles = readFileSync('src/styles.css', 'utf8');
 const logoPicker = readFileSync('src/components/LogoPicker.tsx', 'utf8');
+const settingsSection = readFileSync('src/components/settings/SettingsGlassSection.tsx', 'utf8');
 
-describe('Settings Crystal Glass migration', () => {
-  it('keeps every role-based owner Settings subsection in the rendered screen', () => {
+describe('Settings legacy layout', () => {
+  it('renders the historical category overview and opens one section at a time', () => {
+    expect(settingsScreen).toContain('<div className="settings-content settings-workspace">');
+    expect(settingsScreen).toContain('className="settings-overview"');
+    expect(settingsScreen).toContain('className="settings-overview-card"');
+    expect(settingsScreen).toContain('<div className="settings-section-content">');
+    expect(settingsScreen).toContain('className="settings-back-button"');
+    expect(settingsScreen).toContain("activeSection.id === 'display'");
+    expect(settingsScreen).toContain("hidden={activeSection.id !== 'receipts'}");
+    expect(settingsScreen).not.toContain('settings-section-nav');
+
     for (const section of [
       'display',
       'store',
@@ -24,17 +34,16 @@ describe('Settings Crystal Glass migration', () => {
     }
   });
 
-  it('uses shared glass section and popup styling hooks', () => {
+  it('keeps settings section deep links and existing controls available', () => {
     expect(settingsScreen).toContain('SettingsGlassSection');
     expect(settingsScreen).toContain('settings-logo-picker-panel');
-    expect(settingsScreen).not.toContain('settings-page-header');
-    expect(settingsScreen).toContain('settings-workspace');
-    expect(settingsScreen).toContain('settings-overview');
+    expect(settingsScreen).toContain('setSearchParams({ section: section.id })');
+    expect(settingsSection).toContain('id={id}');
     expect(logoPicker).toContain('panelClassName');
     expect(settingsStyles).toContain('.settings-glass-section');
     expect(settingsStyles).toContain('.settings-logo-picker-panel');
     expect(settingsStyles).toContain('.workspace-layout.settings-screen-layout');
-    expect(settingsStyles).not.toContain('.settings-page-header');
-    expect(settingsStyles).not.toContain('.settings-dashboard');
+    expect(settingsStyles).toContain('.settings-overview-card');
+    expect(settingsStyles).toContain('.settings-section-content [hidden]');
   });
 });

@@ -64,6 +64,7 @@ export function OwnerExpensesScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const selectedExpenseId = new URLSearchParams(window.location.search).get('expenseId') ?? '';
 
   useEffect(() => {
     let active = true;
@@ -128,6 +129,9 @@ export function OwnerExpensesScreen() {
   }
 
   const supplierNames = new Map(suppliers.map((supplier) => [supplier.id, supplier.name]));
+  const visibleExpenses = selectedExpenseId
+    ? expenses.filter((expense) => expense.id === selectedExpenseId)
+    : expenses;
   const enteredAmount = parseNonNegativeMillimes(amount);
   const canSave = enteredAmount !== undefined && enteredAmount > 0 &&
     (newCategory !== 'supplier' || Boolean(supplierId));
@@ -167,7 +171,7 @@ export function OwnerExpensesScreen() {
         </label>
       </section>
       <CardGrid className="mobile-card-list mobile-gap-2">
-        {loading ? <ListSkeleton label="Loading expenses" /> : expenses.map((expense) => (
+        {loading ? <ListSkeleton label="Loading expenses" /> : visibleExpenses.map((expense) => (
           <article key={expense.id} className="rounded-xl bg-surface-container-lowest p-4 shadow-card">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -184,7 +188,7 @@ export function OwnerExpensesScreen() {
             </div>
           </article>
         ))}
-        {!loading && !error && expenses.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">{t('common.noData')}</p>}
+        {!loading && !error && visibleExpenses.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">{t('common.noData')}</p>}
       </CardGrid>
 
       <BottomSheet open={sheetOpen} onClose={() => setSheetOpen(false)} title="Add expense">
@@ -234,7 +238,7 @@ export function OwnerSuppliersScreen() {
   const [suppliers, setSuppliers] = useState<SupplierBalanceRecord[]>([]);
   const [suppliersLoading, setSuppliersLoading] = useState(true);
   const [storeName, setStoreName] = useState('');
-  const [selectedId, setSelectedId] = useState('');
+  const [selectedId, setSelectedId] = useState(() => new URLSearchParams(window.location.search).get('supplierId') ?? '');
   const [details, setDetails] = useState<SupplierDetails | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);

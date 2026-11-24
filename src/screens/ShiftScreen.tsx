@@ -51,10 +51,11 @@ import { useFocusRefreshKey } from '../lib/useFocusRefreshKey';
 import { reportService, type ReportDayStatus } from '../services/reportService';
 import { ReportView } from '../components/ReportView';
 import type { OrderRecord, ReportRecord, ReportShiftLine, UnresolvedTabReversalRecord } from '../types/domain';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { parseNonNegativeMillimes } from '../lib/millimes';
 import { createLatestRequestGuard } from '../lib/requestGuard';
 import { ShiftNotificationsButton } from '../components/ShiftNotificationsButton';
+import { WorkspaceSearch } from '../components/WorkspaceSearch';
 import { getReportCloseDate } from '../lib/reportArchive';
 import { dateKeyInTimezone } from '../lib/date';
 
@@ -92,6 +93,12 @@ const cashMovementReasons: { reason: CashMovementReason; label: string }[] = [
 
 function localDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function validDateKey(value: string | null): value is string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00`);
+  return !Number.isNaN(date.getTime()) && localDateKey(date) === value;
 }
 
 function getSparklinePath(values: number[]): string {
@@ -182,6 +189,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const [openShiftSheetOpen, setOpenShiftSheetOpen] = useState(false);
   const [closeShiftSheetOpen, setCloseShiftSheetOpen] = useState(false);
   const [forceCloseShiftTarget, setForceCloseShiftTarget] = useState<ShiftRecord | null>(null);
+  const location = useLocation();
   const [activeTab, setActiveTab] = useState<'shifts' | 'reports' | 'archive'>(() => {
     if (!ownerMode) return 'shifts';
     const tab = new URLSearchParams(window.location.search).get('tab');
@@ -193,10 +201,22 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     url.searchParams.set('tab', tab);
     window.history.replaceState(window.history.state, '', `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
   };
-  const [historySearch, setHistorySearch] = useState('');
+  const [historySearch, setHistorySearch] = useState(() => new URLSearchParams(window.location.search).get('search') ?? '');
   const [historyStatus, setHistoryStatus] = useState<'all' | 'open' | 'closed'>('all');
   const [historyStaff, setHistoryStaff] = useState('all');
-  const [historyDate, setHistoryDate] = useState(() => localDateKey(new Date()));
+  const [historyDate, setHistoryDate] = useState(() => {
+    const date = new URLSearchParams(window.location.search).get('date');
+    return validDateKey(date) ? date : localDateKey(new Date());
+  });
+  useEffect(() => {
+    const query = new URLSearchParams(location.search);
+    const tab = query.get('tab');
+    if (tab === 'shifts' || tab === 'reports' || tab === 'archive') setActiveTab(tab);
+    const search = query.get('search');
+    setHistorySearch(search ?? '');
+    const date = query.get('date');
+    setHistoryDate(validDateKey(date) ? date : localDateKey(new Date()));
+  }, [location.search]);
   const [ownerPin, setOwnerPin] = useState('');
   const [forceShiftPin, setForceShiftPin] = useState('');
   const [forceShiftConfirmed, setForceShiftConfirmed] = useState(false);
@@ -237,20 +257,9 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     hasActivity: false,
     openShiftCount: 0,
   });
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [overviewRetry, setOverviewRetry] = useState(0);
   const refreshGuardRef = useRef(createLatestRequestGuard());
   const zSubmissionRef = useRef(false);
-
-  useEffect(() => {
-    const updateFullscreenState = () => {
-      const workspace = document.querySelector<HTMLElement>('.workspace-layout.shift-screen-layout');
-      const fullscreenActive = document.fullscreenElement === workspace;
-      setIsFullscreen(fullscreenActive);
-    };
-    document.addEventListener('fullscreenchange', updateFullscreenState);
-    return () => document.removeEventListener('fullscreenchange', updateFullscreenState);
-  }, []);
 
   useEffect(() => updateService.registerUnsavedState(() => startingCashEdited || countedCash.length > 0), [startingCashEdited, countedCash.length]);
 
@@ -339,47 +348,6 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     });
   }), [refresh, storeId]);
 
-  useEffect(() => {
-    if (loading) return;
-    const storageKey = '7anouti-pos:shift-screen-position:v1';
-    const getSavedPositions = (): Record<string, { windowY: number; containerY: number }> => {
-      try {
-        const parsed = JSON.parse(window.sessionStorage.getItem(storageKey) ?? '{}');
-        return parsed && typeof parsed === 'object' ? parsed : {};
-      } catch {
-        return {};
-      }
-    };
-    const savePosition = () => {
-      const container = document.querySelector<HTMLElement>('.shift-workspace--owner');
-      const positions = getSavedPositions();
-      positions[activeTab] = {
-        windowY: window.scrollY,
-        containerY: container?.scrollTop ?? 0,
-      };
-      window.sessionStorage.setItem(storageKey, JSON.stringify(positions));
-    };
-    const saved = getSavedPositions()[activeTab];
-    const firstFrame = window.requestAnimationFrame(() => {
-      const container = document.querySelector<HTMLElement>('.shift-workspace--owner');
-      window.scrollTo({ top: saved?.windowY ?? 0, behavior: 'auto' });
-      if (container) container.scrollTop = saved?.containerY ?? 0;
-    });
-
-    window.addEventListener('scroll', savePosition, { passive: true });
-    window.addEventListener('pagehide', savePosition);
-    window.addEventListener('beforeunload', savePosition);
-    const container = document.querySelector<HTMLElement>('.shift-workspace--owner');
-    container?.addEventListener('scroll', savePosition, { passive: true });
-    return () => {
-      savePosition();
-      window.cancelAnimationFrame(firstFrame);
-      window.removeEventListener('scroll', savePosition);
-      window.removeEventListener('pagehide', savePosition);
-      window.removeEventListener('beforeunload', savePosition);
-      container?.removeEventListener('scroll', savePosition);
-    };
-  }, [activeTab, loading]);
 
   async function openShift(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -806,22 +774,6 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     return right.createdAt.localeCompare(left.createdAt);
   });
 
-  async function toggleFullscreen() {
-    try {
-      const workspace = document.querySelector<HTMLElement>('.workspace-layout.shift-screen-layout');
-      if (!workspace) throw new Error('Shift workspace is unavailable.');
-
-      if (document.fullscreenElement === workspace) {
-        await document.exitFullscreen();
-      } else {
-        await workspace.requestFullscreen();
-      }
-    } catch (fullscreenError) {
-      console.error('Unable to toggle full-screen shift view.', fullscreenError);
-      setError('Full-screen mode is unavailable in this browser.');
-    }
-  }
-
   const isArchivePreview = reportPreview?.type === 'Z' &&
     getReportCloseDate(reportPreview, reportTimeZone) === archiveDate
     ? reportPreview
@@ -938,7 +890,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   return (
     <div className={`shift-workspace ${ownerMode ? 'shift-workspace--owner' : ''}`}>
       {ownerMode && (
-        <div className={`shift-topbar${activeTab === 'shifts' ? ' shift-topbar--search' : ''}`}>
+        <div className="shift-topbar shift-topbar--search">
           <Link to="/owner/dashboard" className="shift-topbar-brand" aria-label="Go to 7anouti-POS dashboard">
             <span className="shift-topbar-logo" aria-hidden="true">
               <img src="/logo1.png" alt="" />
@@ -948,23 +900,9 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
               <span>Smart Business</span>
             </span>
           </Link>
-          {activeTab === 'shifts' && (
-            <label className="shift-topbar-search">
-              <MaterialIcon name="search" className="shift-topbar-search__icon" />
-              <input
-                className="shift-topbar-search__input"
-                value={historySearch}
-                onChange={(event) => setHistorySearch(event.target.value)}
-                placeholder="Search staff or date"
-                aria-label="Search shift history"
-              />
-            </label>
-          )}
+          <WorkspaceSearch key={storeId} storeId={storeId} />
           <div className="shift-topbar-actions">
             <ShiftNotificationsButton />
-            <button type="button" className="shift-topbar-icon-button" onClick={() => { void toggleFullscreen(); }} aria-label={isFullscreen ? 'Exit full screen' : 'Enter full screen'}>
-              <MaterialIcon name={isFullscreen ? 'fullscreen_exit' : 'fullscreen'} />
-            </button>
           </div>
         </div>
       )}

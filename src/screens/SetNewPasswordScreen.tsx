@@ -124,6 +124,7 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
               <input
                 id="personal-pin"
                 required
+                type="password"
                 pattern="[0-9]{4}"
                 maxLength={4}
                 inputMode="numeric"

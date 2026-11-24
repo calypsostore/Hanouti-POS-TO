@@ -65,13 +65,6 @@ interface HelpStep {
   body: TranslationKey;
 }
 
-interface SettingsSection {
-  id: string;
-  title: string;
-  description: string;
-  icon: string;
-}
-
 const staffHelpSteps: HelpStep[] = [
   { icon: 'lock_open', title: 'help.openShift.title', body: 'help.openShift.body' },
   { icon: 'point_of_sale', title: 'help.takeOrder.title', body: 'help.takeOrder.body' },
@@ -236,7 +229,7 @@ export function SettingsScreen() {
   const updateOwnerProfile = useAuthStore((state) => state.updateOwnerProfile);
   const storeId = user?.storeId;
   const userRole = user?.role;
-  const settingsSections: SettingsSection[] = userRole === 'owner'
+  const settingsSections = userRole === 'owner'
     ? [
         { id: 'display', title: 'Appearance & themes', description: 'Personalize colors, theme, and screen density', icon: 'palette' },
         { id: 'store', title: 'Store and profile', description: 'Store details, contact information, and sales target', icon: 'storefront' },
@@ -816,6 +809,7 @@ export function SettingsScreen() {
       {user?.role === 'staff' && activeSection.id === 'notifications' && (
         <>
           <SettingsGlassSection
+            id="settings-notifications"
             heading="Notifications"
             description="These preferences are saved on this device."
             icon="notifications"
@@ -878,7 +872,7 @@ export function SettingsScreen() {
 
       {user?.role === 'owner' && store && (
         <>
-          <div className="settings-owner-store-grid" hidden={activeSection.id !== 'store'}>
+          <div className="settings-owner-store-grid" id="settings-store" hidden={activeSection.id !== 'store'}>
           <SettingsGlassSection heading="Owner profile" icon="account_circle" headingId="owner-profile-settings-heading">
             <form onSubmit={(event) => { void saveOwnerProfile(event); }} className="flex flex-col gap-3">
               <label className="font-body text-label-md">Owner name<input required maxLength={200} value={ownerName} onChange={(event) => setOwnerName(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
@@ -924,7 +918,7 @@ export function SettingsScreen() {
           </SettingsGlassSection>
           </div>
 
-          <SettingsGlassSection hidden={activeSection.id !== 'receipts'} heading="Tickets and reports" description="Configure thermal layouts and live document previews." icon="receipt_long" headingId="ticket-report-settings-heading">
+          <SettingsGlassSection id="settings-receipts" hidden={activeSection.id !== 'receipts'} heading="Tickets and reports" description="Configure thermal layouts and live document previews." icon="receipt_long" headingId="ticket-report-settings-heading">
             <label className="font-body text-label-md">Ticket header line 1<input maxLength={60} value={ticketHeaderText[0] ?? ''} onChange={(event) => setTicketHeaderText([event.target.value, ticketHeaderText[1] ?? ''])} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
             <label className="font-body text-label-md">Ticket header line 2<input maxLength={60} value={ticketHeaderText[1] ?? ''} onChange={(event) => setTicketHeaderText([ticketHeaderText[0] ?? '', event.target.value])} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
             <label className="font-body text-label-md">Ticket footer line 1<input maxLength={60} value={ticketFooterText[0] ?? ''} onChange={(event) => setTicketFooterText([event.target.value, ticketFooterText[1] ?? ''])} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
@@ -963,7 +957,7 @@ export function SettingsScreen() {
             <Button type="submit" form="store-settings-form" variant="secondary">Save ticket and report settings</Button>
           </SettingsGlassSection>
 
-          <SettingsGlassSection hidden={activeSection.id !== 'security'} heading="Security" description="Manage POS access, auto-lock, and payment options." icon="shield_lock" headingId="security-settings-heading">
+          <SettingsGlassSection id="settings-security" hidden={activeSection.id !== 'security'} heading="Security" description="Manage POS access, auto-lock, and payment options." icon="shield_lock" headingId="security-settings-heading">
             {store.pinMustChange && <p role="alert" className="flex items-center gap-2 rounded-xl bg-warning-container p-3 font-body text-body-md text-on-warning-container"><MaterialIcon name="warning" />Set your admin PIN</p>}
             <form onSubmit={(event) => { void savePin(event); }} className="flex flex-col gap-3">
               <label className="font-body text-label-md">{t('settings.adminPin')}<input aria-label={t('settings.adminPin')} required pattern="[0-9]{4}" maxLength={4} inputMode="numeric" value={adminPin} onChange={(event) => setAdminPin(event.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="••••" className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 tracking-[0.5em] outline-none focus:ring-2 focus:ring-primary" /></label>
@@ -1025,7 +1019,7 @@ export function SettingsScreen() {
             </div>
           </SettingsGlassSection>
 
-          <SettingsGlassSection hidden={activeSection.id !== 'customers'} heading="Customers" description="Control credit and settlement defaults." icon="groups" headingId="customer-settings-heading">
+          <SettingsGlassSection id="settings-customers" hidden={activeSection.id !== 'customers'} heading="Customers" description="Control credit and settlement defaults." icon="groups" headingId="customer-settings-heading">
             <label className="flex min-h-12 items-start gap-3 rounded-xl bg-surface-container-low p-3">
               <input type="checkbox" checked={store.allowCustomerCreditBalance ?? false} disabled={savingCreditPolicy} onChange={(event) => { void changeCustomerCreditBalance(event.target.checked); }} className="mt-1 h-5 w-5 accent-primary" />
               <span>
@@ -1045,7 +1039,7 @@ export function SettingsScreen() {
             </form>
           </SettingsGlassSection>
 
-          <SettingsGlassSection hidden={activeSection.id !== 'staff'} heading="Staff rules" description="Configure staff-drink comp limits and eligible items for each position." icon="badge" headingId="staff-rules-heading">
+          <SettingsGlassSection id="settings-staff" hidden={activeSection.id !== 'staff'} heading="Staff rules" description="Configure staff-drink comp limits and eligible items for each position." icon="badge" headingId="staff-rules-heading">
             {positions.map((position) => {
               const draft = staffRuleDrafts[position.id];
               if (!draft) return null;
@@ -1094,7 +1088,7 @@ export function SettingsScreen() {
             {positions.length === 0 && <p className="rounded-xl bg-surface-container-low p-3 font-body text-body-sm text-outline">Create a staff position before setting staff-item rules.</p>}
           </SettingsGlassSection>
 
-          <SettingsGlassSection hidden={activeSection.id !== 'notifications'} heading="Notifications" description="Choose which notification types are created. All are enabled by default." icon="notifications" headingId="notification-settings-heading">
+          <SettingsGlassSection id="settings-notifications" hidden={activeSection.id !== 'notifications'} heading="Notifications" description="Choose which notification types are created. All are enabled by default." icon="notifications" headingId="notification-settings-heading">
             {notificationOptions.map((option) => (
               <label key={option.type} className="flex min-h-14 items-start gap-3 rounded-xl bg-surface-container-low p-3">
                 <input
@@ -1123,7 +1117,7 @@ export function SettingsScreen() {
         </>
       )}
 
-      <div hidden={activeSection.id !== 'help'}>
+      <div id="settings-help" hidden={activeSection.id !== 'help'}>
       <SettingsGlassSection
         heading={t('settings.help')}
         description={t('help.intro')}
@@ -1135,7 +1129,7 @@ export function SettingsScreen() {
       </SettingsGlassSection>
       </div>
 
-      <div hidden={activeSection.id !== 'language'}>
+      <div id="settings-language" hidden={activeSection.id !== 'language'}>
       <SettingsGlassSection
         heading={t('settings.language')}
         description="Choose the language used by the workspace."
@@ -1147,11 +1141,11 @@ export function SettingsScreen() {
       </SettingsGlassSection>
       </div>
 
-      <div hidden={activeSection.id !== 'permissions'}>
+      <div id="settings-permissions" hidden={activeSection.id !== 'permissions'}>
       <PermissionsSettingsCard />
       </div>
 
-      <div hidden={activeSection.id !== 'updates'}>
+      <div id="settings-updates" hidden={activeSection.id !== 'updates'}>
       <SettingsGlassSection
         heading={t('settings.appUpdates')}
         description="Check the installed build and available updates."
@@ -1205,8 +1199,9 @@ export function SettingsScreen() {
         </details>
       </SettingsGlassSection>
       </div>
-
       </div>
+      </>
+      )}
       {user?.role === 'owner' && (
         <LogoPicker
           open={logoPickerOpen}
@@ -1216,8 +1211,6 @@ export function SettingsScreen() {
           onClose={() => setLogoPickerOpen(false)}
           panelClassName="settings-logo-picker-panel"
         />
-      )}
-      </>
       )}
       {(error || notice) && <p role={error ? 'alert' : 'status'} className={`rounded-lg p-3 font-body text-body-sm ${error ? 'bg-error-container text-on-error-container' : 'bg-success-container text-on-success-container'}`}>{error || notice}</p>}
       <Button variant="danger" onClick={() => { void handleLogout(); }} className="w-full"><MaterialIcon name="logout" />{t('app.logOut')}</Button>

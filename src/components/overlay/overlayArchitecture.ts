@@ -94,19 +94,6 @@ export function getOverlayTarget(): HTMLElement | null {
     return null;
   }
 
-  const fullscreenElement = document.fullscreenElement;
-  if (fullscreenElement instanceof HTMLElement) {
-    const existing = fullscreenElement.querySelector<HTMLElement>(':scope > [data-hanouti-fullscreen-overlay-root]');
-    if (existing) return existing;
-
-    const root = document.createElement('div');
-    root.setAttribute('data-hanouti-fullscreen-overlay-root', 'true');
-    root.setAttribute('data-overlay-root', 'fullscreen');
-    root.className = 'hanouti-overlay-root';
-    fullscreenElement.appendChild(root);
-    return root;
-  }
-
   let root = document.getElementById('hanouti-overlay-root');
   if (!(root instanceof HTMLElement)) {
     root = document.createElement('div');
@@ -122,13 +109,7 @@ export function useOverlayTarget(): HTMLElement {
   const [target, setTarget] = useState<HTMLElement | null>(() => getOverlayTarget());
 
   useEffect(() => {
-    const updateTarget = () => setTarget(getOverlayTarget());
-    document.addEventListener('fullscreenchange', updateTarget);
-    document.addEventListener('webkitfullscreenchange', updateTarget);
-    return () => {
-      document.removeEventListener('fullscreenchange', updateTarget);
-      document.removeEventListener('webkitfullscreenchange', updateTarget);
-    };
+    setTarget(getOverlayTarget());
   }, []);
 
   return target as HTMLElement;
@@ -145,7 +126,12 @@ export function useOverlayLifecycle({
   containerRef,
 }: OverlayRegistrationOptions): number {
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const onEscapeRef = useRef(onEscape);
   const [zIndex] = useState(() => getOverlayZIndex(kind));
+
+  useEffect(() => {
+    onEscapeRef.current = onEscape;
+  }, [onEscape]);
 
   useEffect(() => {
     if (!open) return;
@@ -154,7 +140,7 @@ export function useOverlayLifecycle({
     const registration: OverlayRegistration = {
       id: nextOverlayId++,
       kind,
-      onEscape,
+      onEscape: () => onEscapeRef.current?.(),
       preventEscape,
       trapFocus,
       containerRef,
@@ -207,7 +193,7 @@ export function useOverlayLifecycle({
       if (lockScroll) unlockPageScroll();
       if (restoreFocus) previousFocusRef.current?.focus();
     };
-  }, [containerRef, kind, lockScroll, onEscape, open, preventEscape, restoreFocus, trapFocus]);
+  }, [containerRef, kind, lockScroll, open, preventEscape, restoreFocus, trapFocus]);
 
   return zIndex;
 }

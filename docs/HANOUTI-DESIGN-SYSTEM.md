@@ -17,7 +17,7 @@ The following components are approved and frozen. No visual redesign is allowed 
 1. **Shift section**
    - Owner and staff Shift views.
    - Desktop and mobile layouts.
-   - Shift headers, tabs, status strips, cards, tables, filters, KPIs, and full-screen behavior.
+   - Shift headers, tabs, status strips, cards, tables, filters, and KPIs.
    - All existing spacing, dimensions, typography, colors, gradients, radii, shadows, blur, animations, transitions, and responsive behavior.
 
 2. **Shift dialogs, popups, and cash movement interfaces**
@@ -36,7 +36,7 @@ The following components are approved and frozen. No visual redesign is allowed 
 
 6. **Notifications interface**
    - Notification screen and notification popover/button presentation.
-   - Existing list, empty, read/unread, action, badge, overlay, and fullscreen presentation.
+   - Existing list, empty, read/unread, action, badge, and overlay presentation.
 
 7. **Login page**
    - Existing brand identity, logo, decorations, bubbles, colors, glass effects, typography, layout, dimensions, animations, and interactions.
@@ -45,11 +45,11 @@ The frozen list includes appearance and behavior. It does not prevent necessary 
 
 ## 3. Components requiring technical maintenance only
 
-Technical work may proceed only when it is necessary for correctness, maintainability, accessibility, performance, portal/fullscreen behavior, or browser compatibility, and only if the approved visual and interaction result remains unchanged.
+Technical work may proceed only when it is necessary for correctness, maintainability, accessibility, performance, portal behavior, or browser compatibility, and only if the approved visual and interaction result remains unchanged.
 
 Maintenance-only areas include:
 
-- Shift full-screen and overlay integration.
+- Shift overlay integration.
 - Shift cash movement and other Shift dialog/popup portal placement.
 - Shift notification bridge and notification popover behavior.
 - Desktop sidebar implementation and owner/staff shell integration.
@@ -130,7 +130,7 @@ These migration candidates must adopt Crystal Glass through shared tokens and re
 
 - Extend and reuse existing primitives and composites such as buttons, inputs, cards, badges, tables, dialogs, sheets, navigation items, loading states, empty states, and feedback components.
 - Common variants belong in shared component APIs, not in page-specific class lists or CSS blocks.
-- Shared components must support all approved responsive, RTL, keyboard, touch, fullscreen, and accessibility requirements.
+- Shared components must support all approved responsive, RTL, keyboard, touch, and accessibility requirements.
 
 ### Centralized theme management
 
@@ -143,7 +143,7 @@ These migration candidates must adopt Crystal Glass through shared tokens and re
 
 - Use shared breakpoints and responsive behavior.
 - Use one overlay manager/host for dialogs, bottom sheets, popovers, notifications, prompts, toasts, and app-level feedback.
-- The overlay target must become the active fullscreen element while fullscreen is active and return to the document target when fullscreen ends.
+- Overlays render into a persistent document-level target.
 - The overlay stack must own topmost Escape handling, focus entry/restoration, modal semantics, scroll behavior, and semantic z-index layers.
 - Portals must not be added with arbitrary z-index fixes.
 
@@ -160,8 +160,8 @@ These migration candidates must adopt Crystal Glass through shared tokens and re
 9. Do not use the legacy design as a visual reference for migrated sections.
 10. Do not change database migrations or schema. A separate, explicitly approved preferences feature may not be bundled into visual migration work.
 11. Preserve the existing brand assets and Login identity.
-12. Preserve desktop, mobile, tablet, RTL, safe-area, reduced-motion, keyboard, screen-reader, contrast, and browser fullscreen behavior.
-13. Test both normal and fullscreen overlay behavior where the migrated section or shared overlay system participates.
+12. Preserve desktop, mobile, tablet, RTL, safe-area, reduced-motion, keyboard, screen-reader, and contrast behavior.
+13. Test overlay behavior where the migrated section or shared overlay system participates.
 14. Test loading, empty, error, success, permission-denied, offline, and return-navigation states.
 15. Stop and request separate approval if a requested visual change would affect a frozen component or intentionally alter existing behavior.
 16. Record the exact files changed, verification performed, and remaining risks at the end of each migration task.
@@ -184,7 +184,7 @@ These migration candidates must adopt Crystal Glass through shared tokens and re
 2. Complete one centralized semantic token and glass token set.
 3. Consolidate theme-mode application in existing theme initialization.
 4. Build or extend shared primitives with existing component patterns.
-5. Implement the centralized overlay host, including document and fullscreen targets.
+5. Implement the centralized document-level overlay host.
 6. Add focused foundation tests and run existing build/type checks.
 
 **Exit gate:** Foundation work passes tests and does not change frozen or migrated UI appearance.
@@ -192,10 +192,10 @@ These migration candidates must adopt Crystal Glass through shared tokens and re
 ### Stage 2 — Technical maintenance and compatibility
 
 1. Move Shift sheets/dialogs and notifications onto the shared overlay behavior only where required.
-2. Verify desktop and mobile navigation, Mobile More, notifications, Login, and Shift full-screen behavior remain pixel-equivalent and interaction-equivalent.
+2. Verify desktop and mobile navigation, Mobile More, notifications, Login, and Shift overlays remain pixel-equivalent and interaction-equivalent.
 3. Fix only confirmed technical defects, with no visual restyling.
 
-**Exit gate:** All approved frozen surfaces are visually unchanged and overlays work in normal/fullscreen contexts.
+**Exit gate:** All approved frozen surfaces are visually unchanged and overlays work across supported routes and viewports.
 
 ### Stage 3 — Select one pilot migration
 
@@ -266,7 +266,6 @@ Every migration task must verify the following where applicable:
 - Text contrast and glass transparency remain usable.
 - RTL, browser zoom, safe areas, and touch targets remain usable.
 - Keyboard focus, Escape, focus restoration, and modal semantics work.
-- Fullscreen dialogs, sheets, popovers, notifications, and prompts appear in the fullscreen target.
 - Loading, empty, error, success, and access-denied states work.
 - The smallest relevant tests and build/type checks pass.
 
@@ -279,9 +278,9 @@ Known areas that require future technical work are:
 - Completing token coverage for hardcoded Shift and page values.
 - Centralizing theme/mode initialization and persistence.
 - Consolidating duplicate navigation and styling responsibilities.
-- Centralizing overlay and fullscreen behavior.
+- Centralizing overlay behavior.
 - Consolidating notification/portal behavior.
-- Adding focused tests for dialogs, sheets, navigation, responsive states, and fullscreen.
+- Adding focused tests for dialogs, sheets, navigation, and responsive states.
 
 These findings are technical maintenance or foundation candidates. They do not authorize a redesign or database change.
 

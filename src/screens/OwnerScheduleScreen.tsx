@@ -24,6 +24,11 @@ function dateFromKey(value: string): Date {
   return new Date(year, month - 1, day);
 }
 
+function validDateKey(value: string | null): value is string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  return dateKey(dateFromKey(value)) === value;
+}
+
 function addDays(value: string, days: number): string {
   const date = dateFromKey(value);
   date.setDate(date.getDate() + days);
@@ -93,8 +98,17 @@ function OwnerScheduleContent() {
   }, [storeId]);
 
   useEffect(() => {
-    setTodayKey(dateKey(new Date()));
-    setSelectedDayOffset((new Date().getDay() + 6) % 7);
+    const today = dateKey(new Date());
+    const requestedDate = new URLSearchParams(window.location.search).get('date');
+    setTodayKey(today);
+    if (validDateKey(requestedDate)) {
+      const currentWeek = dateFromKey(mondayOf(today));
+      const requestedWeek = dateFromKey(mondayOf(requestedDate));
+      setWeekOffset(Math.round((requestedWeek.getTime() - currentWeek.getTime()) / (7 * 24 * 60 * 60 * 1000)));
+      setSelectedDayOffset((dateFromKey(requestedDate).getDay() + 6) % 7);
+    } else {
+      setSelectedDayOffset((new Date().getDay() + 6) % 7);
+    }
   }, []);
 
   useEffect(() => {

@@ -186,7 +186,10 @@ export function LoginScreen() {
     setError('');
     setSubmitting(true);
     try {
-      const allowedRoles = role === 'staff' ? ['staff'] as const : ['owner', 'super_admin'] as const;
+      const identifierIsEmail = identifier.trim().includes('@');
+      const allowedRoles = identifierIsEmail
+        ? ['owner', 'super_admin'] as const
+        : ['staff'] as const;
       const user = await login(identifier, password, [...allowedRoles]);
       navigate(user.mustChangePassword ? '/set-password' : user.role === 'staff' ? '/dashboard' : user.role === 'owner' ? '/owner/dashboard' : '/admin/overview');
     } catch (loginError) {
@@ -279,7 +282,11 @@ export function LoginScreen() {
                 id="identifier"
                 required
                 value={identifier}
-                onChange={(event) => setIdentifier(event.target.value)}
+                onChange={(event) => {
+                  const nextIdentifier = event.target.value;
+                  setIdentifier(nextIdentifier);
+                  setRole(nextIdentifier.trim().includes('@') ? 'admin' : role === 'admin' && nextIdentifier.trim() === '' ? 'staff' : role);
+                }}
                 placeholder={role === 'staff' ? t('login.exampleStaff') : t('login.identifierPlaceholder')}
                 className="login-input"
               />

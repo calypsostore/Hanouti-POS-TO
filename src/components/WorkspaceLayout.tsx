@@ -3,7 +3,6 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { ownerMoreLinks, ownerPrimaryLinks } from '../app/navigation';
 import { BottomSheet } from './BottomSheet';
 import { MaterialIcon } from './MaterialIcon';
-import { OwnerMobileIcon } from './OwnerMobileIcon';
 import { TopBar } from './TopBar';
 import { t, type TranslationKey } from '../i18n/translations';
 import { orderService } from '../services/orderService';
@@ -151,19 +150,8 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
       <TopBar title={title} storeName={storeName} storeLogoId={storeLogoId} storeType={storeType} onProfileClick={() => navigate('/settings')} />
       <aside className="desktop-sidebar" aria-label={t('common.workspaceNavigation')}>
         <div className="desktop-sidebar__brand">
-          <span className="desktop-sidebar__logo" aria-hidden="true">
-            <svg viewBox="0 0 48 48" focusable="false">
-              <path d="M17 18v-3.5a7 7 0 0 1 14 0V18" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="3" />
-              <path d="M13 18h22l-2 21H15z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="3" />
-              <path d="m19 28 4 4 7-8" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" />
-            </svg>
-          </span>
-          {!sidebarCollapsed && (
-            <span className="desktop-sidebar__brand-copy">
-              <span className="desktop-sidebar__app-name">{t('common.appName')}</span>
-              <span className="desktop-sidebar__tagline">Smart Business</span>
-            </span>
-          )}
+          <span className="desktop-sidebar__logo"><MaterialIcon name="local_cafe" /></span>
+          {!sidebarCollapsed && <span className="desktop-sidebar__app-name">{t('common.appName')}</span>}
         </div>
         <nav ref={sidebarNavRef} className="desktop-sidebar__nav">
           <span
@@ -249,7 +237,7 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
                 aria-label={t(link.label)}
                 className={({ isActive }) => `owner-mobile-nav__item${isActive ? ' is-active' : ''}`}
               >
-                <OwnerMobileIcon name={link.icon} className="owner-mobile-nav__icon" size={23} />
+                <MaterialIcon name={link.icon} className="owner-mobile-nav__icon" />
                 <span>{t(link.label)}</span>
               </NavLink>
             ))}
@@ -262,7 +250,7 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
               className={`owner-mobile-nav__item${isMoreActive ? ' is-active' : ''}`}
             >
               <span className="owner-mobile-nav__more-icon">
-                <OwnerMobileIcon name="more_horiz" className="owner-mobile-nav__icon" size={23} />
+                <MaterialIcon name="more_horiz" className="owner-mobile-nav__icon" />
                 {totalBadgeCount > 0 && <span className="owner-mobile-nav__badge">{totalBadgeCount > 99 ? '99+' : totalBadgeCount}</span>}
               </span>
               <span>{t('nav.more')}</span>
@@ -276,13 +264,13 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
             iconElement={
               <>
                 <MaterialIcon name="grid_view" className="owner-more-header-icon--desktop" />
-                <OwnerMobileIcon name="grid_view" className="owner-more-header-icon--mobile" size={24} />
+                <MaterialIcon name="grid_view" className="owner-more-header-icon--mobile" />
               </>
             }
             closeIcon={
               <>
                 <MaterialIcon name="close" className="owner-more-close-icon--desktop" />
-                <OwnerMobileIcon name="close" className="owner-more-close-icon--mobile" size={20} />
+                <MaterialIcon name="close" className="owner-more-close-icon--mobile" />
               </>
             }
             panelClassName="owner-more-panel"
@@ -298,11 +286,11 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
                     className={({ isActive }) => `owner-more-list__item${isActive ? ' is-active' : ''}`}
                   >
                     <MaterialIcon name={link.icon} className="owner-more-list__desktop-icon text-xl" />
-                    <OwnerMobileIcon name={link.icon} className="owner-more-list__mobile-icon" size={23} />
+                    <MaterialIcon name={link.icon} className="owner-more-list__mobile-icon" />
                     <span className="min-w-0 flex-1">{t(link.label)}</span>
                     {badgeCount > 0 && <span className="owner-more-list__badge">{badgeCount > 99 ? '99+' : badgeCount}</span>}
                     <MaterialIcon name="chevron_right" className="owner-more-chevron--desktop owner-more-list__chevron" />
-                    <OwnerMobileIcon name="chevron_right" className="owner-more-chevron--mobile owner-more-list__chevron" size={20} />
+                    <MaterialIcon name="chevron_right" className="owner-more-chevron--mobile owner-more-list__chevron" />
                   </NavLink>
                 );
               })}

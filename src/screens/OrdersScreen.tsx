@@ -110,7 +110,7 @@ export function OrdersScreen() {
   const [hasMoreOrders, setHasMoreOrders] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [filter, setFilter] = useState<OrderFilter>('all');
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get('search') ?? '');
   const [tagFilter, setTagFilter] = useState('');
   const [activeOrder, setActiveOrder] = useState<OrderView | null>(null);
   const [pin, setPin] = useState('');

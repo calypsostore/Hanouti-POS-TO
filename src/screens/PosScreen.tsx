@@ -724,7 +724,7 @@ export function PosScreen() {
   }
 
   const renderTicketContent = (compact = false) => (
-    <div className={`flex flex-col ${compact ? 'h-full' : ''}`}>
+    <div className={`pos-ticket-content flex min-h-0 flex-col ${compact ? 'h-full' : ''}`}>
       <div className="mb-2 flex items-center justify-between">
         <div>
           <p className="font-body text-label-sm uppercase tracking-wider text-outline">{t('pos.currentOrder')}</p>
@@ -748,7 +748,7 @@ export function PosScreen() {
           Clear order
         </Button>
       </div>
-      <div className={`min-h-24 flex-1 overflow-y-auto ${compact ? 'max-h-[45vh]' : ''}`}>
+      <div className={`pos-ticket-lines min-h-0 flex-1 overflow-y-auto ${compact ? 'max-h-[45vh]' : ''}`}>
         {cart.length === 0 ? (
           <div className="flex min-h-28 flex-col items-center justify-center text-center text-outline">
             <MaterialIcon name="receipt_long" className="text-3xl" />
@@ -864,7 +864,7 @@ export function PosScreen() {
   );
 
   return (
-    <div className="min-h-screen bg-surface pb-36 tablet:pb-20">
+    <div className="pos-screen bg-surface">
       <TopBar
         title={t('pos.terminal')}
         storeName={store?.name}
@@ -873,7 +873,7 @@ export function PosScreen() {
         onDashboardClick={() => navigate(user?.role === 'owner' ? '/owner/dashboard' : '/dashboard')}
         onLockClick={user?.role === 'staff' ? () => { void lockTerminal(); } : undefined}
       />
-      <div className="flex items-center justify-between gap-2 bg-surface-container-low px-3 py-2.5">
+      <div className="pos-store-header flex items-center justify-between gap-2 bg-surface-container-low px-3 py-2.5">
         <div className="min-w-0">
           <h2 className="flex items-center gap-1 truncate font-display text-headline-sm text-primary">
             <MaterialIcon name="storefront" className="text-lg" filled />
@@ -898,32 +898,34 @@ export function PosScreen() {
           </Button>
         )}
       </div>
-      {!openShift && dayStatus.dayIsClosed && (
-        <section role="status" className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-warning-container p-3 text-on-warning-container">
-          <p className="font-body text-body-sm">Day closed. Open a shift to start a new day.</p>
-          <Button type="button" onClick={() => navigate(user?.role === 'owner' ? '/owner/shifts' : '/shift')}>
-            <MaterialIcon name="lock_open" />Open shift
-          </Button>
-        </section>
-      )}
-      <FirstRunHint id={`pos-${user?.id ?? 'guest'}`} title={t('hint.title')} message={t('hint.pos')} />
-      {user?.role === 'owner' && needsAttentionOrders.length > 0 && (
-        <section aria-label="Needs attention" className="mx-3 mt-3 rounded-xl border border-error/30 bg-error-container p-3 text-on-error-container">
-          <h2 className="font-display text-headline-sm">Needs attention ({needsAttentionOrders.length})</h2>
-          <ul className="mt-2 flex flex-col gap-2">
-            {needsAttentionOrders.map(({ order, message }) => (
-              <li key={order.idempotencyKey ?? order.id} className="rounded-lg bg-surface-container-lowest/70 p-3">
-                <p className="font-body text-label-md">Local order {Math.abs(order.number)} · {formatTnd(order.totalMillimes / 1000)} DT</p>
-                <p className="mt-1 font-body text-body-sm">{message}</p>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <div className="pos-alert-stack">
+        {!openShift && dayStatus.dayIsClosed && (
+          <section role="status" className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-warning-container p-3 text-on-warning-container">
+            <p className="font-body text-body-sm">Day closed. Open a shift to start a new day.</p>
+            <Button type="button" onClick={() => navigate(user?.role === 'owner' ? '/owner/shifts' : '/shift')}>
+              <MaterialIcon name="lock_open" />Open shift
+            </Button>
+          </section>
+        )}
+        <FirstRunHint id={`pos-${user?.id ?? 'guest'}`} title={t('hint.title')} message={t('hint.pos')} />
+        {user?.role === 'owner' && needsAttentionOrders.length > 0 && (
+          <section aria-label="Needs attention" className="mx-3 mt-3 rounded-xl border border-error/30 bg-error-container p-3 text-on-error-container">
+            <h2 className="font-display text-headline-sm">Needs attention ({needsAttentionOrders.length})</h2>
+            <ul className="mt-2 flex flex-col gap-2">
+              {needsAttentionOrders.map(({ order, message }) => (
+                <li key={order.idempotencyKey ?? order.id} className="rounded-lg bg-surface-container-lowest/70 p-3">
+                  <p className="font-body text-label-md">Local order {Math.abs(order.number)} · {formatTnd(order.totalMillimes / 1000)} DT</p>
+                  <p className="mt-1 font-body text-body-sm">{message}</p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </div>
 
-      <main className="pos-terminal-layout grid">
-        <section className="min-w-0 pb-4">
-          <div className="flex flex-col gap-3 px-3 pt-3">
+      <main className="pos-terminal-layout">
+        <section className="pos-products-pane min-w-0 pb-4">
+          <div className="pos-catalog-controls flex flex-col gap-3 px-3 pt-3">
             <label className="relative block">
               <MaterialIcon name="search" className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xl text-outline" />
               <input
@@ -943,88 +945,90 @@ export function PosScreen() {
             </div>
           </div>
 
-          <section className="mt-4">
-            <div className="mb-2 flex items-center justify-between px-3">
-              <h2 className="flex items-center gap-1.5 font-display text-headline-sm text-primary">
-                <MaterialIcon name="bolt" className="text-lg text-secondary" filled />
-                {t('pos.quickPicks')}
-              </h2>
-              <span className="font-body text-label-sm text-outline">
-                {resolveStoreSettings(store?.settings).quickPickMode === 'manual' ? 'Admin selected' : t('pos.highVelocity')}
-              </span>
-            </div>
-            <div className="scrollbar-hidden flex gap-2.5 overflow-x-auto px-3 pb-1">
-              {quickPicks.map((item) => {
-                const quantity = cart
-                  .filter((line) => line.itemId === item.id)
-                  .reduce((sum, line) => sum + line.quantity, 0);
-                return (
-                  <article key={item.id} className={`flex ${largeButtons ? 'min-h-40 w-40' : 'min-h-32 w-36'} shrink-0 flex-col justify-between rounded-2xl bg-surface-container-lowest p-3 text-left shadow-card`}>
-                    <button type="button" aria-label={t('pos.addItem', { item: item.name })} onClick={() => addItem(item)} className="flex min-h-0 flex-1 flex-col justify-between text-left active:scale-[0.98]">
-                      <div className="flex items-start justify-between">
-                        <ItemLogo id={item.icon} size="sm" />
-                        {quantity > 0 && <span className="pos-cart-count-badge">{quantity}</span>}
-                      </div>
-                      <div className="mt-2">
-                        <p className="truncate font-body text-label-md text-on-surface">{item.name}</p>
-                        <p className="font-display text-headline-sm text-primary">{formatTnd(item.priceMillimes / 1000)} <small className="font-body text-label-sm text-outline">DT</small></p>
-                      </div>
-                    </button>
-                    {quantity > 0 && !item.outOfStock && (
-                      <div className={`pos-quantity-controls mt-1 flex items-center justify-between rounded-lg bg-surface-container-low p-0.5 ${largeButtons ? 'pos-quantity-controls--large' : ''}`}>
-                        <button type="button" aria-label={t('pos.removeItem', { item: item.name })} onClick={() => changeProductQuantity(item.id, -1)} className={`flex ${largeButtons ? 'h-14 w-14' : 'h-7 w-7'} items-center justify-center rounded-lg bg-surface-container-lowest text-primary`}>
-                          <MaterialIcon name={quantity === 1 ? 'delete' : 'remove'} className="text-sm" />
-                        </button>
-                        <span className="font-display text-label-lg text-primary">{quantity}</span>
-                        <button type="button" aria-label={t('pos.addItem', { item: item.name })} onClick={() => addItem(item)} className={`flex ${largeButtons ? 'h-14 w-14' : 'h-7 w-7'} items-center justify-center rounded-lg bg-primary text-on-primary`}>
-                          <MaterialIcon name="add" className="text-sm" />
-                        </button>
-                      </div>
-                    )}
-                  </article>
-                );
-              })}
-            </div>
-          </section>
+          <div className="pos-catalog-scroll-area">
+            <section className="mt-4">
+              <div className="mb-2 flex items-center justify-between px-3">
+                <h2 className="flex items-center gap-1.5 font-display text-headline-sm text-primary">
+                  <MaterialIcon name="bolt" className="text-lg text-secondary" filled />
+                  {t('pos.quickPicks')}
+                </h2>
+                <span className="font-body text-label-sm text-outline">
+                  {resolveStoreSettings(store?.settings).quickPickMode === 'manual' ? 'Admin selected' : t('pos.highVelocity')}
+                </span>
+              </div>
+              <div className="scrollbar-hidden flex gap-2.5 overflow-x-auto px-3 pb-1">
+                {quickPicks.map((item) => {
+                  const quantity = cart
+                    .filter((line) => line.itemId === item.id)
+                    .reduce((sum, line) => sum + line.quantity, 0);
+                  return (
+                    <article key={item.id} className={`flex ${largeButtons ? 'min-h-40 w-40' : 'min-h-32 w-36'} shrink-0 flex-col justify-between rounded-2xl bg-surface-container-lowest p-3 text-left shadow-card`}>
+                      <button type="button" aria-label={t('pos.addItem', { item: item.name })} onClick={() => addItem(item)} className="flex min-h-0 flex-1 flex-col justify-between text-left active:scale-[0.98]">
+                        <div className="flex items-start justify-between">
+                          <ItemLogo id={item.icon} size="sm" />
+                          {quantity > 0 && <span className="pos-cart-count-badge">{quantity}</span>}
+                        </div>
+                        <div className="mt-2">
+                          <p className="truncate font-body text-label-md text-on-surface">{item.name}</p>
+                          <p className="font-display text-headline-sm text-primary">{formatTnd(item.priceMillimes / 1000)} <small className="font-body text-label-sm text-outline">DT</small></p>
+                        </div>
+                      </button>
+                      {quantity > 0 && !item.outOfStock && (
+                        <div className={`pos-quantity-controls mt-1 flex items-center justify-between rounded-lg bg-surface-container-low p-0.5 ${largeButtons ? 'pos-quantity-controls--large' : ''}`}>
+                          <button type="button" aria-label={t('pos.removeItem', { item: item.name })} onClick={() => changeProductQuantity(item.id, -1)} className={`flex ${largeButtons ? 'h-14 w-14' : 'h-7 w-7'} items-center justify-center rounded-lg bg-surface-container-lowest text-primary`}>
+                            <MaterialIcon name={quantity === 1 ? 'delete' : 'remove'} className="text-sm" />
+                          </button>
+                          <span className="font-display text-label-lg text-primary">{quantity}</span>
+                          <button type="button" aria-label={t('pos.addItem', { item: item.name })} onClick={() => addItem(item)} className={`flex ${largeButtons ? 'h-14 w-14' : 'h-7 w-7'} items-center justify-center rounded-lg bg-primary text-on-primary`}>
+                            <MaterialIcon name="add" className="text-sm" />
+                          </button>
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
 
-          <section className="mt-4 px-3">
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="font-display text-headline-sm text-on-surface">{t('pos.catalogueItems')}</h2>
-              <span className="font-body text-label-sm text-outline">{t('pos.touchToAdd')}</span>
-            </div>
-            {catalogError && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{catalogError}</p>}
-            {customerCreditUnavailable && (
-              <p role="status" className="mb-3 rounded-lg bg-warning-container px-3 py-2 font-body text-label-sm text-on-warning-container">
-                Customer credit balances are unavailable; customer selection is still available.
-              </p>
-            )}
-            {catalogLoading ? <ListSkeleton rows={4} label="Loading products" /> : filteredItems.length === 0 ? (
-              <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">
-                {search ? 'No products match your search.' : 'No products are available yet.'}
-              </p>
-            ) : <div className="pos-catalog-grid grid grid-cols-2 gap-3 xl:grid-cols-3">
-              <LazyBatch
-                items={filteredItems}
-                resetKey={search}
-                renderItem={(item) => (
-                  <ItemCard
-                    key={item.id}
-                    item={{ id: item.id, name: item.name, price: item.priceMillimes / 1000, icon: item.icon, outOfStock: item.outOfStock, outOfStockBy: item.outOfStockBy, outOfStockAt: item.outOfStockAt }}
-                    quantity={cart.filter((line) => line.itemId === item.id).reduce((sum, line) => sum + line.quantity, 0)}
-                    onAdd={() => addItem(item)}
-                    onRemove={() => changeProductQuantity(item.id, -1)}
-                    canToggleStock={user?.role === 'owner' || can86Items}
-                    onToggleStock={() => { void toggleStock(item); }}
-                    onOpenOutOfStock={() => setMarkedOutOfStockItem(item)}
-                    largeButtons={largeButtons}
-                  />
-                )}
-              />
-            </div>}
-          </section>
+            <section className="mt-4 px-3">
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="font-display text-headline-sm text-on-surface">{t('pos.catalogueItems')}</h2>
+                <span className="font-body text-label-sm text-outline">{t('pos.touchToAdd')}</span>
+              </div>
+              {catalogError && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{catalogError}</p>}
+              {customerCreditUnavailable && (
+                <p role="status" className="mb-3 rounded-lg bg-warning-container px-3 py-2 font-body text-label-sm text-on-warning-container">
+                  Customer credit balances are unavailable; customer selection is still available.
+                </p>
+              )}
+              {catalogLoading ? <ListSkeleton rows={4} label="Loading products" /> : filteredItems.length === 0 ? (
+                <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">
+                  {search ? 'No products match your search.' : 'No products are available yet.'}
+                </p>
+              ) : <div className="pos-catalog-grid grid grid-cols-2 gap-3 xl:grid-cols-3">
+                <LazyBatch
+                  items={filteredItems}
+                  resetKey={search}
+                  renderItem={(item) => (
+                    <ItemCard
+                      key={item.id}
+                      item={{ id: item.id, name: item.name, price: item.priceMillimes / 1000, icon: item.icon, outOfStock: item.outOfStock, outOfStockBy: item.outOfStockBy, outOfStockAt: item.outOfStockAt }}
+                      quantity={cart.filter((line) => line.itemId === item.id).reduce((sum, line) => sum + line.quantity, 0)}
+                      onAdd={() => addItem(item)}
+                      onRemove={() => changeProductQuantity(item.id, -1)}
+                      canToggleStock={user?.role === 'owner' || can86Items}
+                      onToggleStock={() => { void toggleStock(item); }}
+                      onOpenOutOfStock={() => setMarkedOutOfStockItem(item)}
+                      largeButtons={largeButtons}
+                    />
+                  )}
+                />
+              </div>}
+            </section>
+          </div>
         </section>
 
-        <aside className="hidden border-l border-outline-variant bg-surface-container-lowest p-4 tablet:block">
+        <aside className="pos-order-pane hidden border-l border-outline-variant bg-surface-container-lowest p-4 tablet:block">
           {renderTicketContent(true)}
         </aside>
       </main>

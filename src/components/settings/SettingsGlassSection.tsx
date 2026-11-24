@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { MaterialIcon } from '../MaterialIcon';
 
 interface SettingsGlassSectionProps {
+  id?: string;
   heading: string;
   description?: string;
   icon?: string;
@@ -21,6 +22,7 @@ export function SettingsGlassList({ children, className = '' }: { children: Reac
 }
 
 export function SettingsGlassSection({
+  id,
   heading,
   description,
   icon,
@@ -32,6 +34,7 @@ export function SettingsGlassSection({
 }: SettingsGlassSectionProps) {
   return (
     <section
+      id={id}
       hidden={hidden}
       aria-labelledby={headingId}
       className={`settings-glass-section flex flex-col gap-4 rounded-2xl p-4 sm:p-5 ${className}`}

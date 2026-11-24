@@ -136,6 +136,7 @@ function OwnerReportsContent() {
   const routeParams = new URLSearchParams(window.location.search);
   const routeFrom = routeParams.get('from');
   const routeTo = routeParams.get('to');
+  const routeReportId = routeParams.get('reportId');
   const hasRouteRange = validDateKey(routeFrom) && validDateKey(routeTo) && routeFrom <= routeTo;
   const [store, setStore] = useState<StoreRecord>();
   const [reports, setReports] = useState<ReportRecord[]>([]);
@@ -152,6 +153,12 @@ function OwnerReportsContent() {
   const insightRange = getInsightRange(insightRangeType, customFrom, customTo, store?.timezone);
   const insightFrom = insightRange?.from;
   const insightTo = insightRange?.to;
+
+  useEffect(() => {
+    if (!routeReportId) return;
+    const report = reports.find((candidate) => candidate.id === routeReportId);
+    if (report) setSelectedReport(report);
+  }, [reports, routeReportId]);
 
   useEffect(() => {
     let active = true;

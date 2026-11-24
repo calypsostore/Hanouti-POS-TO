@@ -137,8 +137,10 @@ function OwnerCatalogContent() {
   const [quickPicksNotice, setQuickPicksNotice] = useState('');
   const [loading, setLoading] = useState(true);
   const [categoryId, setCategoryId] = useState('all');
-  const [productStateFilter, setProductStateFilter] = useState<ProductStateFilter>('active');
-  const [search, setSearch] = useState('');
+  const [productStateFilter, setProductStateFilter] = useState<ProductStateFilter>(() =>
+    new URLSearchParams(window.location.search).get('state') === 'archived' ? 'archived' : 'active',
+  );
+  const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get('search') ?? '');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [sheet, setSheet] = useState<CatalogSheet>(null);
   const [categoryManagerOpen, setCategoryManagerOpen] = useState(false);

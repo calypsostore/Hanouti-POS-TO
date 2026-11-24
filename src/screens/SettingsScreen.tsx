@@ -31,6 +31,8 @@ import { DEFAULT_NOTIFICATION_PREFERENCES, resolveStoreSettings, type CatalogIte
 import { getStoreLogoGroups } from '../data/logoCatalog';
 import { AppearanceSettings } from '../components/AppearanceSettings';
 import { SettingsGlassSection } from '../components/settings/SettingsGlassSection';
+import { applyStoreAppearance } from '../lib/storeAppearance';
+import type { StoreAppearance } from '../theme/themeRegistry';
 
 const notificationOptions: { type: NotificationType; label: string; description: string }[] = [
   { type: 'void_requested', label: 'Void request received', description: 'Notify the owner when staff request an order void.' },
@@ -231,7 +233,7 @@ export function SettingsScreen() {
   const userRole = user?.role;
   const settingsSections = userRole === 'owner'
     ? [
-        { id: 'display', title: 'Display', description: 'Theme and screen density', icon: 'palette' },
+        { id: 'display', title: 'Theme', description: 'Shared store appearance settings', icon: 'palette' },
         { id: 'store', title: 'Store and profile', description: 'Store details, contact information, and sales target', icon: 'storefront' },
         { id: 'receipts', title: 'Tickets and reports', description: 'Receipt layout, paper size, and previews', icon: 'receipt_long' },
         { id: 'security', title: 'Security', description: 'PIN, passwords, and POS access', icon: 'shield_lock' },
@@ -245,7 +247,7 @@ export function SettingsScreen() {
       ]
     : userRole === 'staff'
       ? [
-          { id: 'display', title: 'Display', description: 'Theme and screen density', icon: 'palette' },
+          { id: 'display', title: 'Theme', description: 'Shared store appearance settings', icon: 'palette' },
           { id: 'security', title: 'Security', description: 'Personal PIN and password', icon: 'shield_lock' },
           { id: 'notifications', title: 'Notifications and schedule', description: 'Alert preferences and upcoming shifts', icon: 'notifications' },
           { id: 'help', title: 'Help', description: 'Usage guides for POS operations', icon: 'help' },
@@ -254,7 +256,7 @@ export function SettingsScreen() {
           { id: 'updates', title: 'App updates', description: 'Check versions and install updates', icon: 'system_update' },
         ]
       : [
-          { id: 'display', title: 'Display', description: 'Theme and screen density', icon: 'palette' },
+          { id: 'display', title: 'Theme', description: 'Shared store appearance settings', icon: 'palette' },
           { id: 'security', title: 'Security', description: 'Password and account access', icon: 'shield_lock' },
           { id: 'help', title: 'Help', description: 'Usage guides for POS operations', icon: 'help' },
           { id: 'language', title: 'Language', description: 'Choose the app language', icon: 'language' },
@@ -450,6 +452,17 @@ export function SettingsScreen() {
     } catch (storeError) {
       setError(storeError instanceof Error ? storeError.message : 'Unable to save store information.');
     }
+  }
+
+  async function saveStoreAppearance(appearance: StoreAppearance): Promise<StoreAppearance> {
+    if (!store || !user || user.role !== 'owner' || store.ownerId !== user.id) {
+      throw new Error('Only this store owner can change shared appearance settings.');
+    }
+    const updated = await userService.updateStoreSettings(store.id, user.id, { appearance });
+    setStore(updated);
+    const savedAppearance = resolveStoreSettings(updated.settings).appearance;
+    applyStoreAppearance(savedAppearance);
+    return savedAppearance;
   }
 
   async function saveOwnerProfile(event: FormEvent<HTMLFormElement>) {
@@ -822,7 +835,14 @@ export function SettingsScreen() {
         All settings
       </button>
       <div className="settings-section-content">
-      {activeSection.id === 'display' && user?.id && <AppearanceSettings key={user.id} />}
+      {activeSection.id === 'display' && user?.id && (
+        <AppearanceSettings
+          key={user.id}
+          appearance={resolveStoreSettings(store?.settings).appearance}
+          canEdit={user.role === 'owner' && store?.ownerId === user.id}
+          onSave={saveStoreAppearance}
+        />
+      )}
 
       {user?.role === 'staff' && activeSection.id === 'notifications' && (
         <>
@@ -1235,9 +1255,9 @@ export function SettingsScreen() {
     </div>
   );
 
-  if (user?.role === 'owner') return <WorkspaceLayout title={t('settings.title')} storeName={store?.name} links={ownerWorkspaceLinks} legacyAppearance>{content}</WorkspaceLayout>;
-  if (user?.role === 'super_admin') return <WorkspaceLayout title={t('settings.title')} links={adminWorkspaceLinks} legacyAppearance>{content}</WorkspaceLayout>;
-  return <div className="legacy-workspace min-h-screen bg-surface pb-24"><main className="p-0"><PageContainer>{content}</PageContainer></main><BottomNav /></div>;
+  if (user?.role === 'owner') return <WorkspaceLayout title={t('settings.title')} storeName={store?.name} links={ownerWorkspaceLinks}>{content}</WorkspaceLayout>;
+  if (user?.role === 'super_admin') return <WorkspaceLayout title={t('settings.title')} links={adminWorkspaceLinks}>{content}</WorkspaceLayout>;
+  return <div className="store-themed-screen min-h-screen bg-surface pb-24"><main className="p-0"><PageContainer>{content}</PageContainer></main><BottomNav /></div>;
 }
 
 function HelpGuide({ title, steps }: { title: string; steps: HelpStep[] }) {

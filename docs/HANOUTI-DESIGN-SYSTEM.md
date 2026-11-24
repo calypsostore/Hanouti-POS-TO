@@ -271,109 +271,24 @@ Every migration task must verify the following where applicable:
 
 ## 9. Current architectural audit
 
-The existing system includes useful semantic Tailwind tokens, reusable primitives, and a Shift glass-language reference, but it does not yet provide complete centralized governance.
+The application now has one registered theme, **Hanouti Crystal Glass**, and a store-scoped appearance configuration. Shared tokens drive semantic Tailwind colors, typography, radii, spacing, button sizes, common inputs, page containers, tables, settings cards, and overlay z-index values.
 
-Known areas that require future technical work are:
+The store workspace and Shift use the shared token application. Login and Splash components were not changed. The previous `legacy-workspace` palette override and local theme-selection code were removed.
 
-- Completing token coverage for hardcoded Shift and page values.
-- Centralizing theme/mode initialization and persistence.
-- Consolidating duplicate navigation and styling responsibilities.
-- Centralizing overlay behavior.
-- Consolidating notification/portal behavior.
-- Adding focused tests for dialogs, sheets, navigation, and responsive states.
-
-These findings are technical maintenance or foundation candidates. They do not authorize a redesign or database change.
+This is a centralized foundation, not a complete conversion of every page-specific CSS declaration. The stylesheet and some components still contain literal colors, dimensions, shadows, and layout rules; these remain areas for a careful follow-up audit rather than being represented as already tokenized.
 
 ## 10. Theme foundation and persistence
 
-### Implemented foundation
+Theme Settings stores the complete light and dark token sets, color mode, large-control preference, and density preference inside the existing `store_settings.settings.appearance` JSON object. The store owner is the only editor; store members read the shared setting. The existing `store_settings` Realtime subscription refreshes the active appearance on connected devices.
 
-- The registered initial theme is **Hanouti Crystal Glass**.
-- Theme registration and light/dark token sets are typed in the shared theme module.
-- Palette selection is separate from light/dark/system color mode.
-- Custom primary and accent overrides are supported as display-settings API capabilities.
-- Live preview and reset functions apply or discard theme variables through the same source.
-- Appearance settings provide a theme gallery, curated color presets, light/dark/system mode, and a shared-component preview; edits remain transient until saved.
-- The gallery colorways reuse Crystal Glass tokens and do not create page-specific theme implementations.
-- Existing light/dark/system, compact-density, and large-button behavior remains compatible.
-- Tailwind semantic colors and shadows consume CSS variables updated by the theme engine.
-- The overlay architecture consumes centralized theme z-index tokens instead of an independent overlay registry.
+`resolveStoreAppearance()` fixes the theme ID to the official theme and validates persisted token values before applying them. `store_settings.settings` is normalized by `resolveStoreSettings()` so older rows without appearance data continue to receive the official defaults.
 
-### Personal preference caching
+Older local keys such as `hanouti.display-settings.v1` are no longer read or written. They are left untouched; no unrelated local storage is cleared. Theme changes are not saved to local storage.
 
-The current implementation uses a user-ID-qualified local cache:
+No schema, RLS policy, migration, or Supabase data was changed for this implementation. Existing store ownership and member-read permissions remain authoritative. There is no separate per-user or per-device theme persistence.
 
-- `hanouti.display-settings.user.v1:<auth-user-id>` contains personal appearance preference state.
-- The legacy `hanouti.display-settings.v1` key remains a fallback for pre-auth initialization and device-level density controls.
-- Display settings are activated only after authentication identifies the user.
-- Account switches load only the target user's cache.
-- Logout and session loss reset active appearance to System mode and the Crystal Glass palette, while preserving device-level density choices.
-- No personal preference is copied from one authenticated account to another.
-- The cache is an offline fallback, not an authoritative server preference.
+## 11. Current migration boundary
 
-### Database proposal — not implemented
+The code reuses the existing JSON settings and permission model. The implementation does not change POS calculations, financial behavior, routing, authentication, or store permissions.
 
-No appearance preference table currently exists. `notification_preferences` is notification-only, and `store_settings` is explicitly store-scoped. Personal appearance data must not be placed in either table or in sensitive `profiles` columns.
-
-The safest future migration is a dedicated:
-
-```sql
-create table public.user_preferences (
-  user_id uuid primary key references public.profiles(id) on delete cascade,
-  appearance jsonb not null default '{}'::jsonb,
-  revision bigint not null default 1,
-  updated_at timestamptz not null default now()
-);
-
-alter table public.user_preferences enable row level security;
-
-create policy user_preferences_self_select
-  on public.user_preferences
-  for select
-  to authenticated
-  using (user_id = auth.uid());
-
-create policy user_preferences_self_insert
-  on public.user_preferences
-  for insert
-  to authenticated
-  with check (user_id = auth.uid());
-
-create policy user_preferences_self_update
-  on public.user_preferences
-  for update
-  to authenticated
-  using (user_id = auth.uid())
-  with check (user_id = auth.uid());
-```
-
-The appearance payload should include `themeId`, `mode`, `customPrimary`, `customAccent`, `largeButtons`, and `compactDensity`, with strict application-side validation. Device-only density controls may remain local if product requirements keep them store-terminal settings; the database proposal should not silently change that boundary.
-
-Synchronization requires:
-
-- Auth hydration first loads the server preference.
-- The user-qualified cache is used only as an offline fallback.
-- Server writes use the authenticated user ID and RLS.
-- `updatedAt` plus `revision` define conflict and last-write-wins rules.
-- Account switch removes active variables and loads the target user's preference.
-- Logout clears active variables and removes the active user's visual state from the document.
-- Failed offline writes remain queued and are retried only for the same authenticated user.
-- Cached preferences must expire or be invalidated when authentication or session validity changes.
-
-## 11. Migration boundary
-
-The document does not authorize implementation.
-
-The approved migration sequence is:
-
-1. Foundation and technical maintenance.
-2. One pilot section, if explicitly approved.
-3. One additional section at a time, only after approval of the previous section.
-
-The following are permanently excluded unless explicitly authorized outside this governance document:
-
-- Redesign of frozen components.
-- Multi-section tasks.
-- Database migrations for appearance or any unrelated feature.
-- Changes to authentication, permissions, routing, offline behavior, or business logic for visual reasons.
-- Mixing foundation work, technical maintenance, and unrelated screen migrations in one task.
+The token source and shared components cover common application styles, but page-specific hardcoded CSS remains. Further visual consolidation should preserve the current Hanouti Crystal Glass baseline, avoid the untouched Login/Splash and PayOS areas, and be validated against Shift and responsive layouts before removing remaining styles.

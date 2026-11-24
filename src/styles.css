@@ -12,66 +12,7 @@
 
 :root {
   color-scheme: light;
-  --color-accent: 14 165 233;
-  --color-accent-container: 224 242 254;
-  --color-on-accent: 255 255 255;
-  --glass-surface-alpha: 0.78;
-  --glass-high-surface-alpha: 0.92;
-  --glass-blur: 16px;
-  --glass-saturation: 1.15;
-  --radius-small: 0.25rem;
-  --radius-medium: 0.75rem;
-  --radius-large: 1.5rem;
-  --radius-pill: 9999px;
-  --shadow-card: 0 2px 6px -1px rgba(15, 95, 110, 0.06), 0 1px 3px -1px rgba(0, 0, 0, 0.04);
-  --shadow-sheet: 0 10px 25px -4px rgba(15, 95, 110, 0.12), 0 4px 6px -2px rgba(15, 95, 110, 0.04);
-  --shadow-overlay: 0 20px 30px -6px rgba(16, 27, 32, 0.22);
-  --page-gradient: radial-gradient(ellipse at 100% 100%, rgba(91, 226, 231, 0.18), transparent 42%), radial-gradient(ellipse at 0% 0%, rgba(128, 195, 255, 0.16), transparent 44%), linear-gradient(135deg, rgba(239, 249, 255, 0.92), rgba(239, 242, 255, 0.86) 54%, rgba(233, 250, 251, 0.92));
-  --font-display: Plus Jakarta Sans, sans-serif;
-  --font-body: Inter, sans-serif;
-  --motion-fast-ms: 140;
-  --motion-normal-ms: 180;
-  --motion-slow-ms: 300;
-  --z-navigation: 30;
-  --z-popover: 300;
-  --z-dialog: 200;
-  --z-prompt: 500;
-  --z-critical: 600;
-  --z-toast: 400;
-  --color-primary: 15 95 110;
-  --color-primary-pressed: 9 63 74;
-  --color-primary-dark: 16 27 32;
-  --color-on-primary: 255 255 255;
-  --color-primary-fixed: 170 237 255;
-  --color-primary-fixed-dim: 142 209 226;
-  --color-surface: 244 248 249;
-  --color-surface-dim: 234 242 244;
-  --color-surface-container: 234 242 244;
-  --color-surface-container-low: 238 245 246;
-  --color-surface-container-high: 220 233 236;
-  --color-surface-container-highest: 209 221 224;
-  --color-surface-container-lowest: 255 255 255;
-  --color-on-surface: 16 27 32;
-  --color-on-surface-variant: 63 72 75;
-  --color-outline: 111 121 123;
-  --color-outline-variant: 225 236 238;
-  --color-success: 16 185 129;
-  --color-success-dark: 5 150 105;
-  --color-success-container: 209 250 229;
-  --color-on-success: 6 46 28;
-  --color-success-foreground: 5 150 105;
-  --color-on-success-container: 6 95 70;
-  --color-warning: 245 158 11;
-  --color-warning-dark: 180 83 9;
-  --color-warning-container: 254 243 199;
-  --color-on-warning-container: 133 77 14;
-  --color-error: 239 68 68;
-  --color-error-dark: 220 38 38;
-  --color-error-container: 254 226 226;
-  --color-on-error-container: 153 27 27;
-  --color-secondary: 133 83 0;
-  --color-secondary-container: 254 166 25;
-  font-family: Inter, sans-serif;
+  font-family: var(--font-body);
   color: rgb(var(--color-on-surface));
   background: rgb(var(--color-surface));
   font-synthesis: none;
@@ -83,64 +24,6 @@
 
 :root.dark {
   color-scheme: dark;
-  --color-accent: 56 189 248;
-  --color-accent-container: 12 74 110;
-  --color-on-accent: 8 47 73;
-  --color-primary: 112 213 230;
-  --color-primary-pressed: 142 225 238;
-  --color-primary-dark: 16 27 32;
-  --color-on-primary: 0 54 64;
-  --color-primary-fixed: 23 62 70;
-  --color-primary-fixed-dim: 42 89 97;
-  --color-surface: 16 23 25;
-  --color-surface-dim: 16 23 25;
-  --color-surface-container: 23 33 36;
-  --color-surface-container-low: 29 42 45;
-  --color-surface-container-high: 41 56 59;
-  --color-surface-container-highest: 53 71 74;
-  --color-surface-container-lowest: 32 45 48;
-  --color-on-surface: 230 240 241;
-  --color-on-surface-variant: 180 195 197;
-  --color-outline: 137 153 155;
-  --color-outline-variant: 58 75 78;
-  --color-success: 22 101 52;
-  --color-success-dark: 6 95 70;
-  --color-success-container: 18 56 45;
-  --color-on-success: 236 253 245;
-  --color-success-foreground: 74 222 128;
-  --color-on-success-container: 167 243 208;
-  --color-warning: 146 64 14;
-  --color-warning-dark: 251 191 36;
-  --color-warning-container: 59 46 16;
-  --color-on-warning-container: 253 230 138;
-  --color-error: 153 27 27;
-  --color-error-dark: 252 165 165;
-  --color-error-container: 63 30 34;
-  --color-on-error-container: 254 202 202;
-  --color-secondary: 255 182 92;
-  --color-secondary-container: 85 51 0;
-}
-
-.legacy-workspace {
-  --color-primary: 15 95 110;
-  --color-primary-pressed: 9 63 74;
-  --color-on-primary: 255 255 255;
-  --color-primary-fixed: 170 237 255;
-  --color-primary-fixed-dim: 142 209 226;
-  --color-accent: 14 165 233;
-  --color-accent-container: 224 242 254;
-  --color-on-accent: 255 255 255;
-}
-
-:root.dark .legacy-workspace {
-  --color-primary: 112 213 230;
-  --color-primary-pressed: 142 225 238;
-  --color-on-primary: 0 54 64;
-  --color-primary-fixed: 23 62 70;
-  --color-primary-fixed-dim: 42 89 97;
-  --color-accent: 56 189 248;
-  --color-accent-container: 12 74 110;
-  --color-on-accent: 8 47 73;
 }
 
 * {
@@ -182,6 +65,60 @@ input {
 
 button {
   -webkit-tap-highlight-color: transparent;
+}
+
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) button:not(.rounded-full):not([role="switch"]) {
+  border-radius: var(--button-radius) !important;
+}
+
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) button.bg-primary,
+html.theme-hanouti-crystal-glass .responsive-dialog__panel button.bg-primary,
+html.theme-hanouti-crystal-glass .responsive-dialog .glass-modal-panel button.bg-primary {
+  border: 1px solid rgb(var(--color-primary) / 35%) !important;
+  border-radius: var(--button-radius) !important;
+  background:
+    linear-gradient(145deg, rgb(255 255 255 / 10%), transparent 58%),
+    linear-gradient(145deg, rgb(var(--color-primary) / 88%), rgb(var(--color-primary-pressed) / 86%)) !important;
+  box-shadow: var(--shadow-card) !important;
+  color: rgb(var(--color-on-primary)) !important;
+}
+
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) button.bg-primary:hover:not(:disabled),
+html.theme-hanouti-crystal-glass .responsive-dialog__panel button.bg-primary:hover:not(:disabled),
+html.theme-hanouti-crystal-glass .responsive-dialog .glass-modal-panel button.bg-primary:hover:not(:disabled) {
+  background:
+    linear-gradient(145deg, rgb(255 255 255 / 14%), transparent 58%),
+    linear-gradient(145deg, rgb(var(--color-primary) / 92%), rgb(var(--color-primary-pressed) / 90%)) !important;
+}
+
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) select,
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) textarea {
+  border-color: rgb(var(--color-outline-variant));
+  border-radius: var(--input-radius);
+  color: rgb(var(--color-on-surface));
+  font-family: var(--font-body);
+}
+
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) select {
+  min-height: var(--input-height);
+  background-color: rgb(var(--color-surface-container-lowest));
+  padding-inline: var(--space-md);
+}
+
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) input:focus-visible,
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) select:focus-visible,
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) textarea:focus-visible {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: 1px;
+}
+
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) article,
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) [data-card="true"],
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) .data-table-desktop,
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) [role="dialog"] {
+  border-radius: var(--card-radius) !important;
 }
 
 .material-symbols-outlined {
@@ -263,9 +200,9 @@ button {
 }
 
 .shift-workspace .shift-open-button {
-  min-height: 44px;
-  border-radius: 10px;
-  padding-inline: 16px;
+  min-height: var(--button-height-medium);
+  border-radius: var(--button-radius);
+  padding-inline: var(--button-padding-medium);
   text-transform: none;
 }
 
@@ -2132,16 +2069,16 @@ button {
 }
 
 .shift-workspace--owner .shift-open-button {
-  min-height: 50px;
-  border: 1px solid rgb(255 255 255 / 45%);
-  border-radius: 999px;
-  background: linear-gradient(145deg, #18cbd0, #079daa);
-  color: #fff;
-  box-shadow: 0 9px 20px rgb(9 157 170 / 22%), inset 0 1px 0 rgb(255 255 255 / 40%);
+  min-height: var(--button-height-medium);
+  border: 1px solid rgb(var(--color-outline-variant));
+  border-radius: var(--button-radius);
+  background: rgb(var(--color-primary));
+  color: rgb(var(--color-on-primary));
+  box-shadow: var(--shadow-card);
 }
 
 .shift-workspace--owner .shift-open-button:hover {
-  background: linear-gradient(145deg, #12bfc5, #078f99);
+  background: rgb(var(--color-primary-pressed));
 }
 
 .shift-workspace--owner .shift-section-tabs {
@@ -6299,22 +6236,22 @@ button {
   align-items: center;
   justify-content: center;
   gap: 0.6rem;
-  border: 1px solid rgb(255 255 255 / 34%);
-  background: linear-gradient(135deg, #f8a81a, #e39508);
-  color: #111b30;
-  font-weight: 800;
-  box-shadow: 0 8px 24px rgb(248 168 26 / 22%), inset 0 1px 0 rgb(255 255 255 / 44%);
-  transition: filter 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+  border: 1px solid rgb(var(--color-outline-variant));
+  background: rgb(var(--color-primary));
+  color: rgb(var(--color-on-primary));
+  font-weight: var(--font-weight-extra-bold);
+  box-shadow: var(--shadow-card);
+  transition: background-color var(--motion-normal-ms) ease, transform var(--motion-normal-ms) ease, box-shadow var(--motion-normal-ms) ease;
 }
 
 .dashboard-primary-action:hover {
-  filter: brightness(1.05);
-  box-shadow: 0 12px 28px rgb(248 168 26 / 28%), inset 0 1px 0 rgb(255 255 255 / 52%);
+  background: rgb(var(--color-primary-pressed));
+  box-shadow: var(--shadow-sheet);
 }
 
 .dashboard-primary-action:active {
   transform: translateY(1px);
-  filter: brightness(0.96);
+  background: rgb(var(--color-primary-pressed));
 }
 
 .staff-dashboard-actions {
@@ -6330,8 +6267,8 @@ button {
 .staff-dashboard-actions .dashboard-primary-action {
   min-height: 7rem;
   flex-direction: row;
-  border-radius: 1.5rem;
-  padding: 1rem;
+  border-radius: var(--button-radius);
+  padding: var(--card-padding);
   text-align: left;
 }
 
@@ -6627,13 +6564,13 @@ button {
 }
 
 .shift-workspace--owner .shift-open-button.bg-primary.text-on-primary {
-  border: 1px solid rgb(255 255 255 / 52%);
-  background: linear-gradient(145deg, #11bdc4, #057891);
-  box-shadow: 0 10px 20px rgb(6 128 151 / 20%), inset 0 1px 0 rgb(255 255 255 / 28%);
+  border: 1px solid rgb(var(--color-outline-variant));
+  background: rgb(var(--color-primary));
+  box-shadow: var(--shadow-card);
 }
 
 .shift-workspace--owner .shift-open-button.bg-primary.text-on-primary:hover {
-  background: linear-gradient(145deg, #0daeb7, #046e83);
+  background: rgb(var(--color-primary-pressed));
 }
 
 .shift-workspace--owner .shift-apple-header {
@@ -12410,18 +12347,18 @@ body:has(.shift-screen-layout) {
 
 :root,
 :root.dark {
-  --glass-popup-backdrop: rgb(16 27 32 / 48%);
+  --glass-popup-backdrop: rgb(var(--color-primary-dark) / 48%);
   --glass-popup-surface: rgb(var(--color-surface-container-lowest));
   --glass-popup-border: rgb(var(--color-outline-variant));
   --glass-popup-shadow: var(--shadow-overlay);
   --glass-popup-blur: 0px;
-  --glass-popup-radius: 16px;
+  --glass-popup-radius: var(--card-radius);
   --glass-popup-text: rgb(var(--color-on-surface));
   --glass-popup-muted: rgb(var(--color-on-surface-variant));
   --glass-popup-control: rgb(var(--color-surface-container-lowest));
   --glass-popup-control-border: rgb(var(--color-outline-variant));
   --glass-popup-primary: rgb(var(--color-primary));
-  --glass-popup-primary-hover: rgb(var(--color-primary-dark));
+  --glass-popup-primary-hover: rgb(var(--color-primary-pressed));
   --glass-popup-primary-shadow: none;
   --glass-popup-footer: rgb(var(--color-surface-container-low));
   --notification-card-border: rgb(var(--color-outline-variant));
@@ -12481,6 +12418,12 @@ body:has(.shift-screen-layout) {
   color: rgb(var(--color-on-surface));
 }
 
+.responsive-dialog .glass-modal-panel .glass-modal-content input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+.responsive-dialog .glass-modal-panel .glass-modal-content select {
+  min-height: var(--input-height);
+  padding-inline: var(--space-md);
+}
+
 .glass-modal-panel .glass-modal-subtitle,
 .notification-center-panel .notification-center-body,
 .notification-center-panel .notification-center-time,
@@ -12504,7 +12447,7 @@ body:has(.shift-screen-layout) {
 .responsive-dialog .glass-modal-panel .glass-modal-content select,
 .responsive-dialog .glass-modal-panel .glass-modal-content textarea {
   border: 1px solid rgb(var(--color-outline-variant));
-  border-radius: var(--radius-small);
+  border-radius: var(--input-radius);
   background: rgb(var(--color-surface-container-lowest));
   box-shadow: none;
   color: rgb(var(--color-on-surface));
@@ -12519,19 +12462,19 @@ body:has(.shift-screen-layout) {
 
 .responsive-dialog .glass-modal-panel button.bg-primary.text-on-primary {
   border: 1px solid rgb(var(--color-primary));
-  border-radius: var(--radius-medium);
+  border-radius: var(--button-radius);
   background: rgb(var(--color-primary));
-  box-shadow: none;
+  box-shadow: var(--shadow-card);
 }
 
 .responsive-dialog .glass-modal-panel button.bg-primary.text-on-primary:hover {
-  background: rgb(var(--color-primary-dark));
+  background: rgb(var(--color-primary-pressed));
 }
 
 .responsive-dialog .glass-modal-panel button.bg-surface-container-high.text-primary,
 .responsive-dialog .glass-modal-panel button.bg-transparent.text-on-surface-variant {
   border: 1px solid rgb(var(--color-outline-variant));
-  border-radius: var(--radius-medium);
+  border-radius: var(--button-radius);
   background: rgb(var(--color-surface-container-low));
   box-shadow: none;
   color: rgb(var(--color-on-surface));
@@ -12547,7 +12490,7 @@ body:has(.shift-screen-layout) {
 
 .responsive-dialog .glass-modal-panel button.bg-error-container.text-on-error-container {
   border: 1px solid rgb(var(--color-error) / 25%);
-  border-radius: var(--radius-medium);
+  border-radius: var(--button-radius);
 }
 
 .responsive-dialog .glass-modal-content div.rounded-xl.bg-surface-container-low,

@@ -498,7 +498,7 @@ function OwnerCatalogContent() {
   }, [visibleItems.length, loading]);
 
   return (
-    <WorkspaceLayout title={t('catalog.title')} storeName={store?.name} links={ownerWorkspaceLinks} legacyAppearance>
+    <WorkspaceLayout title={t('catalog.title')} storeName={store?.name} links={ownerWorkspaceLinks}>
       <PageHeader title={t('catalog.title')} subtitle="Manage products, categories, prices, and availability." actions={
         <>
           <Button variant="secondary" onClick={() => { setCategoryError(''); setCategoryManagerOpen(true); }}><MaterialIcon name="tune" className="text-lg" />Manage categories</Button>

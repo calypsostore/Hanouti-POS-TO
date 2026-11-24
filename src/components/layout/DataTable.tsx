@@ -37,18 +37,18 @@ export function DataTable<T>({ rows, columns, getRowKey, mobileCards, empty, row
   if (!rows.length && empty) return <>{empty}</>;
   return (
     <>
-      <div className="data-table-mobile flex flex-col gap-3 lg:hidden">
+      <div className="data-table-mobile flex flex-col gap-[var(--card-gap)] lg:hidden">
         <LazyBatch
           items={sortedRows}
           resetKey={sortKey + String(descending)}
           renderItem={(row) => <div key={getRowKey(row)}>{mobileCards(row)}</div>}
         />
       </div>
-      <div className="data-table-desktop hidden overflow-x-auto rounded-xl border border-outline-variant bg-surface-container-lowest lg:block">
+      <div className="data-table-desktop hidden overflow-x-auto rounded-[var(--card-radius)] border border-outline-variant bg-surface-container-lowest lg:block">
         <table className="w-full border-separate border-spacing-0 text-left font-body text-body-sm">
           <thead className="sticky top-0 z-10 bg-surface-container-high">
             <tr>{columns.map((column) => (
-              <th key={column.key} scope="col" className={`h-11 whitespace-nowrap px-3 font-semibold text-on-surface-variant ${column.className ?? ''}`}>
+              <th key={column.key} scope="col" className={`h-[var(--table-header-height)] whitespace-nowrap px-[var(--table-cell-padding-x)] font-semibold text-on-surface-variant ${column.className ?? ''}`}>
                 {column.sortValue ? (
                   <button
                     type="button"
@@ -66,8 +66,8 @@ export function DataTable<T>({ rows, columns, getRowKey, mobileCards, empty, row
             ))}</tr>
           </thead>
           <tbody>{sortedRows.map((row) => (
-            <tr key={getRowKey(row)} className={`h-11 border-t border-outline-variant hover:bg-surface-container-low ${rowClassName?.(row) ?? ''}`}>
-              {columns.map((column) => <td key={column.key} className={`border-t border-outline-variant px-3 py-2 align-middle ${column.className ?? ''}`}>{column.render(row)}</td>)}
+            <tr key={getRowKey(row)} className={`h-[var(--table-row-height)] border-t border-outline-variant hover:bg-surface-container-low ${rowClassName?.(row) ?? ''}`}>
+              {columns.map((column) => <td key={column.key} className={`border-t border-outline-variant px-[var(--table-cell-padding-x)] py-[var(--table-cell-padding-y)] align-middle ${column.className ?? ''}`}>{column.render(row)}</td>)}
             </tr>
           ))}</tbody>
         </table>

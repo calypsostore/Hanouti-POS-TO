@@ -162,7 +162,7 @@ export function NotificationsBridge() {
         return;
       }
       setBanner(row);
-      window.setTimeout(() => setBanner((current) => current?.id === row.id ? null : current), 5000);
+      window.setTimeout(() => setBanner((current) => current?.id === row.id ? null : current), 7000);
     };
 
     const subscribe = () => {

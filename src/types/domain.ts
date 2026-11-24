@@ -1,3 +1,5 @@
+import { DEFAULT_STORE_APPEARANCE, resolveStoreAppearance, type StoreAppearance } from '../theme/themeRegistry';
+
 export type UserRole = 'staff' | 'owner' | 'super_admin';
 export type ProfileAvatarId = 'avatar-1' | 'avatar-2' | 'avatar-3' | 'avatar-4' | 'avatar-5' | 'avatar-6';
 export type OrderStatus = 'done' | 'pending_void' | 'voided';
@@ -103,6 +105,7 @@ export interface StoreSettings {
   showStaffName: boolean;
   showDateTime: boolean;
   paperWidth: 58 | 80;
+  appearance: StoreAppearance;
 }
 
 export type QuickPickMode = 'auto' | 'manual';
@@ -160,6 +163,7 @@ export function resolveStoreSettings(settings?: Partial<StoreSettings>): StoreSe
     showStaffName: settings?.showStaffName ?? true,
     showDateTime: settings?.showDateTime ?? true,
     paperWidth: settings?.paperWidth === 58 ? 58 : 80,
+    appearance: resolveStoreAppearance(settings?.appearance ?? DEFAULT_STORE_APPEARANCE),
   };
 }
 

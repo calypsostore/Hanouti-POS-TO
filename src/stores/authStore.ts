@@ -7,7 +7,7 @@ import { getSupabaseClient } from '../data/supabaseClient';
 import { isSupabaseDriver } from '../data/driver';
 import { assertExpectedSchemaVersion } from '../services/schemaVersionService';
 import { userService } from '../services/userService';
-import { activateDisplaySettingsForUser, clearDisplaySettingsForUser } from '../lib/displaySettings';
+import { resetStoreAppearance } from '../lib/storeAppearance';
 
 let authStateSubscription: { unsubscribe: () => void } | undefined;
 let permissionRefreshGeneration = 0;
@@ -69,15 +69,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         ready: true,
         initializationError: null,
       });
-      if (user) activateDisplaySettingsForUser(user.id);
-      else clearDisplaySettingsForUser();
+      if (!user) resetStoreAppearance();
       if (isSupabaseDriver() && !authStateSubscription) {
         const { data } = getSupabaseClient().auth.onAuthStateChange((event, session) => {
           if (event === 'INITIAL_SESSION') return;
           window.setTimeout(() => {
             if (!session) {
               useCartStore.getState().clearOrder();
-              clearDisplaySettingsForUser();
+              resetStoreAppearance();
               set({ user: null, cachedUserDisplay: null, permissions: [], permissionsReady: true, locked: false });
               return;
             }
@@ -103,8 +102,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       ]);
       if (permissionGeneration !== permissionRefreshGeneration || requestGeneration !== authRefreshGeneration) return;
       set({ user, cachedUserDisplay: user ? { name: user.name } : null, locked, permissions, permissionsReady: true, initializationError: null });
-      if (user) activateDisplaySettingsForUser(user.id);
-      else clearDisplaySettingsForUser();
+      if (!user) resetStoreAppearance();
     } catch (error) {
       console.error('[startup] Could not refresh the signed-in user.', error);
       if (requestGeneration === authRefreshGeneration) {
@@ -136,7 +134,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     authRefreshGeneration += 1;
     permissionRefreshGeneration += 1;
     set({ user, cachedUserDisplay: { name: user.name }, permissions: [], permissionsReady: user.role !== 'staff', locked: false });
-    activateDisplaySettingsForUser(user.id);
+    resetStoreAppearance();
     if (user.role === 'staff') await get().refreshPermissions();
     return user;
   },
@@ -192,7 +190,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
     }
     await authService.logout();
-    clearDisplaySettingsForUser();
+    resetStoreAppearance();
     permissionRefreshGeneration += 1;
     useCartStore.getState().clearOrder();
     set({ user: null, cachedUserDisplay: null, permissions: [], permissionsReady: true, locked: false });

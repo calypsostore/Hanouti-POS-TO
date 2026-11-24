@@ -55,7 +55,16 @@ describe('store repository', () => {
     mockFrom
       .mockReturnValueOnce(queryResult({ data: storeRow, error: null }))
       .mockReturnValueOnce(queryResult({
-        data: { settings: { quickPickMode: 'manual', quickPickItemIds: ['item-1'] } },
+        data: {
+          settings: {
+            quickPickMode: 'manual',
+            quickPickItemIds: ['item-1'],
+            appearance: {
+              mode: 'dark',
+              dark: { palette: { primary: '7 8 9' } },
+            },
+          },
+        },
         error: null,
       }));
 
@@ -66,6 +75,11 @@ describe('store repository', () => {
       settings: {
         quickPickMode: 'manual',
         quickPickItemIds: ['item-1'],
+        appearance: {
+          themeId: 'hanouti-crystal-glass',
+          mode: 'dark',
+          dark: { palette: { primary: '7 8 9' } },
+        },
       },
     });
     expect(mockFrom.mock.calls.map(([table]) => table)).toEqual(['stores', 'store_settings']);

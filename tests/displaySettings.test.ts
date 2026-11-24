@@ -1,82 +1,74 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  activateDisplaySettingsForUser,
-  clearDisplaySettingsForUser,
-  discardDisplaySettingsPreview,
-  previewDisplaySettings,
-  updateDisplaySettings,
-} from '../src/lib/displaySettings';
-import { getRegisteredThemeIds, getTheme } from '../src/theme/themeRegistry';
+import { applyStoreAppearance, resetStoreAppearance } from '../src/lib/storeAppearance';
+import { DEFAULT_STORE_APPEARANCE, resolveStoreAppearance } from '../src/theme/themeRegistry';
 
-const userSettingsKey = (userId: string) => `hanouti.display-settings.user.v1:${userId}`;
-
-describe('display settings', () => {
+describe('store appearance application', () => {
   let variables: Map<string, string>;
+  let classes: Map<string, boolean>;
+  let addThemeClass: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    localStorage.clear();
     variables = new Map();
+    classes = new Map();
+    addThemeClass = vi.fn();
     const root = {
-      classList: { toggle: vi.fn() },
+      classList: {
+        add: addThemeClass,
+        toggle: (name: string, value: boolean) => classes.set(name, value),
+      },
       style: { setProperty: (name: string, value: string) => variables.set(name, value) },
     };
     vi.stubGlobal('document', { documentElement: root, querySelector: () => null });
-    vi.stubGlobal('window', {
-      localStorage,
-      matchMedia: () => ({ matches: false, addEventListener: vi.fn() }),
-      addEventListener: vi.fn(),
-    });
+    vi.stubGlobal('window', { matchMedia: () => ({ matches: false, addEventListener: vi.fn() }) });
+    resetStoreAppearance();
   });
 
-  it('previews custom primary and accent colors without persisting until saved', () => {
-    activateDisplaySettingsForUser('preview-user');
-    previewDisplaySettings({ customPrimary: '#facc15', customAccent: '#a855f7' });
+  it('applies the persisted store color, component, and typography tokens to the document', () => {
+    const appearance = resolveStoreAppearance({
+      ...DEFAULT_STORE_APPEARANCE,
+      mode: 'light',
+      light: {
+        palette: { primary: '250 204 21' },
+        dimensions: { buttonRadius: '12px', inputHeight: '44px' },
+        typography: { sizes: { bodyMd: '16px' } },
+      },
+    });
+
+    applyStoreAppearance(appearance);
 
     expect(variables.get('--color-primary')).toBe('250 204 21');
-    expect(variables.get('--color-on-primary')).toBe('16 27 32');
-    expect(variables.get('--color-accent')).toBe('168 85 247');
-    expect(localStorage.getItem(userSettingsKey('preview-user'))).toBeNull();
-
-    discardDisplaySettingsPreview();
-
-    expect(variables.get('--color-primary')).toBe('15 95 110');
-    expect(variables.get('--color-accent')).toBe('14 165 233');
+    expect(variables.get('--button-radius')).toBe('12px');
+    expect(variables.get('--input-height')).toBe('44px');
+    expect(variables.get('--font-size-body-md')).toBe('16px');
+    expect(classes.get('dark')).toBe(false);
+    expect(addThemeClass).toHaveBeenCalledWith('theme-hanouti-crystal-glass');
   });
 
-  it('restores saved appearance by account without sharing personal preferences', () => {
-    activateDisplaySettingsForUser('account-one');
-    updateDisplaySettings({ paletteId: 'olive-market', theme: 'dark', customPrimary: '#8833cc' });
+  it('ignores obsolete local theme preferences without deleting unrelated stored values', () => {
+    const legacyPreference = JSON.stringify({ theme: 'dark', paletteId: 'olive-market' });
+    const storage = new Map([['hanouti.display-settings.v1', legacyPreference], ['unrelated-setting', 'preserve']]);
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+        removeItem: (key: string) => storage.delete(key),
+      },
+      matchMedia: () => ({ matches: false, addEventListener: vi.fn() }),
+    });
 
-    activateDisplaySettingsForUser('account-two');
-    expect(variables.get('--color-primary')).toBe(getTheme('hanouti-crystal-glass').light.palette.primary);
-    expect(localStorage.getItem(userSettingsKey('account-two'))).toBeNull();
+    resetStoreAppearance();
 
-    activateDisplaySettingsForUser('account-one');
-    expect(variables.get('--color-primary')).toBe('136 51 204');
-    expect(localStorage.getItem(userSettingsKey('account-one'))).toContain('"paletteId":"olive-market"');
+    expect(variables.get('--color-primary')).toBe(DEFAULT_STORE_APPEARANCE.light.palette.primary);
+    expect(storage.get('hanouti.display-settings.v1')).toBe(legacyPreference);
+    expect(storage.get('unrelated-setting')).toBe('preserve');
   });
 
-  it('clears the active personal theme for Login while keeping the account cache isolated', () => {
-    activateDisplaySettingsForUser('logout-user');
-    updateDisplaySettings({ customPrimary: '#7c3aed', theme: 'dark' });
+  it('applies the shared dark palette and large-control setting', () => {
+    applyStoreAppearance({ ...DEFAULT_STORE_APPEARANCE, mode: 'dark', largeButtons: true, compactDensity: true });
 
-    clearDisplaySettingsForUser();
-
-    expect(variables.get('--color-primary')).toBe('15 95 110');
-    expect(variables.get('--color-accent')).toBe('14 165 233');
-    expect(localStorage.getItem(userSettingsKey('logout-user'))).toContain('"customPrimary":"#7c3aed"');
-  });
-
-  it('applies every registered theme in both light and dark modes', () => {
-    activateDisplaySettingsForUser('theme-test');
-
-    for (const paletteId of getRegisteredThemeIds()) {
-      const theme = getTheme(paletteId);
-      updateDisplaySettings({ paletteId, theme: 'light', customPrimary: undefined, customAccent: undefined });
-      expect(variables.get('--color-primary')).toBe(theme.light.palette.primary);
-
-      updateDisplaySettings({ theme: 'dark' });
-      expect(variables.get('--color-primary')).toBe(theme.dark.palette.primary);
-    }
+    expect(variables.get('--color-primary')).toBe(DEFAULT_STORE_APPEARANCE.dark.palette.primary);
+    expect(classes.get('dark')).toBe(true);
+    expect(classes.get('large-buttons')).toBe(true);
+    expect(classes.get('compact-density')).toBe(true);
   });
 });

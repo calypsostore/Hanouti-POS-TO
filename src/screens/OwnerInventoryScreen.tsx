@@ -160,7 +160,7 @@ function OwnerInventoryContent() {
   });
 
   return (
-    <WorkspaceLayout title={t('inventory.title')} storeName={storeName} links={ownerWorkspaceLinks} legacyAppearance>
+    <WorkspaceLayout title={t('inventory.title')} storeName={storeName} links={ownerWorkspaceLinks}>
       <PageHeader title={t('inventory.title')} subtitle="Manage stock tracking, counts, and adjustments." />
 
       <section aria-label="Inventory filters" className="mb-4 flex flex-col gap-3">

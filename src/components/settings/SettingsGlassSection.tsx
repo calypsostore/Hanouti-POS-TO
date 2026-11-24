@@ -27,7 +27,7 @@ export function SettingsGlassSection({
       id={id}
       hidden={hidden}
       aria-labelledby={headingId}
-      className={`settings-section flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card ${className}`}
+      className={`settings-section flex flex-col gap-[var(--section-gap)] rounded-[var(--card-radius)] bg-surface-container-lowest p-[var(--card-padding)] shadow-card ${className}`}
     >
       <header className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
@@ -38,7 +38,7 @@ export function SettingsGlassSection({
         </div>
         {actions && <div className="shrink-0">{actions}</div>}
       </header>
-      <div className="flex min-w-0 flex-col gap-3">{children}</div>
+      <div className="flex min-w-0 flex-col gap-[var(--space-md)]">{children}</div>
     </section>
   );
 }

@@ -19,6 +19,9 @@ import { classifyInitializationError } from './services/serverErrorService';
 import { PullToRefresh } from './components/PullToRefresh';
 import { ActionFeedbackToast } from './components/ActionFeedbackToast';
 import { useOverlayLifecycle, useOverlayTarget } from './components/overlay/overlayArchitecture';
+import { subscribeToStoreChanges } from './data/repositories/realtimeRepository';
+import { applyStoreAppearance, resetStoreAppearance } from './lib/storeAppearance';
+import { resolveStoreSettings } from './types/domain';
 
 const SetNewPasswordScreen = lazy(() => import('./screens/SetNewPasswordScreen').then((module) => ({ default: module.SetNewPasswordScreen })));
 const PosScreen = lazy(() => import('./screens/PosScreen').then((module) => ({ default: module.PosScreen })));
@@ -206,6 +209,7 @@ export default function App() {
   const locked = useAuthStore((state) => state.locked);
   const initializationError = useAuthStore((state) => state.initializationError);
   const hydrate = useAuthStore((state) => state.hydrate);
+  const [storeAppearanceError, setStoreAppearanceError] = useState<Error | null>(null);
   const [updateReloadError, setUpdateReloadError] = useState(() => updateService.getPostUpdateMessage());
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(() => updateService.getLastResult());
   const portalTarget = useOverlayTarget();
@@ -222,6 +226,38 @@ export default function App() {
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
+
+  useEffect(() => {
+    if (!ready || !user?.storeId) {
+      resetStoreAppearance();
+      setStoreAppearanceError(null);
+      return;
+    }
+
+    let active = true;
+    const refreshAppearance = () => {
+      void userService.getStore(user.storeId!).then((store) => {
+        if (!active) return;
+        if (!store) throw new Error('The active store could not be found.');
+        applyStoreAppearance(resolveStoreSettings(store.settings).appearance);
+        setStoreAppearanceError(null);
+      }).catch((error: unknown) => {
+        if (!active) return;
+        const normalizedError = error instanceof Error ? error : new Error('Unable to load the store theme.', { cause: error });
+        console.error('[theme] Could not load the store appearance.', normalizedError);
+        setStoreAppearanceError(normalizedError);
+      });
+    };
+
+    const stopRealtime = subscribeToStoreChanges(user.storeId, ['store_settings'], refreshAppearance);
+    window.addEventListener('hanouti:store-settings-updated', refreshAppearance);
+    refreshAppearance();
+    return () => {
+      active = false;
+      stopRealtime();
+      window.removeEventListener('hanouti:store-settings-updated', refreshAppearance);
+    };
+  }, [ready, user?.id, user?.storeId]);
 
   useEffect(() => {
     if (!ready) return;
@@ -386,6 +422,11 @@ export default function App() {
     <>
       <UpdateRequiredModal result={updateResult} />
       <ActionFeedbackToast />
+      {storeAppearanceError && (
+        <div role="alert" className="fixed inset-x-3 top-3 z-critical rounded-xl bg-error-container px-4 py-3 text-on-error-container shadow-overlay tablet:inset-x-auto tablet:right-4 tablet:max-w-lg">
+          Could not load this store&apos;s theme settings. The default Hanouti Crystal Glass theme is active. {storeAppearanceError.message}
+        </div>
+      )}
       {updateReloadError && createPortal(
         <div role="status" className="fixed inset-x-0 top-0 flex items-center justify-between gap-3 bg-primary-dark px-4 py-3 text-white shadow-overlay" style={{ zIndex: updateBannerZIndex }}>
           <div>

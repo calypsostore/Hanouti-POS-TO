@@ -137,7 +137,7 @@ export function OwnerExpensesScreen() {
     (newCategory !== 'supplier' || Boolean(supplierId));
 
   return (
-    <WorkspaceLayout title={t('nav.expenses')} storeName={storeName} links={ownerWorkspaceLinks} legacyAppearance>
+    <WorkspaceLayout title={t('nav.expenses')} storeName={storeName} links={ownerWorkspaceLinks}>
       <PageHeader title={t('nav.expenses')} subtitle="Track operating costs and supplier purchases." actions={
         <Button onClick={() => {
           setError('');
@@ -366,7 +366,7 @@ export function OwnerSuppliersScreen() {
     enteredPayment <= (details?.amountOwedMillimes ?? 0);
 
   return (
-    <WorkspaceLayout title={t('nav.suppliers')} storeName={storeName} links={ownerWorkspaceLinks} legacyAppearance>
+    <WorkspaceLayout title={t('nav.suppliers')} storeName={storeName} links={ownerWorkspaceLinks}>
       <PageHeader title={t('nav.suppliers')} subtitle="Supplier purchases, payments and outstanding balances." actions={
         <Button onClick={() => {
           setError('');

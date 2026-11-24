@@ -13,6 +13,7 @@ import { getPermissionOverrides, getProfile, listProfileNames, listProfiles } fr
 import { getStore as getRemoteStore, getSuperAdminStoreOverview, listStores as listRemoteStores } from '../data/repositories/storeRepository';
 import { formatStaffUsername, generateStoreCode, migrateLegacyDemoStoreIdentity } from './accountIdentity';
 import { isProfileAvatarId } from '../data/profileAvatars';
+import { mergeStoreAppearance } from '../theme/themeRegistry';
 
 const PERMISSIONS: PermissionDefinition[] = [
   { id: 'take_orders', group: 'Orders', label: 'Take orders' },
@@ -63,6 +64,10 @@ const savePositions = (value: PositionRecord[]) => writeData('positions', value)
 
 export const PERMISSIONS_CHANGED_EVENT = '7anouti-permissions-changed';
 export const STORE_AUTO_LOCK_CHANGED_EVENT = '7anouti-store-auto-lock-changed';
+
+function notifyStoreSettingsChanged(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('hanouti:store-settings-updated'));
+}
 
 function notifyPermissionsChanged(): void {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(PERMISSIONS_CHANGED_EVENT));
@@ -261,6 +266,7 @@ export const userService = {
       showStaffName?: boolean;
       showDateTime?: boolean;
       paperWidth?: 58 | 80;
+      appearance?: StoreSettings['appearance'];
     },
   ): Promise<StoreRecord> {
     if (changes.storeType !== undefined &&
@@ -291,17 +297,22 @@ export const userService = {
       }
       const store = await getRemoteStore(storeId);
       if (!store || store.ownerId !== ownerId) throw new Error('Only this store owner can change store settings.');
+      const currentSettings = resolveStoreSettings(store.settings);
       const settings = {
-        ...resolveStoreSettings(store.settings),
+        ...currentSettings,
         ...normalizedChanges,
+        appearance: normalizedChanges.appearance
+          ? mergeStoreAppearance(currentSettings.appearance, normalizedChanges.appearance)
+          : currentSettings.appearance,
         notificationPreferences: {
-          ...resolveStoreSettings(store.settings).notificationPreferences,
+          ...currentSettings.notificationPreferences,
           ...normalizedChanges.notificationPreferences,
         },
       };
       const { error } = await getSupabaseClient().from('store_settings').upsert({ store_id: storeId, settings });
       if (error) throw new Error(`Could not save store settings: ${error.message}`, { cause: error });
       invalidateQueryCache(['stores', 'store_settings']);
+      notifyStoreSettingsChanged();
       await activityService.log({
         storeId,
         action: 'store.settings_changed',
@@ -333,6 +344,9 @@ export const userService = {
     const settings: StoreSettings = {
       ...currentSettings,
       ...normalizedChanges,
+      appearance: normalizedChanges.appearance
+        ? mergeStoreAppearance(currentSettings.appearance, normalizedChanges.appearance)
+        : currentSettings.appearance,
       notificationPreferences: {
         ...currentSettings.notificationPreferences,
         ...normalizedChanges.notificationPreferences,
@@ -340,6 +354,7 @@ export const userService = {
     };
     const updated = { ...store, settings };
     saveStores(stores.map((candidate) => candidate.id === storeId ? updated : candidate));
+    notifyStoreSettingsChanged();
     await logUserMutation({
       storeId,
       actorId: ownerId,

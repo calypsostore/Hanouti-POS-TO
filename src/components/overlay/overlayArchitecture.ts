@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
-import { getTheme } from '../../theme/themeRegistry';
+import { DEFAULT_STORE_APPEARANCE } from '../../theme/themeRegistry';
+import { useStoreAppearance } from '../../lib/storeAppearance';
 
 export type OverlayKind = 'popover' | 'sheet' | 'dialog' | 'prompt' | 'critical' | 'toast';
 
@@ -24,13 +25,16 @@ interface OverlayRegistration {
 }
 
 function getOverlayZIndexFromTheme(kind: OverlayKind): number {
-  const zIndex = getTheme('hanouti-crystal-glass').light.zIndex;
-  if (kind === 'sheet') return zIndex.dialog;
-  if (kind === 'dialog') return zIndex.dialog;
-  if (kind === 'popover') return zIndex.popover;
-  if (kind === 'prompt') return zIndex.prompt;
-  if (kind === 'critical') return zIndex.critical;
-  return zIndex.toast;
+  const tokenName = kind === 'sheet' || kind === 'dialog'
+    ? 'dialog'
+    : kind;
+  const token = typeof document === 'undefined'
+    ? ''
+    : window.getComputedStyle(document.documentElement).getPropertyValue(`--z-${tokenName}`);
+  const configured = Number.parseInt(token, 10);
+  if (Number.isFinite(configured)) return configured;
+  if (tokenName === 'dialog') return DEFAULT_STORE_APPEARANCE.light.zIndex.dialog;
+  return DEFAULT_STORE_APPEARANCE.light.zIndex[tokenName];
 }
 
 let nextOverlayId = 1;
@@ -127,7 +131,8 @@ export function useOverlayLifecycle({
 }: OverlayRegistrationOptions): number {
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const onEscapeRef = useRef(onEscape);
-  const [zIndex] = useState(() => getOverlayZIndex(kind));
+  useStoreAppearance();
+  const zIndex = getOverlayZIndex(kind);
 
   useEffect(() => {
     onEscapeRef.current = onEscape;

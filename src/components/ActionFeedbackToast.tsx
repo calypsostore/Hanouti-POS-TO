@@ -16,7 +16,7 @@ interface ToastMessage {
 type ActionToastStyle = CSSProperties & { '--action-toast-drag-y': string };
 
 const EXIT_ANIMATION_MS = 180;
-const TOAST_VISIBLE_DURATION_MS = 2000;
+const TOAST_VISIBLE_DURATION_MS = 7000;
 const TOAST_AUTO_DISMISS_MS = TOAST_VISIBLE_DURATION_MS - EXIT_ANIMATION_MS;
 const HOLD_TO_PIN_MS = 500;
 const SWIPE_TO_DISMISS_PX = 48;

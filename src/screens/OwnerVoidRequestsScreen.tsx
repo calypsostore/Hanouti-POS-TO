@@ -74,7 +74,7 @@ function OwnerVoidRequestsContent() {
   }
 
   return (
-    <WorkspaceLayout title={t('voids.title')} storeName={storeName} links={ownerWorkspaceLinks} legacyAppearance>
+    <WorkspaceLayout title={t('voids.title')} storeName={storeName} links={ownerWorkspaceLinks}>
       <PageHeader title={t('voids.title')} subtitle="Approve or reject staff requests to void completed orders." />
       {error && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       {notice && <p role="status" className="mb-3 rounded-lg bg-success-container p-3 font-body text-body-sm text-on-success-container">{notice}</p>}

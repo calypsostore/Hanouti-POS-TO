@@ -17,7 +17,7 @@ import { TopBar } from '../components/TopBar';
 import { TicketView } from '../components/TicketView';
 import { formatTnd } from '../lib/format';
 import { getCustomerCreditTone, loadCustomerCreditStatuses } from '../lib/customerCredit';
-import { useDisplaySettings } from '../lib/displaySettings';
+import { useStoreAppearance } from '../lib/storeAppearance';
 import { useQueryCacheRefresh } from '../lib/useQueryCacheRefresh';
 import { t } from '../i18n/translations';
 import { catalogService } from '../services/catalogService';
@@ -85,7 +85,7 @@ export function PosScreen() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const permissions = useAuthStore((state) => state.permissions);
-  const { largeButtons } = useDisplaySettings();
+  const { largeButtons } = useStoreAppearance();
   const lock = useAuthStore((state) => state.lock);
   const storeId = user?.storeId ?? '';
   const cacheRevision = useQueryCacheRefresh(['catalog_items', 'categories', 'stores', 'store_settings']);

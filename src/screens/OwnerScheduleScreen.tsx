@@ -314,7 +314,7 @@ function OwnerScheduleContent() {
   }
 
   return (
-    <WorkspaceLayout title="Schedule" storeName={storeName} links={ownerWorkspaceLinks} legacyAppearance>
+    <WorkspaceLayout title="Schedule" storeName={storeName} links={ownerWorkspaceLinks}>
       <PageHeader title="Weekly schedule" subtitle="Plan staff shifts, review conflicts, and publish changes." />
 
       <section className="mb-4 rounded-2xl bg-surface-container-lowest p-3 shadow-card sm:p-4">

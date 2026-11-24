@@ -53,7 +53,7 @@ export function OwnerActivityLogScreen() {
   }, [storeId, filters]);
 
   return (
-    <WorkspaceLayout title={t('nav.activityLog')} storeName={storeName} links={ownerWorkspaceLinks} legacyAppearance>
+    <WorkspaceLayout title={t('nav.activityLog')} storeName={storeName} links={ownerWorkspaceLinks}>
       <PageHeader title={t('nav.activityLog')} />
       {error && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       <section aria-label={t('activity.filters')} className="mb-4 grid grid-cols-2 gap-2 rounded-xl bg-surface-container-lowest p-3 shadow-card sm:gap-3 sm:p-4">

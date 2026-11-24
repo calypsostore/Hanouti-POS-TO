@@ -25,6 +25,7 @@ export interface ThemePalette {
   outlineVariant: RGB;
   success: RGB;
   successDark: RGB;
+  successForeground: RGB;
   successContainer: RGB;
   onSuccess: RGB;
   onSuccessContainer: RGB;
@@ -32,6 +33,10 @@ export interface ThemePalette {
   warningDark: RGB;
   warningContainer: RGB;
   onWarningContainer: RGB;
+  info: RGB;
+  infoDark: RGB;
+  infoContainer: RGB;
+  onInfoContainer: RGB;
   error: RGB;
   errorDark: RGB;
   errorContainer: RGB;
@@ -63,6 +68,41 @@ export interface DesignTokens {
   typography: {
     fontDisplay: string;
     fontBody: string;
+    sizes: {
+      headlineXl: string;
+      headlineLg: string;
+      headlineMd: string;
+      headlineSm: string;
+      titleMd: string;
+      bodyLg: string;
+      bodyMd: string;
+      bodySm: string;
+      labelLg: string;
+      labelMd: string;
+      labelSm: string;
+      currencyDisplay: string;
+    };
+    lineHeights: {
+      headlineXl: string;
+      headlineLg: string;
+      headlineMd: string;
+      headlineSm: string;
+      titleMd: string;
+      bodyLg: string;
+      bodyMd: string;
+      bodySm: string;
+      labelLg: string;
+      labelMd: string;
+      labelSm: string;
+      currencyDisplay: string;
+    };
+    weights: {
+      regular: number;
+      medium: number;
+      semibold: number;
+      bold: number;
+      extraBold: number;
+    };
   };
   spacing: {
     xs: string;
@@ -70,10 +110,30 @@ export interface DesignTokens {
     md: string;
     lg: string;
     xl: string;
+    xxl: string;
   };
   dimensions: {
-    buttonHeight: string;
+    buttonHeightSmall: string;
+    buttonHeightMedium: string;
+    buttonHeightLarge: string;
+    buttonRadius: string;
+    buttonPaddingSmall: string;
+    buttonPaddingMedium: string;
+    buttonPaddingLarge: string;
     inputHeight: string;
+    inputRadius: string;
+    cardRadius: string;
+    cardPadding: string;
+    tableHeaderHeight: string;
+    tableRowHeight: string;
+    tableCellPaddingX: string;
+    tableCellPaddingY: string;
+    pageMaxWidth: string;
+    pageGutterMobile: string;
+    pageGutterTablet: string;
+    pageGutterDesktop: string;
+    sectionGap: string;
+    cardGap: string;
     iconSmall: string;
     iconMedium: string;
   };

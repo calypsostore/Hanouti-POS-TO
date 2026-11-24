@@ -6,6 +6,7 @@ import { orderService } from './orderService';
 import { notificationService } from './notificationService';
 import { activityService } from './activityService';
 import { authService } from './authService';
+import { offlineOrderQueue } from './offlineOrderQueue';
 import { isSupabaseDriver } from '../data/driver';
 import { requireOnlineForAction } from './offlineAvailability';
 import {
@@ -191,7 +192,18 @@ export const shiftService = {
   async closeShift(shiftId: string, countedCashMillimes: number, differenceNote?: string): Promise<ShiftRecord> {
     requireOnlineForAction('Closing a shift');
     if (!Number.isInteger(countedCashMillimes) || countedCashMillimes < 0) throw new Error('Counted cash must be a non-negative amount in millimes.');
-    if (isSupabaseDriver()) return closeRemoteShift(shiftId, countedCashMillimes, validateDifferenceNote(0, differenceNote));
+    if (isSupabaseDriver()) {
+      if (typeof navigator !== 'undefined' && navigator.onLine) await offlineOrderQueue.flush();
+      const unresolvedOrderCount = await offlineOrderQueue.unresolvedCountForShift(shiftId);
+      if (unresolvedOrderCount > 0) {
+        const orderLabel = unresolvedOrderCount === 1 ? 'order has' : 'orders have';
+        throw new Error(
+          `${unresolvedOrderCount} ${orderLabel} not synced yet. Connect to the internet and wait for queued orders to sync. ` +
+          'For "Needs attention" orders, ask the owner to review the notice on the POS screen; the app has no retry action for them yet.',
+        );
+      }
+      return closeRemoteShift(shiftId, countedCashMillimes, validateDifferenceNote(0, differenceNote));
+    }
     const pendingVoidCount = await orderService.getPendingVoidCountForShift(shiftId);
     const shifts = getShifts();
     const shift = shifts.find((candidate) => candidate.id === shiftId && candidate.status === 'open');

@@ -252,6 +252,19 @@ export const offlineOrderQueue = {
       .map((entry) => ({ order: entry.order, message: entry.error ?? 'The server rejected this order.' }));
   },
 
+  async unresolvedCountForShift(shiftId: string): Promise<number> {
+    const { data, error } = await getSupabaseClient().auth.getSession();
+    if (error) throw new Error(`Could not check the active account before closing the shift: ${error.message}`, { cause: error });
+    const staffId = data.session?.user.id;
+    if (!staffId) throw new Error('Could not confirm the active account, so the shift was not closed. Please sign in again.');
+
+    return (((await getValue<QueuedOrderEntry[]>(QUEUE_KEY)) ?? []).filter((entry) =>
+      entry.input.staffId === staffId &&
+      (entry.shift.id === shiftId || entry.order.shiftId === shiftId) &&
+      (entry.status === 'queued' || entry.status === 'needs_attention'),
+    )).length;
+  },
+
   isNetworkFailure,
 };
 

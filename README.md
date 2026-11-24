@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Node.js 20.19+ or 22.12+
+- Node.js 22.12.0+
 - npm
 
 ## Run locally

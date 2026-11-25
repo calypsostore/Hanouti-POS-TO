@@ -215,6 +215,41 @@ export const authRepository = {
     if (typeof window !== 'undefined') window.sessionStorage.removeItem(PIN_LOCK_KEY);
   },
 
+  async verifyFiscalProfileOwnerCredential(
+    storeId: string,
+    method: 'pin' | 'password',
+    credential: string,
+  ): Promise<void> {
+    const user = await currentUser();
+    if (!user || user.role !== 'owner' || user.storeId !== storeId) {
+      throw new Error('Only the active owner of this store can unlock its fiscal information.');
+    }
+    const store = await getStore(storeId);
+    if (!store || store.ownerId !== user.id) {
+      throw new Error('Only the active owner of this store can unlock its fiscal information.');
+    }
+
+    if (method === 'password') {
+      if (!credential) throw new Error('Enter your password.');
+      await verifyCurrentPassword(credential);
+      return;
+    }
+
+    if (!/^\d{4}$/.test(credential)) throw new Error('Enter your 4-digit personal PIN.');
+    const remaining = this.pinLockRemainingMs();
+    if (remaining > 0) throw new Error(`PIN locked. Try again in ${Math.ceil(remaining / 1000)} seconds.`);
+    const { data, error } = await getSupabaseClient().rpc('verify_personal_pin', { p_pin: credential });
+    if (error) {
+      if (error.message.includes('temporarily locked')) {
+        if (typeof window !== 'undefined') window.sessionStorage.setItem(PIN_LOCK_KEY, String(Date.now() + 60_000));
+        throw new Error('Five incorrect PINs. Try again in 60 seconds.');
+      }
+      throwSupabaseError(error, 'Could not verify the personal PIN');
+    }
+    if (data !== true) throw new Error('Incorrect PIN.');
+    if (typeof window !== 'undefined') window.sessionStorage.removeItem(PIN_LOCK_KEY);
+  },
+
   async unlockWithPin(pin: string): Promise<UserSummary> {
     if (!/^\d{4}$/.test(pin)) throw new Error('Enter your 4-digit PIN.');
     const user = await currentUser();

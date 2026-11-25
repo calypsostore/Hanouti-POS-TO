@@ -5,8 +5,11 @@ import { MaterialIcon } from '../components/MaterialIcon';
 import { ToggleSwitch } from '../components/ToggleSwitch';
 import { t } from '../i18n/translations';
 import { useAuthStore } from '../stores/authStore';
+import apk1Logo from '../../logos/apk1.png';
 
 type LoginRole = 'staff' | 'admin';
+
+const LATEST_APK_URL = 'https://github.com/calypsostore/Hanouti-POS-TO/releases/download/v1.0.6/7anouti-POS-v1.0.6.apk';
 
 interface LoginLogoMotion {
   x: number;
@@ -25,6 +28,7 @@ export function LoginScreen() {
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [apkTouchCount, setApkTouchCount] = useState(0);
   const login = useAuthStore((state) => state.login);
   const [logoMotion, setLogoMotion] = useState<LoginLogoMotion | null>(null);
   const logoPhysics = useRef({
@@ -198,8 +202,43 @@ export function LoginScreen() {
     }
   }
 
+  const apkSpeech = apkTouchCount === 1
+    ? t('login.apkTapPrompt')
+    : apkTouchCount === 2
+      ? t('login.apkJokeOne')
+      : apkTouchCount === 3
+        ? t('login.apkJokeTwo')
+        : apkTouchCount === 4
+          ? t('login.apkJokeThree')
+          : null;
+
   return (
     <main className="login-main">
+      <div className="login-apk-widget">
+        <button
+          type="button"
+          className="login-apk-logo"
+          aria-label={t('login.apkLogoTapLabel')}
+          aria-controls="login-apk-speech"
+          aria-expanded={apkSpeech !== null}
+          aria-describedby={apkSpeech !== null ? 'login-apk-speech' : undefined}
+          onClick={() => setApkTouchCount((count) => Math.min(count + 1, 4))}
+          disabled={apkTouchCount >= 4}
+        >
+          <img src={apk1Logo} alt="" draggable={false} />
+        </button>
+        {apkSpeech !== null && (
+          <div
+            key={apkTouchCount}
+            id="login-apk-speech"
+            className="login-apk-speech"
+            role="status"
+            aria-live="polite"
+          >
+            {apkSpeech}
+          </div>
+        )}
+      </div>
       <div className="login-decoration login-decoration--northwest" aria-hidden="true" />
       <div className="login-decoration login-decoration--northeast" aria-hidden="true" />
       <div className="login-decoration login-decoration--southeast" aria-hidden="true" />
@@ -343,7 +382,14 @@ export function LoginScreen() {
         </form>
 
         <footer className="login-footer">
-          <MaterialIcon name="admin_panel_settings" />
+          <a
+            href={LATEST_APK_URL}
+            className="login-footer-download"
+            aria-label={t('login.downloadLatestApk')}
+            title={t('login.downloadLatestApk')}
+          >
+            <MaterialIcon name="admin_panel_settings" />
+          </a>
           <span>{t('login.noAccount')}</span>
         </footer>
       </div>

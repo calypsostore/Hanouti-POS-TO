@@ -51,6 +51,10 @@ describe('credential lifecycle', () => {
     await expect(userService.verifyStorePin(store.id, '2468', 'void')).resolves.toBe(true);
 
     await authService.changePersonalPin(owner.id, '1234', '5678');
+    await expect(authService.verifyFiscalProfileOwnerCredential(store.id, 'pin', '5678')).resolves.toBeUndefined();
+    await expect(authService.verifyFiscalProfileOwnerCredential(store.id, 'pin', '0000')).rejects.toThrow('Incorrect PIN.');
+    await expect(authService.verifyFiscalProfileOwnerCredential(store.id, 'password', 'OwnerPassword1')).resolves.toBeUndefined();
+    await expect(authService.verifyFiscalProfileOwnerCredential(store.id, 'password', 'wrong-password')).rejects.toThrow('Password is incorrect.');
     await authService.lockCurrentSession();
     expect(await authService.isSessionLocked(owner.id)).toBe(true);
     expect((await authService.unlockCurrentSessionWithPin('5678')).id).toBe(owner.id);
@@ -140,6 +144,8 @@ describe('credential lifecycle', () => {
     const pinUpdated = await authService.setPersonalPin(staff.id, '1234');
     expect(pinUpdated.mustSetPin).toBe(false);
     await expect(authService.setPersonalPin(staff.id, '5678')).rejects.toThrow('already set');
+    await expect(authService.verifyFiscalProfileOwnerCredential('store-cafe12', 'pin', '1234'))
+      .rejects.toThrow('Only the active owner of this store can unlock its fiscal information.');
 
     await authService.changePersonalPin(staff.id, '1234', '5678');
     expect((await authService.unlockCurrentSessionWithPin('5678')).id).toBe(staff.id);

@@ -237,6 +237,34 @@ export const authService = {
     });
   },
 
+  async verifyFiscalProfileOwnerCredential(
+    storeId: string,
+    method: 'pin' | 'password',
+    credential: string,
+  ): Promise<void> {
+    if (isSupabaseDriver()) {
+      return authRepository.verifyFiscalProfileOwnerCredential(storeId, method, credential);
+    }
+
+    const session = readData<AuthSession | null>(SESSION_KEY, null);
+    const user = session ? getUsers().find((candidate) => candidate.id === session.userId) : undefined;
+    const store = readData('stores', seedStores).find((candidate) => candidate.id === storeId);
+    if (!user || user.role !== 'owner' || user.storeId !== storeId || store?.ownerId !== user.id) {
+      throw new Error('Only the active owner of this store can unlock its fiscal information.');
+    }
+
+    if (method === 'pin') {
+      if (!/^\d{4}$/.test(credential)) throw new Error('Enter your 4-digit personal PIN.');
+      await verifyPersonalPin(user, credential);
+      return;
+    }
+
+    if (!credential || !(await verifySecret(user.passwordHash ?? user.password, credential)).valid) {
+      throw new Error('Password is incorrect.');
+    }
+    removeData(PIN_ATTEMPTS_PREFIX + user.id);
+  },
+
   async unlockCurrentSessionWithPin(pin: string): Promise<UserSummary> {
     if (isSupabaseDriver()) return authRepository.unlockWithPin(pin);
     if (!/^\d{4}$/.test(pin)) throw new Error('Enter your 4-digit PIN.');

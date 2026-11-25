@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type PointerEvent, type TransitionEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { CardGrid, PageHeader, StatGrid } from '../components/layout';
@@ -112,6 +112,7 @@ function OwnerDashboardContent() {
   const [catalogItems, setCatalogItems] = useState<CatalogItemRecord[]>([]);
   const [overdueCustomers, setOverdueCustomers] = useState<OverdueCustomerRecord[]>([]);
   const [ownerNotifications, setOwnerNotifications] = useState<NotificationRecord[]>([]);
+  const [dismissedOwnerNotificationIds, setDismissedOwnerNotificationIds] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [overdueStatement, setOverdueStatement] = useState<CustomerStatementData | null>(null);
@@ -119,6 +120,10 @@ function OwnerDashboardContent() {
   const [overdueActionError, setOverdueActionError] = useState('');
   const [chartsNearViewport, setChartsNearViewport] = useState(false);
   const chartSectionRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    setDismissedOwnerNotificationIds(new Set());
+  }, [user?.id]);
 
   useEffect(() => {
     if (chartsNearViewport) return;
@@ -375,6 +380,13 @@ function OwnerDashboardContent() {
       : '';
   const zDisabledReason = reportDisabledReason ||
     (dayStatus.openShiftCount > 0 ? 'Close every open shift before creating a Z report.' : '');
+  const visibleOwnerNotifications = ownerNotifications
+    .filter((notification) => !dismissedOwnerNotificationIds.has(notification.id))
+    .slice(0, 5);
+
+  function dismissOwnerNotification(notificationId: string) {
+    setDismissedOwnerNotificationIds((current) => new Set([...current, notificationId]));
+  }
 
   return (
     <>
@@ -389,13 +401,14 @@ function OwnerDashboardContent() {
           ))}
         </div>
       } />
-      {ownerNotifications.length > 0 && (
-        <section aria-label="Owner notifications" className="mt-4 flex flex-col gap-2">
-          {ownerNotifications.slice(0, 5).map((notification) => (
-            <article key={notification.id} role="status" className={`notification-type-card notification-type-card--${getNotificationAppearance(notification.type).tone} flex items-center gap-3 rounded-xl p-3`}>
-              <NotificationTypeIcon type={notification.type} />
-              <span className="font-body text-body-sm text-on-surface"><strong>{notification.title}:</strong> {notification.body}</span>
-            </article>
+      {visibleOwnerNotifications.length > 0 && (
+        <section aria-label="Owner notifications" className="mt-4 mb-4 flex flex-col gap-2">
+          {visibleOwnerNotifications.map((notification) => (
+            <DismissibleOwnerNotification
+              key={notification.id}
+              notification={notification}
+              onDismiss={dismissOwnerNotification}
+            />
           ))}
         </section>
       )}
@@ -639,6 +652,109 @@ function OwnerDashboardContent() {
       />
     )}
     </>
+  );
+}
+
+function DismissibleOwnerNotification({ notification, onDismiss }: {
+  notification: NotificationRecord;
+  onDismiss: (notificationId: string) => void;
+}) {
+  const swipeStartRef = useRef<{ x: number; y: number; offset: number } | null>(null);
+  const [dragX, setDragX] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isDismissing, setIsDismissing] = useState(false);
+  const revealOffset = 72;
+  const dismissOffset = 148;
+  const maxDragOffset = 184;
+
+  function handlePointerDown(event: PointerEvent<HTMLElement>) {
+    if (!event.isPrimary || isDismissing || (event.pointerType === 'mouse' && event.button !== 0)) return;
+    if (event.target instanceof Element && event.target.closest('button')) return;
+    swipeStartRef.current = { x: event.clientX, y: event.clientY, offset: dragX };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handlePointerMove(event: PointerEvent<HTMLElement>) {
+    const start = swipeStartRef.current;
+    if (!start || isDismissing) return;
+
+    const deltaX = event.clientX - start.x;
+    const deltaY = event.clientY - start.y;
+    if (deltaX >= 0 || Math.abs(deltaX) <= Math.abs(deltaY)) return;
+    setIsDragging(true);
+    setDragX(Math.max(-maxDragOffset, Math.min(0, start.offset + deltaX)));
+  }
+
+  function handlePointerUp(event: PointerEvent<HTMLElement>) {
+    const start = swipeStartRef.current;
+    swipeStartRef.current = null;
+    setIsDragging(false);
+    if (!start || isDismissing) return;
+
+    const deltaX = event.clientX - start.x;
+    const deltaY = event.clientY - start.y;
+    if (Math.abs(deltaX) <= Math.abs(deltaY)) {
+      setDragX(start.offset);
+      return;
+    }
+
+    const nextOffset = Math.max(-maxDragOffset, Math.min(0, start.offset + deltaX));
+    if (nextOffset <= -dismissOffset) {
+      setIsDismissing(true);
+    } else if (nextOffset <= -32) {
+      setDragX(-revealOffset);
+    } else {
+      setDragX(0);
+    }
+  }
+
+  function handlePointerCancel() {
+    const start = swipeStartRef.current;
+    swipeStartRef.current = null;
+    setIsDragging(false);
+    setDragX(start?.offset ?? 0);
+  }
+
+  function handleTransitionEnd(event: TransitionEvent<HTMLElement>) {
+    if (isDismissing && event.target === event.currentTarget && event.propertyName === 'transform') {
+      onDismiss(notification.id);
+    }
+  }
+
+  return (
+    <div className="owner-dashboard-notification-shell">
+      <button
+        type="button"
+        aria-label={`${t('common.dismiss')}: ${notification.title}`}
+        aria-hidden={dragX > -32 || isDismissing}
+        tabIndex={dragX <= -32 && !isDismissing ? 0 : -1}
+        onClick={() => setIsDismissing(true)}
+        className="owner-dashboard-notification-delete"
+      >
+        <MaterialIcon name="delete" className="text-white" />
+      </button>
+      <article
+        role="status"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
+        onTransitionEnd={handleTransitionEnd}
+        style={isDismissing ? undefined : { transform: `translateX(${dragX}px)` }}
+        className={`owner-dashboard-notification notification-type-card notification-type-card--${getNotificationAppearance(notification.type).tone} flex items-center gap-3 rounded-xl p-3${isDragging ? ' is-dragging' : ''}${isDismissing ? ' is-dismissing' : ''}`}
+      >
+        <NotificationTypeIcon type={notification.type} />
+        <span className="min-w-0 flex-1 font-body text-body-sm text-on-surface"><strong>{notification.title}:</strong> {notification.body}</span>
+        <button
+          type="button"
+          aria-label={`${t('common.dismiss')}: ${notification.title}`}
+          onClick={() => setIsDismissing(true)}
+          className="owner-dashboard-notification-dismiss"
+        >
+          <MaterialIcon name="close" />
+        </button>
+      </article>
+    </div>
   );
 }
 

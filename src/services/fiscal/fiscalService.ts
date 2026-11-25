@@ -4,6 +4,7 @@ import {
   getCheckoutFiscalProfile,
   insertFiscalAssignment,
   insertFiscalTaxRule,
+  confirmFiscalTaxRule,
   listFiscalAssignments,
   listFiscalRules,
   saveFiscalProfile,
@@ -177,6 +178,48 @@ export const fiscalService = {
       meta: { after: { id: rule.id, version: rule.version, status: rule.status, taxType: rule.taxType, effectiveFrom: rule.effectiveFrom } },
     });
     return rule;
+  },
+
+  async confirmDraftRule(
+    storeId: string,
+    ruleId: string,
+    version: number,
+    legalReference: string,
+    actorId: string,
+  ): Promise<FiscalTaxRuleRecord> {
+    await assertStoreOwner(storeId, actorId);
+    const reference = legalReference.trim();
+    if (!reference) throw new Error('A legal reference is required to activate a fiscal tax rule.');
+    const rule = (await this.listRules(storeId)).find((candidate) =>
+      candidate.id === ruleId && candidate.version === version);
+    if (!rule || rule.status !== 'draft') {
+      throw new Error('The requested tax rule is not an available draft.');
+    }
+    if (isSupabaseDriver()) {
+      await confirmFiscalTaxRule(storeId, ruleId, version, reference);
+    } else {
+      const rules = getRules().map((candidate) =>
+        candidate.storeId === storeId && candidate.id === ruleId && candidate.version === version
+          ? { ...candidate, status: 'active' as const, legalReviewed: true, legalReference: reference }
+          : candidate);
+      writeData('fiscal-tax-rules', rules);
+    }
+    const confirmed = {
+      ...rule,
+      status: 'active' as const,
+      legalReviewed: true,
+      legalReference: reference,
+    };
+    await activityService.log({
+      storeId,
+      actorId,
+      action: 'fiscal.tax_rule_confirmed',
+      summary: `Owner confirmed fiscal tax rule "${rule.name}" version ${rule.version}.`,
+      entityType: 'fiscal_tax_rule',
+      entityId: `${ruleId}:${version}`,
+      meta: { after: { status: 'active', legalReference: reference } },
+    });
+    return confirmed;
   },
 
   async createAssignment(

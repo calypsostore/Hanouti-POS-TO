@@ -37,6 +37,31 @@ function roundedRateAmount(baseMillimes: number, ratePpm: number): number {
   return toSafeNumber((numerator + RATE_DENOMINATOR / 2n) / RATE_DENOMINATOR, 'Tax amount');
 }
 
+function divideRounded(numerator: bigint, denominator: bigint, label: string): number {
+  if (denominator <= 0n) throw new Error(`${label} has an invalid denominator.`);
+  return toSafeNumber((numerator + denominator / 2n) / denominator, label);
+}
+
+function extractInclusiveNetAmount(
+  targetAmountMillimes: number,
+  quantity: number,
+  rules: FiscalTaxRuleRecord[],
+): number {
+  const percentageRules = rules.filter((rule) => rule.calculationMethod === 'percentage');
+  if (rules.length !== percentageRules.length) {
+    const fixedTax = rules.reduce((sum, rule) => {
+      if (rule.calculationMethod !== 'fixed' || rule.fixedAmountMillimes === undefined) return sum;
+      return sum + (rule.fixedAmountPerUnit === false ? rule.fixedAmountMillimes : rule.fixedAmountMillimes * quantity);
+    }, 0);
+    const net = targetAmountMillimes - fixedTax;
+    return net >= 0 ? net : 0;
+  }
+  const combinedRatePpm = percentageRules.reduce((sum, rule) => sum + BigInt(rule.ratePpm ?? 0), 0n);
+  if (combinedRatePpm === 0n) return targetAmountMillimes;
+  const denominator = RATE_DENOMINATOR + combinedRatePpm;
+  return divideRounded(BigInt(targetAmountMillimes) * RATE_DENOMINATOR, denominator, 'Inclusive net amount');
+}
+
 function validateRule(rule: FiscalTaxRuleRecord, transactionDate: string): void {
   if (!rule.id.trim() || !rule.name.trim() || !rule.storeId.trim()) throw new Error('Every tax rule needs an ID, name, and store.');
   if (rule.taxType === 'stamp' || rule.taxType === 'withholding') {
@@ -206,17 +231,32 @@ function resolveLine(input: FiscalLineTaxInput, transactionDate: string): Fiscal
   let netAmountMillimes = targetAmountMillimes;
   let calculation = calculateForNet(netAmountMillimes);
   if (input.priceMode === 'inclusive') {
-    let low = 0;
-    let high = targetAmountMillimes;
-    while (low < high) {
-      const middle = Math.floor((low + high) / 2);
-      if (calculateForNet(middle).totalAmountMillimes >= targetAmountMillimes) high = middle;
-      else low = middle + 1;
-    }
-    netAmountMillimes = low;
+    netAmountMillimes = extractInclusiveNetAmount(targetAmountMillimes, input.quantity, input.rules);
     calculation = calculateForNet(netAmountMillimes);
-    if (calculation.totalAmountMillimes !== targetAmountMillimes) {
-      throw new Error(`Line ${input.lineId} inclusive price cannot be reconciled exactly to the selected millime tax rules.`);
+    const calculatedTaxBeforeAllocation = calculation.totalTaxMillimes;
+    if (calculatedTaxBeforeAllocation !== targetAmountMillimes - netAmountMillimes) {
+      const taxableComponents = calculation.components.filter((component) =>
+        component.treatment === 'taxable' || component.treatment === 'special');
+      const residualTax = targetAmountMillimes - netAmountMillimes;
+      if (taxableComponents.length === 0) {
+        throw new Error(`Line ${input.lineId} inclusive price has no taxable component to reconcile.`);
+      }
+      let remaining = residualTax;
+      const lastTaxableIndex = calculation.components.map((component) =>
+        component.treatment === 'taxable' || component.treatment === 'special')
+        .lastIndexOf(true);
+      for (const component of taxableComponents) {
+        const index = calculation.components.indexOf(component);
+        if (index === lastTaxableIndex) {
+          calculation.components[index] = { ...component, amountMillimes: remaining };
+        } else {
+          const allocated = Math.min(component.amountMillimes, remaining);
+          calculation.components[index] = { ...component, amountMillimes: allocated };
+          remaining -= allocated;
+        }
+      }
+      calculation.totalTaxMillimes = residualTax;
+      calculation.totalAmountMillimes = targetAmountMillimes;
     }
   }
 

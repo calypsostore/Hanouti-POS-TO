@@ -26,6 +26,7 @@ export const fr = {
   'nav.voidRequests': 'Demandes d’annulation',
   'nav.reports': 'Rapports',
   'nav.fiscal': 'Paramètres fiscaux',
+  'nav.fiscalReports': 'Rapports fiscaux',
   'nav.inventory': 'Stock',
   'nav.wasteLog': 'Registre des pertes',
   'nav.expenses': 'Dépenses',

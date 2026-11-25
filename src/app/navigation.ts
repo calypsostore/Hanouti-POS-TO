@@ -16,6 +16,7 @@ export const ownerMoreLinks: WorkspaceLink[] = [
   { to: '/owner/voids', label: 'nav.voidRequests', icon: 'pending_actions' },
   { to: '/owner/waste', label: 'nav.wasteLog', icon: 'delete_sweep' },
   { to: '/owner/reports', label: 'nav.reports', icon: 'analytics' },
+  { to: '/owner/fiscal-reports', label: 'nav.fiscalReports', icon: 'receipt_long' },
   { to: '/owner/fiscal', label: 'nav.fiscal', icon: 'account_balance' },
   { to: '/owner/expenses', label: 'nav.expenses', icon: 'request_quote' },
   { to: '/owner/suppliers', label: 'nav.suppliers', icon: 'local_shipping' },

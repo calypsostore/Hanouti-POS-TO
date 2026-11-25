@@ -113,6 +113,40 @@ describe('fiscal tax engine', () => {
     });
   });
 
+  it('extracts 19% and 7% VAT from inclusive TTC without changing the customer total', () => {
+    const nineteen = calculateFiscalOrder('store-a', '2026-06-01', [line({
+      unitAmountMillimes: 3_000,
+      priceMode: 'inclusive',
+      rules: [{ ...tenPercentRule, ratePpm: 190_000 }],
+    })]);
+    const seven = calculateFiscalOrder('store-a', '2026-06-01', [line({
+      unitAmountMillimes: 3_000,
+      priceMode: 'inclusive',
+      rules: [{ ...tenPercentRule, ratePpm: 70_000 }],
+    })]);
+    const sixAtSeven = calculateFiscalOrder('store-a', '2026-06-01', [line({
+      unitAmountMillimes: 6_000,
+      priceMode: 'inclusive',
+      rules: [{ ...tenPercentRule, ratePpm: 70_000 }],
+    })]);
+
+    expect(nineteen.lines[0]).toMatchObject({
+      netAmountMillimes: 2_521,
+      totalTaxMillimes: 479,
+      totalAmountMillimes: 3_000,
+    });
+    expect(seven.lines[0]).toMatchObject({
+      netAmountMillimes: 2_804,
+      totalTaxMillimes: 196,
+      totalAmountMillimes: 3_000,
+    });
+    expect(sixAtSeven.lines[0]).toMatchObject({
+      netAmountMillimes: 5_607,
+      totalTaxMillimes: 393,
+      totalAmountMillimes: 6_000,
+    });
+  });
+
   it('applies compound and fixed-per-unit rules in explicit priority order', () => {
     const result = calculateFiscalOrder('store-a', '2026-06-01', [line({
       quantity: 2,
@@ -185,7 +219,7 @@ describe('fiscal tax engine', () => {
     });
   });
 
-  it('rejects missing treatment, undocumented exemptions, conflicting rules, and non-reconciling inclusive prices', () => {
+  it('rejects missing treatment, undocumented exemptions, and conflicting rules', () => {
     expect(() => calculateFiscalOrder('store-a', '2026-06-01', [line({
       treatments: [],
     })])).toThrow('needs an explicit vat treatment');
@@ -202,11 +236,6 @@ describe('fiscal tax engine', () => {
       ],
     })])).toThrow('ambiguous tax rules');
 
-    expect(() => calculateFiscalOrder('store-a', '2026-06-01', [line({
-      unitAmountMillimes: 1_001,
-      priceMode: 'inclusive',
-      rules: [{ ...tenPercentRule, ratePpm: 1_000_000 }],
-    })])).toThrow('cannot be reconciled exactly');
   });
 
   it('rejects inactive and out-of-date rules instead of recalculating from them', () => {

@@ -87,16 +87,16 @@ html.theme-hanouti-crystal-glass .responsive-dialog .glass-modal-panel button.bg
     linear-gradient(145deg, rgb(var(--color-primary) / 92%), rgb(var(--color-primary-pressed) / 90%)) !important;
 }
 
-html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]),
 html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) select,
 html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) textarea {
-  border-color: rgb(var(--color-outline-variant));
+  border: 1px solid rgb(var(--color-on-surface) / 36%);
   border-radius: var(--input-radius);
   color: rgb(var(--color-on-surface));
   font-family: var(--font-body);
 }
 
-html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]),
 html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) select {
   min-height: var(--input-height);
   background-color: rgb(var(--color-surface-container-lowest));

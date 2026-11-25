@@ -243,6 +243,21 @@ export async function insertFiscalTaxRule(rule: FiscalTaxRuleRecord): Promise<Fi
   return mapRule(data as RuleRow);
 }
 
+export async function confirmFiscalTaxRule(
+  storeId: string,
+  ruleId: string,
+  version: number,
+  legalReference: string,
+): Promise<void> {
+  const { error } = await getSupabaseClient().rpc('confirm_fiscal_tax_rule', {
+    p_store_id: storeId,
+    p_rule_id: ruleId,
+    p_version: version,
+    p_legal_reference: legalReference,
+  });
+  if (error) raise(error, 'Could not confirm and activate fiscal tax rule');
+}
+
 export async function listFiscalAssignments(storeId: string): Promise<FiscalTaxAssignmentRecord[]> {
   const { data, error } = await getSupabaseClient()
     .from('catalog_item_tax_assignments')

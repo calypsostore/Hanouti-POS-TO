@@ -111,7 +111,7 @@ Deno.serve(async (request) => {
       p_ip_hash: ipKey,
     });
     if (limitError) {
-      console.error('Could not apply login rate limits.', limitError);
+      console.error('[login] rate-limit RPC failed.');
       return response(503, { error: 'Sign-in is temporarily unavailable.' });
     }
     if (allowed !== true) return response(429, { error: 'Too many sign-in attempts. Try again in 15 minutes.' });
@@ -126,7 +126,7 @@ Deno.serve(async (request) => {
     if (authError || !authData.session || !authData.user) {
       if (authError?.status === 429) return response(429, { error: 'Too many sign-in attempts. Try again later.' });
       if (authError && !authError.message.includes('Invalid login credentials') && authError.status !== 400) {
-        console.error('Supabase Auth sign-in failed.', authError);
+        console.error('[login] Supabase Auth returned a service error.', authError.status);
         return response(503, { error: 'Sign-in is temporarily unavailable.' });
       }
       return response(401, { error: 'The username/email or password is incorrect.' });
@@ -182,7 +182,7 @@ Deno.serve(async (request) => {
       refresh_token: authData.session.refresh_token,
     });
   } catch (error) {
-    console.error('Login request failed.', error);
+    console.error('[login] request failed.', error instanceof Error ? error.name : 'UnknownError');
     return response(500, { error: 'Sign-in is temporarily unavailable.' });
   }
 });

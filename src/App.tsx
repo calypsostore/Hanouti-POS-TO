@@ -38,6 +38,7 @@ const OwnerScheduleScreen = lazy(() => import('./screens/OwnerScheduleScreen').t
 const OwnerVoidRequestsScreen = lazy(() => import('./screens/OwnerVoidRequestsScreen').then((module) => ({ default: module.OwnerVoidRequestsScreen })));
 const OwnerReportsScreen = lazy(() => import('./screens/OwnerReportsScreen').then((module) => ({ default: module.OwnerReportsScreen })));
 const OwnerFiscalScreen = lazy(() => import('./screens/OwnerFiscalScreen').then((module) => ({ default: module.OwnerFiscalScreen })));
+const OwnerFiscalReportsScreen = lazy(() => import('./screens/OwnerFiscalReportsScreen').then((module) => ({ default: module.OwnerFiscalReportsScreen })));
 const OwnerInventoryScreen = lazy(() => import('./screens/OwnerInventoryScreen').then((module) => ({ default: module.OwnerInventoryScreen })));
 const OwnerWasteScreen = lazy(() => import('./screens/OwnerWasteScreen').then((module) => ({ default: module.OwnerWasteScreen })));
 const OwnerExpensesScreen = lazy(() => import('./screens/OwnerFinancialScreens').then((module) => ({ default: module.OwnerExpensesScreen })));
@@ -508,6 +509,7 @@ export default function App() {
           <Route path="/owner/voids" element={<ProtectedRoute roles={['owner']}><OwnerVoidRequestsScreen /></ProtectedRoute>} />
           <Route path="/owner/shifts" element={<ProtectedRoute roles={['owner']}><ShiftScreen ownerMode /></ProtectedRoute>} />
           <Route path="/owner/reports" element={<ProtectedRoute roles={['owner']}><OwnerReportsScreen /></ProtectedRoute>} />
+          <Route path="/owner/fiscal-reports" element={<ProtectedRoute roles={['owner']}><OwnerFiscalReportsScreen /></ProtectedRoute>} />
           <Route path="/owner/fiscal" element={<ProtectedRoute roles={['owner']}><OwnerFiscalScreen /></ProtectedRoute>} />
           <Route path="/owner/inventory" element={<ProtectedRoute roles={['owner']}><OwnerInventoryScreen /></ProtectedRoute>} />
           <Route path="/owner/waste" element={<ProtectedRoute roles={['owner']}><OwnerWasteScreen /></ProtectedRoute>} />

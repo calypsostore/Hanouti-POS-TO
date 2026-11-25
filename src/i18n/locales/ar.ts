@@ -26,6 +26,7 @@ export const ar = {
   'nav.voidRequests': 'طلبات الإلغاء',
   'nav.reports': 'التقارير',
   'nav.fiscal': 'الإعدادات الجبائية',
+  'nav.fiscalReports': 'التقارير الجبائية وتتبع الضرائب',
   'nav.inventory': 'المخزون',
   'nav.wasteLog': 'سجل الهدر',
   'nav.expenses': 'المصروفات',

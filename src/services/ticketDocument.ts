@@ -40,6 +40,20 @@ export function buildTicketDocument(
     ]),
     ...(order.note ? [{ text: 'Order note', bold: true }, { text: order.note }] : []),
     { text: '-'.repeat(widthChars(width)), kind: 'divider' },
+    ...(order.fiscalSnapshot ? [
+      { text: formatReceiptRow('HT', money(order.fiscalSnapshot.netAmountMillimes), width) },
+      ...order.fiscalSnapshot.lines.flatMap((line) => line.taxes
+        .filter((tax) => tax.taxType === 'vat')
+        .map((tax) => ({
+          text: formatReceiptRow(
+            `VAT${tax.ratePpm !== undefined ? ` ${(tax.ratePpm / 10_000).toFixed(2).replace(/\.?0+$/, '')}%` : ''}`,
+            money(tax.amountMillimes),
+            width,
+          ),
+        }))),
+      { text: formatReceiptRow('TTC', money(order.fiscalSnapshot.totalAmountMillimes), width) },
+      { text: '-'.repeat(widthChars(width)), kind: 'divider' as const },
+    ] : []),
     { text: formatReceiptRow('TOTAL', money(order.totalMillimes), width), bold: true, size: 'double' },
     { text: formatReceiptRow('Payment', order.paymentMethod.toUpperCase(), width) },
     ...(order.status === 'voided' ? [

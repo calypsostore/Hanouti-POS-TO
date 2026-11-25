@@ -24,6 +24,7 @@ export const en = {
   'nav.voidRequests': 'Void requests',
   'nav.reports': 'Reports',
   'nav.fiscal': 'Fiscal settings',
+  'nav.fiscalReports': 'Fiscal reports & tax tracking',
   'nav.inventory': 'Inventory',
   'nav.wasteLog': 'Waste log',
   'nav.expenses': 'Expenses',

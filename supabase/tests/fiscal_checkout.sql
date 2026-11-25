@@ -1,5 +1,5 @@
 create extension if not exists pgtap;
-select plan(10);
+select plan(14);
 
 begin;
 
@@ -88,7 +88,14 @@ insert into public.fiscal_profiles (
 select store_id, 'confirmed',
        '{"requiredTaxTypes":["vat"],"pricingMode":"exclusive","taxId":"TEST-ONLY"}'::jsonb,
        owner_id, now(), owner_id
-from fiscal_checkout_context;
+from fiscal_checkout_context
+on conflict (store_id) do update set
+  review_status = excluded.review_status,
+  data = excluded.data,
+  reviewed_by = excluded.reviewed_by,
+  reviewed_at = excluded.reviewed_at,
+  updated_by = excluded.updated_by,
+  updated_at = now();
 
 insert into public.fiscal_tax_rules (
   store_id, rule_id, version, name, tax_type, calculation_method,
@@ -106,6 +113,118 @@ insert into public.catalog_item_tax_assignments (
 select store_id, category_id, 'vat', 'taxable', 'synthetic-vat-test', 1,
        current_date - 1, owner_id
 from fiscal_checkout_context;
+
+update public.fiscal_profiles
+set data = jsonb_set(data, '{pricingMode}', '"inclusive"'::jsonb),
+    review_status = 'confirmed',
+    reviewed_by = (select owner_id from fiscal_checkout_context),
+    reviewed_at = now()
+where store_id = (select store_id from fiscal_checkout_context);
+
+insert into public.fiscal_tax_rules (
+  store_id, rule_id, version, name, tax_type, calculation_method,
+  rate_ppm, priority, effective_from, status, legal_reference, legal_reviewed, created_by
+)
+select store_id, 'synthetic-vat-test', 2, 'Synthetic 19 percent database test',
+       'vat', 'percentage', 190000, 1, current_date - 1, 'active',
+       'Test fixture only; not a legal rate', true, owner_id
+from fiscal_checkout_context;
+
+update public.catalog_item_tax_assignments
+set rule_version = 2
+where store_id = (select store_id from fiscal_checkout_context)
+  and rule_id = 'synthetic-vat-test';
+
+select is(
+  (
+    public.calculate_fiscal_order_snapshot(
+      (select store_id from fiscal_checkout_context),
+      current_date,
+      jsonb_build_array(jsonb_build_object(
+        'item_id', (select item_id from fiscal_checkout_context),
+        'category_id', (select category_id from fiscal_checkout_context),
+        'quantity', 1,
+        'unit_price_millimes', 3000
+      ))
+    )->>'totalAmountMillimes'
+  )::bigint,
+  3000::bigint,
+  'inclusive 19 percent preserves 3.000 TND payable'
+);
+
+select is(
+  (
+    public.calculate_fiscal_order_snapshot(
+      (select store_id from fiscal_checkout_context),
+      current_date,
+      jsonb_build_array(jsonb_build_object(
+        'item_id', (select item_id from fiscal_checkout_context),
+        'category_id', (select category_id from fiscal_checkout_context),
+        'quantity', 1,
+        'unit_price_millimes', 3000
+      ))
+    )->>'netAmountMillimes'
+  )::bigint,
+  2521::bigint,
+  'inclusive 19 percent extracts 2.521 TND HT'
+);
+
+select is(
+  (
+    public.calculate_fiscal_order_snapshot(
+      (select store_id from fiscal_checkout_context),
+      current_date,
+      jsonb_build_array(jsonb_build_object(
+        'item_id', (select item_id from fiscal_checkout_context),
+        'category_id', (select category_id from fiscal_checkout_context),
+        'quantity', 1,
+        'unit_price_millimes', 3000
+      ))
+    )->>'totalTaxMillimes'
+  )::bigint,
+  479::bigint,
+  'inclusive 19 percent extracts 0.479 TND VAT'
+);
+
+insert into public.fiscal_tax_rules (
+  store_id, rule_id, version, name, tax_type, calculation_method,
+  rate_ppm, priority, effective_from, status, legal_reference, legal_reviewed, created_by
+)
+select store_id, 'synthetic-vat-test', 3, 'Synthetic 7 percent database test',
+       'vat', 'percentage', 70000, 1, current_date - 1, 'active',
+       'Test fixture only; not a legal rate', true, owner_id
+from fiscal_checkout_context;
+
+update public.catalog_item_tax_assignments
+set rule_version = 3
+where store_id = (select store_id from fiscal_checkout_context)
+  and rule_id = 'synthetic-vat-test';
+
+select is(
+  (
+    public.calculate_fiscal_order_snapshot(
+      (select store_id from fiscal_checkout_context),
+      current_date,
+      jsonb_build_array(jsonb_build_object(
+        'item_id', (select item_id from fiscal_checkout_context),
+        'category_id', (select category_id from fiscal_checkout_context),
+        'quantity', 2,
+        'unit_price_millimes', 3000
+      ))
+    )->>'totalAmountMillimes'
+  )::bigint,
+  6000::bigint,
+  'inclusive 7 percent quantity preserves 6.000 TND payable'
+);
+
+update public.catalog_item_tax_assignments
+set rule_version = 1
+where store_id = (select store_id from fiscal_checkout_context)
+  and rule_id = 'synthetic-vat-test';
+
+update public.fiscal_profiles
+set data = jsonb_set(data, '{pricingMode}', '"exclusive"'::jsonb)
+where store_id = (select store_id from fiscal_checkout_context);
 
 select set_config('request.jwt.claim.sub', staff_id::text, true)
 from fiscal_checkout_context;

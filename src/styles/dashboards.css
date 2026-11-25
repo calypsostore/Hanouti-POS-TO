@@ -69,6 +69,52 @@
   color: var(--dashboard-ink);
 }
 
+.owner-dashboard-notification-shell {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--card-radius);
+  background: #f43f5e;
+}
+
+.owner-dashboard-notification-delete {
+  position: absolute;
+  inset: 0 0 0 auto;
+  display: grid;
+  width: 72px;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: #fff;
+}
+
+.owner-dashboard-notification {
+  position: relative;
+  z-index: 1;
+  touch-action: pan-y;
+  transition: transform 220ms cubic-bezier(0.2, 0, 0, 1), opacity 220ms ease;
+}
+
+.owner-dashboard-notification.is-dragging {
+  transition: none;
+}
+
+.owner-dashboard-notification.is-dismissing {
+  transform: translateX(-110%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.owner-dashboard-notification-dismiss {
+  transition: background-color 160ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .owner-dashboard-notification,
+  .owner-dashboard-notification-dismiss {
+    transition-duration: 1ms;
+  }
+}
+
 .role-dashboard .owner-kpi-grid > .stat-card,
 .role-dashboard .overview-metric,
 .role-dashboard .staff-dashboard-kpis > .dashboard-kpi,

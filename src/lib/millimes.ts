@@ -33,6 +33,10 @@ export function formatMillimesWithThousands(amountMillimes: number): string {
   return `${sign}${dinars.toLocaleString('en-US')}.${String(millimes).padStart(3, '0')}`;
 }
 
+export function formatMetricWithUnit(value: string, unit?: string): string {
+  return unit ? `${value} ${unit}` : value;
+}
+
 export function formatDinarInput(value: string): string {
   const digits = value.replace(/\D/g, '').replace(/^0+(?=\d)/, '');
   if (!digits) return '';

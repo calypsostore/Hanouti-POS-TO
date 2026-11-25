@@ -435,6 +435,36 @@ describe('report document', () => {
         modifiers: ['Oat milk'],
       }],
       totalMillimes: 3000,
+      fiscalSnapshot: {
+        schemaVersion: 1,
+        calculationVersion: 'millime-tax-v1',
+        currency: 'TND',
+        storeId: 'store-1',
+        transactionDate: '2026-11-20',
+        roundingPolicy: 'nearest-millime-half-up',
+        netAmountMillimes: 2521,
+        totalTaxMillimes: 479,
+        totalAmountMillimes: 3000,
+        lines: [{
+          lineId: 'line-1',
+          itemId: 'coffee',
+          quantity: 2,
+          unitAmountMillimes: 1500,
+          discountMillimes: 0,
+          priceMode: 'inclusive',
+          netAmountMillimes: 2521,
+          totalTaxMillimes: 479,
+          totalAmountMillimes: 3000,
+          taxes: [{
+            taxType: 'vat',
+            treatment: 'taxable',
+            calculationMethod: 'percentage',
+            ratePpm: 190000,
+            taxableBaseMillimes: 2521,
+            amountMillimes: 479,
+          }],
+        }],
+      },
       createdAt: '2026-11-20T20:00:00.000Z',
     };
     const document = buildTicketDocument(order, { name: 'Test Store' }, 'Cashier', {
@@ -449,6 +479,11 @@ describe('report document', () => {
     expect(text).toContain('3.000 DT');
     expect(text).toContain('Oat milk');
     expect(text).toContain('Keep this ticket');
+    expect(text).toContain('HT');
+    expect(text).toContain('2.521 DT');
+    expect(text).toContain('VAT 19%');
+    expect(text).toContain('0.479 DT');
+    expect(text).toContain('TTC');
     expect(text).not.toContain('Staff:');
     expect(text).not.toContain('2026');
   });

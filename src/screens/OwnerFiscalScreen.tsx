@@ -55,10 +55,11 @@ export function OwnerFiscalScreen() {
   const [assignments, setAssignments] = useState<FiscalTaxAssignmentRecord[]>([]);
   const [items, setItems] = useState<CatalogItemRecord[]>([]);
   const [categories, setCategories] = useState<CategoryRecord[]>([]);
-  const [ruleName, setRuleName] = useState('');
+  const [ruleName, setRuleName] = useState('Standard VAT');
   const [taxType, setTaxType] = useState<FiscalTaxType>('vat');
   const [calculationMethod, setCalculationMethod] = useState<'percentage' | 'fixed'>('percentage');
-  const [rateValue, setRateValue] = useState('');
+  const [rateValue, setRateValue] = useState('19');
+  const [activationReference, setActivationReference] = useState('');
   const [priority, setPriority] = useState('10');
   const [effectiveFrom, setEffectiveFrom] = useState(todayKey());
   const [compound, setCompound] = useState(false);
@@ -150,9 +151,9 @@ export function OwnerFiscalScreen() {
       };
       const saved = await fiscalService.createDraftRule(common, user.id);
       setRules((current) => [...current, saved].sort((left, right) => left.priority - right.priority));
-      setRuleName('');
-      setRateValue('');
-      setNotice('Draft rule saved. Draft rules are not applied to checkout.');
+      setRuleName('Standard VAT');
+      setRateValue('19');
+      setNotice('Draft rule saved. Owner confirmation and a legal reference are required before checkout can apply it.');
     } catch (saveError) {
       console.error('Unable to save fiscal tax rule.', saveError);
       setError(saveError instanceof Error ? saveError.message : 'Unable to save fiscal tax rule.');
@@ -186,6 +187,25 @@ export function OwnerFiscalScreen() {
       setError(saveError instanceof Error ? saveError.message : 'Unable to save product fiscal classification.');
     } finally {
       setSavingAssignment(false);
+    }
+  };
+
+  const confirmRule = async (rule: FiscalTaxRuleRecord) => {
+    if (!user) return;
+    setSavingRule(true);
+    setError('');
+    setNotice('');
+    try {
+      const confirmed = await fiscalService.confirmDraftRule(storeId, rule.id, rule.version, activationReference, user.id);
+      setRules((current) => current.map((candidate) =>
+        candidate.id === confirmed.id && candidate.version === confirmed.version ? confirmed : candidate));
+      setActivationReference('');
+      setNotice('The owner confirmed and activated this tax rule. Existing completed orders remain unchanged.');
+    } catch (confirmError) {
+      console.error('Unable to confirm fiscal tax rule.', confirmError);
+      setError(confirmError instanceof Error ? confirmError.message : 'Unable to confirm fiscal tax rule.');
+    } finally {
+      setSavingRule(false);
     }
   };
 
@@ -227,7 +247,7 @@ export function OwnerFiscalScreen() {
               </label>
               <label className="text-label-md">Displayed price mode
                 <select className={inputClass()} value={profile.pricingMode ?? 'inclusive'} onChange={(event) => setProfile({ ...profile, pricingMode: event.target.value as FiscalProfileRecord['pricingMode'] })}>
-                  <option value="inclusive">Tax-inclusive</option><option value="exclusive">Tax-exclusive</option>
+                  <option value="inclusive">Tax-inclusive (entered price is the customer total)</option><option value="exclusive">Tax-exclusive (VAT is added to entered HT)</option>
                 </select>
               </label>
               <label className="text-label-md">Declaration period
@@ -299,6 +319,9 @@ export function OwnerFiscalScreen() {
                 <MaterialIcon name="add" />{savingRule ? 'Saving…' : 'Save draft rule'}
               </button>
             </form>
+            <label className="block text-label-md">Owner confirmation legal reference
+              <input className={inputClass()} value={activationReference} maxLength={500} onChange={(event) => setActivationReference(event.target.value)} placeholder="Reference or owner confirmation note" />
+            </label>
             <div className="space-y-2 border-t border-outline-variant pt-4">
               <h3 className="text-label-lg text-on-surface">Saved versions</h3>
               {rules.length === 0 ? <p className="text-body-sm text-on-surface-variant">No tax rules have been drafted.</p> : rules.map((rule) => (
@@ -310,6 +333,16 @@ export function OwnerFiscalScreen() {
                   <p className="mt-1 text-body-sm text-on-surface-variant">
                     {rule.taxType} · priority {rule.priority} · from {rule.effectiveFrom} · {rule.calculationMethod === 'percentage' ? `${((rule.ratePpm ?? 0) / 10_000).toFixed(4)}%` : `${((rule.fixedAmountMillimes ?? 0) / 1000).toFixed(3)} TND`}
                   </p>
+                  {rule.status === 'draft' && (
+                    <button
+                      type="button"
+                      disabled={savingRule || !activationReference.trim()}
+                      onClick={() => void confirmRule(rule)}
+                      className="mt-3 inline-flex h-9 items-center rounded-lg bg-primary px-3 text-label-sm text-on-primary disabled:opacity-60"
+                    >
+                      Owner confirm and activate
+                    </button>
+                  )}
                 </article>
               ))}
             </div>

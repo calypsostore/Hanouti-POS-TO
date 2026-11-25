@@ -274,17 +274,6 @@
   box-shadow: 0 5px 14px rgb(42 104 154 / 7%), inset 0 1px 0 rgb(255 255 255 / 88%);
 }
 
-.shift-workspace--owner .shift-overview-card > .shift-overview-icon {
-  width: 30px;
-  height: 30px;
-}
-
-.shift-workspace--owner .shift-overview-card p {
-  color: #315a88;
-  font-size: 9px;
-  line-height: 12px;
-}
-
 .shift-overview-copy {
   flex: 1;
 }

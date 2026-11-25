@@ -339,10 +339,6 @@
     padding-left: 4px;
   }
 
-  .dashboard-target-card {
-    padding: 16px;
-  }
-
   button,
   a,
   [role="button"],
@@ -354,11 +350,6 @@
 
   button {
     min-width: 48px;
-  }
-
-  .pos-quantity-controls:not(.pos-quantity-controls--large) > button {
-    min-width: 36px !important;
-    min-height: 36px !important;
   }
 
   a {
@@ -458,13 +449,6 @@
   outline: none;
 }
 
-.settings-section-content {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 1rem;
-}
-
 .settings-section-content [hidden] {
   display: none !important;
 }
@@ -524,12 +508,6 @@
 .sales-help-tooltip:hover [role="tooltip"],
 .sales-help-tooltip:focus-within [role="tooltip"] {
   display: block;
-}
-
-@media (max-width: 767px) {
-  .owner-kpi-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 
 @media (min-width: 768px) {

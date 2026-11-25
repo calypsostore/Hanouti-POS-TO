@@ -1,8 +1,4 @@
 @media (min-width: 1280px) {
-  .owner-kpi-grid {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-  }
-
   .pos-terminal-layout {
     grid-template-columns: 176px minmax(0, 1fr) 400px;
   }
@@ -21,12 +17,6 @@
 
   .pos-catalog-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
-
-@media (min-width: 1440px) {
-  .pos-catalog-grid {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 }
 
@@ -58,10 +48,6 @@
   }
 
   .mobile-gap-3 {
-    gap: 0.75rem;
-  }
-
-  .owner-kpi-grid {
     gap: 0.75rem;
   }
 
@@ -819,10 +805,6 @@
     width: 100%;
   }
 
-  .pos-category-list {
-    width: 128px;
-  }
-
   .owner-workspace [aria-label="Period summary"],
   .workspace-layout [aria-label="Customer"] {
     display: grid;
@@ -909,22 +891,6 @@
   .staff-sidebar-collapsed > header,
   .staff-sidebar-collapsed header.safe-top {
     margin-left: 72px;
-  }
-
-  .pos-catalog-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
-
-@media (min-width: 1280px) {
-  .pos-catalog-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
-}
-
-@media (min-width: 1440px) {
-  .pos-catalog-grid {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 }
 

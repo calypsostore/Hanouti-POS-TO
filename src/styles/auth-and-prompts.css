@@ -589,9 +589,4 @@
     min-width: 48px !important;
     min-height: 48px !important;
   }
-
-  a:not([class*="flex"]) {
-    display: inline-flex;
-    align-items: center;
-  }
 }

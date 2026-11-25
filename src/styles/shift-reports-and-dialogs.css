@@ -2602,10 +2602,6 @@ body:has(.shift-screen-layout) {
     margin-left: 72px;
   }
 
-  .workspace-layout .workspace-desktop-nav {
-    display: none;
-  }
-
   .workspace-layout .workspace-main {
     width: calc(100% - 240px);
     max-width: 1472px;

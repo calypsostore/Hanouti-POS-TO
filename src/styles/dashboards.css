@@ -1,3 +1,67 @@
+@media screen and (max-width: 599px) {
+  .dashboard-target-card {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 767px) {
+  .owner-kpi-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (min-width: 1280px) {
+  .owner-kpi-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .owner-kpi-grid {
+    gap: 0.75rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .owner-alert-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .owner-chart-grid {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+
+  .owner-chart-grid > article {
+    min-width: 0;
+  }
+
+  .owner-chart-grid .dashboard-peak-chart {
+    grid-column: span 4;
+    grid-row: 2;
+  }
+
+  .owner-chart-grid .dashboard-sales-chart {
+    grid-column: span 8;
+    grid-row: 1;
+  }
+
+  .owner-chart-grid .dashboard-list-card {
+    grid-column: span 4;
+    grid-row: 2;
+  }
+
+  .owner-chart-grid .dashboard-staff-chart {
+    grid-column: span 12;
+    grid-row: 3;
+  }
+
+  .owner-chart-grid .dashboard-target-card--desktop {
+    grid-column: span 4;
+    grid-row: 1;
+  }
+}
+
 .role-dashboard {
   --dashboard-ink: #111b30;
   --dashboard-muted: #5b6784;

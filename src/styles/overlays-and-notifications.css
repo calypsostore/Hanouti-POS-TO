@@ -243,7 +243,7 @@
   left: 50%;
   display: flex;
   width: min(32rem, calc(100vw - 32px));
-  height: auto;
+  height: min(64dvh, 600px);
   max-height: min(64dvh, 600px);
   flex-direction: column;
   overflow: hidden;
@@ -430,6 +430,31 @@
   color: var(--notification-icon-amber-fg);
 }
 
+.notification-type-card {
+  border: 1px solid var(--notification-type-background);
+  background: var(--notification-type-background);
+}
+
+.notification-type-card--blue {
+  --notification-type-background: var(--notification-icon-blue-bg);
+}
+
+.notification-type-card--green {
+  --notification-type-background: var(--notification-icon-green-bg);
+}
+
+.notification-type-card--red {
+  --notification-type-background: var(--notification-icon-red-bg);
+}
+
+.notification-type-card--violet {
+  --notification-type-background: var(--notification-icon-violet-bg);
+}
+
+.notification-type-card--amber {
+  --notification-type-background: var(--notification-icon-amber-bg);
+}
+
 .notification-center-copy {
   display: flex;
   min-width: 0;
@@ -603,7 +628,7 @@
 @media (max-width: 599px) {
   .notification-center-panel {
     width: min(340px, calc(100vw - 32px));
-    height: auto;
+    height: min(52dvh, 460px);
     max-height: min(52dvh, 460px);
     padding: 10px;
   }
@@ -615,38 +640,38 @@
 
   .notification-center-brand {
     flex: 1 1 auto;
-    gap: 8px;
+    gap: 6px;
+  }
+
+  .notification-center-brand-icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .notification-center-brand-icon .material-symbols-outlined {
+    font-size: 22px;
+  }
+
+  .notification-center-title {
+    font-size: 16px;
   }
 
   .notification-center-actions {
     width: auto;
     justify-content: flex-end;
     gap: 2px;
-  }
-
-  .notification-center-brand-icon {
-    width: 40px;
-    height: 40px;
-  }
-
-  .notification-center-brand-icon .material-symbols-outlined {
-    font-size: 24px;
-  }
-
-  .notification-center-title {
-    font-size: 19px;
+    gap: 2px;
   }
 
   .notification-center-header-link {
-    min-height: 34px;
-    padding-inline: 5px;
-    font-size: 11px;
+    min-height: 40px;
+    padding: 0 4px;
+    font-size: 12px;
   }
 
   .notification-center-close {
-    width: 34px;
-    height: 34px;
-    border-radius: 11px;
+    width: 36px;
+    height: 36px;
   }
 
   .notification-center-close .material-symbols-outlined {

@@ -372,6 +372,11 @@
   box-shadow: none;
 }
 
+.notification-center-card.notification-type-card {
+  border-color: var(--notification-type-background);
+  background: var(--notification-type-background);
+}
+
 .notification-center-footer {
   border-radius: var(--radius-medium);
 }

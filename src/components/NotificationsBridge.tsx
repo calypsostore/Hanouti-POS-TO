@@ -18,7 +18,9 @@ import { useAuthStore } from '../stores/authStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { useFocusRefreshKey } from '../lib/useFocusRefreshKey';
 import { notificationPath } from '../lib/notificationPath';
+import { getNotificationAppearance } from '../lib/notificationAppearance';
 import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
+import { NotificationTypeIcon } from './NotificationTypeIcon';
 import type { NotificationRecord } from '../types/domain';
 
 const SHOWN_IDS_KEY = '7anouti.notification.shown.v1';
@@ -147,7 +149,10 @@ export function NotificationsBridge() {
     let retryTimer = 0;
     let catchUpTimer = 0;
     let catchUpInProgress = false;
-    let channel = getSupabaseClient().channel(`notifications-app-shell:${user.storeId}:${user.id}`);
+    let subscribeInProgress = false;
+    let removingChannel: ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | undefined;
+    let channel: ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | undefined;
+    const channelTopic = `notifications-app-shell:${user.storeId}:${user.id}:${crypto.randomUUID()}`;
 
     const handleAcceptedInsert = async (row: NotificationRecord) => {
       if (disposed || !recipientMatches(row, user.id, user.role)) return;
@@ -165,36 +170,72 @@ export function NotificationsBridge() {
       window.setTimeout(() => setBanner((current) => current?.id === row.id ? null : current), 7000);
     };
 
-    const subscribe = () => {
-      void getSupabaseClient().removeChannel(channel).catch(() => undefined);
-      channel = getSupabaseClient().channel(`notifications-app-shell:${user.storeId}:${user.id}`);
-      channel.on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'notifications',
-        filter: `store_id=eq.${user.storeId}`,
-      }, (payload) => {
-        const row = mapNotificationRow(payload.new as Record<string, unknown>);
-        void handleAcceptedInsert(row);
-      });
-      channel.on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'notifications',
-        filter: `store_id=eq.${user.storeId}`,
-      }, (payload) => {
-        const row = mapNotificationRow(payload.new as Record<string, unknown>);
-        if (recipientMatches(row, user.id, user.role)) acceptRealtimeUpdate(row);
-      });
-      channel.subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          retry = 0;
-          return;
+    const scheduleSubscribeRetry = () => {
+      if (disposed || retryTimer) return;
+      retryTimer = window.setTimeout(() => {
+        retryTimer = 0;
+        void subscribe();
+      }, Math.min(30_000, 1000 * (2 ** retry++)));
+    };
+
+    const subscribe = async () => {
+      if (disposed || subscribeInProgress) return;
+      subscribeInProgress = true;
+      window.clearTimeout(retryTimer);
+      retryTimer = 0;
+      try {
+        if (channel) {
+          const previousChannel = channel;
+          removingChannel = previousChannel;
+          const removalStatus = await getSupabaseClient().removeChannel(previousChannel);
+          if (removalStatus !== 'ok') {
+            throw new Error(`Could not remove notification realtime channel: ${removalStatus}`);
+          }
+          removingChannel = undefined;
+          if (channel === previousChannel) channel = undefined;
         }
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-          retryTimer = window.setTimeout(subscribe, Math.min(30_000, 1000 * (2 ** retry++)));
-        }
-      });
+        if (disposed) return;
+
+        const nextChannel = getSupabaseClient().channel(channelTopic);
+        channel = nextChannel;
+        nextChannel.on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `store_id=eq.${user.storeId}`,
+        }, (payload) => {
+          const row = mapNotificationRow(payload.new as Record<string, unknown>);
+          void handleAcceptedInsert(row);
+        });
+        nextChannel.on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'notifications',
+          filter: `store_id=eq.${user.storeId}`,
+        }, (payload) => {
+          const row = mapNotificationRow(payload.new as Record<string, unknown>);
+          if (recipientMatches(row, user.id, user.role)) acceptRealtimeUpdate(row);
+        });
+        subscribeInProgress = false;
+        nextChannel.subscribe((status) => {
+          if (disposed || channel !== nextChannel || subscribeInProgress) return;
+          if (status === 'SUBSCRIBED') {
+            retry = 0;
+            window.clearTimeout(retryTimer);
+            retryTimer = 0;
+            return;
+          }
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            scheduleSubscribeRetry();
+          }
+        });
+      } catch (error) {
+        removingChannel = undefined;
+        subscribeInProgress = false;
+        if (disposed) return;
+        console.error('[notifications] Realtime subscription failed.', error);
+        scheduleSubscribeRetry();
+      }
     };
 
     const catchUp = async () => {
@@ -240,7 +281,6 @@ export function NotificationsBridge() {
     };
     const handleOnline = () => {
       void catchUp();
-      subscribe();
     };
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('online', handleOnline);
@@ -266,11 +306,18 @@ export function NotificationsBridge() {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener(OWNER_NOTIFICATIONS_CHANGED_EVENT, localEvent);
       void appStateListener?.remove();
-      void getSupabaseClient().removeChannel(channel).catch(() => undefined);
+      const activeChannel = channel;
+      channel = undefined;
+      if (activeChannel && activeChannel !== removingChannel) {
+        void getSupabaseClient().removeChannel(activeChannel).then((status) => {
+          if (status !== 'ok') console.error(`[notifications] Could not remove realtime channel: ${status}.`);
+        }).catch((error: unknown) => console.error('[notifications] Could not remove realtime channel.', error));
+      }
     };
   }, [acceptInsert, acceptRealtimeUpdate, locked, markRead, navigate, user]);
 
   if (!banner) return null;
+  const appearance = getNotificationAppearance(banner.type);
   return createPortal(
     <button
       type="button"
@@ -282,11 +329,14 @@ export function NotificationsBridge() {
           navigate(notificationPath(current, user.role));
         }
       }}
-      className="fixed left-3 right-3 top-20 mx-auto max-w-xl rounded-xl border border-primary/20 bg-surface-container-highest p-4 text-left shadow-overlay"
+      className={`notification-type-card notification-type-card--${appearance.tone} fixed left-3 right-3 top-20 mx-auto flex max-w-xl items-center gap-3 rounded-xl p-4 text-left shadow-overlay`}
       style={{ zIndex: bannerZIndex }}
     >
-      <p className="font-body text-label-lg text-on-surface">{banner.title}</p>
-      <p className="mt-1 font-body text-body-sm text-on-surface-variant">{banner.body}</p>
+      <NotificationTypeIcon type={banner.type} />
+      <span className="min-w-0">
+        <span className="block font-body text-label-lg text-on-surface">{banner.title}</span>
+        <span className="mt-1 block font-body text-body-sm text-on-surface-variant">{banner.body}</span>
+      </span>
     </button>,
     portalTarget,
   );

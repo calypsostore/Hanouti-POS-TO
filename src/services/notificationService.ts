@@ -1,4 +1,5 @@
 import {
+  type CatalogItemRecord,
   resolveStoreSettings,
   type CashMovementRecord,
   type CustomerRecord,
@@ -8,7 +9,7 @@ import {
   type StoreSettings,
   type UserRecord,
 } from '../types/domain';
-import { formatTnd } from '../lib/format';
+import { formatMillimesAmountsInText, formatTnd } from '../lib/format';
 import { readData, writeData } from './storage';
 import { customerService } from './customerService';
 import type { CustomerCreditStatus, CustomerDueInfo } from './customerService';
@@ -28,6 +29,17 @@ export const OWNER_NOTIFICATIONS_CHANGED_EVENT = 'owner-notifications-changed';
 const USER_NOTIFICATION_PREFERENCES_KEY = 'notification-user-preferences';
 const overdueChecks = new Map<string, Promise<number>>();
 
+export function keepUnresolvedItem86Notifications(
+  notifications: NotificationRecord[],
+  catalogItems: Pick<CatalogItemRecord, 'id' | 'outOfStock'>[],
+): NotificationRecord[] {
+  const outOfStockById = new Map(catalogItems.map((item) => [item.id, item.outOfStock]));
+  return notifications.filter((notification) => {
+    if (notification.type !== 'item_86' || !notification.catalogItemId) return true;
+    return outOfStockById.get(notification.catalogItemId) !== false;
+  });
+}
+
 function notifyChanged(): void {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(OWNER_NOTIFICATIONS_CHANGED_EVENT));
 }
@@ -46,7 +58,7 @@ function getNotifications(): NotificationRecord[] {
   let migrated = false;
   const normalized = notifications.map((notification) => {
     const userId = notification.userId ?? notification.staffId;
-    const body = notification.body ?? notification.message ?? '';
+    const body = formatMillimesAmountsInText(notification.body ?? notification.message ?? '');
     if (userId === notification.userId && body === notification.body) return notification;
     migrated = true;
     return { ...notification, userId, body };
@@ -86,7 +98,7 @@ export function mapNotificationRow(row: Record<string, unknown>): NotificationRe
     targetRole: typeof row.target_role === 'string' ? row.target_role as UserRecord['role'] : undefined,
     type: String(row.type) as NotificationType,
     title: String(row.title),
-    body: String(row.body),
+    body: formatMillimesAmountsInText(String(row.body)),
     createdAt: String(row.created_at),
     entityType: typeof row.entity_type === 'string' ? row.entity_type : undefined,
     entityId: typeof row.entity_id === 'string' ? row.entity_id : undefined,
@@ -105,6 +117,7 @@ async function createForUser(
   user: Pick<UserRecord, 'id' | 'role' | 'storeId'>,
   input: Omit<NotificationRecord, 'id' | 'createdAt' | 'readAt' | 'userId' | 'targetRole'>,
 ): Promise<NotificationRecord | undefined> {
+  const body = formatMillimesAmountsInText(input.body);
   if (isSupabaseDriver()) {
     const storeId = input.storeId ?? user.storeId;
     if (!storeId) throw new Error('A store is required to create a notification.');
@@ -114,7 +127,7 @@ async function createForUser(
       p_target_role: null,
       p_type: input.type,
       p_title: input.title,
-      p_body: input.body,
+      p_body: body,
       p_entity_type: input.entityType ?? null,
       p_entity_id: input.entityId ?? null,
       p_staff_id: input.staffId ?? null,
@@ -137,6 +150,7 @@ async function createForUser(
   if (!notificationEnabled(store, input.type, user.id)) return undefined;
   const notification: NotificationRecord = {
     ...input,
+    body,
     userId: user.id,
     id: `notification-${crypto.randomUUID()}`,
     createdAt: new Date().toISOString(),

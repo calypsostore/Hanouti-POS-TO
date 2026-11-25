@@ -1,4 +1,5 @@
 import type { ActivityRecord, UserRecord } from '../types/domain';
+import { formatMillimesAmountsInText } from '../lib/format';
 import { readData, writeData } from './storage';
 import { getProfile } from '../data/repositories/profileRepository';
 import { getSupabaseClient } from '../data/supabaseClient';
@@ -76,7 +77,7 @@ function normalizeLegacyEntry(value: unknown): ActivityRecord | undefined {
       actorName: typeof entry.actorName === 'string' ? entry.actorName : common.actorName,
       actorRole: typeof entry.actorRole === 'string' ? entry.actorRole : common.actorRole,
       action: entry.action,
-      summary: entry.summary,
+      summary: formatMillimesAmountsInText(entry.summary),
       entityType: entry.entityType,
       entityId: entry.entityId,
       meta: typeof entry.meta === 'object' && entry.meta !== null ? entry.meta as ActivityRecord['meta'] : {},
@@ -86,7 +87,7 @@ function normalizeLegacyEntry(value: unknown): ActivityRecord | undefined {
     return {
       ...common,
       action: 'tab.payment_reversed',
-      summary: `Reversed a payment of ${String(entry.amountMillimes ?? 0)} millimes. ${String(entry.reason ?? '')}`.trim(),
+      summary: formatMillimesAmountsInText(`Reversed a payment of ${String(entry.amountMillimes ?? 0)} millimes. ${String(entry.reason ?? '')}`.trim()),
       entityType: 'customer_payment',
       entityId: String(entry.targetId ?? ''),
       meta: { after: { amountMillimes: entry.amountMillimes, reason: entry.reason } },
@@ -126,7 +127,8 @@ function readEntries(): ActivityRecord[] {
 
 export const activityService = {
   async log(entry: ActivityEntry): Promise<ActivityRecord> {
-    if (!entry.storeId.trim() || !entry.action.trim() || !entry.summary.trim() ||
+    const summary = formatMillimesAmountsInText(entry.summary);
+    if (!entry.storeId.trim() || !entry.action.trim() || !summary.trim() ||
       !entry.entityType.trim() || !entry.entityId.trim()) {
       throw new Error('Activity records require a store, action, summary, and entity.');
     }
@@ -140,7 +142,7 @@ export const activityService = {
       }
       const { data: id, error } = await getSupabaseClient().rpc('log_activity', {
         p_action: entry.action,
-        p_summary: entry.summary,
+        p_summary: summary,
         p_entity_type: entry.entityType,
         p_entity_id: entry.entityId,
         p_meta: entry.meta ?? {},
@@ -148,6 +150,7 @@ export const activityService = {
       if (error) throw new Error(`Could not record activity: ${error.message}`, { cause: error });
       return {
         ...entry,
+        summary,
         actorId: actor.id,
         actorName: actor.name,
         actorRole: actor.role,
@@ -158,6 +161,7 @@ export const activityService = {
     }
     const record: ActivityRecord = {
       ...entry,
+      summary,
       ...resolveActor(entry),
       id: `activity-${crypto.randomUUID()}`,
       meta: entry.meta ?? {},
@@ -186,7 +190,7 @@ export const activityService = {
         actorName: row.actor_name,
         actorRole: row.actor_role,
         action: row.action,
-        summary: row.summary,
+        summary: formatMillimesAmountsInText(row.summary),
         entityType: row.entity_type,
         entityId: row.entity_id,
         meta: row.meta as ActivityRecord['meta'],

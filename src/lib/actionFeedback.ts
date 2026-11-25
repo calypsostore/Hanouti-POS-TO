@@ -12,7 +12,7 @@ export function classifyActionFeedback(
   if (isWarning) return undefined;
 
   const isError = classes.some((token) => token.includes('error'));
-  if (isError || role === 'alert') return 'error';
+  if (role === 'alert' || (role !== 'status' && isError)) return 'error';
 
   const isSuccess = classes.some((token) => token.includes('success'));
   if (isSuccess) return 'success';

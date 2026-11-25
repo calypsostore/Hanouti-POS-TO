@@ -74,7 +74,7 @@
 .role-dashboard .staff-dashboard-kpis > .dashboard-kpi,
 .role-dashboard .owner-alert-grid > *,
 .role-dashboard .owner-chart-grid > article,
-.role-dashboard > section[aria-label] {
+.role-dashboard > section[aria-label]:not([aria-label="Owner notifications"]) {
   border: 1px solid var(--dashboard-line);
   border-radius: 1.25rem;
   box-shadow: 0 10px 28px rgb(17 27 48 / 6%);
@@ -139,7 +139,7 @@
 }
 
 .owner-dashboard .owner-chart-grid > article,
-.owner-dashboard > section[aria-label] {
+.owner-dashboard > section[aria-label]:not([aria-label="Owner notifications"]) {
   background-color: #fff;
 }
 
@@ -367,7 +367,7 @@
 :root.dark .owner-dashboard .owner-kpi-grid > .stat-card,
 :root.dark .owner-dashboard .owner-alert-grid > *,
 :root.dark .owner-dashboard .owner-chart-grid > article,
-:root.dark .owner-dashboard > section[aria-label],
+:root.dark .owner-dashboard > section[aria-label]:not([aria-label="Owner notifications"]),
 :root.dark .staff-dashboard-content > header,
 :root.dark .staff-dashboard-content .staff-dashboard-kpis > .dashboard-kpi,
 :root.dark .super-admin-dashboard > header,

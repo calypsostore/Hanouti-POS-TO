@@ -13,7 +13,9 @@ import { userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { notificationPath } from '../lib/notificationPath';
+import { getNotificationAppearance } from '../lib/notificationAppearance';
 import type { NotificationRecord } from '../types/domain';
+import { NotificationTypeIcon } from '../components/NotificationTypeIcon';
 
 export function NotificationsScreen() {
   const navigate = useNavigate();
@@ -89,12 +91,12 @@ export function NotificationsScreen() {
         <section key={group.title} aria-label={group.title} className="flex flex-col gap-2">
           <h2 className="px-1 font-body text-label-lg text-on-surface-variant">{group.title}</h2>
           <CardGrid className="mobile-card-list mobile-gap-2">
-          {group.entries.map((notification) => (
+          {group.entries.map((notification) => {
+            const appearance = getNotificationAppearance(notification.type);
+            return (
             <article
               key={notification.id}
-              className={`rounded-xl p-3 shadow-card ${
-                notification.readAt ? 'bg-surface-container-lowest' : 'bg-primary-fixed/40'
-              }`}
+              className={`notification-type-card notification-type-card--${appearance.tone} rounded-xl p-3 shadow-card`}
             >
               <button
                 type="button"
@@ -103,11 +105,7 @@ export function NotificationsScreen() {
                 aria-label={`Open notification: ${notification.title}`}
                 className="flex w-full min-w-0 items-start gap-3 text-left disabled:opacity-60"
               >
-                <span className={`mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
-                  notification.readAt ? 'bg-surface-container text-outline' : 'bg-primary-fixed text-primary'
-                }`}>
-                  <MaterialIcon name="notifications" className="text-xl" />
-                </span>
+                <NotificationTypeIcon type={notification.type} className="mt-1" />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-start justify-between gap-2">
                     <span className="break-words font-body text-label-lg text-on-surface">{notification.title}</span>
@@ -131,7 +129,8 @@ export function NotificationsScreen() {
                 </button>
               )}
             </article>
-          ))}
+            );
+          })}
           </CardGrid>
         </section>
       ))}

@@ -9,6 +9,7 @@ describe('classifyActionFeedback', () => {
 
   it('does not turn warnings or informational statuses into success/error toasts', () => {
     expect(classifyActionFeedback('status', 'bg-warning-container text-on-warning-container', 'Low stock.')).toBeUndefined();
+    expect(classifyActionFeedback('status', 'bg-error-container text-on-error-container', 'Item marked 86: American was marked out of stock.')).toBeUndefined();
     expect(classifyActionFeedback('status', 'text-outline', 'Checking customer credit…')).toBeUndefined();
   });
 

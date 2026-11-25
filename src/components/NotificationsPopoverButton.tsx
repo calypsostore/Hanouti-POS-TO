@@ -2,39 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import { notificationPath } from '../lib/notificationPath';
+import { getNotificationAppearance } from '../lib/notificationAppearance';
 import { useAuthStore } from '../stores/authStore';
 import { useNotificationStore } from '../stores/notificationStore';
-import type { NotificationRecord, NotificationType } from '../types/domain';
+import type { NotificationRecord } from '../types/domain';
 import { MaterialIcon } from './MaterialIcon';
+import { NotificationTypeIcon } from './NotificationTypeIcon';
 import { t } from '../i18n/translations';
 import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
-
-type NotificationTone = 'blue' | 'green' | 'red' | 'violet' | 'amber';
-
-interface NotificationAppearance {
-  icon: string;
-  tone: NotificationTone;
-}
-
-const notificationAppearance: Record<NotificationType, NotificationAppearance> = {
-  void_requested: { icon: 'pending_actions', tone: 'amber' },
-  void_approved: { icon: 'check_circle', tone: 'green' },
-  void_rejected: { icon: 'block', tone: 'red' },
-  schedule_published: { icon: 'calendar_month', tone: 'blue' },
-  customer_credit_warning: { icon: 'credit_card', tone: 'amber' },
-  customer_credit_limit: { icon: 'credit_card_off', tone: 'red' },
-  customer_overdue: { icon: 'schedule', tone: 'amber' },
-  stock_depleted: { icon: 'inventory_2', tone: 'red' },
-  item_86: { icon: 'do_not_disturb_on', tone: 'red' },
-  low_stock: { icon: 'inventory_2', tone: 'amber' },
-  shift_opened: { icon: 'notifications', tone: 'violet' },
-  shift_closed: { icon: 'power_settings_new', tone: 'red' },
-  cash_difference: { icon: 'price_change', tone: 'violet' },
-  cash_out_alert: { icon: 'payments', tone: 'amber' },
-  z_report_closed: { icon: 'notifications', tone: 'blue' },
-  app_update: { icon: 'download', tone: 'green' },
-  subscription_expiring: { icon: 'workspace_premium', tone: 'violet' },
-};
 
 interface NotificationsPopoverButtonProps {
   id?: string;
@@ -214,10 +189,10 @@ export function NotificationsPopoverButton({
               {loading ? (
                 <p role="status" className="notification-center-empty">Loading notifications…</p>
               ) : visibleNotifications.length > 0 ? visibleNotifications.map((notification) => {
-                const appearance = notificationAppearance[notification.type];
+                const appearance = getNotificationAppearance(notification.type);
                 const busy = activeNotificationId === notification.id || pendingBulkAction !== null;
                 return (
-                  <article key={notification.id} className="notification-center-card">
+                  <article key={notification.id} className={`notification-center-card notification-type-card notification-type-card--${appearance.tone}`}>
                     <button
                       type="button"
                       disabled={busy}
@@ -225,9 +200,7 @@ export function NotificationsPopoverButton({
                       aria-label={`Open notification: ${notification.title}`}
                       className="notification-center-open"
                     >
-                      <span className={`notification-center-type-icon notification-center-type-icon--${appearance.tone}`}>
-                        <MaterialIcon name={appearance.icon} />
-                      </span>
+                      <NotificationTypeIcon type={notification.type} />
                       <span className="notification-center-copy">
                         <span className="notification-center-title-row">
                           <span className="notification-center-item-title">{notification.title}</span>

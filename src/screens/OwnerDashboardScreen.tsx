@@ -16,7 +16,9 @@ import { reportService, type ReportDayStatus } from '../services/reportService';
 import { shiftService } from '../services/shiftService';
 import { userService } from '../services/userService';
 import { customerService } from '../services/customerService';
-import { notificationService } from '../services/notificationService';
+import { keepUnresolvedItem86Notifications, notificationService } from '../services/notificationService';
+import { getNotificationAppearance } from '../lib/notificationAppearance';
+import { NotificationTypeIcon } from '../components/NotificationTypeIcon';
 import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
 import { shareCustomerStatement } from '../services/customerStatementShare';
 import { catalogService } from '../services/catalogService';
@@ -185,7 +187,10 @@ function OwnerDashboardContent() {
           try {
             const notifications = await notificationService.listFor(user);
             if (active) {
-              setOwnerNotifications(notifications.filter((notification) =>
+              const currentNotifications = catalogResult.status === 'fulfilled'
+                ? keepUnresolvedItem86Notifications(notifications, catalogResult.value)
+                : notifications;
+              setOwnerNotifications(currentNotifications.filter((notification) =>
                 notification.type === 'customer_overdue' || notification.type === 'stock_depleted' ||
                 notification.type === 'item_86' || notification.type === 'low_stock' ||
                 notification.type === 'cash_out_alert' || notification.type === 'cash_difference' ||
@@ -384,6 +389,16 @@ function OwnerDashboardContent() {
           ))}
         </div>
       } />
+      {ownerNotifications.length > 0 && (
+        <section aria-label="Owner notifications" className="mt-4 flex flex-col gap-2">
+          {ownerNotifications.slice(0, 5).map((notification) => (
+            <article key={notification.id} role="status" className={`notification-type-card notification-type-card--${getNotificationAppearance(notification.type).tone} flex items-center gap-3 rounded-xl p-3`}>
+              <NotificationTypeIcon type={notification.type} />
+              <span className="font-body text-body-sm text-on-surface"><strong>{notification.title}:</strong> {notification.body}</span>
+            </article>
+          ))}
+        </section>
+      )}
       <p role="status" className={`dashboard-status mb-4 rounded-xl p-3 font-body text-body-sm ${dayStatus.dayIsClosed ? 'bg-warning-container text-on-warning-container' : 'bg-surface-container-low text-on-surface-variant'}`}>
         {dayStatusMessage}
       </p>
@@ -459,16 +474,6 @@ function OwnerDashboardContent() {
           </div>
         </article>
       </CardGrid>
-
-      {ownerNotifications.length > 0 && (
-        <section aria-label="Owner notifications" className="mt-4 flex flex-col gap-2">
-          {ownerNotifications.slice(0, 5).map((notification) => (
-            <p key={notification.id} role="status" className={`rounded-xl p-3 font-body text-body-sm ${notification.type === 'stock_depleted' || notification.type === 'low_stock' || notification.type === 'cash_out_alert' ? 'bg-warning-container text-on-warning-container' : 'bg-error-container text-on-error-container'}`}>
-              <strong>{notification.title}:</strong> {notification.body}
-            </p>
-          ))}
-        </section>
-      )}
 
       <section aria-label={t('owner.overdueTabs')} className="dashboard-glass mt-4 rounded-2xl p-5 shadow-card">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { formatMillimesAmountsInText } from '../src/lib/format';
 import {
   formatDinarInput,
   formatMillimes,
@@ -34,6 +35,15 @@ describe('Dinar millimes parsing', () => {
     expect(formatMillimes(25500)).toBe('25.500');
     expect(formatMillimes(250)).toBe('0.250');
     expect(formatMillimesWithThousands(1250000)).toBe('1,250.000');
+  });
+
+  it('formats legacy millime amounts in display text as DT', () => {
+    expect(formatMillimesAmountsInText('Cash difference of -1223 millimes; total 1,234,567 millimes.'))
+      .toBe('Cash difference of -1.223 DT; total 1,234.567 DT.');
+    expect(formatMillimesAmountsInText('Changed the price from 50000 to 25000 millimes.'))
+      .toBe('Changed the price from 50.000 DT to 25.000 DT.');
+    expect(formatMillimesAmountsInText('The amount is already 1.223 DT.'))
+      .toBe('The amount is already 1.223 DT.');
   });
 
   it('formats raw millime digits as grouped dinar amounts', () => {

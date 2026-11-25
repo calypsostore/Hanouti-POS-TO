@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CustomerRecord, NotificationRecord, UserRecord } from '../src/types/domain';
 import {
+  keepUnresolvedItem86Notifications,
+  mapNotificationRow,
   notificationService,
   shouldRegisterPushNotifications,
 } from '../src/services/notificationService';
@@ -54,6 +56,48 @@ describe('notification service', () => {
     expect(shouldRegisterPushNotifications(true, true, true, owner.storeId)).toBe(true);
     expect(shouldRegisterPushNotifications(true, false, true, owner.storeId)).toBe(false);
     expect(shouldRegisterPushNotifications(true, true, false, owner.storeId)).toBe(false);
+  });
+
+  it('formats legacy millime amounts in notification bodies as DT', async () => {
+    const legacy = {
+      ...notification('cash-difference'),
+      type: 'cash_difference' as const,
+      body: "Staff's shift closed with a cash difference of -1223 millimes.",
+    };
+    localStorage.setItem('7anouti-pos:notifications', JSON.stringify([legacy]));
+
+    await expect(notificationService.listFor(owner)).resolves.toMatchObject([
+      { body: "Staff's shift closed with a cash difference of -1.223 DT." },
+    ]);
+
+    expect(mapNotificationRow({
+      id: legacy.id,
+      type: legacy.type,
+      title: legacy.title,
+      body: legacy.body,
+      created_at: legacy.createdAt,
+    }).body).toBe("Staff's shift closed with a cash difference of -1.223 DT.");
+  });
+
+  it('hides an 86 alert from the dashboard after its catalog item is available again', () => {
+    const marked86: NotificationRecord = {
+      ...notification('item-86'),
+      type: 'item_86',
+      catalogItemId: 'item-1',
+    };
+    const stockAlert: NotificationRecord = {
+      ...notification('stock-alert'),
+      type: 'stock_depleted',
+      catalogItemId: 'item-2',
+    };
+
+    expect(keepUnresolvedItem86Notifications([marked86, stockAlert], [
+      { id: 'item-1', outOfStock: false },
+      { id: 'item-2', outOfStock: true },
+    ])).toEqual([stockAlert]);
+    expect(keepUnresolvedItem86Notifications([marked86], [
+      { id: 'item-1', outOfStock: true },
+    ])).toEqual([marked86]);
   });
 
   it('builds customer alerts from supplied batched credit data', async () => {

@@ -12,3 +12,22 @@ export function formatTnd(amountInDinars: number): string {
 export function formatTndMillimes(amountMillimes: number): string {
   return formatMillimesWithThousands(amountMillimes);
 }
+
+export function formatMillimesAmountsInText(value: string): string {
+  const formatAmount = (amount: string): string | undefined => {
+    const millimes = Number(amount.replace(/,/g, ''));
+    return Number.isSafeInteger(millimes) ? `${formatTndMillimes(millimes)} DT` : undefined;
+  };
+  const convertedRanges = value.replace(
+    /\bfrom\s+(-?[\d,]+)\s+to\s+(-?[\d,]+)\s+millimes?\b/gi,
+    (match, from: string, to: string) => {
+      const formattedFrom = formatAmount(from);
+      const formattedTo = formatAmount(to);
+      return formattedFrom && formattedTo ? `from ${formattedFrom} to ${formattedTo}` : match;
+    },
+  );
+  return convertedRanges.replace(/(^|[^\d.,])(-?\d[\d,]*)\s+millimes?\b/gi, (match, prefix: string, amount: string) => {
+    const formattedAmount = formatAmount(amount);
+    return formattedAmount ? `${prefix}${formattedAmount}` : match;
+  });
+}

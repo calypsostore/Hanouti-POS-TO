@@ -148,10 +148,10 @@ export function ZReportDialog({
               <h3 className="z-report-summary__heading">Period sales and voids</h3>
               <Metric className="z-report-metric" label="Cash / card / other / tab sales" amount={zPaymentSplit.cash + zPaymentSplit.card + zPaymentSplit.other + zPaymentSplit.tab} />
               <p className="z-report-summary__detail">
-                  Cash {formatTnd(zPaymentSplit.cash / 1000)} · Card {formatTnd(zPaymentSplit.card / 1000)} · Other {formatTnd(zPaymentSplit.other / 1000)} · Tab {formatTnd(zPaymentSplit.tab / 1000)}
+                  Cash {formatTnd(zPaymentSplit.cash / 1000)} DT · Card {formatTnd(zPaymentSplit.card / 1000)} DT · Other {formatTnd(zPaymentSplit.other / 1000)} DT · Tab {formatTnd(zPaymentSplit.tab / 1000)} DT
                 </p>
               <p className="z-report-summary__detail">
-                  Non-cash tab payments · Card {formatTnd(zCardTabPayments / 1000)} · Other {formatTnd(zOtherTabPayments / 1000)}
+                  Non-cash tab payments · Card {formatTnd(zCardTabPayments / 1000)} DT · Other {formatTnd(zOtherTabPayments / 1000)} DT
                 </p>
               <Metric className="z-report-metric" label={`Voided orders (${zVoids.count})`} amount={zVoids.totalMillimes} />
               <Metric className="z-report-metric" label={`Pending void requests (${zPendingVoids.count})`} amount={zPendingVoids.totalMillimes} />

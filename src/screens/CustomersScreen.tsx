@@ -719,7 +719,7 @@ export function CustomersScreen() {
               <p className="mt-1 font-body text-body-sm text-on-surface-variant">
                 {selectedStatus?.limit === undefined
                   ? `Current balance: ${money(selectedStatus?.balance ?? 0)}`
-                  : `${formatTnd(Math.max(0, selectedStatus.balance) / 1000)} of ${formatTnd(selectedStatus.limit / 1000)} DT used`}
+                  : `${formatTnd(Math.max(0, selectedStatus.balance) / 1000)} DT of ${formatTnd(selectedStatus.limit / 1000)} DT used`}
               </p>
               {selectedDue?.nextDueAt && <p className={`mt-1 font-body text-body-sm ${selectedDue.overdue ? 'text-error-dark' : 'text-on-surface-variant'}`}>{selectedDue.overdue ? 'Overdue since' : 'Next due'} {dateLabel(selectedDue.nextDueAt)}</p>}
             </div>
@@ -1133,7 +1133,7 @@ function CustomerCard({ customer, status, overdue, onClick }: {
             <span aria-hidden="true" className={`customer-credit-progress-fill ${progressTone}`} style={{ width: `${progress}%` }} />
           </span>
           <span className="mt-1.5 flex items-center justify-between gap-2 font-body text-label-sm text-on-surface-variant">
-            <span>{formatTnd(used / 1000)} / {formatTnd(status.limit / 1000)} DT</span>
+            <span>{formatTnd(used / 1000)} DT / {formatTnd(status.limit / 1000)} DT</span>
             <span>{formatTnd((status.remaining ?? 0) / 1000)} DT left</span>
           </span>
         </span>

@@ -34,6 +34,7 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
   const isOwnerWorkspace = links.some((link) => link.to === '/owner/dashboard');
   const isShiftWorkspace = location.pathname === '/owner/shifts';
   const isSettingsWorkspace = location.pathname === '/owner/settings' || location.pathname === '/settings';
+  const usesOwnerTabletBottomNav = isOwnerWorkspace && location.pathname !== '/pos' && !isShiftWorkspace;
   const isDashboardWorkspace = location.pathname === '/owner/dashboard' || location.pathname === '/admin/overview';
   const [moreOpen, setMoreOpen] = useState(false);
   const [pendingVoidCount, setPendingVoidCount] = useState(0);
@@ -146,7 +147,7 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
     : [{ title: 'System', links }];
 
   return (
-    <div className={`workspace-layout min-h-screen bg-surface pb-6${isOwnerWorkspace ? ' owner-workspace' : ''}${isDashboardWorkspace ? ' dashboard-workspace' : ''}${isShiftWorkspace ? ' shift-screen-layout' : ''}${isSettingsWorkspace ? ' settings-screen-layout' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
+    <div className={`workspace-layout min-h-screen bg-surface pb-6${isOwnerWorkspace ? ' owner-workspace' : ''}${isDashboardWorkspace ? ' dashboard-workspace' : ''}${isShiftWorkspace ? ' shift-screen-layout' : ''}${isSettingsWorkspace ? ' settings-screen-layout' : ''}${usesOwnerTabletBottomNav ? ' owner-tablet-bottom-nav' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
       <TopBar title={title} storeName={storeName} storeLogoId={storeLogoId} storeType={storeType} onProfileClick={() => navigate('/settings')} />
       <aside className="desktop-sidebar" aria-label={t('common.workspaceNavigation')}>
         <div className="desktop-sidebar__brand">

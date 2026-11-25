@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { MaterialIcon } from './MaterialIcon';
-import { OwnerMobileIcon } from './OwnerMobileIcon';
 import { BottomSheet } from './BottomSheet';
 import { t } from '../i18n/translations';
 import { useAuthStore } from '../stores/authStore';
@@ -112,7 +111,7 @@ export function BottomNav() {
               aria-label={t(item.label)}
               className={({ isActive }) => `owner-mobile-nav__item${isActive ? ' is-active' : ''}`}
             >
-              <OwnerMobileIcon name={item.icon} className="owner-mobile-nav__icon" size={23} />
+              <MaterialIcon name={item.icon} className="owner-mobile-nav__icon" />
               <span>{t(item.label)}</span>
             </NavLink>
           ))}
@@ -125,7 +124,7 @@ export function BottomNav() {
             className="owner-mobile-nav__item"
           >
             <span className="owner-mobile-nav__more-icon">
-              <OwnerMobileIcon name="more_horiz" className="owner-mobile-nav__icon" size={23} />
+              <MaterialIcon name="more_horiz" className="owner-mobile-nav__icon" />
               {totalBadgeCount > 0 && <span className="owner-mobile-nav__badge">{totalBadgeCount > 99 ? '99+' : totalBadgeCount}</span>}
             </span>
             <span>{t('nav.more')}</span>
@@ -136,8 +135,8 @@ export function BottomNav() {
           onClose={() => setMoreOpen(false)}
           title={t('nav.more')}
           icon="grid_view"
-          iconElement={<OwnerMobileIcon name="grid_view" className="owner-more-header-icon--mobile" size={24} />}
-          closeIcon={<OwnerMobileIcon name="close" className="owner-more-close-icon--mobile" size={20} />}
+          iconElement={<MaterialIcon name="grid_view" className="owner-more-header-icon--mobile" />}
+          closeIcon={<MaterialIcon name="close" className="owner-more-close-icon--mobile" />}
           panelClassName="owner-more-panel"
         >
           <nav id="owner-more-navigation" aria-label={t('nav.moreNavigation')} className="owner-more-list">
@@ -150,10 +149,10 @@ export function BottomNav() {
                   onClick={() => setMoreOpen(false)}
                   className={({ isActive }) => `owner-more-list__item${isActive ? ' is-active' : ''}`}
                 >
-                  <OwnerMobileIcon name={item.icon} className="owner-more-list__mobile-icon" size={23} />
+                  <MaterialIcon name={item.icon} className="owner-more-list__mobile-icon" />
                   <span className="min-w-0 flex-1">{t(item.label)}</span>
                   {badgeCount > 0 && <span className="owner-more-list__badge">{badgeCount > 99 ? '99+' : badgeCount}</span>}
-                  <OwnerMobileIcon name="chevron_right" className="owner-more-chevron--mobile owner-more-list__chevron" size={20} />
+                  <MaterialIcon name="chevron_right" className="owner-more-chevron--mobile owner-more-list__chevron" />
                 </NavLink>
               );
             })}

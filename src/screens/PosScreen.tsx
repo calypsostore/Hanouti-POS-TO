@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { createLatestRequestGuard } from '../lib/requestGuard';
-import { BottomNav } from '../components/BottomNav';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
 import { Chip } from '../components/Chip';
@@ -49,6 +48,9 @@ interface ProductView extends ItemCardItem {
   modifiersRequired?: boolean;
   modifierSelectionMode?: 'single' | 'multiple';
 }
+
+type CatalogViewMode = 'grid' | 'list';
+const POS_CATALOG_VIEW_MODE_KEY = 'hanouti.pos-catalog-view-mode.v1';
 
 function customerIdFromState(state: unknown): string {
   if (typeof state !== 'object' || state === null || !('customerId' in state)) return '';
@@ -114,6 +116,10 @@ export function PosScreen() {
   const restoreOrder = useCartStore((state) => state.restoreOrder);
   const [store, setStore] = useState<StoreRecord>();
   const [category, setCategory] = useState('all');
+  const [openStockMenuItemId, setOpenStockMenuItemId] = useState<string | null>(null);
+  const [catalogViewMode, setCatalogViewMode] = useState<CatalogViewMode>(() =>
+    window.localStorage.getItem(POS_CATALOG_VIEW_MODE_KEY) === 'list' ? 'list' : 'grid',
+  );
   const [search, setSearch] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [toast, setToast] = useState('');
@@ -135,7 +141,6 @@ export function PosScreen() {
   const [markedOutOfStockItem, setMarkedOutOfStockItem] = useState<ProductView | null>(null);
   const [selectedModifiers, setSelectedModifiers] = useState<string[]>([]);
   const [can86Items, setCan86Items] = useState(false);
-  const [canCompItems, setCanCompItems] = useState(false);
   const [canUseTabs, setCanUseTabs] = useState(false);
   const [canOverrideCreditLimit, setCanOverrideCreditLimit] = useState(false);
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
@@ -233,7 +238,6 @@ export function PosScreen() {
         setStore(currentStore);
         setOrders([...todaysOrders, ...queuedOrders]);
         setCan86Items(permission);
-        setCanCompItems(compPermission);
         setCanUseTabs(user?.role === 'owner' || tabsPermission);
         setCanOverrideCreditLimit(user?.role === 'owner' || overridePermission);
         setCustomers(customerList);
@@ -288,7 +292,6 @@ export function PosScreen() {
               setCustomers(snapshot.customers);
               setCustomerCreditStatuses(snapshot.creditStatuses);
               setCan86Items(snapshot.permissions.can86Items);
-              setCanCompItems(snapshot.permissions.canCompItems);
               setCanUseTabs(snapshot.permissions.canUseTabs);
               setCanOverrideCreditLimit(snapshot.permissions.canOverrideCreditLimit);
               setNeedsAttentionOrders(attentionOrders);
@@ -543,15 +546,6 @@ export function PosScreen() {
       setToast(error instanceof Error ? error.message : t('common.updateFailed'));
       return false;
     }
-  }
-
-  function openCompForm() {
-    setCompItemId(catalogRecords.find((item) => item.stockCount !== 0)?.id ?? catalogRecords[0]?.id ?? '');
-    setCompQuantity('');
-    setCompReason('dropped');
-    setCompNote('');
-    setCompError('');
-    setCompOpen(true);
   }
 
   async function submitComp() {
@@ -897,31 +891,6 @@ export function PosScreen() {
         onDashboardClick={() => navigate(user?.role === 'owner' ? '/owner/dashboard' : '/dashboard')}
         onLockClick={user?.role === 'staff' ? () => { void lockTerminal(); } : undefined}
       />
-      <div className="pos-store-header flex items-center justify-between gap-2 bg-surface-container-low px-3 py-2.5">
-        <div className="min-w-0">
-          <h2 className="flex items-center gap-1 truncate font-display text-headline-sm text-primary">
-            <MaterialIcon name="storefront" className="text-lg" filled />
-            {store?.name ?? t('pos.cafe')}
-          </h2>
-          {openShift ? (
-            <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-success px-2 py-0.5 font-body text-label-sm text-on-success">
-              <span className="h-1.5 w-1.5 rounded-full bg-success-dark" />
-              {t('pos.shiftOpenSince', { time: new Date(openShift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })}
-            </span>
-          ) : (
-            <button type="button" onClick={() => navigate(user?.role === 'owner' ? '/owner/shifts' : '/shift')} className="mt-1 inline-flex items-center gap-1 rounded-full bg-error-container px-2 py-0.5 font-body text-label-sm text-on-error-container">
-              <span className="h-1.5 w-1.5 rounded-full bg-error-dark" />
-              {t('pos.shiftRequired')}
-            </button>
-          )}
-        </div>
-        {canCompItems && (
-          <Button type="button" variant="secondary" onClick={openCompForm} className="min-h-11 shrink-0 rounded-xl px-3 text-label-sm">
-            <MaterialIcon name="menu" className="text-lg" />
-            Comp / waste
-          </Button>
-        )}
-      </div>
       <div className="pos-alert-stack">
         {!openShift && dayStatus.dayIsClosed && (
           <section role="status" className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-warning-container p-3 text-on-warning-container">
@@ -967,6 +936,35 @@ export function PosScreen() {
                 </Chip>
               ))}
             </div>
+            <div className="flex items-center justify-between gap-2">
+              {openShift ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-success px-2 py-0.5 font-body text-label-sm text-on-success">
+                  <span className="h-1.5 w-1.5 rounded-full bg-success-dark" />
+                  {t('pos.shiftOpenSince', { time: new Date(openShift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })}
+                </span>
+              ) : (
+                <button type="button" onClick={() => navigate(user?.role === 'owner' ? '/owner/shifts' : '/shift')} className="inline-flex items-center gap-1 rounded-full bg-error-container px-2 py-0.5 font-body text-label-sm text-on-error-container">
+                  <span className="h-1.5 w-1.5 rounded-full bg-error-dark" />
+                  {t('pos.shiftRequired')}
+                </button>
+              )}
+              <button
+                type="button"
+                aria-label={t('pos.listView')}
+                aria-pressed={catalogViewMode === 'list'}
+                title={t(catalogViewMode === 'grid' ? 'pos.switchToListView' : 'pos.switchToGridView')}
+                onClick={() => {
+                  const nextViewMode = catalogViewMode === 'grid' ? 'list' : 'grid';
+                  window.localStorage.setItem(POS_CATALOG_VIEW_MODE_KEY, nextViewMode);
+                  setCatalogViewMode(nextViewMode);
+                }}
+                className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl transition ${
+                  catalogViewMode === 'grid' ? 'bg-primary text-on-primary' : 'bg-surface-container-high text-primary'
+                }`}
+              >
+                <MaterialIcon name={catalogViewMode === 'grid' ? 'grid_view' : 'view_list'} className="text-xl" />
+              </button>
+            </div>
           </div>
 
           <div className="pos-catalog-scroll-area">
@@ -987,8 +985,10 @@ export function PosScreen() {
                     <article key={item.id} className={`flex ${largeButtons ? 'min-h-40 w-40' : 'min-h-32 w-36'} shrink-0 flex-col justify-between rounded-2xl bg-surface-container-lowest p-3 text-left shadow-card`}>
                       <button type="button" aria-label={t('pos.addItem', { item: item.name })} onClick={() => addItem(item)} className="flex min-h-0 flex-1 flex-col justify-between text-left active:scale-[0.98]">
                         <div className="flex items-start justify-between">
-                          <ItemLogo id={item.icon} size="sm" />
-                          {quantity > 0 && <span className="pos-cart-count-badge">{quantity}</span>}
+                          <span className="relative">
+                            <ItemLogo id={item.icon} size="sm" />
+                            {quantity > 0 && <span className="pos-cart-count-badge">{quantity}</span>}
+                          </span>
                         </div>
                         <div className="mt-2">
                           <p className="truncate font-body text-label-md text-on-surface">{item.name}</p>
@@ -1027,7 +1027,7 @@ export function PosScreen() {
                 <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">
                   {search ? 'No products match your search.' : 'No products are available yet.'}
                 </p>
-              ) : <div className="pos-catalog-grid grid grid-cols-2 gap-3 xl:grid-cols-3">
+              ) : <div className={`pos-catalog-grid grid grid-cols-2 gap-3 xl:grid-cols-3${catalogViewMode === 'list' ? ' pos-catalog-grid--list' : ''}`}>
                 <LazyBatch
                   items={filteredItems}
                   resetKey={search}
@@ -1042,6 +1042,11 @@ export function PosScreen() {
                       onToggleStock={() => { void toggleStock(item); }}
                       onOpenOutOfStock={() => setMarkedOutOfStockItem(item)}
                       largeButtons={largeButtons}
+                      viewMode={catalogViewMode}
+                      stockMenuOpen={openStockMenuItemId === item.id}
+                      onStockMenuToggle={() =>
+                        setOpenStockMenuItemId((currentItemId) => currentItemId === item.id ? null : item.id)
+                      }
                     />
                   )}
                 />
@@ -1092,7 +1097,6 @@ export function PosScreen() {
         </div>
       </div>
 
-      <BottomNav />
       {ticketOrder && <TicketView order={ticketOrder} storeName={store?.name ?? t('pos.cafe')} staffName={user?.name ?? t('common.staff')} onClose={() => setTicketOrder(null)} settings={store?.settings} storeAddress={store?.address} storePhone={store?.phone} storeTaxId={store?.taxId} />}
       <BottomSheet open={drawerOpen} onClose={() => setDrawerOpen(false)} title={t('pos.currentOrder')}>
         {renderTicketContent(true)}

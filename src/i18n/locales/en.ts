@@ -23,6 +23,7 @@ export const en = {
   'nav.schedule': 'Schedule',
   'nav.voidRequests': 'Void requests',
   'nav.reports': 'Reports',
+  'nav.fiscal': 'Fiscal settings',
   'nav.inventory': 'Inventory',
   'nav.wasteLog': 'Waste log',
   'nav.expenses': 'Expenses',

@@ -25,6 +25,7 @@ export const ar = {
   'nav.schedule': 'الجدول',
   'nav.voidRequests': 'طلبات الإلغاء',
   'nav.reports': 'التقارير',
+  'nav.fiscal': 'الإعدادات الجبائية',
   'nav.inventory': 'المخزون',
   'nav.wasteLog': 'سجل الهدر',
   'nav.expenses': 'المصروفات',

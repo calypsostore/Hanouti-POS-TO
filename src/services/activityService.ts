@@ -22,6 +22,7 @@ const getUsers = () => readData<UserRecord[]>('users', []);
 const getStoredEntries = (): unknown[] => readData<unknown[]>('activity-logs', []);
 
 function actionGroup(action: string): string {
+  if (action.startsWith('fiscal.')) return 'settings';
   if (action.startsWith('order.')) return 'orders';
   if (action === 'item.86' || action.startsWith('price.') || action.startsWith('stock.') || action.startsWith('catalog.')) return 'catalog';
   if (action.startsWith('staff.') || action.startsWith('position.')) return 'staff';

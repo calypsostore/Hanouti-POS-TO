@@ -121,6 +121,46 @@ export function buildReportDocument(
     ] : []),
     ...(tabSales === undefined ? [] : [{ label: 'Tab sales', value: money(tabSales) }]),
   ]);
+  if (report.fiscalSummary) {
+    const fiscal = report.fiscalSummary;
+    appendSection(sections, 'FISCAL SNAPSHOTS (HISTORICAL DATA ONLY)', [
+      { label: 'Completed orders with snapshots', value: `${fiscal.ordersWithFiscalSnapshot} / ${fiscal.completedOrderCount}` },
+      ...(fiscal.ordersMissingFiscalSnapshot === 0 ? [] : [{
+        label: 'Completed orders missing fiscal snapshots',
+        value: String(fiscal.ordersMissingFiscalSnapshot),
+        emphasized: true,
+      }]),
+      { label: 'Snapshot net amount (HT)', value: money(fiscal.netAmountMillimes) },
+      { label: 'Snapshot tax amount', value: money(fiscal.taxAmountMillimes) },
+      { label: 'Snapshot gross amount (TTC)', value: money(fiscal.grossAmountMillimes), emphasized: true },
+      ...fiscal.taxes.flatMap((tax) => [
+        {
+          label: `${tax.taxType} · ${tax.treatment}${tax.ruleId ? ` · ${tax.ruleId} v${tax.ruleVersion}` : ''} base`,
+          value: money(tax.taxableBaseMillimes),
+        },
+        {
+            label: `${tax.taxType} · ${tax.treatment}${tax.ruleId ? ` · ${tax.ruleId} v${tax.ruleVersion}` : ''} tax`,
+            value: money(tax.amountMillimes),
+        },
+      ]),
+      { label: 'Not a tax declaration or compliance certification', value: '' },
+    ]);
+    appendSection(sections, 'FISCAL VOID REVERSALS (ORIGINAL SNAPSHOTS)', [
+      { label: 'Voided orders with snapshots', value: `${fiscal.voidedOrdersWithFiscalSnapshot ?? 0} / ${fiscal.voidedOrderCount ?? 0}` },
+      ...((fiscal.voidedOrdersMissingFiscalSnapshot ?? 0) === 0 ? [] : [{
+        label: 'Voided orders missing fiscal snapshots',
+        value: String(fiscal.voidedOrdersMissingFiscalSnapshot),
+        emphasized: true,
+      }]),
+      { label: 'Reversed net amount (HT)', value: money(fiscal.reversedNetAmountMillimes ?? 0) },
+      { label: 'Reversed tax amount', value: money(fiscal.reversedTaxAmountMillimes ?? 0) },
+      { label: 'Reversed gross amount (TTC)', value: money(fiscal.reversedGrossAmountMillimes ?? 0), emphasized: true },
+      ...(fiscal.reversedTaxes ?? []).map((tax) => ({
+        label: `${tax.taxType} · ${tax.treatment}${tax.ruleId ? ` · ${tax.ruleId} v${tax.ruleVersion}` : ''} reversal`,
+        value: money(tax.amountMillimes),
+      })),
+    ]);
+  }
   if (report.expensesMillimes !== undefined || report.netProfitMillimes !== undefined || report.expenseDetails?.length) {
     appendSection(sections, 'EXPENSES / NET', [
       ...(report.expensesMillimes === undefined ? [] : [{ label: 'Expenses', value: money(report.expensesMillimes) }]),

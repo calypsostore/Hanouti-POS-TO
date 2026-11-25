@@ -42,6 +42,9 @@ import {
   getUnreportedShiftsAfterLastZ,
   getZReportBoundaryValue,
 } from './reportPeriod';
+import { calculateFiscalCheckoutSnapshot } from './fiscal/fiscalCheckout';
+import { fiscalService } from './fiscal/fiscalService';
+import type { FiscalOrderSnapshot } from '../types/fiscal';
 
 const getOrders = () => readData('orders', seedOrders);
 const saveOrders = (orders: OrderRecord[]) => writeData('orders', orders);
@@ -227,6 +230,22 @@ async function createQueuedOrder(input: {
       lineTotalMillimes: unitPriceMillimes * line.quantity,
     };
   });
+  if ((snapshot.fiscalProfile?.requiredTaxTypes?.length ?? 0) > 0 && !snapshot.businessDate) {
+    throw new Error('No cached business date is available for fiscal checkout. Reconnect before placing this order.');
+  }
+  const fiscalSnapshot = calculateFiscalCheckoutSnapshot({
+    storeId: input.storeId,
+    transactionDate: snapshot.businessDate ?? '',
+    lines: items,
+    profile: snapshot.fiscalProfile,
+    rules: snapshot.fiscalRules ?? [],
+    assignments: snapshot.fiscalAssignments ?? [],
+  });
+  const fiscalLines = new Map(fiscalSnapshot?.lines.map((line) => [line.lineId, line]) ?? []);
+  const pricedItems = items.map((item, index) => ({
+    ...item,
+    lineTotalMillimes: fiscalLines.get(`line-${index + 1}`)?.totalAmountMillimes ?? item.lineTotalMillimes,
+  }));
 
   const queuedOrders = await offlineOrderQueue.pendingOrders(input.storeId);
   for (const [itemId, quantity] of requestedQuantities) {
@@ -244,7 +263,8 @@ async function createQueuedOrder(input: {
   }
 
   const paymentMethod = input.paymentMethod ?? 'cash';
-  const totalMillimes = items.reduce((sum, line) => sum + line.lineTotalMillimes, 0);
+  const totalMillimes = fiscalSnapshot?.totalAmountMillimes ??
+    pricedItems.reduce((sum, line) => sum + line.lineTotalMillimes, 0);
   if (paymentMethod === 'tab') {
     if (!input.customerId) throw new Error('Select a customer before charging this order to a tab.');
     const customer = snapshot.customers.find((candidate) => candidate.id === input.customerId && candidate.isActive);
@@ -275,8 +295,9 @@ async function createQueuedOrder(input: {
     paymentMethod,
     customerId: input.customerId,
     note: input.note?.trim() || undefined,
-    items,
+    items: pricedItems,
     totalMillimes,
+    fiscalSnapshot,
     createdAt: new Date().toISOString(),
   };
   return await offlineOrderQueue.enqueue({
@@ -286,11 +307,12 @@ async function createQueuedOrder(input: {
     input: {
       storeId: input.storeId,
       staffId: input.staffId,
-      items,
+      items: pricedItems,
       paymentMethod,
       customerId: input.customerId,
       location: input.location,
       note: input.note,
+      fiscalSnapshot: fiscalSnapshot ?? null,
     },
   });
 }
@@ -308,6 +330,10 @@ export interface ShiftSalesBreakdown {
 }
 
 export const orderService = {
+  async getCurrentBusinessDate(storeId: string): Promise<string> {
+    return getCurrentBusinessDate(storeId);
+  },
+
   async listToday(storeId: string, staffId?: string): Promise<OrderRecord[]> {
     const [currentBusinessDate, periodStart] = await Promise.all([
       getCurrentBusinessDate(storeId),
@@ -401,6 +427,8 @@ export const orderService = {
         && (!options.businessDate || order.businessDate === options.businessDate)
         && (!options.createdAfter || order.createdAt >= options.createdAfter)
         && (!options.createdBefore || order.createdAt <= options.createdBefore)
+        && (!options.voidedAfter || Boolean(order.voidedAt && order.voidedAt >= options.voidedAfter))
+        && (!options.voidedBefore || Boolean(order.voidedAt && order.voidedAt <= options.voidedBefore))
         && (!options.shiftId || order.shiftId === options.shiftId)
         && (!options.status || order.status === options.status))
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
@@ -413,7 +441,7 @@ export const orderService = {
     return getOrders().find((order) => order.id === orderId);
   },
 
-  async createOrder(input: { storeId: string; staffId: string; items: OrderLineRecord[]; paymentMethod?: PaymentMethod; customerId?: string; location?: string; adminPin?: string; note?: string; idempotencyKey?: string }): Promise<OrderRecord> {
+  async createOrder(input: { storeId: string; staffId: string; items: OrderLineRecord[]; paymentMethod?: PaymentMethod; customerId?: string; location?: string; adminPin?: string; note?: string; idempotencyKey?: string; fiscalSnapshot?: FiscalOrderSnapshot | null }): Promise<OrderRecord> {
     if (isSupabaseDriver()) {
       if (input.items.length === 0) throw new Error('Add at least one item before completing an order.');
       const idempotencyKey = input.idempotencyKey ?? crypto.randomUUID();
@@ -432,6 +460,7 @@ export const orderService = {
           location: input.location,
           adminPin: input.adminPin,
           note: input.note,
+          fiscalSnapshot: input.fiscalSnapshot ?? null,
         });
         return { ...order, idempotencyKey };
       } catch (error) {
@@ -493,7 +522,27 @@ export const orderService = {
         throw new Error(`${catalogItem.name} has only ${catalogItem.stockCount} remaining.`);
       }
     }
-    const totalMillimes = items.reduce((sum, item) => sum + item.lineTotalMillimes, 0);
+    const dateKey = await getCurrentBusinessDate(input.storeId);
+    const [fiscalProfile, fiscalRules, fiscalAssignments] = await Promise.all([
+      fiscalService.getProfile(input.storeId),
+      fiscalService.listRules(input.storeId),
+      fiscalService.listAssignments(input.storeId),
+    ]);
+    const fiscalSnapshot = calculateFiscalCheckoutSnapshot({
+      storeId: input.storeId,
+      transactionDate: dateKey,
+      lines: items,
+      profile: fiscalProfile,
+      rules: fiscalRules,
+      assignments: fiscalAssignments,
+    });
+    const fiscalLines = new Map(fiscalSnapshot?.lines.map((line) => [line.lineId, line]) ?? []);
+    const pricedItems = items.map((item, index) => ({
+      ...item,
+      lineTotalMillimes: fiscalLines.get(`line-${index + 1}`)?.totalAmountMillimes ?? item.lineTotalMillimes,
+    }));
+    const totalMillimes = fiscalSnapshot?.totalAmountMillimes ??
+      pricedItems.reduce((sum, item) => sum + item.lineTotalMillimes, 0);
     let creditStatusBefore: Awaited<ReturnType<typeof customerService.getCreditStatus>> | undefined;
     let creditStatusAfter: Awaited<ReturnType<typeof customerService.getCreditStatus>> | undefined;
     if (input.paymentMethod === 'tab' && tabCustomer) {
@@ -509,7 +558,6 @@ export const orderService = {
         });
       }
     }
-    const dateKey = await getCurrentBusinessDate(input.storeId);
     const counters = readData<Record<string, { businessDate: string; nextNumber: number }>>('order-counters', {});
     const counter = counters[input.storeId];
     const number = counter?.businessDate === dateKey ? counter.nextNumber : 1;
@@ -527,8 +575,9 @@ export const orderService = {
       paymentMethod: input.paymentMethod ?? 'cash',
       customerId: input.customerId,
       note: input.note?.trim() || undefined,
-      items,
+      items: pricedItems,
       totalMillimes,
+      fiscalSnapshot,
       createdAt: new Date().toISOString(),
     };
     const stockDepletedItems: CatalogItemRecord[] = [];

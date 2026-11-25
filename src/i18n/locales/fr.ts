@@ -25,6 +25,7 @@ export const fr = {
   'nav.schedule': 'Planning',
   'nav.voidRequests': 'Demandes d’annulation',
   'nav.reports': 'Rapports',
+  'nav.fiscal': 'Paramètres fiscaux',
   'nav.inventory': 'Stock',
   'nav.wasteLog': 'Registre des pertes',
   'nav.expenses': 'Dépenses',

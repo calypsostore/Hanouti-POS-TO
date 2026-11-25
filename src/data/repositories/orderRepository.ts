@@ -1,4 +1,6 @@
 import type { OrderLineRecord, OrderRecord, OrderSummaryRecord, PaymentMethod, ShiftRecord } from '../../types/domain';
+import { isFiscalOrderSnapshot } from '../../types/fiscal';
+import type { FiscalOrderSnapshot } from '../../types/fiscal';
 import { getSupabaseClient } from '../supabaseClient';
 
 interface OrderRow {
@@ -22,6 +24,7 @@ interface OrderRow {
   voided_by: string | null;
   voided_by_user_id: string | null;
   void_reason: string | null;
+  fiscal_snapshot?: unknown | null;
 }
 
 interface OrderLineRow {
@@ -49,6 +52,13 @@ function mapLine(row: OrderLineRow): OrderLineRecord {
 }
 
 function mapOrder(row: OrderRow, itemRows: OrderLineRow[] = []): OrderRecord {
+  const fiscalSnapshot = row.fiscal_snapshot ?? undefined;
+  if (fiscalSnapshot !== undefined &&
+    (!isFiscalOrderSnapshot(fiscalSnapshot) ||
+      fiscalSnapshot.storeId !== row.store_id ||
+      fiscalSnapshot.totalAmountMillimes !== Number(row.total_millimes))) {
+    throw new Error(`Order ${row.id} contains an invalid fiscal snapshot.`);
+  }
   return {
     id: row.id,
     number: row.number,
@@ -65,6 +75,7 @@ function mapOrder(row: OrderRow, itemRows: OrderLineRow[] = []): OrderRecord {
     note: row.note ?? undefined,
     items: itemRows.map(mapLine),
     totalMillimes: Number(row.total_millimes),
+    fiscalSnapshot,
     createdAt: row.created_at,
     voidRequestedAt: row.void_requested_at ?? undefined,
     voidedAt: row.voided_at ?? undefined,
@@ -92,6 +103,8 @@ export interface OrderListOptions {
   businessDate?: string;
   createdAfter?: string;
   createdBefore?: string;
+  voidedAfter?: string;
+  voidedBefore?: string;
   shiftId?: string;
   status?: OrderRecord['status'];
   limit?: number;
@@ -116,7 +129,7 @@ function orderQuery(storeId: string, options: OrderListOptions, includeItems: bo
     .select(includeItems ? '*, items:order_lines(*)' : [
       'id', 'number', 'store_id', 'business_date', 'staff_id', 'shift_id', 'location', 'status',
       'payment_method', 'customer_id', 'note', 'total_millimes', 'created_at',
-      'void_requested_at', 'voided_at', 'voided_by', 'voided_by_user_id', 'void_reason',
+      'void_requested_at', 'voided_at', 'voided_by', 'voided_by_user_id', 'void_reason', 'fiscal_snapshot',
     ].join(', '))
     .eq('store_id', storeId)
     .order('created_at', { ascending: false })
@@ -128,6 +141,8 @@ function orderQuery(storeId: string, options: OrderListOptions, includeItems: bo
   if (options.businessDate) query = query.eq('business_date', options.businessDate);
   if (options.createdAfter) query = query.gte('created_at', options.createdAfter);
   if (options.createdBefore) query = query.lte('created_at', options.createdBefore);
+  if (options.voidedAfter) query = query.gte('voided_at', options.voidedAfter);
+  if (options.voidedBefore) query = query.lte('voided_at', options.voidedBefore);
   if (options.shiftId) query = query.eq('shift_id', options.shiftId);
   if (options.status) query = query.eq('status', options.status);
   return query;
@@ -167,14 +182,16 @@ export async function createOrder(input: {
   location?: string;
   adminPin?: string;
   note?: string;
+  fiscalSnapshot?: FiscalOrderSnapshot | null;
 }): Promise<OrderRecord> {
   const { data, error } = await getSupabaseClient().rpc('create_order_idempotent', {
     p_idempotency_key: input.idempotencyKey,
     p_shift_id: input.shift.id,
-    p_items: input.items.map((item) => ({
+    p_items: input.items.map((item, index) => ({
       itemId: item.itemId,
       quantity: item.quantity,
       modifiers: item.modifiers ?? [],
+      ...(index === 0 && input.fiscalSnapshot !== undefined ? { fiscalSnapshot: input.fiscalSnapshot } : {}),
     })),
     p_payment_method: input.paymentMethod ?? 'cash',
     p_customer_id: input.customerId ?? null,

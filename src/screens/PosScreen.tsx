@@ -24,6 +24,8 @@ import { compService, type StaffDrinkAllowance } from '../services/compService';
 import { OrderNotificationError, OrderServiceError, orderService } from '../services/orderService';
 import { shiftService } from '../services/shiftService';
 import { reportService, type ReportDayStatus } from '../services/reportService';
+import { fiscalService } from '../services/fiscal/fiscalService';
+import { calculateFiscalCheckoutSnapshot } from '../services/fiscal/fiscalCheckout';
 import { userService } from '../services/userService';
 import { updateService } from '../services/updateService';
 import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
@@ -33,6 +35,11 @@ import { useCartStore, type CartLine, type CartSnapshot } from '../stores/cartSt
 import type { CatalogItemRecord, CatalogModifierRecord, CategoryRecord, CompReason, CustomerRecord, OrderLineRecord, OrderRecord, OrderSummaryRecord, PaymentMethod, ShiftRecord, StoreRecord } from '../types/domain';
 import { customerService } from '../services/customerService';
 import type { CustomerCreditStatus } from '../services/customerService';
+import type {
+  FiscalProfileRecord,
+  FiscalTaxAssignmentRecord,
+  FiscalTaxRuleRecord,
+} from '../types/fiscal';
 import {
   offlineOrderQueue,
   OFFLINE_ORDER_SYNCED_EVENT,
@@ -115,6 +122,10 @@ export function PosScreen() {
   const clearOrder = useCartStore((state) => state.clearOrder);
   const restoreOrder = useCartStore((state) => state.restoreOrder);
   const [store, setStore] = useState<StoreRecord>();
+  const [businessDate, setBusinessDate] = useState('');
+  const [fiscalProfile, setFiscalProfile] = useState<FiscalProfileRecord>();
+  const [fiscalRules, setFiscalRules] = useState<FiscalTaxRuleRecord[]>([]);
+  const [fiscalAssignments, setFiscalAssignments] = useState<FiscalTaxAssignmentRecord[]>([]);
   const [category, setCategory] = useState('all');
   const [openStockMenuItemId, setOpenStockMenuItemId] = useState<string | null>(null);
   const [catalogViewMode, setCatalogViewMode] = useState<CatalogViewMode>(() =>
@@ -206,13 +217,18 @@ export function PosScreen() {
       setCatalogError('');
       setCustomerCreditUnavailable(false);
       try {
-        const [items, categories, shift, currentStore, todaysOrders, nextDayStatus] = await Promise.all([
+        const [items, categories, shift, currentStore, todaysOrders, nextDayStatus, businessDate,
+          fiscalProfile, fiscalRules, fiscalAssignments] = await Promise.all([
           catalogService.listItems(storeId),
           catalogService.listCategories(storeId),
           user ? shiftService.getOpenShiftForUser(storeId, user.id) : Promise.resolve(undefined),
           storeId ? userService.getStore(storeId) : Promise.resolve(undefined),
           orderService.listTodaySummaries(storeId),
           reportService.getDayStatus(storeId),
+          orderService.getCurrentBusinessDate(storeId),
+          fiscalService.getCheckoutProfile(storeId),
+          fiscalService.listRules(storeId),
+          fiscalService.listAssignments(storeId),
         ]);
         if (!active || !refreshGuardRef.current.isLatest(requestGeneration)) return;
 
@@ -236,6 +252,10 @@ export function PosScreen() {
         setOpenShift(shift);
         setDayStatus(nextDayStatus);
         setStore(currentStore);
+        setBusinessDate(businessDate);
+        setFiscalProfile(fiscalProfile);
+        setFiscalRules(fiscalRules);
+        setFiscalAssignments(fiscalAssignments);
         setOrders([...todaysOrders, ...queuedOrders]);
         setCan86Items(permission);
         setCanUseTabs(user?.role === 'owner' || tabsPermission);
@@ -268,6 +288,10 @@ export function PosScreen() {
                 canUseTabs: user.role === 'owner' || tabsPermission,
                 canOverrideCreditLimit: user.role === 'owner' || overridePermission,
               },
+              businessDate,
+              fiscalProfile,
+              fiscalRules,
+              fiscalAssignments,
               cachedAt: new Date().toISOString(),
             });
           } catch (cacheError) {
@@ -288,6 +312,10 @@ export function PosScreen() {
               setCategoryRecords(snapshot.categories);
               setOpenShift(snapshot.shift);
               setStore(snapshot.store);
+              setBusinessDate(snapshot.businessDate ?? '');
+              setFiscalProfile(snapshot.fiscalProfile);
+              setFiscalRules(snapshot.fiscalRules ?? []);
+              setFiscalAssignments(snapshot.fiscalAssignments ?? []);
               setOrders([...snapshot.orders, ...queuedOrders]);
               setCustomers(snapshot.customers);
               setCustomerCreditStatuses(snapshot.creditStatuses);
@@ -426,7 +454,44 @@ export function PosScreen() {
     return (soldItems.length ? soldItems : allProducts).slice(0, 4);
   }, [allProducts, orders, store?.settings]);
 
-  const totalMillimes = cart.reduce((sum, line) => sum + line.quantity * line.unitPriceMillimes, 0);
+  const baseTotalMillimes = cart.reduce((sum, line) => sum + line.quantity * line.unitPriceMillimes, 0);
+  const fiscalPreview = useMemo((): {
+    snapshot?: ReturnType<typeof calculateFiscalCheckoutSnapshot>;
+    error?: string;
+  } => {
+    if (!cart.length) return {};
+    try {
+      if ((fiscalProfile?.requiredTaxTypes?.length ?? 0) > 0 && !businessDate) {
+        throw new Error('No current business date is available for fiscal calculation. Reconnect before checkout.');
+      }
+      const lines: OrderLineRecord[] = cart.map((line) => {
+        const catalogItem = catalogRecords.find((item) => item.id === line.itemId);
+        if (!catalogItem) throw new Error(`${line.name} is missing from the current catalog.`);
+        return {
+          itemId: line.itemId,
+          categoryId: catalogItem.categoryId,
+          name: line.name,
+          quantity: line.quantity,
+          unitPriceMillimes: line.unitPriceMillimes,
+          lineTotalMillimes: line.quantity * line.unitPriceMillimes,
+          modifiers: line.modifiers ?? [],
+        };
+      });
+      return {
+        snapshot: calculateFiscalCheckoutSnapshot({
+          storeId,
+          transactionDate: businessDate,
+          lines,
+          profile: fiscalProfile,
+          rules: fiscalRules,
+          assignments: fiscalAssignments,
+        }),
+      };
+    } catch (previewError) {
+      return { error: previewError instanceof Error ? previewError.message : 'Fiscal calculation could not be completed.' };
+    }
+  }, [businessDate, cart, catalogRecords, fiscalAssignments, fiscalProfile, fiscalRules, storeId]);
+  const totalMillimes = fiscalPreview.snapshot?.totalAmountMillimes ?? baseTotalMillimes;
   const count = cart.reduce((sum, line) => sum + line.quantity, 0);
   const creditStatusPending = paymentMethod === 'tab' && Boolean(selectedCustomerId) && creditStatusCustomerId !== selectedCustomerId;
   const creditLimitExceeded = paymentMethod === 'tab' && creditStatusCustomerId === selectedCustomerId &&
@@ -662,6 +727,7 @@ export function PosScreen() {
         storeId: user.storeId,
         staffId: user.id,
         items,
+        fiscalSnapshot: fiscalPreview.snapshot ?? null,
         paymentMethod,
         customerId: paymentMethod === 'tab' ? selectedCustomerId : undefined,
         note,
@@ -796,9 +862,15 @@ export function PosScreen() {
       </label>
       <div className="mt-3 border-t border-outline-variant pt-3">
         <div className="mb-3 flex items-baseline justify-between">
-          <span className="font-body text-label-md text-on-surface-variant">{t('common.total')}</span>
+          <span className="font-body text-label-md text-on-surface-variant">Total</span>
           <span className="font-display text-currency-display-mobile text-on-surface">{formatTnd(totalMillimes / 1000)} <small className="font-body text-label-md">DT</small></span>
         </div>
+        {fiscalPreview.error && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{fiscalPreview.error}</p>}
+        {fiscalPreview.snapshot && (
+          <div className="mb-3 flex justify-between font-body text-body-sm text-on-surface-variant">
+            <span>Included tax</span><span>{formatTnd(fiscalPreview.snapshot.totalTaxMillimes / 1000)} DT</span>
+          </div>
+        )}
         <div className="mb-3">
           <p className="mb-1 font-body text-label-sm text-on-surface-variant">Payment method</p>
           <div role="group" aria-label="Payment method" className="flex rounded-xl bg-surface-container-low p-1">
@@ -871,7 +943,7 @@ export function PosScreen() {
           </section>
         )}
         {creditStatusPending && <p role="status" className="mb-3 font-body text-body-sm text-outline">Checking customer credit…</p>}
-        <Button onClick={() => { void finishOrder(); }} disabled={!cart.length || tabCheckoutBlocked} className="min-h-[54px] w-full rounded-xl text-body-lg">
+        <Button onClick={() => { void finishOrder(); }} disabled={!cart.length || tabCheckoutBlocked || Boolean(fiscalPreview.error)} className="min-h-[54px] w-full rounded-xl text-body-lg">
           <MaterialIcon name="check_circle" className="text-xl text-white" />
           {paymentMethod === 'tab' && selectedCustomer ? `Charge to ${selectedCustomer.name}` : t('common.done')}
           <span className="ml-auto font-display tabular-nums">{formatTnd(totalMillimes / 1000)} DT</span>
@@ -1090,7 +1162,7 @@ export function PosScreen() {
               Add to tab
             </Button>
           ))}
-          <Button variant="success" onClick={() => { void finishOrder(); }} disabled={!cart.length || tabCheckoutBlocked} className="min-h-[52px] rounded-2xl px-3 text-label-sm">
+          <Button variant="success" onClick={() => { void finishOrder(); }} disabled={!cart.length || tabCheckoutBlocked || Boolean(fiscalPreview.error)} className="min-h-[52px] rounded-2xl px-3 text-label-sm">
             <MaterialIcon name="check_circle" className="text-lg text-white" />
             <span className="max-w-[38vw] truncate">{paymentMethod === 'tab' && selectedCustomer ? `Charge to ${selectedCustomer.name}` : t('common.done')}</span>
           </Button>

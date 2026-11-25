@@ -10,6 +10,12 @@ import type {
   StoreRecord,
 } from '../types/domain';
 import type { CustomerCreditStatus } from './customerService';
+import type {
+  FiscalOrderSnapshot,
+  FiscalProfileRecord,
+  FiscalTaxAssignmentRecord,
+  FiscalTaxRuleRecord,
+} from '../types/fiscal';
 import { createOrder as createRemoteOrder } from '../data/repositories/orderRepository';
 import { isSupabaseDriver } from '../data/driver';
 import { getSupabaseClient } from '../data/supabaseClient';
@@ -37,6 +43,10 @@ export interface PosOfflineSnapshot {
     canUseTabs: boolean;
     canOverrideCreditLimit: boolean;
   };
+  businessDate?: string;
+  fiscalProfile?: FiscalProfileRecord;
+  fiscalRules?: FiscalTaxRuleRecord[];
+  fiscalAssignments?: FiscalTaxAssignmentRecord[];
   cachedAt: string;
 }
 
@@ -48,6 +58,7 @@ export interface OfflineOrderInput {
   customerId?: string;
   location?: string;
   note?: string;
+  fiscalSnapshot?: FiscalOrderSnapshot | null;
 }
 
 interface QueuedOrderEntry {
@@ -202,6 +213,7 @@ export const offlineOrderQueue = {
             location: entry.input.location,
             note: entry.input.note,
             idempotencyKey: entry.idempotencyKey,
+            fiscalSnapshot: entry.input.fiscalSnapshot ?? null,
           });
         } catch (error) {
           if (isNetworkFailure(error) || (typeof navigator !== 'undefined' && !navigator.onLine)) break;

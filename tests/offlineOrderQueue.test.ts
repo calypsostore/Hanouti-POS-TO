@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrderRecord, ShiftRecord } from '../src/types/domain';
+import { calculateFiscalOrder } from '../src/services/fiscal/taxEngine';
+import type { FiscalTaxRuleRecord } from '../src/types/fiscal';
 
 const { closeShiftMock, createOrderMock, getSessionMock } = vi.hoisted(() => ({
   closeShiftMock: vi.fn(),
@@ -32,7 +34,7 @@ function makeQueueEntry(id: string, shiftId: string): {
   idempotencyKey: string;
   order: OrderRecord;
   shift: ShiftRecord;
-  input: { storeId: string; staffId: string; items: [] };
+  input: { storeId: string; staffId: string; items: []; fiscalSnapshot?: import('../src/types/fiscal').FiscalOrderSnapshot | null };
 } {
   const shift: ShiftRecord = {
     id: shiftId,
@@ -116,6 +118,83 @@ describe('offline order queue idempotency', () => {
 
     expect(createOrderMock).toHaveBeenCalledTimes(1);
     expect(await offlineOrderQueue.pendingOrders(shift.storeId)).toHaveLength(0);
+  });
+
+  it('passes the queued fiscal snapshot unchanged when syncing the idempotent order', async () => {
+    const shift: ShiftRecord = {
+      id: 'shift-fiscal-queue',
+      storeId: 'store-fiscal-queue',
+      staffId: 'staff-queue-test',
+      status: 'open',
+      startingCashMillimes: 0,
+      openedAt: new Date().toISOString(),
+    };
+    const rule: FiscalTaxRuleRecord = {
+      id: 'vat-queue-v1',
+      storeId: shift.storeId,
+      version: 1,
+      name: 'Synthetic offline queue test',
+      taxType: 'vat',
+      calculationMethod: 'percentage',
+      ratePpm: 100_000,
+      priority: 1,
+      effectiveFrom: '2026-01-01',
+      status: 'active',
+      legalReviewed: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    };
+    const fiscalSnapshot = calculateFiscalOrder(shift.storeId, '2026-06-01', [{
+      lineId: 'line-1',
+      itemId: 'item-queue',
+      quantity: 1,
+      unitAmountMillimes: 1_000,
+      priceMode: 'exclusive',
+      requiredTaxTypes: ['vat'],
+      treatments: [{ taxType: 'vat', treatment: 'taxable' }],
+      rules: [rule],
+    }]);
+    const order: OrderRecord = {
+      id: 'offline-fiscal-order',
+      idempotencyKey: 'offline-fiscal-order',
+      number: -1,
+      storeId: shift.storeId,
+      staffId: shift.staffId,
+      shiftId: shift.id,
+      status: 'done',
+      paymentMethod: 'cash',
+      items: [],
+      totalMillimes: fiscalSnapshot.totalAmountMillimes,
+      fiscalSnapshot,
+      createdAt: new Date().toISOString(),
+    };
+    const input = {
+      storeId: shift.storeId,
+      staffId: shift.staffId,
+      items: [],
+      fiscalSnapshot,
+    };
+    createOrderMock.mockResolvedValue(order);
+
+    await offlineOrderQueue.enqueue({
+      idempotencyKey: 'offline-fiscal-order',
+      order,
+      shift,
+      input,
+    });
+    await offlineOrderQueue.flush();
+
+    expect(createOrderMock).toHaveBeenCalledWith(expect.objectContaining({ fiscalSnapshot }));
+  });
+
+  it('pins an explicit missing snapshot for offline orders made before fiscal rules are configured', async () => {
+    const entry = makeQueueEntry('offline-without-fiscal', 'shift-offline-without-fiscal');
+    entry.input.fiscalSnapshot = null;
+    createOrderMock.mockResolvedValue(entry.order);
+
+    await offlineOrderQueue.enqueue(entry);
+    await offlineOrderQueue.flush();
+
+    expect(createOrderMock).toHaveBeenCalledWith(expect.objectContaining({ fiscalSnapshot: null }));
   });
 });
 

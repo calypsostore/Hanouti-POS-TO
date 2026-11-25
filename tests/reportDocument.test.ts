@@ -36,6 +36,49 @@ function makeReport(type: 'X' | 'Z'): ReportRecord {
 }
 
 describe('report document', () => {
+  it('prints only persisted fiscal snapshot totals and warns about missing snapshots', () => {
+    const report = makeReport('X');
+    report.fiscalSummary = {
+      completedOrderCount: 2,
+      ordersWithFiscalSnapshot: 1,
+      ordersMissingFiscalSnapshot: 1,
+      voidedOrderCount: 1,
+      voidedOrdersWithFiscalSnapshot: 1,
+      voidedOrdersMissingFiscalSnapshot: 0,
+      netAmountMillimes: 1000,
+      taxAmountMillimes: 100,
+      grossAmountMillimes: 1100,
+      reversedNetAmountMillimes: -1000,
+      reversedTaxAmountMillimes: -100,
+      reversedGrossAmountMillimes: -1100,
+      reversedTaxes: [{
+        taxType: 'vat',
+        treatment: 'taxable',
+        ruleId: 'reviewed-rule',
+        ruleVersion: 1,
+        taxableBaseMillimes: -1000,
+        amountMillimes: -100,
+      }],
+      taxes: [{
+        taxType: 'vat',
+        treatment: 'taxable',
+        ruleId: 'reviewed-rule',
+        ruleVersion: 1,
+        taxableBaseMillimes: 1000,
+        amountMillimes: 100,
+      }],
+    };
+
+    const text = buildReportDocument(report, { name: 'Test Store' }).lines.map((line) => line.text).join('\n');
+    expect(text).toContain('FISCAL SNAPSHOTS');
+    expect(text).toContain('1 / 2');
+    expect(text).toContain('Completed orders missing fiscal snapshots');
+    expect(text).toContain('Snapshot tax amount');
+    expect(text).toContain('Not a tax declaration');
+    expect(text).toContain('FISCAL VOID REVERSALS');
+    expect(text).toContain('Reversed tax amount');
+  });
+
   it('wraps long thermal rows without dropping their label or value', () => {
     const formatted = formatReceiptRow(
       'Cash / card / other / tab',

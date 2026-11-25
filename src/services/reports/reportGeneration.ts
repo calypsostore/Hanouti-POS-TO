@@ -1,4 +1,4 @@
-import type { ReportRecord } from '../../types/domain';
+import type { OrderSummaryRecord, ReportRecord } from '../../types/domain';
 import { resolveStoreSettings } from '../../types/domain';
 import type { ReportDayStatus } from './types';
 import { userService } from '../userService';
@@ -12,6 +12,32 @@ import { listReports as listRemoteReports, saveReport as saveRemoteReport } from
 import { getPreviouslyReportedZShiftIds } from '../reportPeriod';
 import { getReports, datePartsInTimezone, todayKey, sinceLastZ, expensesIncludedInZReports } from './reportHelpers';
 import { summarize } from './reportSummaryRemote';
+import { aggregateFiscalOrders } from '../fiscal/fiscalReporting';
+import type { OrderListOptions } from '../../data/repositories/orderRepository';
+
+async function summarizeFiscalSnapshots(storeId: string, from: string, to: string) {
+  const loadPages = async (
+    options: Partial<Pick<OrderListOptions, 'status' | 'createdAfter' | 'createdBefore' | 'voidedAfter' | 'voidedBefore'>>,
+  ) => {
+    const orders: OrderSummaryRecord[] = [];
+    const pageSize = 200;
+    for (let offset = 0; ; offset += pageSize) {
+      const page = await orderService.listOrderSummaries(storeId, {
+        ...options,
+        limit: pageSize,
+        range: { from: offset, to: offset + pageSize - 1 },
+      });
+      orders.push(...page);
+      if (page.length < pageSize) break;
+    }
+    return orders;
+  };
+  const [completedOrders, voidedOrders] = await Promise.all([
+    loadPages({ status: 'done', createdAfter: from, createdBefore: to }),
+    loadPages({ status: 'voided', voidedAfter: from, voidedBefore: to }),
+  ]);
+  return aggregateFiscalOrders([...completedOrders, ...voidedOrders]);
+}
 
 export async function createReport(
   storeId: string,
@@ -51,6 +77,7 @@ export async function createReport(
     isSupabaseDriver() ? periodFrom : undefined,
     !isSupabaseDriver() && type === 'Z' ? getPreviouslyReportedZShiftIds(storeId, reports) : undefined,
   );
+  const fiscalSummary = await summarizeFiscalSnapshots(storeId, periodFrom, createdAt);
   if (type === 'Z' && summary.pendingVoids.count > 0) {
     throw new Error('Resolve every void request before creating a Z report.');
   }
@@ -125,6 +152,7 @@ export async function createReport(
     receivableMillimes: summary.receivableMillimes,
     orderCount: summary.orderCount,
     cashDifferenceMillimes: cashDifference ?? summary.cashDifferenceMillimes,
+    fiscalSummary,
     grossMillimes: summary.salesMillimes,
     netMillimes: summary.salesMillimes,
     zNumber,

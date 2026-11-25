@@ -1,3 +1,4 @@
+import type { FiscalOrderSnapshot, FiscalReportSummary } from './fiscal';
 import { DEFAULT_STORE_APPEARANCE, resolveStoreAppearance, type StoreAppearance } from '../theme/themeRegistry';
 
 export type UserRole = 'staff' | 'owner' | 'super_admin';
@@ -282,6 +283,7 @@ export interface OrderRecord {
   note?: string;
   items: OrderLineRecord[];
   totalMillimes: number;
+  fiscalSnapshot?: FiscalOrderSnapshot;
   createdAt: string;
   voidRequestedAt?: string;
   voidedAt?: string;
@@ -565,6 +567,7 @@ export interface ReportRecord {
   receivableMillimes?: number;
   orderCount: number;
   cashDifferenceMillimes: number;
+  fiscalSummary?: FiscalReportSummary;
   zNumber?: number;
   reportNumber?: string;
   dayOpenedAt?: string;

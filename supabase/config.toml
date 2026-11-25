@@ -1,3 +1,23 @@
+[api]
+# Use local ports outside this host's excluded TCP ranges.
+port = 55000
+
+[db]
+port = 55001
+shadow_port = 55002
+
+[db.pooler]
+port = 55006
+
+[studio]
+port = 55003
+
+[local_smtp]
+port = 55004
+
+[analytics]
+port = 55005
+
 [functions.provision-account]
 verify_jwt = true
 

@@ -1,19 +1,13 @@
-export type AppLanguage = 'en' | 'ar';
+import { getLanguage as getCurrentLanguage, setLanguage as setCurrentLanguage, type LanguageCode } from '../i18n';
 
-const LANGUAGE_KEY = '7anouti-pos:language';
+export type AppLanguage = LanguageCode;
 
 export const settingsService = {
   async getLanguage(): Promise<AppLanguage> {
-    const savedLanguage = localStorage.getItem(LANGUAGE_KEY);
-    const language = savedLanguage === 'ar' ? 'ar' : 'en';
-    document.documentElement.lang = language;
-    document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
-    return language;
+    return getCurrentLanguage();
   },
 
   async setLanguage(language: AppLanguage): Promise<void> {
-    localStorage.setItem(LANGUAGE_KEY, language);
-    document.documentElement.lang = language;
-    document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
+    setCurrentLanguage(language);
   },
 };

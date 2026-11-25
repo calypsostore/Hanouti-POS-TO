@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { LoginScreen } from './screens/LoginScreen';
@@ -10,6 +10,7 @@ import type { UserRole } from './types/domain';
 import { Button } from './components/Button';
 import { MaterialIcon } from './components/MaterialIcon';
 import { t } from './i18n/translations';
+import { getLanguage, subscribeToLanguage } from './i18n';
 import { classifyInitializationError } from './services/serverErrorService';
 import { PullToRefresh } from './components/PullToRefresh';
 import { ActionFeedbackToast } from './components/ActionFeedbackToast';
@@ -47,6 +48,10 @@ const SuperAdminStoresScreen = lazy(() => import('./screens/SuperAdminStoresScre
 const SuperAdminOverviewScreen = lazy(() => import('./screens/SuperAdminStoresScreen').then((module) => ({ default: module.SuperAdminOverviewScreen })));
 
 const loadUpdateService = () => import('./services/updateService');
+
+function useLanguageRefresh(): void {
+  useSyncExternalStore(subscribeToLanguage, getLanguage);
+}
 
 function homeForRole(role: UserRole): string {
   if (role === 'staff') return '/dashboard';
@@ -203,6 +208,7 @@ function RolePlaceholder({ title }: { title: string }) {
 }
 
 export default function App() {
+  useLanguageRefresh();
   const ready = useAuthStore((state) => state.ready);
   const user = useAuthStore((state) => state.user);
   const cachedUserDisplay = useAuthStore((state) => state.cachedUserDisplay);

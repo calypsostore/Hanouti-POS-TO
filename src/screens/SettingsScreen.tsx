@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { BottomNav } from '../components/BottomNav';
 import { Button } from '../components/Button';
@@ -17,7 +17,7 @@ import { PageContainer } from '../components/layout';
 import { catalogService } from '../services/catalogService';
 import { notificationService } from '../services/notificationService';
 import { scheduleService } from '../services/scheduleService';
-import { settingsService } from '../services/settingsService';
+import { settingsService, type AppLanguage } from '../services/settingsService';
 import { updateService, type UpdateCheckResult } from '../services/updateService';
 import { userService } from '../services/userService';
 import { buildReportDocument } from '../services/reportDocument';
@@ -26,6 +26,8 @@ import { downloadThermalPdf, printOrSharePdf, shareThermalPdf } from '../service
 import { useAuthStore } from '../stores/authStore';
 import { parseNonNegativeMillimes } from '../lib/millimes';
 import { t, type TranslationKey } from '../i18n/translations';
+import { getLanguage, subscribeToLanguage } from '../i18n';
+import { isLanguageCode, LANGUAGE_OPTIONS } from '../i18n/languageConfig';
 import { adminWorkspaceLinks, ownerWorkspaceLinks } from '../app/navigation';
 import { DEFAULT_NOTIFICATION_PREFERENCES, resolveStoreSettings, type CatalogItemRecord, type CategoryRecord, type NotificationRecord, type NotificationType, type OrderRecord, type PositionRecord, type ReportRecord, type ScheduleShiftRecord, type SettlementTerms, type StoreType } from '../types/domain';
 import { getStoreLogoGroups } from '../data/logoCatalog';
@@ -305,7 +307,7 @@ export function SettingsScreen() {
   const [savingCashOutThreshold, setSavingCashOutThreshold] = useState(false);
   const [savingSettlementTerms, setSavingSettlementTerms] = useState(false);
   const [savingNotifications, setSavingNotifications] = useState(false);
-  const [language, setLanguage] = useState<'en' | 'ar'>('en');
+  const language = useSyncExternalStore(subscribeToLanguage, getLanguage);
   const [lastCheck, setLastCheck] = useState(updateService.getLastCheck());
   const [checking, setChecking] = useState(false);
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(() => updateService.getLastResult());
@@ -368,10 +370,6 @@ export function SettingsScreen() {
         setError(t('common.storeLoadFailed'));
       });
     }
-    void settingsService.getLanguage().then(setLanguage).catch((languageError: unknown) => {
-      console.error('Unable to load the language preference.', languageError);
-      setError(t('settings.languageFailed'));
-    });
   }, [storeId, userRole]);
 
   useEffect(() => {
@@ -697,11 +695,12 @@ export function SettingsScreen() {
     }
   }
 
-  async function changeLanguage(value: 'en') {
+  async function changeLanguage(value: AppLanguage) {
+    setError('');
+    setNotice('');
     try {
       await settingsService.setLanguage(value);
-      setLanguage(value);
-      setNotice(t('settings.englishOnly'));
+      setNotice(t('settings.languageChanged'));
     } catch (languageError) {
       setError(languageError instanceof Error ? languageError.message : t('settings.languageFailed'));
     }
@@ -1170,11 +1169,20 @@ export function SettingsScreen() {
       <div id="settings-language" hidden={activeSection.id !== 'language'}>
       <SettingsGlassSection
         heading={t('settings.language')}
-        description="Choose the language used by the workspace."
+        description={t('settings.languageDescription')}
         icon="language"
       >
-        <select value={language} onChange={(event) => { void changeLanguage(event.target.value as 'en'); }} className="h-12 w-full rounded-lg bg-surface-container-low px-3 font-body text-body-md outline-none focus:ring-2 focus:ring-primary">
-          <option value="en">{t('settings.englishOnly')}</option>
+        <select
+          value={language}
+          onChange={(event) => {
+            const value = event.currentTarget.value;
+            if (isLanguageCode(value)) void changeLanguage(value);
+          }}
+          className="h-12 w-full rounded-lg bg-surface-container-low px-3 font-body text-body-md outline-none focus:ring-2 focus:ring-primary"
+        >
+          {LANGUAGE_OPTIONS.map((option) => (
+            <option key={option.code} value={option.code}>{option.name}</option>
+          ))}
         </select>
       </SettingsGlassSection>
       </div>

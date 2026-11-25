@@ -1,8 +1,13 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const settingsScreen = readFileSync('src/screens/SettingsScreen.tsx', 'utf8');
-const settingsStyles = readFileSync('src/styles.css', 'utf8');
+const settingsStyles = [
+  readFileSync('src/styles.css', 'utf8'),
+  ...readdirSync('src/styles')
+    .filter((file) => file.endsWith('.css'))
+    .map((file) => readFileSync(`src/styles/${file}`, 'utf8')),
+].join('\n');
 const logoPicker = readFileSync('src/components/LogoPicker.tsx', 'utf8');
 const settingsSection = readFileSync('src/components/settings/SettingsGlassSection.tsx', 'utf8');
 const appearanceSettings = readFileSync('src/components/AppearanceSettings.tsx', 'utf8');

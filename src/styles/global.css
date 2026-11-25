@@ -1,0 +1,196 @@
+@font-face {
+  font-family: "Roboto Mono";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/RobotoMono-Variable-Latin.woff2") format("woff2");
+}
+
+:root {
+  color-scheme: light;
+  font-family: var(--font-body);
+  color: rgb(var(--color-on-surface));
+  background: rgb(var(--color-surface));
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+:root.dark {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Keep below-the-fold cards and rows out of rendering work until they approach the viewport. */
+.page-container article,
+.page-container li,
+.page-container tr,
+.card-grid > *,
+.pos-catalog-grid > *,
+.customer-card-list > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 180px;
+}
+
+.lazy-list-sentinel {
+  height: 1px;
+  grid-column: 1 / -1;
+}
+
+html,
+body,
+#root {
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  overscroll-behavior-y: none;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) button:not(.rounded-full):not([role="switch"]) {
+  border-radius: var(--button-radius) !important;
+}
+
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) button.bg-primary,
+html.theme-hanouti-crystal-glass .responsive-dialog__panel button.bg-primary,
+html.theme-hanouti-crystal-glass .responsive-dialog .glass-modal-panel button.bg-primary {
+  border: 1px solid rgb(var(--color-primary) / 35%) !important;
+  border-radius: var(--button-radius) !important;
+  background:
+    linear-gradient(145deg, rgb(255 255 255 / 10%), transparent 58%),
+    linear-gradient(145deg, rgb(var(--color-primary) / 88%), rgb(var(--color-primary-pressed) / 86%)) !important;
+  box-shadow: var(--shadow-card) !important;
+  color: rgb(var(--color-on-primary)) !important;
+}
+
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) button.bg-primary:hover:not(:disabled),
+html.theme-hanouti-crystal-glass .responsive-dialog__panel button.bg-primary:hover:not(:disabled),
+html.theme-hanouti-crystal-glass .responsive-dialog .glass-modal-panel button.bg-primary:hover:not(:disabled) {
+  background:
+    linear-gradient(145deg, rgb(255 255 255 / 14%), transparent 58%),
+    linear-gradient(145deg, rgb(var(--color-primary) / 92%), rgb(var(--color-primary-pressed) / 90%)) !important;
+}
+
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) select,
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) textarea {
+  border-color: rgb(var(--color-outline-variant));
+  border-radius: var(--input-radius);
+  color: rgb(var(--color-on-surface));
+  font-family: var(--font-body);
+}
+
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) select {
+  min-height: var(--input-height);
+  background-color: rgb(var(--color-surface-container-lowest));
+  padding-inline: var(--space-md);
+}
+
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) input:focus-visible,
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) select:focus-visible,
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) textarea:focus-visible {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: 1px;
+}
+
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) article,
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) [data-card="true"],
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) .data-table-desktop,
+html.theme-hanouti-crystal-glass :is(.workspace-layout, .store-themed-screen, .shift-workspace) [role="dialog"] {
+  border-radius: var(--card-radius) !important;
+}
+
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  font-feature-settings: 'liga';
+  -webkit-font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+.loading-logo {
+  animation: loading-logo-jump 900ms ease-in-out infinite;
+}
+
+@keyframes loading-logo-jump {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+
+  45% {
+    transform: translateY(-12px) scale(1.04, 0.96);
+  }
+
+  60% {
+    transform: translateY(0) scale(0.96, 1.04);
+  }
+}
+
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.top-bar-glass {
+  border-color: rgb(var(--color-outline-variant) / 55%);
+  background: rgb(var(--color-surface-container-lowest) / 72%);
+  box-shadow: 0 4px 20px rgb(var(--color-primary-dark) / 7%);
+  backdrop-filter: blur(20px) saturate(170%);
+  -webkit-backdrop-filter: blur(20px) saturate(170%);
+}
+
+.bg-primary.text-on-primary {
+  border: 1px solid rgb(255 255 255 / 38%);
+  background:
+    linear-gradient(145deg, rgb(255 255 255 / 10%), transparent 58%),
+    linear-gradient(145deg, rgb(var(--color-primary) / 88%), rgb(var(--color-primary-pressed) / 86%));
+  box-shadow:
+    0 8px 20px rgb(var(--color-primary) / 20%),
+    inset 0 1px 0 rgb(255 255 255 / 42%),
+    inset 0 -1px 0 rgb(var(--color-primary-dark) / 12%);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+.bg-primary.text-on-primary:hover {
+  background:
+    linear-gradient(145deg, rgb(255 255 255 / 14%), transparent 58%),
+    linear-gradient(145deg, rgb(var(--color-primary) / 92%), rgb(var(--color-primary-pressed) / 90%));
+}
+
+.shift-workspace .bg-primary.text-on-primary {
+  border: 0;
+  background: rgb(var(--color-primary));
+  box-shadow: 0 2px 6px rgb(var(--color-primary-dark) / 12%);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.shift-workspace .bg-primary.text-on-primary:hover {
+  background: rgb(var(--color-primary-pressed));
+}

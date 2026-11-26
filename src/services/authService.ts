@@ -78,8 +78,8 @@ async function verifyPersonalPin(user: UserRecord, pin: string): Promise<void> {
 }
 
 export const authService = {
-  async login(identifier: string, password: string, acceptedRoles?: UserRecord['role'][]): Promise<UserSummary> {
-    if (isSupabaseDriver()) return authRepository.login(identifier, password, acceptedRoles);
+  async login(identifier: string, password: string, acceptedRoles?: UserRecord['role'][] , keepSignedIn = true): Promise<UserSummary> {
+    if (isSupabaseDriver()) return authRepository.login(identifier, password, acceptedRoles, keepSignedIn);
     const users = getUsers();
     const candidates = users.filter((candidate) =>
       (candidate.username?.toLocaleLowerCase() === identifier.toLocaleLowerCase() ||
@@ -181,6 +181,11 @@ export const authService = {
     });
   },
 
+  async lockDeviceStaffSession(): Promise<void> {
+    if (isSupabaseDriver()) return authRepository.lockDeviceStaffSession();
+    throw new Error('Shared device sessions require the connected Supabase service.');
+  },
+
   getPinLockRemainingMs(userId: string): number {
     if (isSupabaseDriver()) return authRepository.pinLockRemainingMs();
     const attempts = getPinAttempts(userId);
@@ -194,7 +199,7 @@ export const authService = {
     if (!session || session.userId !== userId) throw new Error('You must sign in as this account to set a PIN.');
     const users = getUsers();
     const user = users.find((candidate) => candidate.id === userId);
-    if (!user || (user.role !== 'staff' && user.role !== 'owner') || user.mustChangePassword) throw new Error('The account is not ready to set a PIN.');
+    if (!user || user.role !== 'owner' || user.mustChangePassword) throw new Error('Only a signed-in store owner can set a personal PIN.');
     if (user.pinHash || user.mustSetPin === false) throw new Error('A personal PIN is already set for this account.');
     const pinHash = await hashSecret(pin);
     const updatedUser = { ...user, pinHash, mustSetPin: false };
@@ -221,8 +226,8 @@ export const authService = {
     if (!session || session.userId !== userId) throw new Error('You must sign in as this account to change a PIN.');
     const users = getUsers();
     const user = users.find((candidate) => candidate.id === userId);
-    if (!user || (user.role !== 'staff' && user.role !== 'owner') || !user.storeId || user.mustChangePassword || !user.pinHash) {
-      throw new Error('The account is not ready to change a PIN.');
+    if (!user || user.role !== 'owner' || !user.storeId || user.mustChangePassword || !user.pinHash) {
+      throw new Error('Only a signed-in store owner can change a personal PIN.');
     }
     await verifyPersonalPin(user, currentPin);
     const pinHash = await hashSecret(newPin);
@@ -303,8 +308,9 @@ export const authService = {
       password: undefined,
       passwordHash: await hashSecret(newPassword),
       mustChangePassword: false,
-      pinHash: user.role === 'staff' && user.mustChangePassword ? undefined : user.pinHash,
-      mustSetPin: (user.role === 'staff' || user.role === 'owner') && user.mustChangePassword ? true : user.mustSetPin,
+      mustSetPin: (user.role === 'staff' || user.role === 'owner') && user.mustChangePassword
+        ? !user.pinHash
+        : user.mustSetPin,
     };
     saveUsers(users.map((candidate) => candidate.id === userId ? updatedUser : candidate));
     if (user.storeId) {

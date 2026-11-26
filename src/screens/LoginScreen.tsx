@@ -3,8 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { ToggleSwitch } from '../components/ToggleSwitch';
+import { getKeepSignedInPreference } from '../data/supabaseClient';
 import { t } from '../i18n/translations';
 import { useAuthStore } from '../stores/authStore';
+import { requiresCredentialSetup } from '../services/credentialSetup';
 import apk1Logo from '../../logos/apk1.png';
 
 type LoginRole = 'staff' | 'admin';
@@ -25,7 +27,7 @@ export function LoginScreen() {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [visible, setVisible] = useState(false);
-  const [remember, setRemember] = useState(true);
+  const [remember, setRemember] = useState(getKeepSignedInPreference);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [apkTouchCount, setApkTouchCount] = useState(0);
@@ -193,8 +195,8 @@ export function LoginScreen() {
       const allowedRoles = identifierIsEmail
         ? ['owner', 'super_admin'] as const
         : ['staff'] as const;
-      const user = await login(identifier, password, [...allowedRoles]);
-      navigate(user.mustChangePassword || user.mustSetPin || user.mustSetVoidPin ? '/set-password' : user.role === 'staff' ? '/dashboard' : user.role === 'owner' ? '/owner/dashboard' : '/admin/overview');
+      const user = await login(identifier, password, [...allowedRoles], remember);
+      navigate(requiresCredentialSetup(user) ? '/set-password' : user.role === 'staff' ? '/dashboard' : user.role === 'owner' ? '/owner/dashboard' : '/admin/overview');
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : t('login.unableToSignIn'));
     } finally {
@@ -382,6 +384,9 @@ export function LoginScreen() {
         </form>
 
         <footer className="login-footer">
+          <button type="button" className="text-primary underline-offset-4 hover:underline" onClick={() => navigate('/device-login')}>
+            {t('devices.deviceLoginLink')}
+          </button>
           <a
             href={LATEST_APK_URL}
             className="login-footer-download"

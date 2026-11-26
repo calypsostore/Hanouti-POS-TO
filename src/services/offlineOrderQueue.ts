@@ -21,7 +21,7 @@ import { isSupabaseDriver } from '../data/driver';
 import { getSupabaseClient } from '../data/supabaseClient';
 
 const DATABASE_NAME = '7anouti-pos-offline';
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 const STORE_NAME = 'records';
 const QUEUE_KEY = 'order-queue';
 export const OFFLINE_QUEUE_CHANGED_EVENT = '7anouti-offline-queue-changed';
@@ -66,7 +66,7 @@ interface QueuedOrderEntry {
   order: OrderRecord;
   shift: ShiftRecord;
   input: OfflineOrderInput;
-  status: 'queued' | 'needs_attention';
+  status: 'queued' | 'syncing' | 'needs_attention';
   queuedAt: string;
   error?: string;
 }
@@ -153,7 +153,8 @@ function isNetworkFailure(error: unknown): boolean {
 }
 
 export const offlineOrderQueue = {
-  async cacheSnapshot(snapshot: PosOfflineSnapshot): Promise<void> {
+  async cacheSnapshot(snapshot: PosOfflineSnapshot, complete = true): Promise<void> {
+    if (!complete) return;
     const key = `pos:${snapshot.storeId}:${snapshot.userId}`;
     await setValue(key, snapshot);
     for (const customer of snapshot.customers) {
@@ -183,7 +184,7 @@ export const offlineOrderQueue = {
           ? Math.abs(candidate.order.number)
           : 0,
       )) + 1;
-      queuedOrder = { ...entry.order, number: -nextLocalNumber };
+      queuedOrder = { ...entry.order, number: -nextLocalNumber, syncStatus: 'queued' };
       return [...entries, { ...entry, order: queuedOrder, status: 'queued' as const, queuedAt: new Date().toISOString() }]
         .sort((left, right) => left.queuedAt.localeCompare(right.queuedAt));
     });
@@ -199,10 +200,16 @@ export const offlineOrderQueue = {
       if (sessionError) throw new Error(`Could not check the active account before syncing orders: ${sessionError.message}`, { cause: sessionError });
       if (!sessionData.session) return;
       const entries = ((await getValue<QueuedOrderEntry[]>(QUEUE_KEY)) ?? [])
-        .filter((entry) => entry.status === 'queued' && entry.input.staffId === sessionData.session.user.id)
+        .filter((entry) => (entry.status === 'queued' || entry.status === 'syncing') && entry.input.staffId === sessionData.session.user.id)
         .sort((left, right) => left.queuedAt.localeCompare(right.queuedAt));
       for (const entry of entries) {
         if (typeof navigator !== 'undefined' && !navigator.onLine) break;
+        await updateQueue((current) => current.map((candidate) =>
+          candidate.idempotencyKey === entry.idempotencyKey
+            ? { ...candidate, status: 'syncing', order: { ...candidate.order, syncStatus: 'syncing' as OrderRecord['syncStatus'] } }
+            : candidate,
+        ));
+        announceQueueChanged();
         let order: OrderRecord;
         try {
           order = await createRemoteOrder({
@@ -248,7 +255,7 @@ export const offlineOrderQueue = {
 
   async pendingCount(storeId?: string): Promise<number> {
     return (((await getValue<QueuedOrderEntry[]>(QUEUE_KEY)) ?? []).filter((entry) =>
-      entry.status === 'queued' && (!storeId || entry.order.storeId === storeId),
+      (entry.status === 'queued' || entry.status === 'syncing') && (!storeId || entry.order.storeId === storeId),
     )).length;
   },
 
@@ -273,7 +280,7 @@ export const offlineOrderQueue = {
     return (((await getValue<QueuedOrderEntry[]>(QUEUE_KEY)) ?? []).filter((entry) =>
       entry.input.staffId === staffId &&
       (entry.shift.id === shiftId || entry.order.shiftId === shiftId) &&
-      (entry.status === 'queued' || entry.status === 'needs_attention'),
+      (entry.status === 'queued' || entry.status === 'syncing' || entry.status === 'needs_attention'),
     )).length;
   },
 

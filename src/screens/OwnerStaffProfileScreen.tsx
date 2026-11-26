@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { Link, useParams } from 'react-router-dom';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
-import { Keypad } from '../components/Keypad';
 import { ListSkeleton } from '../components/ListSkeleton';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { ProfileAvatar } from '../components/ProfileAvatar';
@@ -108,7 +107,7 @@ function ProfileContent() {
   const [confirmation, setConfirmation] = useState<'reset' | 'logout' | null>(null);
   const [temporaryPassword, setTemporaryPassword] = useState('');
   const [pinResetOpen, setPinResetOpen] = useState(false);
-  const [staffPin, setStaffPin] = useState('');
+  const [generatedStaffPin, setGeneratedStaffPin] = useState('');
   const [scheduleEditorOpen, setScheduleEditorOpen] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<ScheduleShiftRecord | null>(null);
   const [scheduleDate, setScheduleDate] = useState('');
@@ -259,19 +258,17 @@ function ProfileContent() {
     }
   }
 
-  async function resetStaffPin(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function generateStaffPin() {
     if (!staff || !owner || owner.role !== 'owner') return;
     setBusy(true);
     setError('');
     setNotice('');
     try {
-      await userService.resetStaffPin(owner.id, staff.id, staffPin);
-      setStaffPin('');
-      setPinResetOpen(false);
-      setNotice(`${staff.name}'s PIN has been reset.`);
+      const pin = await userService.generateStaffPin(owner.id, staff.id);
+      setGeneratedStaffPin(pin);
+      await refresh();
     } catch (resetError) {
-      setError(resetError instanceof Error ? resetError.message : 'Unable to reset the staff PIN.');
+      setError(resetError instanceof Error ? resetError.message : 'Unable to generate the staff PIN.');
     } finally {
       setBusy(false);
     }
@@ -375,6 +372,16 @@ function ProfileContent() {
     }
   }
 
+  async function copyGeneratedStaffPin() {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable.');
+      await navigator.clipboard.writeText(generatedStaffPin);
+      setNotice('Staff PIN copied.');
+    } catch (copyError) {
+      setError(copyError instanceof Error ? copyError.message : 'Unable to copy the staff PIN.');
+    }
+  }
+
   const weekShifts = shifts.filter((shift) => {
     const openedAt = new Date(shift.openedAt);
     return openedAt >= weekStart && openedAt < nextWeekStart;
@@ -432,6 +439,9 @@ function ProfileContent() {
                   <div className="mt-2 flex flex-wrap gap-2">
                     <span className="rounded-full bg-secondary-container px-3 py-1.5 font-body text-label-sm text-on-secondary-container">{positionName}</span>
                     <StatusTag status={staff.isActive ? 'open' : 'suspended'}>{staff.isActive ? 'Active' : 'Suspended'}</StatusTag>
+                    <span className={`rounded-full px-3 py-1.5 font-body text-label-sm ${staff.mustSetPin ? 'bg-warning-container text-on-warning-container' : 'bg-success-container text-success-dark'}`}>
+                      {staff.mustSetPin ? 'PIN not assigned' : 'PIN assigned'}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -443,7 +453,9 @@ function ProfileContent() {
               <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
                 <Button variant="secondary" onClick={openEdit}><MaterialIcon name="edit" />Edit</Button>
                 <Button variant="secondary" onClick={() => { setError(''); setConfirmation('reset'); }}><MaterialIcon name="lock_reset" />Reset password</Button>
-                <Button variant="secondary" disabled={busy || staff.mustChangePassword || staff.mustSetPin} title={staff.mustChangePassword || staff.mustSetPin ? 'The staff member must complete first-login setup before their PIN can be reset.' : undefined} onClick={() => { setError(''); setStaffPin(''); setPinResetOpen(true); }}><MaterialIcon name="pin" />Reset PIN</Button>
+                <Button variant="secondary" disabled={busy} onClick={() => { setError(''); setGeneratedStaffPin(''); setPinResetOpen(true); }}>
+                  <MaterialIcon name="pin" />{staff.mustSetPin ? 'Generate PIN' : 'Replace PIN'}
+                </Button>
                 <Button variant={staff.isActive ? 'danger' : 'secondary'} disabled={busy} onClick={() => { void toggleActive(); }}>
                   <MaterialIcon name={staff.isActive ? 'person_off' : 'person'} />
                   {staff.isActive ? 'Suspend' : 'Enable'}
@@ -624,7 +636,7 @@ function ProfileContent() {
         <div className="flex flex-col gap-4">
           <p className="font-body text-body-md text-on-surface-variant">
             {confirmation === 'reset'
-              ? `Create a new temporary password for ${staff?.name}? This will clear their current PIN and require a new password and PIN at their next sign-in.`
+              ? `Create a new temporary password for ${staff?.name}? This will clear their current PIN. They must change the password at next sign-in; you can generate a new PIN separately.`
               : `End ${staff?.name}'s current session? They will need to sign in again.`}
           </p>
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
@@ -645,41 +657,46 @@ function ProfileContent() {
               <input readOnly value={temporaryPassword} className="h-12 min-w-0 rounded-lg bg-surface-container-low px-3 font-mono tracking-widest" />
               <Button type="button" variant="secondary" className="px-3" onClick={() => { void copyPassword(); }}>Copy</Button>
             </div>
-            <p className="rounded-lg bg-primary-fixed/40 p-3 font-body text-body-sm text-on-surface">They must set a new password and personal PIN at their next login.</p>
+            <p className="rounded-lg bg-primary-fixed/40 p-3 font-body text-body-sm text-on-surface">They must set a new password at their next login. Staff PINs are generated and managed by the owner separately.</p>
             {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
           </div>
         )}
       </BottomSheet>
 
-      <BottomSheet open={pinResetOpen} onClose={() => setPinResetOpen(false)} title="Reset staff PIN">
-        <form onSubmit={(event) => { void resetStaffPin(event); }} className="flex flex-col gap-4">
-          <p className="font-body text-body-md text-on-surface-variant">Set a new 4-digit unlock PIN for {staff?.name}.</p>
-          <label htmlFor="staff-pin-reset" className="font-body text-label-md text-on-surface">New PIN</label>
-          <input
-            id="staff-pin-reset"
-            required
-            type="password"
-            pattern="[0-9]{4}"
-            maxLength={4}
-            inputMode="numeric"
-            autoComplete="new-password"
-            value={staffPin}
-            onChange={(event) => setStaffPin(event.target.value.replace(/\D/g, '').slice(0, 4))}
-            placeholder="••••"
-            className="h-12 rounded-lg bg-surface-container-low px-3 text-center tracking-[0.5em] outline-none focus:ring-2 focus:ring-primary"
-          />
-          <Keypad
-            onPress={(digit) => setStaffPin((current) => current.length < 4 ? `${current}${digit}` : current)}
-            onClear={() => setStaffPin('')}
-            onBackspace={() => setStaffPin((current) => current.slice(0, -1))}
-            disabled={busy}
-          />
-          {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
-          <div className="grid grid-cols-2 gap-2">
-            <Button type="button" variant="secondary" disabled={busy} onClick={() => setPinResetOpen(false)}>Cancel</Button>
-            <Button type="submit" disabled={busy || !/^\d{4}$/.test(staffPin)}>Save PIN</Button>
-          </div>
-        </form>
+      <BottomSheet
+        open={pinResetOpen}
+        onClose={() => { setPinResetOpen(false); setGeneratedStaffPin(''); }}
+        title={generatedStaffPin ? 'Staff PIN generated' : staff?.mustSetPin ? 'Generate staff PIN' : 'Replace staff PIN'}
+      >
+        <div className="flex flex-col gap-4">
+          {generatedStaffPin ? (
+            <>
+              <p className="font-body text-body-md text-on-surface">Share this PIN with {staff?.name}. It will only be shown here once.</p>
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                <input readOnly value={generatedStaffPin} aria-label="Generated staff PIN" className="h-14 min-w-0 rounded-lg bg-surface-container-low px-3 text-center font-mono text-headline-md tracking-[0.5em]" />
+                <Button type="button" variant="secondary" className="px-3" onClick={() => { void copyGeneratedStaffPin(); }}>Copy</Button>
+              </div>
+              {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
+              <Button type="button" onClick={() => { setPinResetOpen(false); setGeneratedStaffPin(''); }}>Done</Button>
+            </>
+          ) : (
+            <>
+              <p className="font-body text-body-md text-on-surface-variant">
+                {staff?.mustSetPin
+                  ? `Generate a secure 4-digit PIN for ${staff?.name}.`
+                  : `Generate a replacement PIN for ${staff?.name}. Their current PIN will stop working immediately.`}
+                {' '}The PIN is shown once and cannot be changed by the staff member.
+              </p>
+              {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
+              <div className="grid grid-cols-2 gap-2">
+                <Button type="button" variant="secondary" disabled={busy} onClick={() => setPinResetOpen(false)}>Cancel</Button>
+                <Button type="button" disabled={busy} onClick={() => { void generateStaffPin(); }}>
+                  {busy ? 'Generating...' : staff?.mustSetPin ? 'Generate PIN' : 'Replace PIN'}
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
       </BottomSheet>
 
       <BottomSheet open={scheduleEditorOpen} onClose={() => setScheduleEditorOpen(false)} title={editingSchedule ? 'Edit planned shift' : 'Add planned shift'}>

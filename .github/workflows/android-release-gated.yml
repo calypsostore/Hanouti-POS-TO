@@ -1,11 +1,9 @@
-name: Android APKs
+name: Android APKs (Protected)
 
 on:
   push:
     branches:
       - main
-    tags:
-      - 'v*.*.*'
   workflow_dispatch:
     inputs:
       version:
@@ -18,15 +16,21 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: android-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  quality:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   android:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: quality
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -156,11 +160,18 @@ jobs:
           if-no-files-found: error
 
   android-release:
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: quality
+    environment:
+      name: production-release
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -200,13 +211,26 @@ jobs:
         env:
           RELEASE_INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == refs/tags/v* ]]; then
-            version="${GITHUB_REF_NAME#v}"
-          else
-            version="$RELEASE_INPUT_VERSION"
+          if [[ "$GITHUB_EVENT_NAME" != "workflow_dispatch" || "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Dispatch Android releases from the protected main branch only."
+            exit 1
           fi
+          version="$RELEASE_INPUT_VERSION"
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Version must match major.minor.patch (for example 1.0.0)."
+            exit 1
+          fi
+          package_version="$(node -p 'require("./package.json").version')"
+          if [[ "$version" != "$package_version" ]]; then
+            echo "::error::Release version $version must match package.json version $package_version."
+            exit 1
+          fi
+          if ! tag_sha="$(git rev-parse --verify "refs/tags/v${version}^{commit}" 2>/dev/null)"; then
+            echo "::error::Release tag v$version must already exist."
+            exit 1
+          fi
+          if [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
+            echo "::error::Release tag v$version must point to the selected main commit."
             exit 1
           fi
           version_code="$(python3 -c 'import sys; major, minor, patch = map(int, sys.argv[1].split(".")); print(major * 10000 + minor * 100 + patch)' "$version")"
@@ -216,11 +240,6 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      - name: Set release version
-        env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
-        run: npm version "$RELEASE_VERSION" --no-git-tag-version --allow-same-version
-
       - name: Validate and decode signing secrets
         shell: bash
         env:
@@ -228,6 +247,7 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: |
@@ -235,16 +255,20 @@ jobs:
           test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo "::error::Missing secret ANDROID_KEYSTORE_PASSWORD."; exit 1; }
           test -n "$ANDROID_KEY_ALIAS" || { echo "::error::Missing secret ANDROID_KEY_ALIAS."; exit 1; }
           test -n "$ANDROID_KEY_PASSWORD" || { echo "::error::Missing secret ANDROID_KEY_PASSWORD."; exit 1; }
+          test -n "$GOOGLE_SERVICES_JSON_BASE64" || { echo "::error::Missing secret GOOGLE_SERVICES_JSON_BASE64; release push notifications require Firebase configuration."; exit 1; }
           test -n "$VITE_SUPABASE_URL" || { echo "::error::Missing secret VITE_SUPABASE_URL."; exit 1; }
           test -n "$VITE_SUPABASE_ANON_KEY" || { echo "::error::Missing secret VITE_SUPABASE_ANON_KEY."; exit 1; }
           umask 077
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/hanouti-release.jks"
           test -s "$RUNNER_TEMP/hanouti-release.jks" || { echo "::error::Decoded keystore is empty."; exit 1; }
+          printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > android/app/google-services.json
+          test -s android/app/google-services.json || { echo "::error::Decoded Firebase configuration is empty."; exit 1; }
+          python3 -c 'import json; d=json.load(open("android/app/google-services.json", encoding="utf-8")); packages={c.get("client_info", {}).get("android_client_info", {}).get("package_name") for c in d.get("client", [])}; raise SystemExit(0 if "com.hanouti.pos" in packages else "Firebase config does not include com.hanouti.pos.")'
 
       - name: Build web assets
         env:
           VITE_DATA_DRIVER: supabase
-          VITE_ANDROID_PUSH_ENABLED: 'false'
+          VITE_ANDROID_PUSH_ENABLED: 'true'
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: npm run build

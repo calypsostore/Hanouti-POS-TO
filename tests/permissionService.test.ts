@@ -77,15 +77,37 @@ describe('permissionService', () => {
 
     expect(checkPermissions).toHaveBeenCalledOnce();
     expect(createChannel).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'orders_v2',
+      id: 'orders_v2_alert1',
       importance: 4,
+      sound: 'alert1.mpeg',
+    }));
+    const channelIds = createChannel.mock.calls.map(([channel]) => channel.id);
+    expect(channelIds).not.toContain('orders_v2_alert2');
+    expect(channelIds).not.toContain('orders_v2_alert3');
+    expect(channelIds).not.toContain('alerts_v2_alert2');
+    expect(channelIds).not.toContain('alerts_v2_alert3');
+    expect(channelIds).not.toContain('system_v2_alert2');
+    expect(channelIds).not.toContain('system_v2_alert3');
+    expect(createChannel).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'orders_v2_alert6',
+      sound: 'alert6.mp3',
+    }));
+    expect(createChannel).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'orders_v2_alert7',
+      sound: 'alert7.mp3',
+    }));
+    expect(createChannel).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'orders_v2_alert8',
+      sound: 'alert8.mp3',
     }));
     expect(schedule).toHaveBeenCalledWith({
       notifications: [expect.objectContaining({
         title: 'Update available',
         body: 'A new build is ready.',
-        channelId: 'system_v2',
+        channelId: 'system_v2_alert6',
+        smallIcon: 'ic_stat_notification',
       })],
     });
+    expect(schedule.mock.calls[0]?.[0].notifications[0]).not.toHaveProperty('largeIcon');
   });
 });

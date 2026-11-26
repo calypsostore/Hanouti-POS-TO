@@ -39,7 +39,7 @@ export function ChangePersonalPinForm({ userId }: ChangePersonalPinFormProps) {
   }
 
   return (
-    <SettingsGlassSection heading="Change personal PIN" description="Enter your current PIN, then choose a new 4-digit PIN." icon="pin">
+    <SettingsGlassSection heading="Change owner personal PIN" description="Enter your current PIN, then choose a new 4-digit PIN." icon="pin">
       <form onSubmit={submit} className="settings-glass-form flex flex-col gap-3">
       {[
         { label: 'Current PIN', value: currentPin, onChange: setCurrentPin },

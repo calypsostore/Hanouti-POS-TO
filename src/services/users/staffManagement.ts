@@ -1,15 +1,31 @@
 import type { PermissionOverrides, UserRecord, UserSummary } from '../../types/domain';
 import { removeData } from '../storage';
-import { hashSecret } from '../secretService';
+import { hashSecret, verifySecret } from '../secretService';
 import { activityService } from '../activityService';
 import { getSupabaseClient } from '../../data/supabaseClient';
 import { isSupabaseDriver } from '../../data/driver';
 import { createStaff, resetPassword } from '../../data/repositories/accountRepository';
 import { getProfile } from '../../data/repositories/profileRepository';
+import { authService } from '../authService';
+import { generateStaffPin as createGeneratedStaffPin } from '../staffPin';
 import { formatStaffUsername, generateStoreCode } from '../accountIdentity';
 import { getUsers, getStores, getPositions, saveUsers, makeStaffTemporaryPassword, createId, withoutPassword, logUserMutation, notifyPermissionsChanged } from './userHelpers';
 import { normalizePermissionOverrides } from './userValidation';
 import type { UserServiceContext } from './types';
+
+let localPinMutation = Promise.resolve();
+
+async function withLocalPinMutation<T>(operation: () => Promise<T>): Promise<T> {
+  const previous = localPinMutation;
+  let release: () => void = () => {};
+  localPinMutation = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
+}
 
 export const staffManagementMethods = {
   generateStoreCode(storeName: string, existingCodes: string[] = []): string {
@@ -113,49 +129,66 @@ export const staffManagementMethods = {
     return temporaryPassword;
   },
 
-  async resetStaffPin(ownerId: string, staffId: string, pin: string): Promise<void> {
+  async generateStaffPin(ownerId: string, staffId: string): Promise<string> {
     if (isSupabaseDriver()) {
-      if (!/^\d{4}$/.test(pin)) throw new Error('PIN must contain exactly 4 digits.');
       const { data: authData, error: authError } = await getSupabaseClient().auth.getUser();
-      if (authError || authData.user?.id !== ownerId) throw new Error('Only this store owner can reset this staff PIN.');
-      const { error } = await getSupabaseClient().rpc('set_staff_pin_by_owner', { p_staff_id: staffId, p_pin: pin });
-      if (error) throw new Error(`Could not reset the staff PIN: ${error.message}`, { cause: error });
-      const staff = await getProfile(staffId);
-      if (staff?.storeId) {
-        await activityService.log({
-          storeId: staff.storeId,
-          action: 'staff.pin_reset',
-          summary: `Reset the personal PIN for "${staff.name}".`,
-          entityType: 'staff',
-          entityId: staff.id,
-          meta: { after: { hasPin: true } },
-        });
+      if (authError || authData.user?.id !== ownerId) throw new Error('Only this store owner can generate a staff PIN.');
+      const { data, error } = await getSupabaseClient().rpc('generate_staff_pin_by_owner', { p_staff_id: staffId });
+      if (error) throw new Error('Could not generate the staff PIN.', { cause: error });
+      if (typeof data !== 'string' || !/^\d{4}$/.test(data)) throw new Error('Staff PIN generation returned an invalid result.');
+      return data;
+    }
+    return withLocalPinMutation(async () => {
+      const owner = await authService.getCurrentUser();
+      const users = getUsers();
+      const staff = users.find((candidate) => candidate.id === staffId && candidate.role === 'staff');
+      const store = owner?.storeId ? getStores().find((candidate) => candidate.id === owner.storeId) : undefined;
+      if (!owner || owner.id !== ownerId || owner.role !== 'owner' || !owner.isActive ||
+        !staff || !store || !store.isActive || store.ownerId !== owner.id || owner.storeId !== staff.storeId) {
+        throw new Error('Only this store owner can generate a staff PIN.');
       }
-      return;
-    }
-    if (!/^\d{4}$/.test(pin)) throw new Error('PIN must contain exactly 4 digits.');
-    const users = getUsers();
-    const owner = users.find((candidate) => candidate.id === ownerId && candidate.role === 'owner');
-    const staff = users.find((candidate) => candidate.id === staffId && candidate.role === 'staff');
-    const store = owner?.storeId ? getStores().find((candidate) => candidate.id === owner.storeId) : undefined;
-    if (!owner || !staff || !store || store.ownerId !== owner.id || owner.storeId !== staff.storeId) {
-      throw new Error('Only this store owner can reset this staff PIN.');
-    }
-    if (staff.mustChangePassword || staff.mustSetPin || !staff.pinHash) {
-      throw new Error('The staff member must complete first-login PIN setup before their PIN can be reset.');
-    }
-    const pinHash = await hashSecret(pin);
-    saveUsers(users.map((candidate) => candidate.id === staffId ? { ...candidate, pinHash, mustSetPin: false } : candidate));
-    removeData(`staff-pin-attempts:${staffId}`);
-    await logUserMutation({
-      storeId: store.id,
-      actorId: owner.id,
-      action: 'staff.pin_reset',
-      summary: `Reset the personal PIN for "${staff.name}".`,
-      entityType: 'staff',
-      entityId: staff.id,
-      before: { hasPin: Boolean(staff.pinHash) },
-      after: { hasPin: true },
+
+      const pin = await createGeneratedStaffPin(async (candidatePin) => {
+        if (staff.pinHash && (await verifySecret(staff.pinHash, candidatePin)).valid) return false;
+        for (const otherStaff of getUsers()) {
+          if (otherStaff.role !== 'staff' || otherStaff.storeId !== store.id ||
+            otherStaff.id === staff.id || !otherStaff.pinHash) continue;
+          if ((await verifySecret(otherStaff.pinHash, candidatePin)).valid) return false;
+        }
+        return true;
+      });
+      const pinHash = await hashSecret(pin);
+      const latestUsers = getUsers();
+      const latestStaff = latestUsers.find((candidate) => candidate.id === staffId && candidate.role === 'staff' && candidate.storeId === store.id);
+      if (!latestStaff) throw new Error('Staff account could not be found.');
+      if (latestStaff.pinHash && (await verifySecret(latestStaff.pinHash, pin)).valid) {
+        throw new Error('A replacement PIN must differ from the current PIN. Generate a new PIN and try again.');
+      }
+      for (const otherStaff of latestUsers) {
+        if (otherStaff.role !== 'staff' || otherStaff.storeId !== store.id ||
+          otherStaff.id === staff.id || !otherStaff.pinHash) continue;
+        if ((await verifySecret(otherStaff.pinHash, pin)).valid) {
+          throw new Error('A staff PIN collision occurred. Generate a new PIN and try again.');
+        }
+      }
+
+      saveUsers(latestUsers.map((candidate) => candidate.id === staff.id
+        ? { ...candidate, pinHash, mustSetPin: false }
+        : candidate));
+      removeData(`staff-pin-attempts:${staff.id}`);
+      await logUserMutation({
+        storeId: store.id,
+        actorId: owner.id,
+        action: latestStaff.pinHash ? 'staff.pin_reset' : 'staff.pin_assigned',
+        summary: latestStaff.pinHash
+          ? `Generated a replacement PIN for "${staff.name}".`
+          : `Generated a PIN for "${staff.name}".`,
+        entityType: 'staff',
+        entityId: staff.id,
+        before: { hasPin: Boolean(latestStaff.pinHash) },
+        after: { hasPin: true },
+      });
+      return pin;
     });
   },
 

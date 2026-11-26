@@ -588,6 +588,9 @@ function OwnerStaffContent() {
                     <span className="max-w-full truncate font-body text-label-lg text-on-surface">{staffMember.name}</span>
                     <span className="rounded-full bg-secondary-container px-2.5 py-1 font-body text-label-sm text-on-secondary-container">{positionFor(staffMember)}</span>
                     <StatusTag status={staffMember.isActive ? 'open' : 'suspended'}>{staffMember.isActive ? t('common.active') : t('common.suspended')}</StatusTag>
+                    <span className={`rounded-full px-2.5 py-1 font-body text-label-sm ${staffMember.mustSetPin ? 'bg-warning-container text-on-warning-container' : 'bg-success-container text-success-dark'}`}>
+                      {staffMember.mustSetPin ? 'PIN not assigned' : 'PIN assigned'}
+                    </span>
                   </span>
                   <span className="mt-1 block truncate font-body text-body-sm text-outline">{staffMember.username ?? 'No username'}</span>
                   <span className={`mt-1 block font-body text-body-sm ${currentShift ? 'text-success-dark' : 'text-outline'}`}>
@@ -661,7 +664,7 @@ function OwnerStaffContent() {
             <label className="min-w-0 font-body text-label-md">Username preview
               <input readOnly value={usernamePreview} placeholder="Enter a name to preview" className="mt-1 h-12 w-full min-w-0 rounded-lg bg-surface-container-low px-3 font-mono text-body-sm" />
             </label>
-            <p className="font-body text-body-sm text-on-surface-variant">Duplicate first names are numbered automatically. A temporary password is generated after creation; the staff member must set a new password and PIN at their next sign-in.</p>
+            <p className="font-body text-body-sm text-on-surface-variant">Duplicate first names are numbered automatically. A temporary password is generated after creation; the staff member must set a new password at their next sign-in. The owner assigns their PIN separately.</p>
           </section>
 
           <details className="rounded-xl border border-outline-variant p-3">
@@ -798,7 +801,7 @@ function OwnerStaffContent() {
                 <Button type="button" variant="secondary" className="px-3" onClick={() => { void copyValue('Temporary password', activeCredentials.password); }}>Copy</Button>
               </div>
             </label>
-            <p className="rounded-lg bg-primary-fixed/40 p-3 font-body text-body-sm text-on-surface">They must set a new password and personal PIN at their next sign-in.</p>
+            <p className="rounded-lg bg-primary-fixed/40 p-3 font-body text-body-sm text-on-surface">They must set a new password at their next sign-in. Staff PINs are generated and managed by the owner separately.</p>
             {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
             <div className="grid grid-cols-2 gap-2">
               <Button type="button" variant="secondary" onClick={() => { void copyAllCredentials(); }}>Copy all</Button>
@@ -811,7 +814,7 @@ function OwnerStaffContent() {
 
       <BottomSheet open={Boolean(resetTarget)} onClose={() => setResetTarget(null)} title="Reset password?">
         <div className="flex flex-col gap-3">
-          <p className="font-body text-body-md text-on-surface-variant">Reset the temporary password for {resetTarget?.name}? This also clears their current PIN and requires them to set a new password and PIN at their next sign-in.</p>
+          <p className="font-body text-body-md text-on-surface-variant">Reset the temporary password for {resetTarget?.name}? This also clears their current PIN. They must change the password at next sign-in; you can generate a new PIN separately.</p>
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
           <div className="grid grid-cols-2 gap-2">
             <Button type="button" variant="secondary" disabled={busy} onClick={() => setResetTarget(null)}>Cancel</Button>

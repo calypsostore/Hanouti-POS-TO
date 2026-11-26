@@ -19,6 +19,7 @@ import { useNotificationStore } from '../stores/notificationStore';
 import { useFocusRefreshKey } from '../lib/useFocusRefreshKey';
 import { notificationPath } from '../lib/notificationPath';
 import { getNotificationAppearance } from '../lib/notificationAppearance';
+import { playNotificationSoundForEvent } from '../services/notificationSounds';
 import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
 import { NotificationTypeIcon } from './NotificationTypeIcon';
 import type { NotificationRecord } from '../types/domain';
@@ -92,6 +93,13 @@ export function NotificationsBridge() {
   }, [markRead, navigate]);
 
   useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    void permissionService.createDefaultChannel().catch((error: unknown) => {
+      console.error('[notifications] Could not initialize notification channels.', error);
+    });
+  }, []);
+
+  useEffect(() => {
     if (!user?.storeId || !shouldRegisterPushNotifications(
       import.meta.env.VITE_ANDROID_PUSH_ENABLED === 'true',
       Capacitor.isNativePlatform(),
@@ -113,13 +121,15 @@ export function NotificationsBridge() {
     let registrationListener: { remove: () => Promise<void> } | undefined;
     let refreshListener: { remove: () => Promise<void> } | undefined;
     let pushActionListener: { remove: () => Promise<void> } | undefined;
-    void PushNotifications.checkPermissions().then(async (status) => {
+    void (async () => {
+      await permissionService.createDefaultChannel();
+      const status = await PushNotifications.checkPermissions();
       if (status.receive !== 'granted') {
         const requested = await PushNotifications.requestPermissions();
         if (requested.receive !== 'granted') return;
       }
       await PushNotifications.register();
-    }).catch((error: unknown) => console.error('[push] Could not request push permission.', error));
+    })().catch((error: unknown) => console.error('[push] Could not initialize notifications or request push permission.', error));
     void PushNotifications.addListener('registration', (event) => {
       void saveToken(event.value);
     }).then((listener) => { registrationListener = listener; });
@@ -159,6 +169,11 @@ export function NotificationsBridge() {
       acceptInsert(row);
       if (readShownIds().has(row.id)) return;
       rememberShownId(row.id);
+      if (!Capacitor.isNativePlatform() || (appActive.current && document.visibilityState === 'visible')) {
+        void playNotificationSoundForEvent(user.id, row.type).catch((error: unknown) => {
+          console.error('[notifications] Could not play the selected notification sound.', error);
+        });
+      }
       if (row.type === 'app_update') return;
 
       const backgrounded = !document.visibilityState || document.visibilityState !== 'visible';

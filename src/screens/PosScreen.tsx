@@ -139,6 +139,9 @@ export function PosScreen() {
   const [catalogRecords, setCatalogRecords] = useState<CatalogItemRecord[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState('');
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  const [cachedAt, setCachedAt] = useState('');
   const [categoryRecords, setCategoryRecords] = useState<CategoryRecord[]>([]);
   const [openShift, setOpenShift] = useState<ShiftRecord>();
   const [dayStatus, setDayStatus] = useState<ReportDayStatus>({
@@ -198,6 +201,17 @@ export function PosScreen() {
     };
     window.addEventListener('keydown', handleShortcut);
     return () => window.removeEventListener('keydown', handleShortcut);
+  }, []);
+
+  useEffect(() => {
+    const updateConnection = () => setIsOnline(navigator.onLine);
+    window.addEventListener('online', updateConnection);
+    window.addEventListener('offline', updateConnection);
+    updateConnection();
+    return () => {
+      window.removeEventListener('online', updateConnection);
+      window.removeEventListener('offline', updateConnection);
+    };
   }, []);
 
   async function lockTerminal() {
@@ -264,6 +278,8 @@ export function PosScreen() {
         setCustomerCreditStatuses({});
         setNeedsAttentionOrders(attentionOrders);
         setCatalogLoading(false);
+        setIsOnline(true);
+        setPendingSyncCount(await offlineOrderQueue.pendingCount(storeId));
 
         const creditStatusResult = await loadCustomerCreditStatuses(
           () => customerService.getCreditStatuses(storeId, customerList),
@@ -272,6 +288,32 @@ export function PosScreen() {
         setCustomerCreditUnavailable(creditStatusResult.unavailable);
         if (user) {
           try {
+            if (creditStatusResult.unavailable) {
+              setCachedAt((await offlineOrderQueue.getSnapshot(storeId, user.id))?.cachedAt ?? '');
+              await offlineOrderQueue.cacheSnapshot({
+                storeId,
+                userId: user.id,
+                items,
+                categories,
+                customers: customerList,
+                creditStatuses: creditStatusResult.statuses,
+                shift,
+                store: currentStore,
+                orders: todaysOrders,
+                permissions: {
+                  can86Items: permission,
+                  canCompItems: compPermission,
+                  canUseTabs: user.role === 'owner' || tabsPermission,
+                  canOverrideCreditLimit: user.role === 'owner' || overridePermission,
+                },
+                businessDate,
+                fiscalProfile,
+                fiscalRules,
+                fiscalAssignments,
+                cachedAt: new Date().toISOString(),
+              }, false);
+              return;
+            }
             await offlineOrderQueue.cacheSnapshot({
               storeId,
               userId: user.id,
@@ -294,6 +336,7 @@ export function PosScreen() {
               fiscalAssignments,
               cachedAt: new Date().toISOString(),
             });
+            setCachedAt(new Date().toISOString());
           } catch (cacheError) {
             console.error('Unable to cache point-of-sale data for offline use.', cacheError);
           }
@@ -324,6 +367,9 @@ export function PosScreen() {
               setCanOverrideCreditLimit(snapshot.permissions.canOverrideCreditLimit);
               setNeedsAttentionOrders(attentionOrders);
               setCatalogError('Offline mode: using the last saved POS data.');
+              setCachedAt(snapshot.cachedAt);
+              setPendingSyncCount(queuedOrders.length);
+              setIsOnline(false);
               return;
             }
           } catch (cacheError) {
@@ -347,6 +393,7 @@ export function PosScreen() {
           ? queuedOrders.find((order) => order.idempotencyKey === current.idempotencyKey) ?? current
           : current);
         setNeedsAttentionOrders(attentionOrders);
+        setPendingSyncCount(queuedOrders.length);
       }).catch((error: unknown) => {
         console.error('Unable to refresh the offline order queue.', error);
       });
@@ -964,6 +1011,32 @@ export function PosScreen() {
         onLockClick={user?.role === 'staff' ? () => { void lockTerminal(); } : undefined}
       />
       <div className="pos-alert-stack">
+        <section
+          role="status"
+          aria-live="polite"
+          className={`mx-3 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl p-3 font-body text-body-sm ${
+            !isOnline
+              ? 'bg-warning-container text-on-warning-container'
+              : needsAttentionOrders.length > 0
+                ? 'bg-error-container text-on-error-container'
+                : 'bg-success text-on-success'
+          }`}
+        >
+          <span className="font-body text-label-md">
+            {!isOnline
+              ? 'Offline - Working with saved data'
+              : pendingSyncCount > 0
+                ? `Synchronizing - ${pendingSyncCount} operation${pendingSyncCount === 1 ? '' : 's'} pending`
+                : needsAttentionOrders.length > 0
+                  ? 'Sync issue - Some operations need attention'
+                  : 'Online - Connected'}
+          </span>
+          {cachedAt && (
+            <span className="text-label-sm">
+              Saved {new Date(cachedAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+            </span>
+          )}
+        </section>
         {!openShift && dayStatus.dayIsClosed && (
           <section role="status" className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-warning-container p-3 text-on-warning-container">
             <p className="font-body text-body-sm">Day closed. Open a shift to start a new day.</p>
@@ -1185,16 +1258,21 @@ export function PosScreen() {
       <BottomSheet open={completedOrder !== null} onClose={() => setCompletedOrder(null)} title="Order complete">
         {completedOrder && (
           <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-3 rounded-xl bg-success-container p-4 text-on-success-container">
-              <MaterialIcon name="check_circle" className="text-3xl" />
+            <div className={`flex items-center gap-3 rounded-xl p-4 ${
+              completedOrder.syncStatus
+                ? 'bg-warning-container text-on-warning-container'
+                : 'bg-success-container text-on-success-container'
+            }`}>
+              <MaterialIcon name={completedOrder.syncStatus ? 'sync' : 'check_circle'} className="text-3xl" />
               <div>
                 <p className="font-display text-headline-sm">
                   {completedOrder.syncStatus ? `Local order ${Math.abs(completedOrder.number)}` : `Order #${completedOrder.number}`}
                 </p>
                 <p className="font-body text-body-md">Total: {formatTnd(completedOrder.totalMillimes / 1000)} DT</p>
               </div>
-              {completedOrder.syncStatus === 'queued' && <span className="rounded-full bg-warning px-2 py-1 font-body text-label-sm text-on-warning">Queued</span>}
-              {completedOrder.syncStatus === 'needs_attention' && <span className="rounded-full bg-error px-2 py-1 font-body text-label-sm text-white">Needs attention</span>}
+              {completedOrder.syncStatus === 'queued' && <span className="rounded-full bg-warning px-2 py-1 font-body text-label-sm text-on-warning">Queued - not synced</span>}
+              {completedOrder.syncStatus === 'syncing' && <span className="rounded-full bg-warning px-2 py-1 font-body text-label-sm text-on-warning">Syncing - not confirmed</span>}
+              {completedOrder.syncStatus === 'needs_attention' && <span className="rounded-full bg-error px-2 py-1 font-body text-label-sm text-white">Needs attention - not synced</span>}
               {completedOrder.verificationStatus === 'to_verify' && <span className="rounded-full bg-warning-container px-2 py-1 font-body text-label-sm text-on-warning-container">To verify</span>}
             </div>
             {completedOrderNotice && <p role="alert" className="rounded-lg bg-warning-container p-3 font-body text-body-sm text-on-warning-container">{completedOrderNotice}</p>}

@@ -3,6 +3,13 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 import type { NotificationRecord, NotificationType } from '../types/domain';
 import { notificationPath } from '../lib/notificationPath';
 import { useAuthStore } from '../stores/authStore';
+import {
+  DEFAULT_NOTIFICATION_SOUND_PREFERENCES,
+  getNotificationSoundChannelId,
+  getNotificationSoundForType,
+  getNotificationSoundPreferences,
+  NOTIFICATION_SOUNDS,
+} from './notificationSounds';
 
 export type NotificationPermissionStatus = 'granted' | 'denied' | 'prompt' | 'unsupported';
 
@@ -60,31 +67,43 @@ async function ensureChannels(): Promise<void> {
   if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') return;
   if (!channelCreation) {
     channelCreation = (async () => {
-      await Promise.all([
-        LocalNotifications.createChannel({
+      const channels = [
+        {
           id: NOTIFICATION_CHANNELS.orders,
           name: 'Orders and shifts',
           description: 'Orders, schedules, and shift activity',
           importance: 4,
           visibility: 1,
           vibration: true,
-        }),
-        LocalNotifications.createChannel({
+        },
+        {
           id: NOTIFICATION_CHANNELS.alerts,
           name: 'Business alerts',
           description: 'Void requests, cash differences, and stock alerts',
           importance: 5,
           visibility: 1,
           vibration: true,
-        }),
-        LocalNotifications.createChannel({
+        },
+        {
           id: NOTIFICATION_CHANNELS.system,
           name: 'System updates',
           description: 'App updates, reports, and summaries',
           importance: 3,
           visibility: 1,
           vibration: false,
-        }),
+        },
+      ] as const;
+      await Promise.all([
+        ...channels.map((channel) => LocalNotifications.createChannel(channel)),
+        ...channels.flatMap((channel) => NOTIFICATION_SOUNDS.map((sound) =>
+          LocalNotifications.createChannel({
+            ...channel,
+            id: getNotificationSoundChannelId(channel.id, sound.id),
+            name: `${channel.name} - ${sound.label}`,
+            description: `${channel.description}. ${sound.label}.`,
+            sound: sound.fileName,
+          }),
+        )),
       ]);
       await LocalNotifications.deleteChannel({ id: '7anouti-general' }).catch(() => undefined);
     })();
@@ -159,11 +178,23 @@ export const permissionService = {
     if (this.isNative()) {
       await ensureChannels();
       const type = notification?.type ?? 'app_update';
-      const channelId = NOTIFICATION_CHANNELS[NOTIFICATION_CHANNEL_BY_TYPE[type]];
+      const activeUser = useAuthStore.getState().user;
+      let soundPreferences = DEFAULT_NOTIFICATION_SOUND_PREFERENCES;
+      if (activeUser) {
+        try {
+          soundPreferences = await getNotificationSoundPreferences(activeUser.id);
+        } catch (error) {
+          console.error('[notifications] Could not load the selected sound; using the default.', error);
+        }
+      }
+      const baseChannelId = NOTIFICATION_CHANNELS[NOTIFICATION_CHANNEL_BY_TYPE[type]];
+      const soundId = getNotificationSoundForType(type, soundPreferences);
+      const channelId = Capacitor.getPlatform() === 'android'
+        ? getNotificationSoundChannelId(baseChannelId, soundId)
+        : baseChannelId;
       const numericId = notification
         ? stableNotificationId(notification.id)
         : ((Date.now() % 2_000_000_000) >>> 0);
-      const activeUser = useAuthStore.getState().user;
       await LocalNotifications.schedule({
         notifications: [{
           id: numericId,
@@ -171,7 +202,6 @@ export const permissionService = {
           body,
           channelId,
           smallIcon: 'ic_stat_notification',
-          largeIcon: 'ic_notification_large',
           extra: notification ? {
             notificationId: notification.id,
             route: activeUser ? notificationPath(notification, activeUser.role) : '/notifications',

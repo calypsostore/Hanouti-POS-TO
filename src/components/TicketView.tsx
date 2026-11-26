@@ -90,6 +90,11 @@ export function TicketView({ order, storeName, staffName, onClose, settings, sto
           <Button variant="secondary" onClick={() => { void sharePdf(); }}>Share PDF</Button>
           <Button variant="ghost" onClick={onClose}>Close</Button>
         </div>
+        {order.syncStatus && (
+          <p role="status" className="no-print mx-3 my-2 rounded-lg bg-warning-container p-3 font-body text-body-sm text-on-warning-container">
+            Provisional local ticket - not server-confirmed or fiscalized.
+          </p>
+        )}
         {shareError && <p role="alert" className="no-print receipt-error">{shareError}</p>}
         <ReceiptDocumentView ref={printTarget} document={ticketDocument} />
       </section>

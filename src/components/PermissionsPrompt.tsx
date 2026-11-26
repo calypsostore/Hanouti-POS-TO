@@ -6,13 +6,14 @@ import { permissionService, type NotificationPermissionStatus } from '../service
 import { useAuthStore } from '../stores/authStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
+import { requiresCredentialSetup } from '../services/credentialSetup';
 
 export function PermissionsPrompt() {
   const user = useAuthStore((state) => state.user);
   const userId = user?.id;
   const locked = useAuthStore((state) => state.locked);
   const latestNotificationId = useNotificationStore((state) => state.items[0]?.id);
-  const canPromptUser = Boolean(user && !locked && !user.mustChangePassword && !user.mustSetPin && !user.mustSetVoidPin);
+  const canPromptUser = Boolean(user && !locked && !requiresCredentialSetup(user));
   const [status, setStatus] = useState<NotificationPermissionStatus>('prompt');
   const [visible, setVisible] = useState(false);
   const [showInstructions, setShowInstructions] = useState(false);

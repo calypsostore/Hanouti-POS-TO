@@ -268,7 +268,7 @@ export interface OrderRecord {
   id: string;
   number: number;
   idempotencyKey?: string;
-  syncStatus?: 'queued' | 'needs_attention';
+  syncStatus?: 'queued' | 'syncing' | 'synced' | 'needs_attention';
   verificationStatus?: 'to_verify';
   storeId: string;
   businessDate?: string;

@@ -1,11 +1,52 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { authService } from '../src/services/authService';
+import { getCredentialSetupStep, isValidPinConfirmation, requiresCredentialSetup } from '../src/services/credentialSetup';
 import { seedStores, seedUsers } from '../src/services/seedData';
+import { generateStaffPin, isAcceptableStaffPin } from '../src/services/staffPin';
 import { userService } from '../src/services/userService';
+import { useAuthStore } from '../src/stores/authStore';
+import type { UserRecord } from '../src/types/domain';
 
 describe('credential lifecycle', () => {
   beforeEach(() => {
     localStorage.clear();
+  });
+
+  it('orders Owner setup stages and requires matching four-digit PIN confirmations', () => {
+    expect(getCredentialSetupStep({
+      role: 'owner',
+      mustChangePassword: true,
+      mustSetPin: true,
+      mustSetVoidPin: true,
+    })).toBe('password');
+    expect(getCredentialSetupStep({
+      role: 'owner',
+      mustChangePassword: false,
+      mustSetPin: true,
+      mustSetVoidPin: true,
+    })).toBe('personal-pin');
+    expect(getCredentialSetupStep({
+      role: 'owner',
+      mustChangePassword: false,
+      mustSetPin: false,
+      mustSetVoidPin: true,
+    })).toBe('store-pin');
+    expect(getCredentialSetupStep({
+      role: 'owner',
+      mustChangePassword: false,
+      mustSetPin: false,
+      mustSetVoidPin: false,
+    })).toBe('complete');
+    expect(getCredentialSetupStep({
+      role: 'staff',
+      mustChangePassword: false,
+      mustSetPin: true,
+      mustSetVoidPin: true,
+    })).toBe('complete');
+
+    expect(isValidPinConfirmation('2468', '2468')).toBe(true);
+    expect(isValidPinConfirmation('2468', '2469')).toBe(false);
+    expect(isValidPinConfirmation('246', '246')).toBe(false);
   });
 
   it('generates store IDs from names and increments duplicate IDs', async () => {
@@ -43,12 +84,16 @@ describe('credential lifecycle', () => {
     const passwordUpdated = await authService.setInitialPassword(owner.id, 'OwnerPassword1');
     expect(passwordUpdated.mustChangePassword).toBe(false);
     expect(passwordUpdated.mustSetPin).toBe(true);
+    expect(getCredentialSetupStep(passwordUpdated)).toBe('personal-pin');
     const pinUpdated = await authService.setPersonalPin(owner.id, '1234');
     expect(pinUpdated.mustSetPin).toBe(false);
     expect(pinUpdated.mustSetVoidPin).toBe(true);
+    expect(getCredentialSetupStep(pinUpdated)).toBe('store-pin');
     await userService.updateStorePin(store.id, '2468');
-    expect((await authService.getCurrentUser())?.mustSetVoidPin).toBe(false);
-    await expect(userService.verifyStorePin(store.id, '2468', 'void')).resolves.toBe(true);
+    await useAuthStore.getState().refreshCurrentUser();
+    const refreshedUser = await authService.getCurrentUser();
+    expect(refreshedUser?.mustSetVoidPin).toBe(false);
+    expect(getCredentialSetupStep(refreshedUser)).toBe('complete');
 
     await authService.changePersonalPin(owner.id, '1234', '5678');
     await expect(authService.verifyFiscalProfileOwnerCredential(store.id, 'pin', '5678')).resolves.toBeUndefined();
@@ -72,6 +117,42 @@ describe('credential lifecycle', () => {
     });
     await authService.logout();
     expect(await authService.getCurrentUser()).toBeNull();
+  });
+
+  it('skips Store PIN setup on subsequent Owner login after pin_must_change is cleared', async () => {
+    const { owner, temporaryPassword, store } = await userService.createOwnerAccount({
+      name: 'Store PIN Owner',
+      email: 'store-pin-owner@example.com',
+      storeName: 'Store PIN Store',
+    });
+
+    await authService.login(owner.email ?? '', temporaryPassword, ['owner']);
+    await authService.setInitialPassword(owner.id, 'OwnerPassword1');
+    await authService.setPersonalPin(owner.id, '1234');
+    await userService.updateStorePin(store.id, '2468');
+    await authService.logout();
+
+    const subsequentLogin = await authService.login(owner.email ?? '', 'OwnerPassword1', ['owner']);
+
+    expect(subsequentLogin.mustSetVoidPin).toBe(false);
+    expect(getCredentialSetupStep(subsequentLogin)).toBe('complete');
+  });
+
+  it('preserves void, credit_override, and z_report Store PIN verification purposes', async () => {
+    const { owner, temporaryPassword, store } = await userService.createOwnerAccount({
+      name: 'Purpose Owner',
+      email: 'purpose-owner@example.com',
+      storeName: 'Purpose Store',
+    });
+
+    await authService.login(owner.email ?? '', temporaryPassword, ['owner']);
+    await authService.setInitialPassword(owner.id, 'OwnerPassword1');
+    await authService.setPersonalPin(owner.id, '1234');
+    await userService.updateStorePin(store.id, '2468');
+
+    await expect(userService.verifyStorePin(store.id, '2468', 'void')).resolves.toBe(true);
+    await expect(userService.verifyStorePin(store.id, '2468', 'credit_override')).resolves.toBe(true);
+    await expect(userService.verifyStorePin(store.id, '2468', 'z_report')).resolves.toBe(true);
   });
 
   it('lets the owner configure separate staff and owner auto-lock timeouts, including never', async () => {
@@ -125,41 +206,97 @@ describe('credential lifecycle', () => {
     expect(duplicate.temporaryPassword).toHaveLength(6);
   });
 
-  it('requires a new password and PIN after staff password resets', async () => {
-    const { staff, temporaryPassword } = await userService.createStaff({
-      storeId: 'store-cafe12',
-      name: 'Abdullah Ben Ali',
-      positionId: 'position-barista',
+  it('requires Staff to change only their password and lets the Owner generate and replace unique PINs', async () => {
+    const { owner, temporaryPassword: ownerTemporaryPassword, store } = await userService.createOwnerAccount({
+      name: 'PIN Owner',
+      email: 'pin-owner@example.com',
+      storeName: 'PIN Store',
+    });
+    await authService.login(owner.email ?? '', ownerTemporaryPassword, ['owner']);
+    await authService.setInitialPassword(owner.id, 'OwnerPassword1');
+    await authService.setPersonalPin(owner.id, '1357');
+    await userService.updateStorePin(store.id, '8642');
+    const position = await userService.createPosition(store.id, 'Counter staff', []);
+
+    const first = await userService.createStaff({
+      storeId: store.id,
+      name: 'First Staff',
+      positionId: position.id,
+    });
+    const second = await userService.createStaff({
+      storeId: store.id,
+      name: 'Second Staff',
+      positionId: position.id,
     });
 
-    const signedIn = await authService.login(staff.username ?? '', temporaryPassword);
-    expect(signedIn.mustChangePassword).toBe(true);
-    expect(signedIn.mustSetPin).toBe(true);
-    expect(signedIn.mustSetVoidPin).toBe(false);
+    const firstLogin = await authService.login(first.staff.username ?? '', first.temporaryPassword, ['staff']);
+    expect(firstLogin.mustChangePassword).toBe(true);
+    expect(firstLogin.mustSetPin).toBe(true);
+    expect(requiresCredentialSetup(firstLogin)).toBe(true);
 
-    const passwordUpdated = await authService.setInitialPassword(staff.id, 'StaffPassword1');
-    expect(passwordUpdated.mustChangePassword).toBe(false);
+    const passwordUpdated = await authService.setInitialPassword(first.staff.id, 'StaffPassword1');
     expect(passwordUpdated.mustSetPin).toBe(true);
+    expect(requiresCredentialSetup(passwordUpdated)).toBe(false);
+    await expect(authService.setPersonalPin(first.staff.id, '1234')).rejects.toThrow('Only a signed-in store owner');
+    await expect(authService.changePersonalPin(first.staff.id, '1234', '5678')).rejects.toThrow('Only a signed-in store owner');
 
-    const pinUpdated = await authService.setPersonalPin(staff.id, '1234');
-    expect(pinUpdated.mustSetPin).toBe(false);
-    await expect(authService.setPersonalPin(staff.id, '5678')).rejects.toThrow('already set');
-    await expect(authService.verifyFiscalProfileOwnerCredential('store-cafe12', 'pin', '1234'))
-      .rejects.toThrow('Only the active owner of this store can unlock its fiscal information.');
+    await authService.login(owner.email ?? '', 'OwnerPassword1', ['owner']);
+    const firstPin = await userService.generateStaffPin(owner.id, first.staff.id);
+    const firstPinStatus = await userService.getUser(first.staff.id);
+    expect(firstPin).toMatch(/^\d{4}$/);
+    expect(isAcceptableStaffPin(firstPin)).toBe(true);
+    expect(firstPinStatus?.mustSetPin).toBe(false);
+    const storedUsers = JSON.parse(localStorage.getItem('7anouti-pos:users') ?? '[]') as UserRecord[];
+    const storedFirstStaff = storedUsers.find((candidate) => candidate.id === first.staff.id);
+    expect(storedFirstStaff?.pinHash).toMatch(/^pbkdf2-sha256\$/);
+    expect(storedFirstStaff?.pinHash).not.toBe(firstPin);
 
-    await authService.changePersonalPin(staff.id, '1234', '5678');
-    expect((await authService.unlockCurrentSessionWithPin('5678')).id).toBe(staff.id);
+    const secondPin = await userService.generateStaffPin(owner.id, second.staff.id);
+    expect(secondPin).not.toBe(firstPin);
+    expect(isAcceptableStaffPin(secondPin)).toBe(true);
 
-    const resetPassword = await userService.resetStaffPassword(staff.id);
-    expect(await authService.getCurrentUser()).toBeNull();
+    const secondLogin = await authService.login(second.staff.username ?? '', second.temporaryPassword, ['staff']);
+    expect(secondLogin.mustChangePassword).toBe(true);
+    expect(secondLogin.mustSetPin).toBe(false);
+    const secondPasswordUpdated = await authService.setInitialPassword(second.staff.id, 'StaffPassword2');
+    expect(requiresCredentialSetup(secondPasswordUpdated)).toBe(false);
+    expect((await userService.getUser(second.staff.id))?.mustSetPin).toBe(false);
+    await authService.lockCurrentSession();
+    expect((await authService.unlockCurrentSessionWithPin(secondPin)).id).toBe(second.staff.id);
 
-    const resetLogin = await authService.login(staff.username ?? '', resetPassword);
-    expect(resetLogin.mustChangePassword).toBe(true);
-    expect(resetLogin.mustSetPin).toBe(true);
-    const resetPasswordUpdated = await authService.setInitialPassword(staff.id, 'StaffPassword2');
-    expect(resetPasswordUpdated.mustSetPin).toBe(true);
-    const resetPinUpdated = await authService.setPersonalPin(staff.id, '9876');
-    expect(resetPinUpdated.mustSetPin).toBe(false);
+    await authService.login(owner.email ?? '', 'OwnerPassword1', ['owner']);
+    await authService.login(first.staff.username ?? '', 'StaffPassword1', ['staff']);
+    await expect(userService.generateStaffPin(first.staff.id, second.staff.id)).rejects.toThrow('Only this store owner');
+    await authService.lockCurrentSession();
+    expect((await authService.unlockCurrentSessionWithPin(firstPin)).id).toBe(first.staff.id);
+
+    await authService.login(owner.email ?? '', 'OwnerPassword1', ['owner']);
+    const replacementPin = await userService.generateStaffPin(owner.id, first.staff.id);
+    expect(replacementPin).not.toBe(firstPin);
+
+    await authService.login(first.staff.username ?? '', 'StaffPassword1', ['staff']);
+    await authService.lockCurrentSession();
+    await expect(authService.unlockCurrentSessionWithPin(firstPin)).rejects.toThrow('Incorrect PIN.');
+    expect((await authService.unlockCurrentSessionWithPin(replacementPin)).id).toBe(first.staff.id);
+
+    await authService.login(owner.email ?? '', 'OwnerPassword1', ['owner']);
+    await expect(authService.verifyFiscalProfileOwnerCredential(store.id, 'pin', '1357')).resolves.toBeUndefined();
+    await expect(userService.verifyStorePin(store.id, '8642', 'void')).resolves.toBe(true);
+  }, 20_000);
+
+  it('rejects predictable Staff PIN patterns and retries collisions', async () => {
+    for (const pin of ['1234', '4321', '1111', '1122', '1212', '1221', '1357', '2580']) {
+      expect(isAcceptableStaffPin(pin)).toBe(false);
+    }
+    expect(isAcceptableStaffPin('4826')).toBe(true);
+
+    let uniquenessChecks = 0;
+    const pin = await generateStaffPin(async () => {
+      uniquenessChecks += 1;
+      return uniquenessChecks === 3;
+    });
+    expect(uniquenessChecks).toBe(3);
+    expect(isAcceptableStaffPin(pin)).toBe(true);
   });
 
   it('lets only the super admin issue owner password resets without requiring a staff PIN', async () => {

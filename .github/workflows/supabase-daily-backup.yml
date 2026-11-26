@@ -15,12 +15,12 @@ concurrency:
 jobs:
   backup:
     runs-on: ubuntu-latest
-    env:
-      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-      BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
     steps:
       - name: Validate backup secrets
         shell: bash
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
         run: |
           set -euo pipefail
           test -n "$SUPABASE_DB_URL" || { echo "::error::Set the SUPABASE_DB_URL Actions secret."; exit 1; }
@@ -33,6 +33,9 @@ jobs:
 
       - name: Export and encrypt database
         shell: bash
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
         run: |
           set -euo pipefail
           dump="$RUNNER_TEMP/hanouti-${GITHUB_RUN_ID}.dump"
@@ -42,10 +45,12 @@ jobs:
           printf '%s' "$BACKUP_ENCRYPTION_KEY" > "$passphrase_file"
           chmod 600 "$passphrase_file"
           pg_dump --format=custom --no-owner --no-acl --file="$dump" "$SUPABASE_DB_URL"
+          test -s "$dump" || { echo "::error::Database dump is empty."; exit 1; }
           gpg --batch --yes --pinentry-mode loopback \
             --passphrase-file "$passphrase_file" \
             --symmetric --cipher-algo AES256 \
             --output "$encrypted" "$dump"
+          test -s "$encrypted" || { echo "::error::Encrypted backup is empty."; exit 1; }
 
       - name: Store encrypted backup
         uses: actions/upload-artifact@v4
@@ -56,4 +61,10 @@ jobs:
           retention-days: 30
 
       - name: Remove expired login rate-limit records
-        run: psql "$SUPABASE_DB_URL" --set ON_ERROR_STOP=on --command "delete from public.login_rate_limits where window_started_at < now() - interval '1 day'"
+        if: success()
+        shell: bash
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          psql "$SUPABASE_DB_URL" --set ON_ERROR_STOP=on --command "delete from public.login_rate_limits where window_started_at < now() - interval '1 day'"

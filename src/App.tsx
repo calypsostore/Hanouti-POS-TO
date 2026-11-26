@@ -18,6 +18,7 @@ import { useOverlayLifecycle, useOverlayTarget } from './components/overlay/over
 import { subscribeToStoreChanges } from './data/repositories/realtimeRepository';
 import { applyStoreAppearance, resetStoreAppearance } from './lib/storeAppearance';
 import { resolveStoreSettings } from './types/domain';
+import { requiresCredentialSetup } from './services/credentialSetup';
 
 const SetNewPasswordScreen = lazy(() => import('./screens/SetNewPasswordScreen').then((module) => ({ default: module.SetNewPasswordScreen })));
 const LockScreen = lazy(() => import('./components/LockScreen').then((module) => ({ default: module.LockScreen })));
@@ -33,6 +34,8 @@ const StaffProfileScreen = lazy(() => import('./screens/StaffProfileScreen').the
 const OwnerDashboardScreen = lazy(() => import('./screens/OwnerDashboardScreen').then((module) => ({ default: module.OwnerDashboardScreen })));
 const OwnerCatalogScreen = lazy(() => import('./screens/OwnerCatalogScreen').then((module) => ({ default: module.OwnerCatalogScreen })));
 const OwnerStaffScreen = lazy(() => import('./screens/OwnerStaffScreen').then((module) => ({ default: module.OwnerStaffScreen })));
+const OwnerDevicesScreen = lazy(() => import('./screens/OwnerDevicesScreen').then((module) => ({ default: module.OwnerDevicesScreen })));
+const DeviceLoginScreen = lazy(() => import('./screens/DeviceAccessScreen').then((module) => ({ default: module.DeviceLoginScreen })));
 const OwnerStaffProfileScreen = lazy(() => import('./screens/OwnerStaffProfileScreen').then((module) => ({ default: module.OwnerStaffProfileScreen })));
 const OwnerScheduleScreen = lazy(() => import('./screens/OwnerScheduleScreen').then((module) => ({ default: module.OwnerScheduleScreen })));
 const OwnerVoidRequestsScreen = lazy(() => import('./screens/OwnerVoidRequestsScreen').then((module) => ({ default: module.OwnerVoidRequestsScreen })));
@@ -111,17 +114,18 @@ function InitializationErrorScreen({ error, onRetry }: { error: Error; onRetry: 
 
 function GuestRoute() {
   const user = useAuthStore((state) => state.user);
+  const device = useAuthStore((state) => state.device);
   const locked = useAuthStore((state) => state.locked);
-  if (!user) return <LoginScreen />;
+  if (!user) return device ? <Navigate to="/device-pin" replace /> : <LoginScreen />;
   if (locked) return <Navigate to="/lock" replace state={{ from: location.pathname }} />;
-  return <Navigate to={user.mustChangePassword || user.mustSetPin || user.mustSetVoidPin ? '/set-password' : homeForRole(user.role)} replace />;
+  return <Navigate to={requiresCredentialSetup(user) ? '/set-password' : homeForRole(user.role)} replace />;
 }
 
 function SetPasswordRoute() {
   const user = useAuthStore((state) => state.user);
-  const [setupActive, setSetupActive] = useState(Boolean(user?.mustChangePassword || user?.mustSetPin || user?.mustSetVoidPin));
+  const [setupActive, setSetupActive] = useState(requiresCredentialSetup(user));
   if (!user) return <Navigate to="/" replace />;
-  if (!user.mustChangePassword && !user.mustSetPin && !user.mustSetVoidPin && !setupActive) return <Navigate to={homeForRole(user.role)} replace />;
+  if (!requiresCredentialSetup(user) && !setupActive) return <Navigate to={homeForRole(user.role)} replace />;
   return <SetNewPasswordScreen onSetupComplete={() => setSetupActive(false)} />;
 }
 
@@ -153,7 +157,7 @@ function ProtectedRoute({ roles, children, permission }: ProtectedRouteProps) {
 
   if (!user) return <Navigate to="/" replace state={{ from: location.pathname }} />;
   if (locked) return <Navigate to="/lock" replace />;
-  if (user.mustChangePassword || user.mustSetPin || user.mustSetVoidPin) return <Navigate to="/set-password" replace />;
+  if (requiresCredentialSetup(user)) return <Navigate to="/set-password" replace />;
   if (!roles.includes(user.role)) return <Navigate to={homeForRole(user.role)} replace />;
   const permissionAllowed = permissionKey.split('|').some((permissionId) => permissions.includes(permissionId));
   if (permission && user.role === 'staff' && !permissionsReady) return <LoadingScreen message={t('app.loading')} />;
@@ -167,7 +171,7 @@ function LockRoute() {
   const locked = useAuthStore((state) => state.locked);
   const location = useLocation();
   if (!user) return <Navigate to="/" replace />;
-  if (user.mustChangePassword || user.mustSetPin || user.mustSetVoidPin) return <Navigate to="/set-password" replace />;
+  if (requiresCredentialSetup(user)) return <Navigate to="/set-password" replace />;
   if (user.role !== 'staff' && user.role !== 'owner') return <Navigate to={homeForRole(user.role)} replace />;
   if (!locked) return <Navigate to={homeForRole(user.role)} replace />;
   const stateFrom = typeof location.state === 'object' && location.state !== null && 'from' in location.state
@@ -342,7 +346,8 @@ export default function App() {
   }, [ready, user?.id, user?.role, user?.storeId]);
 
   useEffect(() => {
-    if (!ready || locked || (user?.role !== 'staff' && user?.role !== 'owner') || user.mustChangePassword || user.mustSetPin || user.mustSetVoidPin || !user.storeId) return;
+    if (!ready || locked || (user?.role !== 'staff' && user?.role !== 'owner') ||
+      user.mustChangePassword || (user.role === 'owner' && (user.mustSetPin || user.mustSetVoidPin)) || !user.storeId) return;
     let active = true;
     let timeoutId = 0;
     let timeoutMs = (user.role === 'staff' ? 5 : 0) * 60_000;
@@ -485,10 +490,12 @@ export default function App() {
         {user && <PermissionsPrompt />}
         {user && !locked && <NotificationsBridge />}
       </Suspense>
-      <PullToRefresh enabled={Boolean(user && !locked && !user.mustChangePassword && !user.mustSetPin && !user.mustSetVoidPin)}>
+      <PullToRefresh enabled={Boolean(user && !locked && !requiresCredentialSetup(user))}>
         <Suspense fallback={<LoadingScreen message={t('app.loading')} />}>
           <Routes>
           <Route path="/" element={<GuestRoute />} />
+          <Route path="/device-login" element={<DeviceLoginScreen />} />
+          <Route path="/device-pin" element={<DeviceLoginScreen />} />
           <Route path="/set-password" element={<SetPasswordRoute />} />
           <Route path="/lock" element={<LockRoute />} />
           <Route path="/dashboard" element={<ProtectedRoute roles={['staff']}><StaffDashboardScreen /></ProtectedRoute>} />
@@ -505,6 +512,7 @@ export default function App() {
           <Route path="/owner/catalog" element={<ProtectedRoute roles={['owner']}><OwnerCatalogScreen /></ProtectedRoute>} />
           <Route path="/owner/staff/:id" element={<ProtectedRoute roles={['owner']}><OwnerStaffProfileScreen /></ProtectedRoute>} />
           <Route path="/owner/staff" element={<ProtectedRoute roles={['owner']}><OwnerStaffScreen /></ProtectedRoute>} />
+          <Route path="/owner/devices" element={<ProtectedRoute roles={['owner']}><OwnerDevicesScreen /></ProtectedRoute>} />
           <Route path="/owner/schedule" element={<ProtectedRoute roles={['owner']}><OwnerScheduleScreen /></ProtectedRoute>} />
           <Route path="/owner/voids" element={<ProtectedRoute roles={['owner']}><OwnerVoidRequestsScreen /></ProtectedRoute>} />
           <Route path="/owner/shifts" element={<ProtectedRoute roles={['owner']}><ShiftScreen ownerMode /></ProtectedRoute>} />

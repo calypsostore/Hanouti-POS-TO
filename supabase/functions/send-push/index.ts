@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { resolveNotificationSoundId } from './notificationSounds.ts';
 
 interface NotificationWebhook {
   record?: {
@@ -6,10 +7,14 @@ interface NotificationWebhook {
   };
 }
 
-function channelForType(type: string): string {
+function baseChannelForType(type: string): string {
   if (['void_requested', 'customer_credit_warning', 'customer_credit_limit', 'customer_overdue', 'stock_depleted', 'item_86', 'low_stock', 'cash_difference', 'cash_out_alert'].includes(type)) return 'alerts_v2';
   if (['void_approved', 'void_rejected', 'schedule_published', 'shift_opened', 'shift_closed'].includes(type)) return 'orders_v2';
   return 'system_v2';
+}
+
+function channelForType(type: string, soundId: string): string {
+  return `${baseChannelForType(type)}_${soundId}`;
 }
 
 function constantTimeEqual(expected: string, actual: string): boolean {
@@ -87,10 +92,19 @@ Deno.serve(async (request) => {
 
   const { data: tokens, error: tokenError } = await admin
     .from('device_tokens')
-    .select('token')
+    .select('user_id, token')
     .eq('store_id', storeId)
     .in('user_id', recipientIds);
   if (tokenError) return response(500, { error: tokenError.message });
+
+  const { data: soundPreferences, error: soundPreferencesError } = await admin
+    .from('notification_sound_preferences')
+    .select('user_id, general_sound, void_sound')
+    .in('user_id', recipientIds);
+  if (soundPreferencesError) return response(500, { error: soundPreferencesError.message });
+  const soundPreferencesByUser = new Map(
+    (soundPreferences ?? []).map((preference) => [preference.user_id, preference]),
+  );
 
   const serviceAccount = JSON.parse(serviceAccountJson) as {
     project_id: string;
@@ -128,8 +142,15 @@ Deno.serve(async (request) => {
 
   const unregistered: string[] = [];
   let sent = 0;
+  const notificationType = String(record.type ?? '');
   for (const tokenRow of tokens ?? []) {
     const token = tokenRow.token as string;
+    const soundPreferences = soundPreferencesByUser.get(tokenRow.user_id);
+    const requestedSound = notificationType.startsWith('void_')
+      ? soundPreferences?.void_sound
+      : soundPreferences?.general_sound;
+    const soundId = resolveNotificationSoundId(notificationType, requestedSound);
+    const channelId = channelForType(notificationType, soundId);
     const fcm = await fetch(`https://fcm.googleapis.com/v1/projects/${serviceAccount.project_id}/messages:send`, {
       method: 'POST',
       headers: {
@@ -146,15 +167,15 @@ Deno.serve(async (request) => {
           android: {
             priority: 'HIGH',
             notification: {
-              channel_id: channelForType(String(record.type ?? '')),
-              icon: '@drawable/ic_stat_notification',
+              channel_id: channelId,
+              icon: 'ic_stat_notification',
               color: '#0F5E6E',
             },
           },
           data: {
             notificationId: String(record.id ?? ''),
             route: '/notifications',
-            channel_id: channelForType(String(record.type ?? '')),
+            channel_id: channelId,
           },
         },
       }),

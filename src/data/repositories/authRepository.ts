@@ -1,12 +1,22 @@
 import { isSubscriptionExpired, type AuthSession, type UserSummary } from '../../types/domain';
 import { getStore } from './storeRepository';
 import { getProfile, hasPersonalPin } from './profileRepository';
-import { getSupabaseClient } from '../supabaseClient';
+import { getKeepSignedInPreference, getSupabaseClient, setKeepSignedInPreference } from '../supabaseClient';
 
 const SESSION_LOCK_KEY = '7anouti-pos:auth-locked-user';
 const SESSION_VERSION_KEY = '7anouti-pos:supabase-session-version';
 const PIN_LOCK_KEY = '7anouti-pos:supabase-pin-lock-until';
 const CACHED_USER_DISPLAY_KEY = '7anouti-pos:cached-user-display';
+const CACHED_AUTH_USER_KEY = '7anouti-pos:cached-auth-user';
+const CACHED_AUTH_AT_KEY = '7anouti-pos:cached-auth-at';
+const OFFLINE_AUTH_MAX_MS = 7 * 24 * 60 * 60 * 1000;
+
+function isNetworkFailure(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (/fetcherror|networkerror/i.test(error.name)) return true;
+  return /failed to fetch|network request failed|networkerror|load failed|connection|offline|timed out|timeout/i.test(error.message) ||
+    isNetworkFailure(error.cause);
+}
 
 export interface CachedUserDisplay {
   name: string;
@@ -27,6 +37,43 @@ function clearCachedUserDisplay(): void {
     window.sessionStorage.removeItem(CACHED_USER_DISPLAY_KEY);
   } catch (error) {
     console.warn('[startup] Could not clear the cached user display.', error);
+  }
+}
+
+function cacheAuthUser(user: UserSummary): void {
+  if (typeof window === 'undefined') return;
+  if (!getKeepSignedInPreference()) {
+    clearCachedAuthUser();
+    return;
+  }
+  try {
+    window.localStorage.setItem(CACHED_AUTH_USER_KEY, JSON.stringify(user));
+    window.localStorage.setItem(CACHED_AUTH_AT_KEY, new Date().toISOString());
+  } catch (error) {
+    console.warn('[startup] Could not cache the signed-in account.', error);
+  }
+}
+
+function clearCachedAuthUser(): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(CACHED_AUTH_USER_KEY);
+  window.localStorage.removeItem(CACHED_AUTH_AT_KEY);
+}
+
+function getCachedAuthUser(): UserSummary | null {
+  if (typeof window === 'undefined' || !getKeepSignedInPreference()) return null;
+  try {
+    const raw = window.localStorage.getItem(CACHED_AUTH_USER_KEY);
+    if (!raw) return null;
+    const cachedAt = Date.parse(window.localStorage.getItem(CACHED_AUTH_AT_KEY) ?? '');
+    if (!Number.isFinite(cachedAt) || Date.now() - cachedAt > OFFLINE_AUTH_MAX_MS) return null;
+    const user: unknown = JSON.parse(raw);
+    if (typeof user !== 'object' || user === null || !('id' in user) || typeof user.id !== 'string' ||
+      !('role' in user) || !['staff', 'owner', 'super_admin'].includes(String(user.role)) ||
+      !('isActive' in user) || user.isActive !== true) return null;
+    return user as UserSummary;
+  } catch {
+    return null;
   }
 }
 
@@ -72,43 +119,123 @@ async function writeActivity(user: UserSummary, action: string, summary: string)
 
 async function currentUser(): Promise<UserSummary | null> {
   const client = getSupabaseClient();
-  const { data: authData, error: authError } = await client.auth.getUser();
-  if (authError && authError.name !== 'AuthSessionMissingError') throwSupabaseError(authError, 'Could not restore the sign-in session');
+  const { data: sessionData } = await client.auth.getSession();
+  const localSession = sessionData.session;
+  if (!localSession) {
+    clearCachedUserDisplay();
+    clearCachedAuthUser();
+    return null;
+  }
+  const expiresAtSeconds = localSession.expires_at;
+  if (typeof expiresAtSeconds !== 'number' || !Number.isFinite(expiresAtSeconds) || expiresAtSeconds * 1000 <= Date.now()) {
+    try {
+      await client.auth.signOut({ scope: 'local' });
+    } finally {
+      clearSessionLock();
+      clearCachedUserDisplay();
+      clearCachedAuthUser();
+    }
+    return null;
+  }
+  let authData: Awaited<ReturnType<typeof client.auth.getUser>>['data'];
+  let authError: Awaited<ReturnType<typeof client.auth.getUser>>['error'];
+  try {
+    ({ data: authData, error: authError } = await client.auth.getUser());
+  } catch (error) {
+    if (isNetworkFailure(error)) {
+      const cached = getCachedAuthUser();
+      if (cached && cached.id === localSession.user.id) {
+        cacheUserDisplay(cached);
+        return cached;
+      }
+    }
+    throw error;
+  }
+  if (authError && isNetworkFailure(authError)) {
+    const cached = getCachedAuthUser();
+    if (cached && cached.id === localSession.user.id) {
+      cacheUserDisplay(cached);
+      return cached;
+    }
+  }
+  if (authError) {
+    if (isNetworkFailure(authError)) throwSupabaseError(authError, 'Could not restore the sign-in session');
+    try {
+      await client.auth.signOut({ scope: 'local' });
+    } finally {
+      clearSessionLock();
+      clearCachedUserDisplay();
+      clearCachedAuthUser();
+    }
+    return null;
+  }
   if (!authData.user) {
     clearCachedUserDisplay();
+    clearCachedAuthUser();
     return null;
   }
   let profile: UserSummary | undefined;
   try {
     profile = await getProfile(authData.user.id);
   } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes('The sign-in session has expired or is no longer active.')) {
-      throw error;
+    if (isNetworkFailure(error)) {
+      const cached = getCachedAuthUser();
+      if (cached && cached.id === authData.user.id) {
+        cacheUserDisplay(cached);
+        return cached;
+      }
     }
-    const { error: signOutError } = await client.auth.signOut();
-    if (signOutError) throwSupabaseError(signOutError, 'Could not clear the expired sign-in session');
-    clearSessionLock();
-    clearCachedUserDisplay();
+    try {
+      await client.auth.signOut({ scope: 'local' });
+    } finally {
+      clearSessionLock();
+      clearCachedUserDisplay();
+      clearCachedAuthUser();
+    }
     return null;
   }
   if (!profile || !profile.isActive) {
-    await client.auth.signOut();
-    clearCachedUserDisplay();
+    try {
+      await client.auth.signOut({ scope: 'local' });
+    } finally {
+      clearCachedUserDisplay();
+      clearCachedAuthUser();
+    }
     return null;
   }
   const storedVersion = typeof window === 'undefined' ? null : window.localStorage.getItem(SESSION_VERSION_KEY);
   if (storedVersion !== null && Number(storedVersion) !== (profile.sessionVersion ?? 0)) {
-    await client.auth.signOut();
-    clearSessionLock();
-    clearCachedUserDisplay();
+    try {
+      await client.auth.signOut({ scope: 'local' });
+    } finally {
+      clearSessionLock();
+      clearCachedUserDisplay();
+      clearCachedAuthUser();
+    }
     return null;
   }
   if (profile.storeId) {
-    const store = await getStore(profile.storeId);
+    let store: Awaited<ReturnType<typeof getStore>>;
+    try {
+      store = await getStore(profile.storeId);
+    } catch (error) {
+      if (isNetworkFailure(error)) {
+        const cached = getCachedAuthUser();
+        if (cached && cached.id === authData.user.id) {
+          cacheUserDisplay(cached);
+          return cached;
+        }
+      }
+      throw error;
+    }
     if (!store?.isActive || store.archivedAt) {
-      await client.auth.signOut();
-      clearSessionLock();
-      clearCachedUserDisplay();
+      try {
+        await client.auth.signOut({ scope: 'local' });
+      } finally {
+        clearSessionLock();
+        clearCachedUserDisplay();
+        clearCachedAuthUser();
+      }
       return null;
     }
     if (isSubscriptionExpired(store)) throw new Error('Subscription expired, contact 7anouti');
@@ -118,11 +245,14 @@ async function currentUser(): Promise<UserSummary | null> {
     };
   }
   cacheUserDisplay(profile);
+  cacheAuthUser(profile);
   return profile;
 }
 
 export const authRepository = {
-  async login(identifier: string, password: string, acceptedRoles?: UserSummary['role'][]): Promise<UserSummary> {
+  async login(identifier: string, password: string, acceptedRoles?: UserSummary['role'][], keepSignedIn = true): Promise<UserSummary> {
+    setKeepSignedInPreference(keepSignedIn);
+    if (!keepSignedIn) clearCachedAuthUser();
     const client = getSupabaseClient();
     if (typeof window !== 'undefined') window.localStorage.removeItem(SESSION_VERSION_KEY);
     const { data, error } = await client.functions.invoke<{ access_token: string; refresh_token: string }>('login', {
@@ -137,8 +267,9 @@ export const authRepository = {
     if (sessionError) throwSupabaseError(sessionError, 'Could not establish the sign-in session');
     const user = await currentUser();
     if (!user || (acceptedRoles && !acceptedRoles.includes(user.role))) {
-      await client.auth.signOut();
+      await client.auth.signOut({ scope: 'local' });
       clearCachedUserDisplay();
+      clearCachedAuthUser();
       throw new Error('The username/email or password is incorrect.');
     }
     if (typeof window !== 'undefined') {
@@ -184,6 +315,26 @@ export const authRepository = {
     await writeActivity(user, 'lock.locked', `${user.name}'s session was locked.`);
   },
 
+  async lockDeviceStaffSession(): Promise<void> {
+    const user = await currentUser();
+    if (!user || user.role !== 'staff' || !user.storeId) {
+      throw new Error('Only a signed-in Staff account can lock a shared device session.');
+    }
+    const client = getSupabaseClient();
+    await writeActivity(user, 'lock.locked', `${user.name}'s shared device session was locked.`);
+    const { error: revokeError } = await client.rpc('revoke_current_auth_session');
+    if (revokeError) throwSupabaseError(revokeError, 'Could not revoke the staff session');
+    const { error: signOutError } = await client.auth.signOut({ scope: 'local' });
+    clearSessionLock();
+    clearCachedUserDisplay();
+    clearCachedAuthUser();
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(SESSION_VERSION_KEY);
+      window.sessionStorage.removeItem(PIN_LOCK_KEY);
+    }
+    if (signOutError) throwSupabaseError(signOutError, 'Could not clear the staff session');
+  },
+
   pinLockRemainingMs(): number {
     if (typeof window === 'undefined') return 0;
     const lockedUntil = Number(window.sessionStorage.getItem(PIN_LOCK_KEY) ?? 0);
@@ -193,7 +344,7 @@ export const authRepository = {
   async setPersonalPin(userId: string, pin: string): Promise<UserSummary> {
     if (!/^\d{4}$/.test(pin)) throw new Error('PIN must contain exactly 4 digits.');
     const user = await currentUser();
-    if (!user || user.id !== userId || (user.role !== 'staff' && user.role !== 'owner')) throw new Error('You must sign in as this account to set a PIN.');
+    if (!user || user.id !== userId || user.role !== 'owner') throw new Error('Only a signed-in store owner can set a personal PIN.');
     const { error } = await getSupabaseClient().rpc('set_personal_pin', { p_pin: pin });
     if (error) throwSupabaseError(error, 'Could not set the personal PIN');
     if (typeof window !== 'undefined') window.sessionStorage.removeItem(PIN_LOCK_KEY);
@@ -205,13 +356,14 @@ export const authRepository = {
   async changePersonalPin(userId: string, currentPin: string, newPin: string): Promise<void> {
     if (!/^\d{4}$/.test(currentPin) || !/^\d{4}$/.test(newPin)) throw new Error('PIN must contain exactly 4 digits.');
     const user = await currentUser();
-    if (!user || user.id !== userId || (user.role !== 'staff' && user.role !== 'owner')) throw new Error('You must sign in as this account to change a PIN.');
+    if (!user || user.id !== userId || user.role !== 'owner') throw new Error('Only a signed-in store owner can change a personal PIN.');
     if (user.mustChangePassword || user.mustSetPin) throw new Error('Complete the initial password and PIN setup first.');
-    const { error } = await getSupabaseClient().rpc('change_personal_pin', {
+    const { data, error } = await getSupabaseClient().rpc('change_personal_pin', {
       p_current_pin: currentPin,
       p_new_pin: newPin,
     });
     if (error) throwSupabaseError(error, 'Could not change the personal PIN');
+    if (data !== true) throw new Error('Incorrect PIN.');
     if (typeof window !== 'undefined') window.sessionStorage.removeItem(PIN_LOCK_KEY);
   },
 
@@ -307,23 +459,44 @@ export const authRepository = {
   },
 
   async logout(): Promise<void> {
-    const user = await currentUser();
-    if (user?.storeId) await writeActivity(user, 'logout', `${user.name} signed out.`);
     const client = getSupabaseClient();
-    let revokeError: { message: string; code?: string } | null = null;
-    if (user) {
-      const { error } = await client.rpc('revoke_current_auth_session');
-      revokeError = error;
+    let user: UserSummary | null = null;
+    const remoteErrors: unknown[] = [];
+    try {
+      user = await currentUser();
+    } catch (error) {
+      remoteErrors.push(error);
     }
-    const { error } = await client.auth.signOut();
-    if (error) throwSupabaseError(error, 'Could not sign out');
-    clearSessionLock();
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(SESSION_VERSION_KEY);
-      window.sessionStorage.removeItem(PIN_LOCK_KEY);
+    if (user && (typeof navigator === 'undefined' || navigator.onLine)) {
+      try {
+        if (user.storeId) await writeActivity(user, 'logout', `${user.name} signed out.`);
+      } catch (error) {
+        remoteErrors.push(error);
+      }
+      try {
+        const { error } = await client.rpc('revoke_current_auth_session');
+        if (error) throw error;
+      } catch (error) {
+        remoteErrors.push(error);
+      }
     }
-    clearCachedUserDisplay();
-    if (revokeError) throwSupabaseError(revokeError, 'Could not revoke the sign-in session');
+    let signOutError: { message: string; code?: string } | null | undefined;
+    try {
+      const { error } = await client.auth.signOut({ scope: 'local' });
+      signOutError = error;
+    } finally {
+      clearSessionLock();
+      clearCachedAuthUser();
+      clearCachedUserDisplay();
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem(SESSION_VERSION_KEY);
+        window.sessionStorage.removeItem(PIN_LOCK_KEY);
+      }
+    }
+    for (const error of remoteErrors) {
+      console.warn('[auth] Remote logout audit/revocation failed; local sign-out completed.', error);
+    }
+    if (signOutError) throwSupabaseError(signOutError, 'Could not sign out locally');
   },
 
   async unlockSession(session: AuthSession, user: UserSummary): Promise<void> {

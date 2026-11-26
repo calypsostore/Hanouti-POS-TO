@@ -32,7 +32,7 @@ grant select, insert, update, delete on public.device_sessions to service_role;
 create table public.device_pin_attempts (
   device_id uuid primary key references public.devices(id) on delete cascade,
   store_id uuid not null references public.stores(store_id) on delete cascade,
-  failed_attempts integer not null default 0 check (failed_attempts between 0 and 4),
+  failed_attempts integer not null default 0 check (failed_attempts between 0 and 5),
   locked_until timestamptz,
   updated_at timestamptz not null default now()
 );
@@ -178,7 +178,7 @@ begin
   where device_id = device_row.id
   for update;
   if found and pin_attempt.locked_until > now() then
-    raise exception 'PIN verification is temporarily locked.' using errcode = 'P0001';
+    raise exception 'PIN verification is locked until the owner resets device access.' using errcode = 'P0001';
   end if;
 
   select count(*), (array_agg(p.id order by p.id))[1]
@@ -196,15 +196,15 @@ begin
     return matching_staff_id;
   end if;
 
-  next_count := coalesce(pin_attempt.failed_attempts, 0) + 1;
+  next_count := least(coalesce(pin_attempt.failed_attempts, 0) + 1, 5);
   insert into public.device_pin_attempts (
     device_id, store_id, failed_attempts, locked_until, updated_at
   )
   values (
     device_row.id,
     device_row.store_id,
-    case when next_count >= 5 then 0 else next_count end,
-    case when next_count >= 5 then now() + interval '60 seconds' else null end,
+    next_count,
+    case when next_count >= 5 then 'infinity'::timestamptz else null end,
     now()
   )
   on conflict (device_id) do update

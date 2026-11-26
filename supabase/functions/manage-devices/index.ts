@@ -167,6 +167,10 @@ Deno.serve(async (request) => {
       if (sessionResults.some((result) => result.error)) {
         throw new HttpError(503, 'The device password was reset, but active sessions could not all be revoked.');
       }
+      const { error: pinAttemptsError } = await admin.from('device_pin_attempts').delete().eq('device_id', device.id);
+      if (pinAttemptsError) {
+        throw new HttpError(503, 'Device sessions were revoked, but staff PIN access could not be reset. Retry the device reset.');
+      }
       const { error: passwordError } = await serverAdmin.auth.admin.updateUserById(device.auth_user_id, {
         password: temporaryPassword,
       });

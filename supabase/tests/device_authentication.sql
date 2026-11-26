@@ -155,6 +155,15 @@ begin
       context.device_id, context.device_auth_user, context.device_session_id, '1111'
     );
   end loop;
+  if not exists (
+    select 1
+    from public.device_pin_attempts
+    where device_id = context.device_id
+      and failed_attempts = 5
+      and locked_until = 'infinity'::timestamptz
+  ) then
+    raise exception 'Five failed PIN attempts did not persistently lock the device.';
+  end if;
   begin
     perform public.verify_staff_pin_for_device(
       context.device_id, context.device_auth_user, context.device_session_id, '4826'
@@ -164,6 +173,11 @@ begin
     null;
   end;
   delete from public.device_pin_attempts where device_id = context.device_id;
+  if public.verify_staff_pin_for_device(
+    context.device_id, context.device_auth_user, context.device_session_id, '4826'
+  ) is distinct from context.staff_a then
+    raise exception 'Resetting the device PIN lockout did not restore valid Staff sign-in.';
+  end if;
 
   insert into public.device_sessions (session_id, device_id, session_version, expires_at)
   values (context.staff_session_id, context.device_id, 0, now() + interval '1 hour');

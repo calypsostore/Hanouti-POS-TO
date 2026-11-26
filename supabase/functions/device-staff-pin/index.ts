@@ -35,8 +35,8 @@ Deno.serve(async (request) => {
       p_pin: body.pin,
     });
     if (pinError) {
-      if (pinError.message.includes('temporarily locked')) {
-        return response(429, { error: 'Too many incorrect PIN attempts. Try again in 60 seconds.' });
+      if (pinError.message.includes('locked until the owner resets')) {
+        return response(429, { error: 'Staff PIN sign-in is locked. Ask the store owner to reset this device.' });
       }
       if (pinError.code === '28000') return response(401, { error: 'The device session is no longer active.' });
       console.error('[device-pin] PIN verification failed.');

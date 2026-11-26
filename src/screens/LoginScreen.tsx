@@ -11,7 +11,7 @@ import apk1Logo from '../../logos/apk1.png';
 
 type LoginRole = 'staff' | 'admin';
 
-const LATEST_APK_URL = 'https://github.com/calypsostore/Hanouti-POS-TO/releases/download/v1.0.6/7anouti-POS-v1.0.6.apk';
+const LATEST_APK_URL = 'https://github.com/calypsostore/Hanouti-POS-TO/releases/download/v1.0.14/7anouti-POS-v1.0.14.apk';
 
 interface LoginLogoMotion {
   x: number;

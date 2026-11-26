@@ -27,5 +27,17 @@ verify_jwt = false
 [functions.verify-password]
 verify_jwt = true
 
+[functions.manage-devices]
+verify_jwt = true
+
+[functions.device-login]
+verify_jwt = false
+
+[functions.device-staff-pin]
+verify_jwt = true
+
+[functions.device-session]
+verify_jwt = true
+
 [functions.send-push]
 verify_jwt = false

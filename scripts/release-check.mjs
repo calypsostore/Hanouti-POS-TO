@@ -10,8 +10,9 @@ const migrationsDirectory = resolve(repositoryRoot, 'supabase', 'migrations');
 
 function printReleaseReminder() {
   log('Before publishing a new app version:');
-  log('  1. Run npx supabase db push --remote and verify the remote migration list.');
-  log('  2. Deploy every changed Edge Function with npx supabase functions deploy <function-name>.');
+  log('  1. Confirm a recent encrypted backup exists and targets the linked production project.');
+  log('  2. Apply pending migrations only through the approved, backup-verified database process.');
+  log('  3. Deploy changed Edge Functions only after their required schema is available.');
 }
 
 function parseMigrationList(output) {
@@ -33,7 +34,7 @@ function parseMigrationList(output) {
 }
 
 function localMigrationVersions() {
-  return readdirSync(migrationsDirectory)
+  const versions = readdirSync(migrationsDirectory)
     .filter((file) => file.endsWith('.sql'))
     .map((file) => {
       const match = /^(\d{14})_.+\.sql$/.exec(file);
@@ -41,6 +42,21 @@ function localMigrationVersions() {
       return match[1];
     })
     .sort();
+  const duplicates = versions.filter((version, index) => versions[index - 1] === version);
+  if (duplicates.length) {
+    throw new Error(`Duplicate local migration version(s): ${[...new Set(duplicates)].join(', ')}`);
+  }
+  return versions;
+}
+
+function runLocalMigrationCheck() {
+  try {
+    const versions = localMigrationVersions();
+    log(`Validated ${versions.length} local migration filenames; Hosted Supabase was not contacted.`);
+  } catch (error) {
+    logError(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  }
 }
 
 function runReleaseCheck() {
@@ -72,7 +88,7 @@ function runReleaseCheck() {
 
     const pending = diskVersions.filter((version) => !remoteVersions.has(version));
     if (pending.length) {
-      throw new Error(`Unapplied local migration(s): ${pending.join(', ')}. Run npx supabase db push --remote before publishing.`);
+      throw new Error(`Unapplied local migration(s): ${pending.join(', ')}. Apply them through the approved backup-verified database process before publishing.`);
     }
 
     log('All local migrations are applied to the linked Supabase database.');
@@ -82,4 +98,8 @@ function runReleaseCheck() {
   }
 }
 
-runReleaseCheck();
+if (process.argv.includes('--local')) {
+  runLocalMigrationCheck();
+} else {
+  runReleaseCheck();
+}

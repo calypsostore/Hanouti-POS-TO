@@ -184,6 +184,25 @@ export const authRepository = {
     await writeActivity(user, 'lock.locked', `${user.name}'s session was locked.`);
   },
 
+  async lockDeviceStaffSession(): Promise<void> {
+    const user = await currentUser();
+    if (!user || user.role !== 'staff' || !user.storeId) {
+      throw new Error('Only a signed-in Staff account can lock a shared device session.');
+    }
+    const client = getSupabaseClient();
+    await writeActivity(user, 'lock.locked', `${user.name}'s shared device session was locked.`);
+    const { error: revokeError } = await client.rpc('revoke_current_auth_session');
+    if (revokeError) throwSupabaseError(revokeError, 'Could not revoke the staff session');
+    const { error: signOutError } = await client.auth.signOut({ scope: 'local' });
+    clearSessionLock();
+    clearCachedUserDisplay();
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(SESSION_VERSION_KEY);
+      window.sessionStorage.removeItem(PIN_LOCK_KEY);
+    }
+    if (signOutError) throwSupabaseError(signOutError, 'Could not clear the staff session');
+  },
+
   pinLockRemainingMs(): number {
     if (typeof window === 'undefined') return 0;
     const lockedUntil = Number(window.sessionStorage.getItem(PIN_LOCK_KEY) ?? 0);
@@ -193,7 +212,7 @@ export const authRepository = {
   async setPersonalPin(userId: string, pin: string): Promise<UserSummary> {
     if (!/^\d{4}$/.test(pin)) throw new Error('PIN must contain exactly 4 digits.');
     const user = await currentUser();
-    if (!user || user.id !== userId || (user.role !== 'staff' && user.role !== 'owner')) throw new Error('You must sign in as this account to set a PIN.');
+    if (!user || user.id !== userId || user.role !== 'owner') throw new Error('Only a signed-in store owner can set a personal PIN.');
     const { error } = await getSupabaseClient().rpc('set_personal_pin', { p_pin: pin });
     if (error) throwSupabaseError(error, 'Could not set the personal PIN');
     if (typeof window !== 'undefined') window.sessionStorage.removeItem(PIN_LOCK_KEY);
@@ -205,13 +224,14 @@ export const authRepository = {
   async changePersonalPin(userId: string, currentPin: string, newPin: string): Promise<void> {
     if (!/^\d{4}$/.test(currentPin) || !/^\d{4}$/.test(newPin)) throw new Error('PIN must contain exactly 4 digits.');
     const user = await currentUser();
-    if (!user || user.id !== userId || (user.role !== 'staff' && user.role !== 'owner')) throw new Error('You must sign in as this account to change a PIN.');
+    if (!user || user.id !== userId || user.role !== 'owner') throw new Error('Only a signed-in store owner can change a personal PIN.');
     if (user.mustChangePassword || user.mustSetPin) throw new Error('Complete the initial password and PIN setup first.');
-    const { error } = await getSupabaseClient().rpc('change_personal_pin', {
+    const { data, error } = await getSupabaseClient().rpc('change_personal_pin', {
       p_current_pin: currentPin,
       p_new_pin: newPin,
     });
     if (error) throwSupabaseError(error, 'Could not change the personal PIN');
+    if (data !== true) throw new Error('Incorrect PIN.');
     if (typeof window !== 'undefined') window.sessionStorage.removeItem(PIN_LOCK_KEY);
   },
 

@@ -22,10 +22,16 @@ if (versionParts.size() != 3) {
     throw new GradleException("Expected a three-part package.json version, got ${appVersionName}.")
 }
 def appVersionCode = versionParts[0] * 10000 + versionParts[1] * 100 + versionParts[2]
+def notificationSoundResources = layout.buildDirectory.dir('generated/res/notification-sounds')
 
 android {
     namespace "com.hanouti.pos"
     compileSdk rootProject.ext.compileSdkVersion
+    sourceSets {
+        main {
+            res.srcDir(notificationSoundResources)
+        }
+    }
     defaultConfig {
         applicationId "com.hanouti.pos"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -65,6 +71,32 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+}
+
+tasks.register('copyNotificationSounds', Sync) {
+    from(rootProject.file('../alerts')) {
+        include 'alert1.mpeg', 'alert4.mpeg', 'alert5.mpeg'
+        into 'raw'
+    }
+    from(rootProject.file('../alerts')) {
+        include 'universfield-new-notification-050-494248.mp3'
+        rename { 'alert6.mp3' }
+        into 'raw'
+    }
+    from(rootProject.file('../alerts')) {
+        include 'tithuh-warning-545568.mp3'
+        rename { 'alert7.mp3' }
+        into 'raw'
+    }
+    from(rootProject.file('../alerts')) {
+        include 'notification_message-notification-alert-2-331726.mp3'
+        rename { 'alert8.mp3' }
+        into 'raw'
+    }
+    into notificationSoundResources
+}
+tasks.named('preBuild').configure {
+    dependsOn('copyNotificationSounds')
 }
 
 repositories {

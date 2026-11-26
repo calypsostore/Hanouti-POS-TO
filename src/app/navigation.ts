@@ -9,6 +9,7 @@ export const ownerPrimaryLinks: WorkspaceLink[] = [
 
 export const ownerMoreLinks: WorkspaceLink[] = [
   { to: '/owner/staff', label: 'nav.staff', icon: 'groups' },
+  { to: '/owner/devices', label: 'nav.devices', icon: 'devices' },
   { to: '/owner/schedule', label: 'nav.schedule', icon: 'calendar_month' },
   { to: '/owner/catalog', label: 'nav.products', icon: 'inventory_2' },
   { to: '/owner/inventory', label: 'nav.inventory', icon: 'inventory' },

@@ -35,6 +35,16 @@ import { AppearanceSettings } from '../components/AppearanceSettings';
 import { SettingsGlassSection } from '../components/settings/SettingsGlassSection';
 import { applyStoreAppearance } from '../lib/storeAppearance';
 import type { StoreAppearance } from '../theme/themeRegistry';
+import { NotificationSoundSettings } from '../components/NotificationSoundSettings';
+import {
+  DEFAULT_NOTIFICATION_SOUND_PREFERENCES,
+  getNotificationSoundPreferences,
+  playNotificationSound,
+  saveNotificationSoundPreferences,
+  type NotificationSoundId,
+  type NotificationSoundPreferences,
+  type NotificationSoundPurpose,
+} from '../services/notificationSounds';
 
 const notificationOptions: { type: NotificationType; label: string; description: string }[] = [
   { type: 'void_requested', label: 'Void request received', description: 'Notify the owner when staff request an order void.' },
@@ -250,7 +260,7 @@ export function SettingsScreen() {
     : userRole === 'staff'
       ? [
           { id: 'display', title: 'Theme', description: 'Shared store appearance settings', icon: 'palette' },
-          { id: 'security', title: 'Security', description: 'Personal PIN and password', icon: 'shield_lock' },
+          { id: 'security', title: 'Security', description: 'Password and sign-in', icon: 'shield_lock' },
           { id: 'notifications', title: 'Notifications and schedule', description: 'Alert preferences and upcoming shifts', icon: 'notifications' },
           { id: 'help', title: 'Help', description: 'Usage guides for POS operations', icon: 'help' },
           { id: 'language', title: 'Language', description: 'Choose the app language', icon: 'language' },
@@ -260,6 +270,7 @@ export function SettingsScreen() {
       : [
           { id: 'display', title: 'Theme', description: 'Shared store appearance settings', icon: 'palette' },
           { id: 'security', title: 'Security', description: 'Password and account access', icon: 'shield_lock' },
+          { id: 'notifications', title: 'Notifications', description: 'Choose your notification sounds', icon: 'notifications' },
           { id: 'help', title: 'Help', description: 'Usage guides for POS operations', icon: 'help' },
           { id: 'language', title: 'Language', description: 'Choose the app language', icon: 'language' },
           { id: 'permissions', title: 'Permissions', description: 'Notification and device permissions', icon: 'lock_open' },
@@ -296,6 +307,7 @@ export function SettingsScreen() {
   const [defaultSettlementTerms, setDefaultSettlementTerms] = useState<SettlementTerms>('monthly');
   const [notificationPreferences, setNotificationPreferences] = useState<Partial<Record<NotificationType, boolean>>>(DEFAULT_NOTIFICATION_PREFERENCES);
   const [userNotificationPreferences, setUserNotificationPreferences] = useState<Partial<Record<NotificationType, boolean>>>({});
+  const [notificationSoundPreferences, setNotificationSoundPreferences] = useState<NotificationSoundPreferences>(DEFAULT_NOTIFICATION_SOUND_PREFERENCES);
   const [positions, setPositions] = useState<PositionRecord[]>([]);
   const [catalogItems, setCatalogItems] = useState<CatalogItemRecord[]>([]);
   const [categories, setCategories] = useState<CategoryRecord[]>([]);
@@ -307,6 +319,8 @@ export function SettingsScreen() {
   const [savingCashOutThreshold, setSavingCashOutThreshold] = useState(false);
   const [savingSettlementTerms, setSavingSettlementTerms] = useState(false);
   const [savingNotifications, setSavingNotifications] = useState(false);
+  const [soundPreferencesLoading, setSoundPreferencesLoading] = useState(false);
+  const [savingSoundPreferences, setSavingSoundPreferences] = useState(false);
   const language = useSyncExternalStore(subscribeToLanguage, getLanguage);
   const [lastCheck, setLastCheck] = useState(updateService.getLastCheck());
   const [checking, setChecking] = useState(false);
@@ -323,6 +337,22 @@ export function SettingsScreen() {
     setLastCheck(result.checkedAt);
     setUpdateResult(result);
   }), []);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let active = true;
+    setNotificationSoundPreferences(DEFAULT_NOTIFICATION_SOUND_PREFERENCES);
+    setSoundPreferencesLoading(true);
+    void getNotificationSoundPreferences(user.id).then((preferences) => {
+      if (active) setNotificationSoundPreferences(preferences);
+    }).catch((preferenceError: unknown) => {
+      console.error('Unable to load notification sound preferences.', preferenceError);
+      if (active) setError('Unable to load notification sound preferences. Please try again.');
+    }).finally(() => {
+      if (active) setSoundPreferencesLoading(false);
+    });
+    return () => { active = false; };
+  }, [user?.id]);
 
   useEffect(() => {
     if (storeId) {
@@ -660,6 +690,33 @@ export function SettingsScreen() {
     }
   }
 
+  async function changeNotificationSound(purpose: NotificationSoundPurpose, soundId: NotificationSoundId) {
+    if (!user?.id) return;
+    setError('');
+    setNotice('');
+    setSavingSoundPreferences(true);
+    const nextPreferences = { ...notificationSoundPreferences, [purpose]: soundId };
+    try {
+      await saveNotificationSoundPreferences(user.id, nextPreferences);
+      setNotificationSoundPreferences(nextPreferences);
+      setNotice('Notification sounds saved.');
+    } catch (settingsError) {
+      setError(settingsError instanceof Error ? settingsError.message : 'Unable to save notification sound preferences.');
+    } finally {
+      setSavingSoundPreferences(false);
+    }
+  }
+
+  async function testNotificationSound(soundId: NotificationSoundId, onFinish: () => void) {
+    setError('');
+    try {
+      await playNotificationSound(soundId, onFinish);
+    } catch (soundError) {
+      onFinish();
+      setError(soundError instanceof Error ? soundError.message : 'Unable to play this notification sound.');
+    }
+  }
+
   function updateStaffRule(
     positionId: string,
     change: Partial<StaffRuleDraft>,
@@ -843,6 +900,26 @@ export function SettingsScreen() {
         />
       )}
 
+      {user?.id && activeSection.id === 'notifications' && (
+        <SettingsGlassSection
+          heading="Notification Sounds"
+          description="Choose and preview the sounds used by your notifications."
+          icon="volume_up"
+          headingId="notification-sound-settings-heading"
+        >
+          {soundPreferencesLoading ? (
+            <ListSkeleton rows={5} label="Loading notification sound preferences" />
+          ) : (
+            <NotificationSoundSettings
+              preferences={notificationSoundPreferences}
+              disabled={savingSoundPreferences}
+              onChange={(purpose, soundId) => { void changeNotificationSound(purpose, soundId); }}
+              onTest={testNotificationSound}
+            />
+          )}
+        </SettingsGlassSection>
+      )}
+
       {user?.role === 'staff' && activeSection.id === 'notifications' && (
         <>
           <SettingsGlassSection
@@ -852,23 +929,37 @@ export function SettingsScreen() {
             icon="notifications"
             headingId="staff-notification-settings-heading"
           >
-            {preferencesLoading ? <ListSkeleton rows={3} label="Loading notification preferences" /> : notificationOptions.filter(({ type }) => [
-              'void_approved', 'void_rejected', 'schedule_published', 'stock_depleted', 'item_86', 'app_update',
-            ].includes(type)).map((option) => (
-              <label key={option.type} className="flex min-h-14 items-start gap-3 rounded-xl bg-surface-container-low p-3">
-                <input
-                  type="checkbox"
-                  checked={userNotificationPreferences[option.type] ?? true}
-                  disabled={savingNotifications}
-                  onChange={(event) => { void changeUserNotificationPreference(option.type, event.target.checked); }}
-                  className="mt-1 h-5 w-5 shrink-0 accent-primary"
-                />
-                <span>
-                  <span className="block font-body text-label-md text-on-surface">{option.label}</span>
-                  <span className="mt-1 block font-body text-body-sm text-on-surface-variant">{option.description}</span>
-                </span>
-              </label>
-            ))}
+            {preferencesLoading ? <ListSkeleton rows={3} label="Loading notification preferences" /> : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {notificationOptions.filter(({ type }) => [
+                  'void_approved', 'void_rejected', 'schedule_published', 'stock_depleted', 'item_86', 'app_update',
+                ].includes(type)).map((option) => {
+                  const isEnabled = userNotificationPreferences[option.type] ?? true;
+                  return (
+                    <label
+                      key={option.type}
+                      className={`flex min-h-24 items-start gap-3 rounded-2xl border p-4 transition-colors ${
+                        isEnabled
+                          ? 'border-primary/30 bg-primary-container/40'
+                          : 'border-outline-variant bg-surface-container-lowest hover:border-primary/40'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isEnabled}
+                        disabled={savingNotifications}
+                        onChange={(event) => { void changeUserNotificationPreference(option.type, event.target.checked); }}
+                        className="mt-1 h-5 w-5 shrink-0 accent-primary"
+                      />
+                      <span>
+                        <span className="block font-body text-label-md text-on-surface">{option.label}</span>
+                        <span className="mt-1 block font-body text-body-sm text-on-surface-variant">{option.description}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
           </SettingsGlassSection>
           <SettingsGlassSection heading="My schedule" description="Upcoming published shifts." icon="calendar_month">
             {scheduleLoading ? <ListSkeleton rows={2} label="Loading your schedule" /> : upcomingSchedule.length > 0 ? (
@@ -902,7 +993,7 @@ export function SettingsScreen() {
       )}
 
       {activeSection.id === 'security' && <>
-        {(user?.role === 'staff' || user?.role === 'owner') && <ChangePersonalPinForm userId={user.id} />}
+        {user?.role === 'owner' && <ChangePersonalPinForm userId={user.id} />}
         <ChangePasswordForm onError={setError} onNotice={setNotice} />
         {user?.role === 'owner' && <p className="font-body text-body-sm text-on-surface-variant">If you forget your password, contact your platform super admin to issue a temporary reset password.</p>}
       </>}
@@ -1126,29 +1217,58 @@ export function SettingsScreen() {
           </SettingsGlassSection>
 
           <SettingsGlassSection id="settings-notifications" hidden={activeSection.id !== 'notifications'} heading="Notifications" description="Choose which notification types are created. All are enabled by default." icon="notifications" headingId="notification-settings-heading">
-            {notificationOptions.map((option) => (
-              <label key={option.type} className="flex min-h-14 items-start gap-3 rounded-xl bg-surface-container-low p-3">
-                <input
-                  type="checkbox"
-                  checked={notificationPreferences[option.type] ?? true}
-                  disabled={savingNotifications}
-                  onChange={(event) => { void changeNotificationPreference(option.type, event.target.checked); }}
-                  className="mt-1 h-5 w-5 shrink-0 accent-primary"
-                />
-                <span>
-                  <span className="block font-body text-label-md text-on-surface">{option.label}</span>
-                  <span className="mt-1 block font-body text-body-sm text-on-surface-variant">{option.description}</span>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {notificationOptions.map((option) => {
+                const isEnabled = notificationPreferences[option.type] ?? true;
+                return (
+                  <label
+                    key={option.type}
+                    className={`flex min-h-24 items-start gap-3 rounded-2xl border p-4 transition-colors ${
+                      isEnabled
+                        ? 'border-primary/30 bg-primary-container/40'
+                        : 'border-outline-variant bg-surface-container-lowest hover:border-primary/40'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isEnabled}
+                      disabled={savingNotifications}
+                      onChange={(event) => { void changeNotificationPreference(option.type, event.target.checked); }}
+                      className="mt-1 h-5 w-5 shrink-0 accent-primary"
+                    />
+                    <span>
+                      <span className="block font-body text-label-md text-on-surface">{option.label}</span>
+                      <span className="mt-1 block font-body text-body-sm text-on-surface-variant">{option.description}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            <form onSubmit={(event) => { void saveCashOutAlertThreshold(event); }} className="rounded-2xl border border-outline-variant bg-surface-container-low p-4">
+              <div className="mb-4 flex items-start gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-container text-on-primary-container">
+                  <MaterialIcon name="payments" />
                 </span>
-              </label>
-            ))}
-            <form onSubmit={(event) => { void saveCashOutAlertThreshold(event); }} className="flex flex-col gap-3 rounded-xl bg-surface-container-low p-3">
-              <div>
-                <h3 className="font-body text-label-lg text-on-surface">Large cash-out threshold</h3>
-                <p className="mt-1 font-body text-body-sm text-on-surface-variant">Notify the owner when a cash-out is greater than this amount. Set to 0 to alert for every cash-out. Default: 50.000 DT.</p>
+                <div>
+                  <h3 className="font-body text-label-lg text-on-surface">Large cash-out threshold</h3>
+                  <p className="mt-1 font-body text-body-sm text-on-surface-variant">Notify the owner when a cash-out is greater than this amount. Set to 0 to alert for every cash-out. Default: 50.000 DT.</p>
+                </div>
               </div>
-              <label htmlFor="cash-out-alert-threshold" className="font-body text-label-md text-on-surface">Alert threshold (TND)</label>
-              <DinarInput id="cash-out-alert-threshold" required value={cashOutAlertThreshold} onChange={(event) => setCashOutAlertThreshold(event.target.value)} className="h-12 rounded-lg bg-surface-container-lowest px-3 outline-none focus:ring-2 focus:ring-primary" />
-              <Button type="submit" variant="secondary" disabled={savingCashOutThreshold}>{savingCashOutThreshold ? 'Saving…' : t('common.save')}</Button>
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                <label htmlFor="cash-out-alert-threshold" className="font-body text-label-md text-on-surface">
+                  Alert threshold (TND)
+                  <DinarInput
+                    id="cash-out-alert-threshold"
+                    required
+                    value={cashOutAlertThreshold}
+                    onChange={(event) => setCashOutAlertThreshold(event.target.value)}
+                    className="mt-1.5 h-12 w-full rounded-xl border border-outline-variant bg-surface-container-lowest px-3 outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </label>
+                <Button type="submit" variant="secondary" disabled={savingCashOutThreshold} className="w-full sm:w-auto">
+                  {savingCashOutThreshold ? 'Saving…' : t('common.save')}
+                </Button>
+              </div>
             </form>
           </SettingsGlassSection>
         </>

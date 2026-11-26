@@ -64,6 +64,10 @@ Complete this checklist once for each environment:
    npx supabase functions deploy provision-account
    npx supabase functions deploy login
    npx supabase functions deploy verify-password
+   npx supabase functions deploy manage-devices
+   npx supabase functions deploy device-login
+   npx supabase functions deploy device-staff-pin
+   npx supabase functions deploy device-session
    ```
 
 5. **Create the first super admin.** Create the administrator user through
@@ -113,6 +117,14 @@ catalog availability. Server-registered sessions expire after 12 hours, are
 revoked by staff force-logout, and are revalidated when the app regains focus.
 Store inactivity, archival, subscription expiry, or an inactive owner blocks
 authenticated API requests.
+
+Store owners can create shared POS devices from **Devices** in the owner
+workspace. Device accounts are isolated from employee profiles and can only
+use the device Edge Functions. A staff member's own PIN establishes a normal
+staff Auth session for the same store, so existing role permissions and audit
+identity remain in effect. Device support requires the
+`20261127100000_store_devices.sql` migration and the four device Edge Functions
+listed above; apply/deploy them only through the approved production process.
 
 ## Known limits
 

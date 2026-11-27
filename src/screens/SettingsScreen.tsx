@@ -758,8 +758,12 @@ export function SettingsScreen() {
   async function changeLanguage(value: AppLanguage) {
     setError('');
     setNotice('');
+    if (!user?.id) {
+      setError(t('settings.languageFailed'));
+      return;
+    }
     try {
-      await settingsService.setLanguage(value);
+      await settingsService.setProfileLanguage(user.id, value);
       setNotice(t('settings.languageChanged'));
     } catch (languageError) {
       setError(localizeErrorMessage(languageError, t('settings.languageFailed')));

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   authGetCurrentUser: vi.fn(),
@@ -52,6 +52,7 @@ vi.mock('../src/lib/storeAppearance', () => ({ resetStoreAppearance: vi.fn() }))
 
 import { useAuthStore } from '../src/stores/authStore';
 import type { UserSummary } from '../src/types/domain';
+import { getLanguage, setDeviceLoginLanguage, setProfileLanguage } from '../src/i18n';
 
 const device = {
   id: 'terminal-1',
@@ -81,6 +82,10 @@ const owner = {
 describe('shared device authentication state', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
+    vi.stubGlobal('window', { localStorage });
+    vi.stubGlobal('document', { documentElement: { lang: 'en', dir: 'ltr' } });
+    setDeviceLoginLanguage('en');
     useAuthStore.setState({
       user: null,
       device: null,
@@ -101,6 +106,10 @@ describe('shared device authentication state', () => {
     mocks.authLockCurrentSession.mockResolvedValue(undefined);
     mocks.authLogout.mockResolvedValue(undefined);
     mocks.signOut.mockResolvedValue({ error: null });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('keeps the employee role, store identity, and permissions after device PIN sign-in', async () => {
@@ -130,6 +139,36 @@ describe('shared device authentication state', () => {
       permissions: [],
       permissionsReady: true,
     });
+  });
+
+  it('switches between device-login and per-profile languages across PIN sessions', async () => {
+    setProfileLanguage(staff.id, 'en');
+    setProfileLanguage(owner.id, 'fr');
+    setDeviceLoginLanguage('ar');
+
+    await useAuthStore.getState().loginDevice(device.username, 'temporary-password');
+    expect(getLanguage()).toBe('ar');
+
+    await useAuthStore.getState().loginWithDevicePin('4826');
+    expect(getLanguage()).toBe('en');
+
+    await useAuthStore.getState().lock();
+    expect(getLanguage()).toBe('ar');
+
+    mocks.authGetCurrentUser.mockResolvedValue(owner);
+    await useAuthStore.getState().loginWithDevicePin('8642');
+    expect(getLanguage()).toBe('fr');
+  });
+
+  it('restores the signed-in profile language when an existing session hydrates', async () => {
+    setProfileLanguage(staff.id, 'fr');
+    setDeviceLoginLanguage('ar');
+    mocks.authGetCurrentUser.mockResolvedValue(staff);
+    mocks.deviceGetCurrent.mockResolvedValue(null);
+
+    await useAuthStore.getState().hydrate();
+
+    expect(getLanguage()).toBe('fr');
   });
 
   it('rejects an account from a different store instead of switching terminal identity', async () => {

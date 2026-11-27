@@ -8,6 +8,7 @@ import { isSupabaseDriver } from '../data/driver';
 import { assertExpectedSchemaVersion } from '../services/schemaVersionService';
 import { resetStoreAppearance } from '../lib/storeAppearance';
 import { deviceService, type DeviceSessionSummary } from '../services/deviceService';
+import { activateDeviceLoginLanguage, activateProfileLanguage } from '../i18n';
 
 let authStateSubscription: { unsubscribe: () => void } | undefined;
 let permissionRefreshGeneration = 0;
@@ -81,6 +82,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         user?.role === 'staff' ? getEffectivePermissions(user.id) : Promise.resolve([]),
       ]);
       if (requestGeneration !== permissionRefreshGeneration) return;
+      if (user) activateProfileLanguage(user.id);
+      else activateDeviceLoginLanguage();
       set({
         user,
         device,
@@ -99,6 +102,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             if (!session) {
               useCartStore.getState().clearOrder();
               resetStoreAppearance();
+              activateDeviceLoginLanguage();
               set({ user: null, cachedUserDisplay: null, permissions: [], permissionsReady: true, locked: false });
               return;
             }
@@ -135,6 +139,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         user?.role === 'staff' ? getEffectivePermissions(user.id) : Promise.resolve([]),
       ]);
       if (permissionGeneration !== permissionRefreshGeneration || requestGeneration !== authRefreshGeneration) return;
+      if (user) activateProfileLanguage(user.id);
+      else activateDeviceLoginLanguage();
       set({ user, device, cachedUserDisplay: user ? { name: user.name } : null, locked, permissions, permissionsReady: true, initializationError: null });
       if (!user) resetStoreAppearance();
     } catch (error) {
@@ -167,6 +173,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const user = await authService.login(identifier, password, roles, keepSignedIn);
     authRefreshGeneration += 1;
     permissionRefreshGeneration += 1;
+    activateProfileLanguage(user.id);
     set({ user, device: null, cachedUserDisplay: { name: user.name }, permissions: [], permissionsReady: user.role !== 'staff', locked: false });
     resetStoreAppearance();
     if (user.role === 'staff') await get().refreshPermissions();
@@ -177,6 +184,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   const device = await deviceService.loginDevice(username, password);
   authRefreshGeneration += 1;
   permissionRefreshGeneration += 1;
+  activateDeviceLoginLanguage();
   useCartStore.getState().clearOrder();
   set({
     user: null,
@@ -201,6 +209,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   }
   authRefreshGeneration += 1;
   permissionRefreshGeneration += 1;
+  activateProfileLanguage(user.id);
   set({
     user,
     cachedUserDisplay: { name: user.name },
@@ -255,6 +264,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       await authService.lockDeviceSession();
       authRefreshGeneration += 1;
       permissionRefreshGeneration += 1;
+      activateDeviceLoginLanguage();
       useCartStore.getState().clearOrder();
       set({ user: null, cachedUserDisplay: null, permissions: [], permissionsReady: true, locked: true });
       return;
@@ -302,6 +312,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     resetStoreAppearance();
     permissionRefreshGeneration += 1;
     useCartStore.getState().clearOrder();
+    activateDeviceLoginLanguage();
     set({ user: null, device: null, cachedUserDisplay: null, permissions: [], permissionsReady: true, locked: false });
     if (logoutError) throw normalizeError(logoutError);
   },

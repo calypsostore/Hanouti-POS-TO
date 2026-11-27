@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getLanguage, setLanguage } from '../src/i18n';
+import { getLanguage, setDeviceLoginLanguage } from '../src/i18n';
 import { formatMillimesAmountsInText, formatTnd } from '../src/lib/format';
 import {
   formatDinarInput,
@@ -41,12 +41,12 @@ describe('Dinar millimes parsing', () => {
   it('formats displayed Dinars using the selected language conventions', () => {
     const previousLanguage = getLanguage();
     try {
-      setLanguage('fr');
+      setDeviceLoginLanguage('fr');
       expect(formatMillimesWithThousands(1250000)).toBe('1\u202f250,000');
       expect(formatMillimesWithThousands(-250)).toBe('-0,250');
       expect(formatTnd(1250)).toBe('1\u202f250,000');
     } finally {
-      setLanguage(previousLanguage);
+      setDeviceLoginLanguage(previousLanguage);
     }
   });
 

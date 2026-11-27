@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getLanguage, setLanguage } from '../src/i18n';
+import { getLanguage, setDeviceLoginLanguage } from '../src/i18n';
 import { ticketTranslations } from '../src/i18n/tickets';
 import { buildReportDocument } from '../src/services/reportDocument';
 import { buildKitchenTicketDocument, buildTicketDocument } from '../src/services/ticketDocument';
@@ -59,7 +59,7 @@ describe('ticket and report translations', () => {
         ['fr', 'Ticket n° 42', 'COPIE CUISINE N° 42', 'RAPPORT X', 'RAPPORT Z'],
         ['ar', 'التذكرة رقم 42', 'نسخة المطبخ رقم 42', 'تقرير X', 'تقرير Z'],
       ] as const) {
-        setLanguage(language);
+        setDeviceLoginLanguage(language);
         const ticket = buildTicketDocument(order, { name: 'Test Store' }, 'Cashier');
         const kitchenTicket = buildKitchenTicketDocument(order, { name: 'Test Store' }, 'Cashier');
         const reportDocument = buildReportDocument(report, { name: 'Test Store' });
@@ -76,7 +76,7 @@ describe('ticket and report translations', () => {
         expect(zReportDocument.lines.map((line) => line.text).join('\n')).not.toContain('EXPECTED CASH');
       }
     } finally {
-      setLanguage(previousLanguage);
+      setDeviceLoginLanguage(previousLanguage);
     }
   });
 });

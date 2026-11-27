@@ -32,7 +32,7 @@ describe('internationalization', () => {
     let notifications = 0;
     const unsubscribe = subscribeToLanguage(() => { notifications += 1; });
 
-    await settingsService.setLanguage('fr');
+    await settingsService.setDeviceLoginLanguage('fr');
     expect(getLanguage()).toBe('fr');
     expect(localStorage.getItem(LANGUAGE_KEY)).toBe('fr');
     expect(document.documentElement.lang).toBe('fr');
@@ -40,7 +40,7 @@ describe('internationalization', () => {
     expect(t('settings.title')).toBe('Paramètres');
     expect(localizeErrorMessage(new Error('Service error'), t('common.loadFailed'))).toBe(t('common.loadFailed'));
 
-    await settingsService.setLanguage('ar');
+    await settingsService.setDeviceLoginLanguage('ar');
     expect(getLanguage()).toBe('ar');
     expect(document.documentElement.lang).toBe('ar');
     expect(document.documentElement.dir).toBe('rtl');
@@ -48,6 +48,27 @@ describe('internationalization', () => {
     expect(localizeErrorMessage(new Error('خطأ'), t('common.loadFailed'))).toBe('خطأ');
     expect(notifications).toBe(2);
     unsubscribe();
+  });
+
+  it('keeps device-login language separate from each signed-in profile preference', async () => {
+    const {
+      activateDeviceLoginLanguage,
+      activateProfileLanguage,
+      getLanguage,
+      setDeviceLoginLanguage,
+      setProfileLanguage,
+    } = await import('../src/i18n');
+
+    setDeviceLoginLanguage('ar');
+    expect(activateProfileLanguage('staff-english')).toBe('en');
+
+    setProfileLanguage('staff-french', 'fr');
+    expect(getLanguage()).toBe('fr');
+    expect(localStorage.getItem('7anouti-pos:language')).toBe('ar');
+    expect(activateProfileLanguage('staff-french')).toBe('fr');
+    expect(activateProfileLanguage('staff-english')).toBe('en');
+    expect(activateDeviceLoginLanguage()).toBe('ar');
+    expect(localStorage.getItem('7anouti-pos:profile-language:staff-french')).toBe('fr');
   });
 
   it('restores a saved language at startup and falls back safely for unsupported values and missing keys', async () => {
@@ -68,7 +89,7 @@ describe('internationalization', () => {
     expect(document.documentElement.dir).toBe('ltr');
     expect(fallbackI18n.t('settings.title')).toBe('Settings');
 
-    expect(fallbackI18n.setLanguage('unsupported')).toBe('en');
+    expect(fallbackI18n.setDeviceLoginLanguage('unsupported')).toBe('en');
     expect(localStorage.getItem(LANGUAGE_KEY)).toBe('en');
   });
 });

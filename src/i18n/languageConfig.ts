@@ -1,5 +1,5 @@
 export const DEFAULT_LANGUAGE = 'en' as const;
-export const LANGUAGE_STORAGE_KEY = '7anouti-pos:language';
+export const DEVICE_LOGIN_LANGUAGE_STORAGE_KEY = '7anouti-pos:language';
 
 export const LANGUAGE_OPTIONS = [
   { code: 'en', name: 'English', direction: 'ltr' },

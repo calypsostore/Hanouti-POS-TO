@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { getLanguage, setLanguage } from '../src/i18n';
+import { getLanguage, setDeviceLoginLanguage } from '../src/i18n';
 import { shareCustomerStatement } from '../src/services/customerStatementShare';
 import { shareTextAsPdf } from '../src/services/receiptExport';
 import type { CustomerStatementData } from '../src/services/customerService';
@@ -30,7 +30,7 @@ describe('customer statement translations', () => {
   it('renders customer ticket details in French', async () => {
     const previousLanguage = getLanguage();
     try {
-      setLanguage('fr');
+      setDeviceLoginLanguage('fr');
       await shareCustomerStatement(statement);
 
       const [text, , title] = vi.mocked(shareTextAsPdf).mock.calls[0];
@@ -41,14 +41,14 @@ describe('customer statement translations', () => {
       expect(text).toContain('Solde créditeur');
       expect(title).toBe('Relevé du compte client - Sana');
     } finally {
-      setLanguage(previousLanguage);
+      setDeviceLoginLanguage(previousLanguage);
     }
   });
 
   it('renders the empty customer statement in Arabic', async () => {
     const previousLanguage = getLanguage();
     try {
-      setLanguage('ar');
+      setDeviceLoginLanguage('ar');
       await shareCustomerStatement({ ...statement, balanceMillimes: 1000, transactions: [] });
 
       const [text, , title] = vi.mocked(shareTextAsPdf).mock.calls[0];
@@ -56,7 +56,7 @@ describe('customer statement translations', () => {
       expect(text).toContain('المبلغ المستحق');
       expect(title).toBe('كشف حساب العميل - Sana');
     } finally {
-      setLanguage(previousLanguage);
+      setDeviceLoginLanguage(previousLanguage);
     }
   });
 });

@@ -29,7 +29,7 @@ vi.mock('../src/data/deviceSupabaseClient', () => ({
 }));
 
 import { deviceService } from '../src/services/deviceService';
-import { setLanguage } from '../src/i18n';
+import { setDeviceLoginLanguage } from '../src/i18n';
 
 describe('device service authentication boundaries', () => {
   beforeEach(() => {
@@ -103,7 +103,7 @@ describe('device service authentication boundaries', () => {
   });
 
   it('keeps PIN verification separate from the UI language and device identity', async () => {
-    setLanguage('ar');
+    setDeviceLoginLanguage('ar');
     mocks.deviceInvoke.mockResolvedValue({
       data: {
         access_token: 'account-access',

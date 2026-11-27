@@ -183,7 +183,7 @@ export function DeviceLoginScreen() {
     if (!isLanguageCode(value)) return;
     setLanguageError('');
     try {
-      await settingsService.setLanguage(value);
+      await settingsService.setDeviceLoginLanguage(value);
       setLanguageDialogOpen(false);
     } catch (languageChangeError) {
       console.error('[devices] Could not change the PIN screen language.', languageChangeError);

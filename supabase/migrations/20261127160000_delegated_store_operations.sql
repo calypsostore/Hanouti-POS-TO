@@ -337,6 +337,12 @@ begin
   original := 'actor.role <> ''owner''';
   replacement := '(actor.role <> ''owner'' and not public.has_store_permission(''manage_shifts''))';
   if position(original in definition) = 0 then raise exception 'Could not locate force-close day authorization check.'; end if;
+  execute replace(definition, original, replacement);
+
+  definition := pg_get_functiondef('public.force_close_day_legacy(text)'::regprocedure);
+  original := 'actor.role <> ''owner''';
+  replacement := '(actor.role <> ''owner'' and not public.has_store_permission(''manage_shifts''))';
+  if position(original in definition) = 0 then raise exception 'Could not locate legacy force-close role check.'; end if;
   definition := replace(definition, original, replacement);
   original := 'not public.is_store_owner(target_store.store_id)';
   replacement := '(not public.is_store_owner(target_store.store_id) and not public.has_store_permission(''manage_shifts''))';

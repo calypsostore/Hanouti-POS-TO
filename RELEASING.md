@@ -89,19 +89,25 @@ Before publishing a new app version:
 5. If migrations are pending, stop the release and use the separately approved
    database change process. Do not run `supabase db push --remote` as part of
    the application release workflow.
-6. After the sound migrations are applied, deploy the changed `send-push` Edge
-   Function through the approved process so FCM uses per-user sound choices and
-   the same general and Void defaults as the app. Older Android clients without
-   sound-specific channels fall back to their manifest default channel;
+6. Apply `20261127220000_notification_localized_content.sql` before deploying
+   the updated web app. It adds structured notification content and per-device
+   language metadata; the app schema version check rejects older databases.
+7. Apply `20261127230000_super_admin_store_read_only_access.sql` before
+   deploying the updated web app. It enables read-only store data access for
+   super-admins and updates the expected schema version.
+8. After the sound, localization, and super-admin migrations are applied, deploy
+   the changed `send-push` Edge Function through the approved process so FCM uses
+   per-device language and the configured sound choices. Older Android clients
+   without sound-specific channels fall back to their manifest default channel;
    notifications remain deliverable, but those clients use their channel's
    existing sound until updated.
-7. Check for other changed files under `supabase/functions` since the last
+9. Check for other changed files under `supabase/functions` since the last
    release and deploy each changed function through the approved process.
-8. For each changed PL/pgSQL function, manually compare parameters, declared
+10. For each changed PL/pgSQL function, manually compare parameters, declared
    variables, and `RETURNS TABLE` output names with columns from every
    referenced relation. Use `v_`-prefixed locals and qualify SQL columns; a
    regex-based check is not reliable for nested PL/pgSQL.
-9. Publish only after all checks and required production approvals succeed.
+11. Publish only after all checks and required production approvals succeed.
 
 The repository has `package.json` version `1.0.12`; the latest remote tag is
 `v1.0.6`, and `v1.0.12` is unused remotely. The selected next release version

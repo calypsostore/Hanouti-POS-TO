@@ -250,8 +250,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     return updatedUser;
   },
   lock: async () => {
-    if (get().device && get().user?.role === 'staff') {
-      await authService.lockDeviceStaffSession();
+    const { device, user } = get();
+    if (device && user && (user.role === 'staff' || user.role === 'owner')) {
+      await authService.lockDeviceSession();
       authRefreshGeneration += 1;
       permissionRefreshGeneration += 1;
       useCartStore.getState().clearOrder();

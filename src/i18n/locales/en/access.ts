@@ -74,8 +74,6 @@ export const enAccess = {
   'devices.staffPinLabel': 'Enter your 4-digit PIN',
   'devices.signInDevice': 'Sign in to device',
   'devices.signInStaff': 'Sign in with PIN',
-  'devices.deviceLogout': 'Device log out',
-  'devices.deviceLogoutDisabled': 'This shared terminal cannot be signed out here. Ask the store owner to deactivate it in Device Management.',
   'devices.logoutFailed': 'Could not sign out this device.',
   'password.useSixCharacters': 'Use at least 6 characters.',
   'password.mismatch': 'Passwords do not match.',

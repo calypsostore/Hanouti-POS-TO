@@ -92,7 +92,7 @@ export function TopBar({ title, storeName, storeLogoId, storeType = 'general', o
     try {
       await lock();
       setProfileOpen(false);
-      navigate('/lock', { replace: true, state: { from: location.pathname } });
+      navigate(deviceBoundSession ? '/device-pin' : '/lock', { replace: true, state: { from: location.pathname } });
     } catch (lockError) {
       console.error('Unable to lock the shared-device session.', lockError);
       setProfileError(localizeErrorMessage(lockError, t('profile.unableToLockTerminal')));
@@ -296,19 +296,16 @@ export function TopBar({ title, storeName, storeLogoId, storeType = 'general', o
               </button>
             )}
             {profileError && <p role="alert" className="rounded-lg bg-error-container p-2 font-body text-body-sm text-on-error-container">{profileError}</p>}
-            <button
-              type="button"
-              disabled={loggingOut || deviceBoundSession}
-              onClick={() => { void handleLogout(); }}
-              className="flex min-h-11 items-center gap-3 rounded-lg bg-error-container px-3 text-left font-body text-label-md text-on-error-container hover:opacity-90 disabled:opacity-60"
-            >
-              <MaterialIcon name={loggingOut ? 'sync' : 'logout'} className={loggingOut ? 'animate-spin' : ''} />
-              {loggingOut ? t('profile.signingOut') : t('app.logOut')}
-            </button>
-            {deviceBoundSession && (
-              <p role="note" className="font-body text-body-sm text-on-surface-variant">
-                {t('devices.deviceLogoutDisabled')}
-              </p>
+            {!deviceBoundSession && (
+              <button
+                type="button"
+                disabled={loggingOut}
+                onClick={() => { void handleLogout(); }}
+                className="flex min-h-11 items-center gap-3 rounded-lg bg-error-container px-3 text-left font-body text-label-md text-on-error-container hover:opacity-90 disabled:opacity-60"
+              >
+                <MaterialIcon name={loggingOut ? 'sync' : 'logout'} className={loggingOut ? 'animate-spin' : ''} />
+                {loggingOut ? t('profile.signingOut') : t('app.logOut')}
+              </button>
             )}
           </div>
         </section>

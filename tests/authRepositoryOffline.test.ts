@@ -146,6 +146,18 @@ describe('offline Supabase authentication cache', () => {
     expect(localStorage.getItem('7anouti-pos:cached-auth-at')).toBeNull();
   });
 
+  it('revokes an owner session and clears local identity when locking a shared device', async () => {
+    getProfileMock.mockResolvedValue({ ...profile, storeId: 'store-1' });
+    getStoreMock.mockResolvedValue({ isActive: true, archivedAt: null, pinMustChange: false });
+
+    await authRepository.lockDeviceSession();
+
+    expect(client.rpc).toHaveBeenCalledWith('revoke_current_auth_session');
+    expect(client.auth.signOut).toHaveBeenCalledWith({ scope: 'local' });
+    expect(localStorage.getItem('7anouti-pos:cached-auth-user')).toBeNull();
+    expect(localStorage.getItem('7anouti-pos:cached-user-display')).toBeNull();
+  });
+
   it('clears cached identity when Supabase rejects the session after reconnecting', async () => {
     await authRepository.currentUser();
     client.auth.getUser.mockResolvedValue({

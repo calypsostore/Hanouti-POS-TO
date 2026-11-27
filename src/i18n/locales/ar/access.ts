@@ -74,8 +74,6 @@ export const arAccess = {
   'devices.staffPinLabel': 'أدخل رمز PIN المكوّن من 4 أرقام',
   'devices.signInDevice': 'تسجيل الدخول إلى الجهاز',
   'devices.signInStaff': 'تسجيل الدخول باستخدام PIN',
-  'devices.deviceLogout': 'تسجيل خروج الجهاز',
-  'devices.deviceLogoutDisabled': 'لا يمكن تسجيل الخروج من هذه المحطة المشتركة هنا. اطلب من مالك المتجر إلغاء تنشيطها من إدارة الأجهزة.',
   'devices.logoutFailed': 'تعذّر تسجيل خروج الجهاز.',
   'password.useSixCharacters': 'استخدم 6 أحرف على الأقل.',
   'password.mismatch': 'كلمتا المرور غير متطابقتين.',

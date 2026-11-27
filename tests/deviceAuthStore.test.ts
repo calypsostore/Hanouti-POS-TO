@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   authGetCachedUserDisplay: vi.fn(() => null),
   authIsSessionLocked: vi.fn(),
   authLockCurrentSession: vi.fn(),
-  authLockDeviceStaffSession: vi.fn(),
+  authLockDeviceSession: vi.fn(),
   authLogout: vi.fn(),
   deviceLogin: vi.fn(),
   devicePinLogin: vi.fn(),
@@ -23,7 +23,7 @@ vi.mock('../src/services/authService', () => ({
     getCachedUserDisplay: mocks.authGetCachedUserDisplay,
     isSessionLocked: mocks.authIsSessionLocked,
     lockCurrentSession: mocks.authLockCurrentSession,
-    lockDeviceStaffSession: mocks.authLockDeviceStaffSession,
+    lockDeviceSession: mocks.authLockDeviceSession,
     logout: mocks.authLogout,
   },
 }));
@@ -97,7 +97,7 @@ describe('shared device authentication state', () => {
     mocks.deviceLogout.mockResolvedValue(undefined);
     mocks.authGetCurrentUser.mockResolvedValue(staff);
     mocks.getEffectivePermissions.mockResolvedValue(['take_orders']);
-    mocks.authLockDeviceStaffSession.mockResolvedValue(undefined);
+    mocks.authLockDeviceSession.mockResolvedValue(undefined);
     mocks.authLockCurrentSession.mockResolvedValue(undefined);
     mocks.authLogout.mockResolvedValue(undefined);
     mocks.signOut.mockResolvedValue({ error: null });
@@ -148,7 +148,7 @@ describe('shared device authentication state', () => {
 
     await useAuthStore.getState().lock();
 
-    expect(mocks.authLockDeviceStaffSession).toHaveBeenCalledOnce();
+    expect(mocks.authLockDeviceSession).toHaveBeenCalledOnce();
     expect(useAuthStore.getState()).toMatchObject({
       user: null,
       device,
@@ -158,15 +158,33 @@ describe('shared device authentication state', () => {
     expect(mocks.clearOrder).toHaveBeenCalledOnce();
   });
 
-  it('lets the store owner lock their shared-device session without signing out', async () => {
+  it('returns the owner to the shared-device PIN screen when locking', async () => {
     useAuthStore.setState({ user: owner, device, locked: false });
 
     await useAuthStore.getState().lock();
 
-    expect(mocks.authLockCurrentSession).toHaveBeenCalledOnce();
-    expect(useAuthStore.getState()).toMatchObject({ user: owner, device, locked: true });
-    expect(mocks.authLogout).not.toHaveBeenCalled();
+    expect(mocks.authLockDeviceSession).toHaveBeenCalledOnce();
+    expect(useAuthStore.getState()).toMatchObject({
+      user: null,
+      cachedUserDisplay: null,
+      device,
+      locked: true,
+      permissions: [],
+    });
+    expect(mocks.authLockCurrentSession).not.toHaveBeenCalled();
     expect(mocks.deviceLogout).not.toHaveBeenCalled();
+    expect(mocks.clearOrder).toHaveBeenCalledOnce();
+  });
+
+  it('locks a regular owner session without clearing or signing out the account', async () => {
+    useAuthStore.setState({ user: owner, device: null, locked: false });
+
+    await useAuthStore.getState().lock();
+
+    expect(mocks.authLockCurrentSession).toHaveBeenCalledOnce();
+    expect(mocks.authLockDeviceSession).not.toHaveBeenCalled();
+    expect(useAuthStore.getState()).toMatchObject({ user: owner, device: null, locked: true });
+    expect(mocks.authLogout).not.toHaveBeenCalled();
   });
 
   it('prevents a staff PIN session from signing out the shared device', async () => {

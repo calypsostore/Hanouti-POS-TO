@@ -181,8 +181,8 @@ export const authService = {
     });
   },
 
-  async lockDeviceStaffSession(): Promise<void> {
-    if (isSupabaseDriver()) return authRepository.lockDeviceStaffSession();
+  async lockDeviceSession(): Promise<void> {
+    if (isSupabaseDriver()) return authRepository.lockDeviceSession();
     throw new Error('Shared device sessions require the connected Supabase service.');
   },
 

@@ -199,17 +199,6 @@ export function DeviceLoginScreen() {
           </div>
         )}
 
-        {device && (
-          <div className="mt-4">
-            <Button type="button" variant="ghost" disabled className="w-full border border-outline-variant">
-              <MaterialIcon name="logout" />
-              {t('devices.deviceLogout')}
-            </Button>
-            <p role="note" className="mt-2 text-center font-body text-body-sm text-on-surface-variant">
-              {t('devices.deviceLogoutDisabled')}
-            </p>
-          </div>
-        )}
         {error && <p role="alert" className="mt-4 rounded-xl bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       </section>
     </main>

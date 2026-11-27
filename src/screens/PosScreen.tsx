@@ -108,6 +108,7 @@ export function PosScreen() {
   const location = useLocation();
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
+  const device = useAuthStore((state) => state.device);
   const permissions = useAuthStore((state) => state.permissions);
   const canAddOrderNote = user?.role === 'owner' || permissions.includes('add_order_note');
   const canEditStockCount = user?.role === 'owner' || permissions.includes('edit_stock_counts');
@@ -223,7 +224,7 @@ export function PosScreen() {
   async function lockTerminal() {
     try {
       await lock();
-      navigate('/lock', { replace: true, state: { from: location.pathname } });
+      navigate(device ? '/device-pin' : '/lock', { replace: true, state: { from: location.pathname } });
     } catch (lockError) {
       setToast(localizeErrorMessage(lockError, t('pos.unableToLockTerminal')));
     }

@@ -1382,8 +1382,7 @@ export function SettingsScreen() {
         />
       )}
       {(error || notice) && <p role={error ? 'alert' : 'status'} className={`rounded-lg p-3 font-body text-body-sm ${error ? 'bg-error-container text-on-error-container' : 'bg-success-container text-on-success-container'}`}>{error || notice}</p>}
-      {deviceBoundSession && <p role="note" className="font-body text-body-sm text-on-surface-variant">{t('devices.deviceLogoutDisabled')}</p>}
-      <Button variant="danger" disabled={deviceBoundSession} onClick={() => { void handleLogout(); }} className="w-full"><MaterialIcon name="logout" />{t('app.logOut')}</Button>
+      {!deviceBoundSession && <Button variant="danger" onClick={() => { void handleLogout(); }} className="w-full"><MaterialIcon name="logout" />{t('app.logOut')}</Button>}
     </div>
   );
 

@@ -74,8 +74,6 @@ export const frAccess = {
   'devices.staffPinLabel': 'Saisissez votre PIN à 4 chiffres',
   'devices.signInDevice': 'Se connecter à l’appareil',
   'devices.signInStaff': 'Se connecter avec un PIN',
-  'devices.deviceLogout': 'Déconnexion de l’appareil',
-  'devices.deviceLogoutDisabled': 'La déconnexion de ce terminal partagé est désactivée ici. Demandez au propriétaire du magasin de le désactiver dans Gestion des appareils.',
   'devices.logoutFailed': 'Impossible de déconnecter cet appareil.',
   'password.useSixCharacters': 'Utilisez au moins 6 caractères.',
   'password.mismatch': 'Les mots de passe ne correspondent pas.',

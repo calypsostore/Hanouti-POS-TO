@@ -315,15 +315,15 @@ export const authRepository = {
     await writeActivity(user, 'lock.locked', `${user.name}'s session was locked.`);
   },
 
-  async lockDeviceStaffSession(): Promise<void> {
+  async lockDeviceSession(): Promise<void> {
     const user = await currentUser();
-    if (!user || user.role !== 'staff' || !user.storeId) {
-      throw new Error('Only a signed-in Staff account can lock a shared device session.');
+    if (!user || (user.role !== 'staff' && user.role !== 'owner') || !user.storeId) {
+      throw new Error('Only a signed-in store account can lock a shared device session.');
     }
     const client = getSupabaseClient();
     await writeActivity(user, 'lock.locked', `${user.name}'s shared device session was locked.`);
     const { error: revokeError } = await client.rpc('revoke_current_auth_session');
-    if (revokeError) throwSupabaseError(revokeError, 'Could not revoke the staff session');
+    if (revokeError) throwSupabaseError(revokeError, 'Could not revoke the account session');
     const { error: signOutError } = await client.auth.signOut({ scope: 'local' });
     clearSessionLock();
     clearCachedUserDisplay();
@@ -332,7 +332,7 @@ export const authRepository = {
       window.localStorage.removeItem(SESSION_VERSION_KEY);
       window.sessionStorage.removeItem(PIN_LOCK_KEY);
     }
-    if (signOutError) throwSupabaseError(signOutError, 'Could not clear the staff session');
+    if (signOutError) throwSupabaseError(signOutError, 'Could not clear the account session');
   },
 
   pinLockRemainingMs(): number {

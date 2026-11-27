@@ -170,11 +170,12 @@ export function LockScreen({ returnTo }: LockScreenProps) {
           </div>
         )}
 
-        <Button type="button" variant="ghost" disabled={submitting || loggingOut || deviceBoundSession} onClick={() => { void handleLogout(); }} className="mt-4 w-full border border-outline-variant">
-          <MaterialIcon name={loggingOut ? 'sync' : 'logout'} className={loggingOut ? 'animate-spin' : ''} />
-          {loggingOut ? t('lock.signingOut') : t('app.logOut')}
-        </Button>
-        {deviceBoundSession && <p role="note" className="mt-2 text-center font-body text-body-sm text-on-surface-variant">{t('devices.deviceLogoutDisabled')}</p>}
+        {!deviceBoundSession && (
+          <Button type="button" variant="ghost" disabled={submitting || loggingOut} onClick={() => { void handleLogout(); }} className="mt-4 w-full border border-outline-variant">
+            <MaterialIcon name={loggingOut ? 'sync' : 'logout'} className={loggingOut ? 'animate-spin' : ''} />
+            {loggingOut ? t('lock.signingOut') : t('app.logOut')}
+          </Button>
+        )}
 
         {error && <p role="alert" className="mt-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       </section>

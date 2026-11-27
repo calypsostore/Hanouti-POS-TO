@@ -159,7 +159,7 @@ export function StaffProfileScreen() {
     setError('');
     try {
       await lock();
-      navigate('/lock', { state: { from: location.pathname } });
+      navigate(device ? '/device-pin' : '/lock', { replace: true, state: { from: location.pathname } });
     } catch (lockError) {
       setError(localizeErrorMessage(lockError, t('staff.self.error.lockTerminal' as TranslationKey)));
     }
@@ -265,8 +265,7 @@ export function StaffProfileScreen() {
         <div className="staff-profile-actions flex flex-col gap-4">
           <Button variant="secondary" onClick={() => navigate('/settings')} className="w-full"><MaterialIcon name="settings" />{t('staff.self.action.settings' as TranslationKey)}</Button>
           <Button variant="danger" onClick={() => { void lockNow(); }} className="w-full"><MaterialIcon name="lock" />{t('staff.self.action.lock' as TranslationKey)}</Button>
-          {deviceBoundSession && <p role="note" className="font-body text-body-sm text-on-surface-variant">{t('devices.deviceLogoutDisabled')}</p>}
-          <Button variant="ghost" disabled={deviceBoundSession} onClick={() => { void endSession(); }} className="w-full"><MaterialIcon name="logout" />{t('staff.self.action.logout' as TranslationKey)}</Button>
+          {!deviceBoundSession && <Button variant="ghost" onClick={() => { void endSession(); }} className="w-full"><MaterialIcon name="logout" />{t('staff.self.action.logout' as TranslationKey)}</Button>}
         </div>
       </PageContainer>
       </main>

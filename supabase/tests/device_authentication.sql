@@ -150,7 +150,7 @@ begin
   end if;
 
   delete from public.device_pin_attempts where device_id = context.device_id;
-  for attempt in 1..5 loop
+  for attempt in 1..3 loop
     perform public.verify_staff_pin_for_device(
       context.device_id, context.device_auth_user, context.device_session_id, '1111'
     );
@@ -159,16 +159,78 @@ begin
     select 1
     from public.device_pin_attempts
     where device_id = context.device_id
-      and failed_attempts = 5
-      and locked_until = 'infinity'::timestamptz
+      and failed_attempts = 3
+      and locked_until > now()
+      and locked_until <= now() + interval '30 seconds'
   ) then
-    raise exception 'Five failed PIN attempts did not persistently lock the device.';
+    raise exception 'Three failed PIN attempts did not lock the device for 30 seconds.';
   end if;
   begin
     perform public.verify_staff_pin_for_device(
       context.device_id, context.device_auth_user, context.device_session_id, '4826'
     );
-    raise exception 'PIN lockout did not block a subsequent correct attempt.' using errcode = 'P0002';
+    raise exception 'The first PIN cooldown did not block a correct attempt.' using errcode = 'P0002';
+  exception when sqlstate 'P0001' then
+    null;
+  end;
+
+  update public.device_pin_attempts
+  set locked_until = now() - interval '1 second'
+  where device_id = context.device_id;
+  perform public.verify_staff_pin_for_device(
+    context.device_id, context.device_auth_user, context.device_session_id, '1111'
+  );
+  perform public.verify_staff_pin_for_device(
+    context.device_id, context.device_auth_user, context.device_session_id, '1111'
+  );
+  if not exists (
+    select 1
+    from public.device_pin_attempts
+    where device_id = context.device_id
+      and failed_attempts = 5
+      and locked_until > now()
+      and locked_until <= now() + interval '1 minute'
+  ) then
+    raise exception 'The fifth failed PIN attempt did not lock the device for one minute.';
+  end if;
+
+  update public.device_pin_attempts
+  set locked_until = now() - interval '1 second'
+  where device_id = context.device_id;
+  perform public.verify_staff_pin_for_device(
+    context.device_id, context.device_auth_user, context.device_session_id, '1111'
+  );
+  if not exists (
+    select 1
+    from public.device_pin_attempts
+    where device_id = context.device_id
+      and failed_attempts = 6
+      and locked_until > now()
+      and locked_until <= now() + interval '5 minutes'
+  ) then
+    raise exception 'The sixth failed PIN attempt did not lock the device for five minutes.';
+  end if;
+
+  update public.device_pin_attempts
+  set locked_until = now() - interval '1 second'
+  where device_id = context.device_id;
+  perform public.verify_staff_pin_for_device(
+    context.device_id, context.device_auth_user, context.device_session_id, '1111'
+  );
+  if not exists (
+    select 1
+    from public.device_pin_attempts
+    where device_id = context.device_id
+      and failed_attempts = 7
+      and locked_until = 'infinity'::timestamptz
+  ) then
+    raise exception 'The seventh failed PIN attempt did not permanently block PIN login.';
+  end if;
+  begin
+    perform public.verify_staff_pin_for_device(
+      context.device_id, context.device_auth_user, context.device_session_id, '4826'
+    );
+    raise exception 'The permanent PIN block did not reject a correct attempt.' using errcode = 'P0002';
   exception when sqlstate 'P0001' then
     null;
   end;

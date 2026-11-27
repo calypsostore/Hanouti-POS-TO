@@ -24,6 +24,22 @@ export interface DeviceCredentialResult {
   auditWarning?: string;
 }
 
+export interface DevicePinLockoutStatus {
+  failedAttempts: number;
+  blocked: boolean;
+  retryAfterSeconds: number | null;
+}
+
+export class DevicePinLoginError extends Error {
+  readonly lockout?: DevicePinLockoutStatus;
+
+  constructor(message: string, lockout?: DevicePinLockoutStatus) {
+    super(message);
+    this.name = 'DevicePinLoginError';
+    this.lockout = lockout;
+  }
+}
+
 interface DeviceSessionResponse {
   device: DeviceSessionSummary;
 }
@@ -98,6 +114,33 @@ async function throwFunctionError(error: { message: string; context?: unknown },
   throw new Error(`${fallback}: ${error.message}`, { cause: error });
 }
 
+function isDevicePinLockoutStatus(value: unknown): value is DevicePinLockoutStatus {
+  return typeof value === 'object' && value !== null &&
+    'failedAttempts' in value && typeof value.failedAttempts === 'number' &&
+    'blocked' in value && typeof value.blocked === 'boolean' &&
+    'retryAfterSeconds' in value &&
+    (value.retryAfterSeconds === null ||
+      (typeof value.retryAfterSeconds === 'number' && Number.isFinite(value.retryAfterSeconds) && value.retryAfterSeconds >= 0));
+}
+
+async function throwDevicePinLoginError(error: { message: string; context?: unknown }): Promise<never> {
+  if (error.context instanceof Response) {
+    let body: unknown;
+    try {
+      body = await error.context.clone().json();
+    } catch {
+      body = null;
+    }
+    if (typeof body === 'object' && body !== null && 'error' in body && typeof body.error === 'string') {
+      const lockout = 'lockout' in body && isDevicePinLockoutStatus(body.lockout)
+        ? body.lockout
+        : undefined;
+      throw new DevicePinLoginError(body.error, lockout);
+    }
+  }
+  return throwFunctionError(error, 'Could not verify the account PIN');
+}
+
 async function invokeOwner<T>(body: Record<string, unknown>): Promise<T> {
   requireSupabase();
   const { data, error } = await getSupabaseClient().functions.invoke<T>('manage-devices', { body });
@@ -107,6 +150,18 @@ async function invokeOwner<T>(body: Record<string, unknown>): Promise<T> {
 }
 
 export const deviceService = {
+  async getPinLockoutStatus(): Promise<DevicePinLockoutStatus> {
+    requireSupabase();
+    const { data, error } = await getDeviceSupabaseClient().functions.invoke<{
+      lockout: unknown;
+    }>('device-staff-pin', { body: { action: 'status' } });
+    if (error) await throwFunctionError(error, 'Could not check the device PIN lockout status');
+    if (!data || !isDevicePinLockoutStatus(data.lockout)) {
+      throw new Error('The device PIN lockout status returned an invalid response.');
+    }
+    return data.lockout;
+  },
+
   async listForOwner(offset = 0): Promise<{ devices: DeviceSummary[]; totalCount: number }> {
     const result = await invokeOwner<{ devices: DeviceSummary[]; totalCount?: number; count?: number }>({
       action: 'list',
@@ -234,7 +289,7 @@ export const deviceService = {
       refresh_token: string;
       must_change_password: boolean;
     }>('device-staff-pin', { body: { pin } });
-    if (error) await throwFunctionError(error, 'Could not verify the account PIN');
+    if (error) await throwDevicePinLoginError(error);
     if (!data?.access_token || !data.refresh_token) {
       throw new Error('The account sign-in service returned an invalid session.');
     }

@@ -10,7 +10,43 @@ import {
 } from '../_shared/deviceAuth.ts';
 
 interface PinRequest {
+  action?: unknown;
   pin?: unknown;
+}
+
+interface PinLockoutStatus {
+  failedAttempts: number;
+  blocked: boolean;
+  retryAfterSeconds: number | null;
+}
+
+async function getPinLockoutStatus(
+  admin: ReturnType<typeof clients>['admin'],
+  deviceId: string,
+): Promise<PinLockoutStatus> {
+  const { data, error } = await admin
+    .from('device_pin_attempts')
+    .select('failed_attempts, locked_until')
+    .eq('device_id', deviceId)
+    .maybeSingle();
+  if (error) throw new HttpError(503, 'Could not check the device PIN lockout status.');
+
+  const lockedUntil = data?.locked_until;
+  const blocked = lockedUntil === 'infinity';
+  const remainingMs = typeof lockedUntil === 'string' && !blocked
+    ? Date.parse(lockedUntil) - Date.now()
+    : 0;
+  return {
+    failedAttempts: data?.failed_attempts ?? 0,
+    blocked,
+    retryAfterSeconds: blocked ? null : Number.isFinite(remainingMs) ? Math.max(0, Math.ceil(remainingMs / 1000)) : 0,
+  };
+}
+
+function pinLockoutMessage(lockout: PinLockoutStatus): string {
+  return lockout.blocked
+    ? 'PIN sign-in is blocked. Contact the store owner to restore access.'
+    : 'PIN sign-in is temporarily locked. Wait for the timer before trying again.';
 }
 
 Deno.serve(async (request) => {
@@ -19,13 +55,20 @@ Deno.serve(async (request) => {
 
   try {
     const body = await request.json() as PinRequest;
-    if (typeof body.pin !== 'string' || !/^\d{4}$/.test(body.pin)) {
-      return response(400, { error: 'Enter the 4-digit account PIN.' });
-    }
-
     const deviceContext = await requireDeviceContext(request);
     if (deviceContext.device.must_change_password) {
       return response(403, { error: 'Change the device password before PIN sign-in.' });
+    }
+    if (body.action !== undefined && body.action !== 'status') {
+      return response(400, { error: 'The device PIN request is invalid.' });
+    }
+    if (body.action === 'status') {
+      return response(200, {
+        lockout: await getPinLockoutStatus(deviceContext.admin, deviceContext.device.id),
+      });
+    }
+    if (typeof body.pin !== 'string' || !/^\d{4}$/.test(body.pin)) {
+      return response(400, { error: 'Enter the 4-digit account PIN.' });
     }
 
     const { data: accountId, error: pinError } = await deviceContext.admin.rpc('verify_staff_pin_for_device', {
@@ -35,15 +78,22 @@ Deno.serve(async (request) => {
       p_pin: body.pin,
     });
     if (pinError) {
-      if (pinError.message.includes('locked until the owner resets')) {
-        return response(429, { error: 'PIN sign-in is locked. Ask the store owner to reset this device.' });
-      }
       if (pinError.code === '28000') return response(401, { error: 'The device session is no longer active.' });
+      if (pinError.code === 'P0001') {
+        const lockout = await getPinLockoutStatus(deviceContext.admin, deviceContext.device.id);
+        if (lockout.blocked || (lockout.retryAfterSeconds ?? 0) > 0) {
+          return response(429, { error: pinLockoutMessage(lockout), lockout });
+        }
+      }
       console.error('[device-pin] PIN verification failed.');
       return response(503, { error: 'PIN verification is temporarily unavailable.' });
     }
     if (typeof accountId !== 'string' || !/^[0-9a-f-]{36}$/i.test(accountId)) {
-      return response(401, { error: 'The PIN is incorrect or unavailable.' });
+      const lockout = await getPinLockoutStatus(deviceContext.admin, deviceContext.device.id);
+      if (lockout.blocked || (lockout.retryAfterSeconds ?? 0) > 0) {
+        return response(429, { error: pinLockoutMessage(lockout), lockout });
+      }
+      return response(401, { error: 'The PIN is incorrect or unavailable.', lockout });
     }
 
     const { data: account, error: accountError } = await deviceContext.admin

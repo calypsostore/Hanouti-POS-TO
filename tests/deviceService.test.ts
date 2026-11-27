@@ -122,16 +122,29 @@ describe('device service authentication boundaries', () => {
     });
   });
 
+  it('loads the server-enforced PIN lockout status for the signed-in device', async () => {
+    const lockout = { failedAttempts: 5, blocked: false, retryAfterSeconds: 60 };
+    mocks.deviceInvoke.mockResolvedValue({ data: { lockout }, error: null });
+
+    await expect(deviceService.getPinLockoutStatus()).resolves.toEqual(lockout);
+    expect(mocks.deviceInvoke).toHaveBeenCalledWith('device-staff-pin', { body: { action: 'status' } });
+  });
+
   it('surfaces a rejected PIN without attempting to establish an account session', async () => {
+    const lockout = { failedAttempts: 3, blocked: false, retryAfterSeconds: 30 };
     mocks.deviceInvoke.mockResolvedValue({
       data: null,
       error: {
         message: 'Edge Function returned a non-2xx status code',
-        context: new Response(JSON.stringify({ error: 'The PIN is incorrect or unavailable.' }), { status: 401 }),
+        context: new Response(JSON.stringify({ error: 'PIN sign-in is temporarily locked.', lockout }), { status: 429 }),
       },
     });
 
-    await expect(deviceService.loginWithPin('0000')).rejects.toThrow('The PIN is incorrect or unavailable.');
+    await expect(deviceService.loginWithPin('0000')).rejects.toMatchObject({
+      name: 'DevicePinLoginError',
+      message: 'PIN sign-in is temporarily locked.',
+      lockout,
+    });
     expect(mocks.mainSetSession).not.toHaveBeenCalled();
   });
 

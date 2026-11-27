@@ -1,5 +1,6 @@
-import { useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useEffect, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Skull } from 'lucide-react';
 import { Button } from '../components/Button';
 import { Keypad } from '../components/Keypad';
 import { MaterialIcon } from '../components/MaterialIcon';
@@ -13,6 +14,14 @@ import { getLanguage, localizeErrorMessage, subscribeToLanguage } from '../i18n'
 import { isLanguageCode, LANGUAGE_OPTIONS } from '../i18n/languageConfig';
 import { settingsService } from '../services/settingsService';
 import { getDevicePinAutoLoginPreference, setDevicePinAutoLoginPreference, shouldAutoLoginWithDevicePin } from '../services/devicePinPreferences';
+import { DevicePinLoginError, deviceService, type DevicePinLockoutStatus } from '../services/deviceService';
+
+function formatLockoutTime(seconds: number, language: string): string {
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  const formatter = new Intl.NumberFormat(language, { minimumIntegerDigits: 2, useGrouping: false });
+  return `${formatter.format(minutes)}:${formatter.format(remainingSeconds)}`;
+}
 
 function destinationForUser(user: UserSummary): string {
   if (requiresCredentialSetup(user)) return '/set-password';
@@ -39,7 +48,54 @@ export function DeviceLoginScreen() {
   const [languageError, setLanguageError] = useState('');
   const [settingsError, setSettingsError] = useState('');
   const [autoLogin, setAutoLogin] = useState(getDevicePinAutoLoginPreference);
+  const [pinLockout, setPinLockout] = useState<DevicePinLockoutStatus>({
+    failedAttempts: 0,
+    blocked: false,
+    retryAfterSeconds: 0,
+  });
+  const [lockoutRemainingSeconds, setLockoutRemainingSeconds] = useState(0);
+  const [pinStatusLoading, setPinStatusLoading] = useState(true);
+  const [pinStatusError, setPinStatusError] = useState('');
   const language = useSyncExternalStore(subscribeToLanguage, getLanguage);
+  const pinBlocked = pinLockout.blocked;
+  const pinCoolingDown = lockoutRemainingSeconds > 0;
+  const pinEntryDisabled = busy || pinStatusLoading || pinBlocked || pinCoolingDown;
+  const showLockoutWarning = Boolean(device && !device.mustChangePassword && pinCoolingDown);
+
+  useEffect(() => {
+    if (!device || user || device.mustChangePassword) {
+      setPinStatusLoading(false);
+      return;
+    }
+
+    let active = true;
+    setPinStatusLoading(true);
+    setPinStatusError('');
+    void deviceService.getPinLockoutStatus()
+      .then((status) => {
+        if (!active) return;
+        setPinLockout(status);
+        setLockoutRemainingSeconds(status.retryAfterSeconds ?? 0);
+      })
+      .catch((statusError) => {
+        if (!active) return;
+        console.error('[devices] Could not load the PIN lockout status.', statusError);
+        setPinStatusError(t('devices.pinStatusFailed'));
+      })
+      .finally(() => {
+        if (active) setPinStatusLoading(false);
+      });
+
+    return () => { active = false; };
+  }, [device, user]);
+
+  useEffect(() => {
+    if (pinBlocked || !pinCoolingDown) return;
+    const timer = window.setInterval(() => {
+      setLockoutRemainingSeconds((remaining) => Math.max(0, remaining - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [pinBlocked, pinCoolingDown]);
 
   if (user) {
     return <Navigate to={destinationForUser(user)} replace />;
@@ -92,7 +148,7 @@ export function DeviceLoginScreen() {
   }
 
   async function submitPin(pinValue = pin) {
-    if (busy || pinValue.length !== 4) return;
+    if (pinEntryDisabled || pinValue.length !== 4) return;
     setBusy(true);
     setError('');
     try {
@@ -100,14 +156,24 @@ export function DeviceLoginScreen() {
       navigate(destinationForUser(account), { replace: true });
     } catch (pinError) {
       setPin('');
-      setError(localizeErrorMessage(pinError, t('devices.pinFailed')));
+      if (pinError instanceof DevicePinLoginError && pinError.lockout) {
+        setPinLockout(pinError.lockout);
+        setLockoutRemainingSeconds(pinError.lockout.retryAfterSeconds ?? 0);
+        if (pinError.lockout.blocked || (pinError.lockout.retryAfterSeconds ?? 0) > 0) {
+          setError('');
+        } else {
+          setError(localizeErrorMessage(pinError, t('devices.pinFailed')));
+        }
+      } else {
+        setError(localizeErrorMessage(pinError, t('devices.pinFailed')));
+      }
     } finally {
       setBusy(false);
     }
   }
 
   function handlePinPress(digit: string) {
-    if (busy || pin.length >= 4) return;
+    if (pinEntryDisabled || pin.length >= 4) return;
     const nextPin = `${pin}${digit}`;
     setPin(nextPin);
     if (shouldAutoLoginWithDevicePin(nextPin, autoLogin)) void submitPin(nextPin);
@@ -138,7 +204,8 @@ export function DeviceLoginScreen() {
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-surface px-4 py-8">
-      <section className="w-full max-w-md rounded-3xl bg-surface-container-lowest p-6 shadow-card tablet:p-8">
+      <div dir="ltr" className={`flex w-full items-center justify-center gap-8 ${showLockoutWarning ? 'max-w-5xl flex-col lg:flex-row' : 'max-w-md'}`}>
+        <section dir={language === 'ar' ? 'rtl' : 'ltr'} className="w-full max-w-md rounded-3xl bg-surface-container-lowest p-6 shadow-card tablet:p-8">
         <header className="text-center">
           <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-primary-fixed text-primary">
             <MaterialIcon name={device ? 'point_of_sale' : 'devices'} className="text-3xl" filled />
@@ -244,27 +311,51 @@ export function DeviceLoginScreen() {
           </form>
         ) : (
           <div className="mt-6 flex flex-col gap-3">
-            <p className="text-center font-body text-label-md text-on-surface-variant">{t('devices.staffPinLabel')}</p>
-            <div className="flex h-8 items-center justify-center gap-3" aria-label={t('devices.pinDigitsEntered', { entered: String(pin.length), total: '4' })}>
-              {[0, 1, 2, 3].map((index) => (
-                <span key={index} className={`h-3 w-3 rounded-full ${index < pin.length ? 'bg-primary' : 'bg-outline-variant'}`} />
-              ))}
-            </div>
-            <Keypad
-              disabled={busy}
-              onPress={handlePinPress}
-              onClear={() => setPin('')}
-              onBackspace={() => setPin((current) => current.slice(0, -1))}
-            />
-            <Button type="button" disabled={busy || pin.length !== 4} onClick={() => { void submitPin(); }} className="min-h-12 w-full">
-              <MaterialIcon name={busy ? 'sync' : 'login'} className={busy ? 'animate-spin' : ''} />
-              {busy ? t('login.verifying') : t('devices.signInStaff')}
-            </Button>
+            {pinBlocked ? (
+              <div role="alert" className="flex flex-col items-center gap-3 py-5 text-center text-error">
+                <h2 className="font-display text-headline-sm">{t('devices.pinBlockedTitle')}</h2>
+                <Skull aria-hidden="true" className="h-20 w-20" strokeWidth={1.5} />
+                <p className="font-body text-body-md">{t('devices.pinBlockedDescription')}</p>
+              </div>
+            ) : (
+              <>
+                <p className="text-center font-body text-label-md text-on-surface-variant">{t('devices.staffPinLabel')}</p>
+                <div className="flex h-8 items-center justify-center gap-3" aria-label={t('devices.pinDigitsEntered', { entered: String(pin.length), total: '4' })}>
+                  {[0, 1, 2, 3].map((index) => (
+                    <span key={index} className={`h-3 w-3 rounded-full ${index < pin.length ? 'bg-primary' : 'bg-outline-variant'}`} />
+                  ))}
+                </div>
+                <Keypad
+                  disabled={pinEntryDisabled}
+                  onPress={handlePinPress}
+                  onClear={() => setPin('')}
+                  onBackspace={() => setPin((current) => current.slice(0, -1))}
+                />
+                <Button type="button" disabled={pinEntryDisabled || pin.length !== 4} onClick={() => { void submitPin(); }} className="min-h-12 w-full">
+                  <MaterialIcon name={busy ? 'sync' : 'login'} className={busy ? 'animate-spin' : ''} />
+                  {busy ? t('login.verifying') : t('devices.signInStaff')}
+                </Button>
+                {pinStatusLoading && <p role="status" className="text-center font-body text-body-sm text-on-surface-variant">{t('devices.pinStatusLoading')}</p>}
+                {pinStatusError && <p role="alert" className="text-center font-body text-body-sm text-error">{pinStatusError}</p>}
+              </>
+            )}
           </div>
         )}
 
         {error && <p role="alert" className="mt-4 rounded-xl bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
-      </section>
+        </section>
+        {showLockoutWarning && (
+          <aside dir={language === 'ar' ? 'rtl' : 'ltr'} aria-live="off" className="w-full max-w-sm text-center text-error">
+            <MaterialIcon name="warning" className="text-6xl" filled />
+            <h2 className="mt-3 font-display text-headline-sm">{t('devices.pinLockoutTitle')}</h2>
+            <p className="mt-2 font-body text-body-md">{t('devices.pinLockoutDescription')}</p>
+            <p className="mt-5 font-display text-display-sm tabular-nums" role="timer" aria-label={t('devices.pinLockoutRemaining', { time: formatLockoutTime(lockoutRemainingSeconds, language) })}>
+              {formatLockoutTime(lockoutRemainingSeconds, language)}
+            </p>
+            <p className="mt-1 font-body text-label-md">{t('devices.pinLockoutRemainingLabel')}</p>
+          </aside>
+        )}
+      </div>
       <ResponsiveDialog
         open={languageDialogOpen}
         onClose={() => setLanguageDialogOpen(false)}

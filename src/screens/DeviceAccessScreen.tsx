@@ -1,13 +1,18 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useSyncExternalStore, type FormEvent } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { Keypad } from '../components/Keypad';
 import { MaterialIcon } from '../components/MaterialIcon';
+import { ResponsiveDialog } from '../components/layout/ResponsiveDialog';
+import { ToggleSwitch } from '../components/ToggleSwitch';
 import { useAuthStore } from '../stores/authStore';
 import { requiresCredentialSetup } from '../services/credentialSetup';
 import { t } from '../i18n/translations';
 import type { UserSummary } from '../types/domain';
-import { localizeErrorMessage } from '../i18n';
+import { getLanguage, localizeErrorMessage, subscribeToLanguage } from '../i18n';
+import { isLanguageCode, LANGUAGE_OPTIONS } from '../i18n/languageConfig';
+import { settingsService } from '../services/settingsService';
+import { getDevicePinAutoLoginPreference, setDevicePinAutoLoginPreference, shouldAutoLoginWithDevicePin } from '../services/devicePinPreferences';
 
 function destinationForUser(user: UserSummary): string {
   if (requiresCredentialSetup(user)) return '/set-password';
@@ -29,6 +34,12 @@ export function DeviceLoginScreen() {
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [languageDialogOpen, setLanguageDialogOpen] = useState(false);
+  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+  const [languageError, setLanguageError] = useState('');
+  const [settingsError, setSettingsError] = useState('');
+  const [autoLogin, setAutoLogin] = useState(getDevicePinAutoLoginPreference);
+  const language = useSyncExternalStore(subscribeToLanguage, getLanguage);
 
   if (user) {
     return <Navigate to={destinationForUser(user)} replace />;
@@ -80,18 +91,48 @@ export function DeviceLoginScreen() {
     }
   }
 
-  async function submitPin() {
-    if (busy || pin.length !== 4) return;
+  async function submitPin(pinValue = pin) {
+    if (busy || pinValue.length !== 4) return;
     setBusy(true);
     setError('');
     try {
-      const account = await loginWithDevicePin(pin);
+      const account = await loginWithDevicePin(pinValue);
       navigate(destinationForUser(account), { replace: true });
     } catch (pinError) {
       setPin('');
       setError(localizeErrorMessage(pinError, t('devices.pinFailed')));
     } finally {
       setBusy(false);
+    }
+  }
+
+  function handlePinPress(digit: string) {
+    if (busy || pin.length >= 4) return;
+    const nextPin = `${pin}${digit}`;
+    setPin(nextPin);
+    if (shouldAutoLoginWithDevicePin(nextPin, autoLogin)) void submitPin(nextPin);
+  }
+
+  async function changeLanguage(value: string) {
+    if (!isLanguageCode(value)) return;
+    setLanguageError('');
+    try {
+      await settingsService.setLanguage(value);
+      setLanguageDialogOpen(false);
+    } catch (languageChangeError) {
+      console.error('[devices] Could not change the PIN screen language.', languageChangeError);
+      setLanguageError(localizeErrorMessage(languageChangeError, t('settings.languageFailed')));
+    }
+  }
+
+  function updateAutoLogin(enabled: boolean) {
+    setSettingsError('');
+    try {
+      setDevicePinAutoLoginPreference(enabled);
+      setAutoLogin(enabled);
+    } catch (preferenceError) {
+      console.error('[devices] Could not save the PIN sign-in preference.', preferenceError);
+      setSettingsError(localizeErrorMessage(preferenceError, t('devices.autoLoginSaveFailed')));
     }
   }
 
@@ -111,6 +152,29 @@ export function DeviceLoginScreen() {
               : t('devices.loginDescription')}
           </p>
         </header>
+
+        {device && !device.mustChangePassword && (
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              type="button"
+              aria-label={t('settings.language')}
+              title={t('settings.language')}
+              onClick={() => { setLanguageError(''); setLanguageDialogOpen(true); }}
+              className="flex h-11 w-11 items-center justify-center rounded-full bg-surface-container text-primary"
+            >
+              <MaterialIcon name="language" />
+            </button>
+            <button
+              type="button"
+              aria-label={t('devices.pinLoginSettings')}
+              title={t('devices.pinLoginSettings')}
+              onClick={() => { setSettingsError(''); setSettingsDialogOpen(true); }}
+              className="flex h-11 w-11 items-center justify-center rounded-full bg-surface-container text-primary"
+            >
+              <MaterialIcon name="settings" />
+            </button>
+          </div>
+        )}
 
         {!device ? (
           <form onSubmit={(event) => { void submitDeviceLogin(event); }} className="mt-6 flex flex-col gap-4">
@@ -188,7 +252,7 @@ export function DeviceLoginScreen() {
             </div>
             <Keypad
               disabled={busy}
-              onPress={(digit) => setPin((current) => current.length < 4 ? current + digit : current)}
+              onPress={handlePinPress}
               onClear={() => setPin('')}
               onBackspace={() => setPin((current) => current.slice(0, -1))}
             />
@@ -201,6 +265,48 @@ export function DeviceLoginScreen() {
 
         {error && <p role="alert" className="mt-4 rounded-xl bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       </section>
+      <ResponsiveDialog
+        open={languageDialogOpen}
+        onClose={() => setLanguageDialogOpen(false)}
+        title={t('settings.language')}
+        subtitle={t('settings.languageDescription')}
+        icon="language"
+      >
+        <label htmlFor="device-pin-language" className="mb-2 block font-body text-label-md text-on-surface">
+          {t('settings.language')}
+        </label>
+        <select
+          id="device-pin-language"
+          aria-label={t('settings.language')}
+          value={language}
+          onChange={(event) => { void changeLanguage(event.currentTarget.value); }}
+          className="h-12 w-full rounded-lg bg-surface-container-low px-3 font-body text-body-md outline-none focus:ring-2 focus:ring-primary"
+        >
+          {LANGUAGE_OPTIONS.map((option) => (
+            <option key={option.code} value={option.code}>{option.name}</option>
+          ))}
+        </select>
+        {languageError && <p role="alert" className="mt-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{languageError}</p>}
+      </ResponsiveDialog>
+      <ResponsiveDialog
+        open={settingsDialogOpen}
+        onClose={() => setSettingsDialogOpen(false)}
+        title={t('devices.pinLoginSettings')}
+        icon="settings"
+      >
+        <div className="flex items-center justify-between gap-4 rounded-xl bg-surface-container-low p-3">
+          <div>
+            <p className="font-body text-label-md text-on-surface">{t('devices.autoLogin')}</p>
+            <p className="mt-1 font-body text-body-sm text-on-surface-variant">{t('devices.autoLoginDescription')}</p>
+          </div>
+          <ToggleSwitch
+            checked={autoLogin}
+            label={t('devices.autoLogin')}
+            onChange={() => updateAutoLogin(!autoLogin)}
+          />
+        </div>
+        {settingsError && <p role="alert" className="mt-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{settingsError}</p>}
+      </ResponsiveDialog>
     </main>
   );
 }

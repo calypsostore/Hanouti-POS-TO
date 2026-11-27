@@ -29,6 +29,7 @@ vi.mock('../src/data/deviceSupabaseClient', () => ({
 }));
 
 import { deviceService } from '../src/services/deviceService';
+import { setLanguage } from '../src/i18n';
 
 describe('device service authentication boundaries', () => {
   beforeEach(() => {
@@ -101,7 +102,8 @@ describe('device service authentication boundaries', () => {
     expect(mocks.mainSetSession).not.toHaveBeenCalled();
   });
 
-  it('uses the server-issued account session after PIN verification, not the device identity', async () => {
+  it('keeps PIN verification separate from the UI language and device identity', async () => {
+    setLanguage('ar');
     mocks.deviceInvoke.mockResolvedValue({
       data: {
         access_token: 'account-access',

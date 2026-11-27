@@ -28,4 +28,4 @@ jobs:
             -o UserKnownHostsFile=~/.ssh/known_hosts \
             -o StrictHostKeyChecking=yes \
             hanouti-deploy@84.247.176.105 \
-            "echo GITHUB_ACTIONS_SSH_OK && whoami"
+            "sudo -n /usr/local/sbin/hanouti-vps-deploy"

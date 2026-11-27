@@ -23,12 +23,14 @@ function versionManifestPlugin(buildId: string): Plugin {
 
 export default defineConfig(({ command, mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
-  const dataDriver = env.VITE_DATA_DRIVER ?? (mode === 'development' ? 'local' : '');
-  if (command === 'build' && dataDriver !== 'supabase') {
-    throw new Error('Production builds require VITE_DATA_DRIVER=supabase; demo accounts cannot ship in production.');
+  const isVercelPreview = process.env.VERCEL === '1' && process.env.VERCEL_ENV === 'preview';
+  const dataDriver = env.VITE_DATA_DRIVER || (mode === 'development' || isVercelPreview ? 'local' : '');
+  const isLocalPreviewBuild = isVercelPreview && dataDriver === 'local';
+  if (command === 'build' && dataDriver !== 'supabase' && !isLocalPreviewBuild) {
+    throw new Error('Builds require VITE_DATA_DRIVER=supabase; only Vercel Preview builds may use local demo data.');
   }
-  if (command === 'build' && (!env.VITE_SUPABASE_URL || !env.VITE_SUPABASE_ANON_KEY)) {
-    throw new Error('Production builds require VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
+  if (command === 'build' && dataDriver === 'supabase' && (!env.VITE_SUPABASE_URL || !env.VITE_SUPABASE_ANON_KEY)) {
+    throw new Error('Supabase builds require VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
   }
   const buildId = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? Date.now().toString(36);
 

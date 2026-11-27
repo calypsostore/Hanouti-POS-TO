@@ -68,7 +68,11 @@ Complete this checklist once for each environment:
    npx supabase functions deploy device-login
    npx supabase functions deploy device-staff-pin
    npx supabase functions deploy device-session
+   npx supabase functions deploy send-push
    ```
+
+   Deploy `send-push` when enabling FCM delivery; it localizes each push using
+   the language saved for that device.
 
 5. **Create the first super admin.** Create the administrator user through
    Supabase Authentication, then run this once in the SQL editor. Replace the
@@ -147,8 +151,10 @@ npm run preview
 ```
 
 Production builds must be made with `VITE_DATA_DRIVER=supabase` and valid
-Supabase URL/anon-key build variables. For example, configure those variables
-in the deployment environment before running `npm run build`.
+Supabase URL/anon-key build variables. Vercel Preview builds default to
+`VITE_DATA_DRIVER=local` for isolated demo data; that bundle does not connect to
+Supabase. Set `VITE_DATA_DRIVER=supabase` and provide staging credentials only
+if Preview deployments should connect to a separate Supabase project.
 
 To test the production-mode Supabase bundle locally, put the production-safe
 client values and `VITE_DATA_DRIVER=supabase` in an ignored
@@ -209,10 +215,12 @@ Command, and `dist` as its Output Directory. The `vercel.json` build invokes
 `scripts/vercel-build.mjs`, which validates local migrations, runs typecheck,
 lint and tests using the local data driver, then builds. On Vercel, it also
 requires system deployment metadata and rejects production builds not from
-`main`. Set
-`VITE_DATA_DRIVER=supabase`, `VITE_SUPABASE_URL`, and `VITE_SUPABASE_ANON_KEY`
-in the Vercel environment for each deployment target. These are frontend
-variables; never use a Supabase service-role key in the frontend.
+`main`. Set `VITE_DATA_DRIVER=supabase`, `VITE_SUPABASE_URL`, and
+`VITE_SUPABASE_ANON_KEY` for the Production environment. Preview deployments
+default to isolated local demo data; if Preview should use Supabase, set
+`VITE_DATA_DRIVER=supabase` and provide a separate staging project's URL and
+anon key. These are frontend variables; never use a Supabase service-role key
+in the frontend.
 
 The root `vercel.json` preserves the SPA rewrite and asset cache rules. The
 `/api/update-manifest` endpoint is provided by `api/update-manifest.js`. Pushes

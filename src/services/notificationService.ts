@@ -9,7 +9,7 @@ import {
   type StoreSettings,
   type UserRecord,
 } from '../types/domain';
-import { formatMillimesAmountsInText, formatTnd } from '../lib/format';
+import { formatMillimesAmountsInText } from '../lib/format';
 import { readData, writeData } from './storage';
 import { customerService } from './customerService';
 import type { CustomerCreditStatus, CustomerDueInfo } from './customerService';
@@ -19,7 +19,8 @@ import { getSupabaseClient } from '../data/supabaseClient';
 import { isSupabaseDriver } from '../data/driver';
 import { permissionService } from './permissionService';
 import { compareNotificationsNewestFirst, type NotificationCursor } from '../lib/notificationOrder';
-import { getLanguage, t } from '../i18n';
+import { t } from '../i18n';
+import { createNotificationContent, getNotificationContent, type NotificationContentValues } from '../lib/notificationContent';
 
 export interface CustomerCreditAlert {
   customerId: string;
@@ -73,10 +74,19 @@ function notifyChanged(): void {
 async function showLocalNotificationForActiveUser(notification: NotificationRecord): Promise<void> {
   if (notification.type === 'app_update') return;
   try {
-    await permissionService.showLocalNotification(notification.title, notification.body, notification);
+    const content = getNotificationContent(notification);
+    await permissionService.showLocalNotification(content.title, content.body, notification);
   } catch (error) {
     console.error('[notifications] Could not show a local notification.', error);
   }
+}
+
+function mapNotificationContentValues(value: unknown): NotificationContentValues | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value).filter((entry): entry is [string, string | number] =>
+    typeof entry[1] === 'string' || (typeof entry[1] === 'number' && Number.isFinite(entry[1])),
+  );
+  return Object.fromEntries(entries);
 }
 
 function getNotifications(): NotificationRecord[] {
@@ -152,6 +162,7 @@ export function mapNotificationRow(row: Record<string, unknown>): NotificationRe
     shiftId: typeof row.shift_id === 'string' ? row.shift_id : undefined,
     cashMovementId: typeof row.cash_movement_id === 'string' ? row.cash_movement_id : undefined,
     dueAt: typeof row.due_at === 'string' ? row.due_at : undefined,
+    contentValues: mapNotificationContentValues(row.content_values),
   };
 }
 
@@ -163,7 +174,7 @@ async function createForUser(
   if (isSupabaseDriver()) {
     const storeId = input.storeId ?? user.storeId;
     if (!storeId) throw new Error('A store is required to create a notification.');
-    const { data, error } = await getSupabaseClient().rpc('create_notification', {
+    const { data, error } = await getSupabaseClient().rpc('create_localized_notification', {
       p_store_id: storeId,
       p_user_id: user.id,
       p_target_role: null,
@@ -179,6 +190,7 @@ async function createForUser(
       p_shift_id: input.shiftId ?? null,
       p_cash_movement_id: input.cashMovementId ?? null,
       p_due_at: input.dueAt ?? null,
+      p_content_values: input.contentValues ?? {},
     });
     if (error) throw new Error(`Could not create notification: ${error.message}`, { cause: error });
     if (!data) return undefined;
@@ -237,12 +249,7 @@ async function notifyOwnerAnd86Staff(
   await Promise.all(recipients.map((recipient) => createForUser(recipient, {
     storeId,
     type,
-    title: type === 'stock_depleted'
-      ? t('notificationsContent.stockDepletedTitle')
-      : t('notificationsContent.item86Title'),
-    body: type === 'stock_depleted'
-      ? t('notificationsContent.stockDepletedBody', { name: itemName })
-      : t('notificationsContent.item86Body', { name: itemName }),
+    ...createNotificationContent(type, { name: itemName }),
     entityType: 'catalog_item',
     entityId: catalogItemId,
     catalogItemId,
@@ -442,10 +449,9 @@ export const notificationService = {
           storeId,
           userId: ownerId,
           type: 'customer_overdue' as const,
-          title: t('notificationsContent.customerOverdueTitle'),
-          body: t('notificationsContent.customerOverdueBody', {
+          ...createNotificationContent('customer_overdue', {
             name: customer.name,
-            amount: formatTnd(balanceMillimes / 1000),
+            amount: balanceMillimes / 1000,
           }),
           entityType: 'customer',
           entityId: customer.id,
@@ -496,10 +502,7 @@ export const notificationService = {
       await createForUser(owner, {
         storeId,
         type: 'subscription_expiring',
-        title: t('notificationsContent.subscriptionExpiringTitle'),
-        body: t('notificationsContent.subscriptionExpiringBody', {
-          date: new Date(`${store.subscription.paidUntil}T00:00:00`).toLocaleDateString(getLanguage()),
-        }),
+        ...createNotificationContent('subscription_expiring', { date: store.subscription.paidUntil }),
         entityType: 'store',
         entityId: store.subscription.paidUntil,
       });
@@ -516,8 +519,7 @@ export const notificationService = {
     const staff = await userService.getUser(order.staffId);
     await notifyOwner(order.storeId, {
       type: 'void_requested',
-      title: t('notificationsContent.voidRequestedTitle'),
-      body: t('notificationsContent.voidRequestedBody', {
+      ...createNotificationContent('void_requested', {
         name: staff?.name ?? t('notificationsContent.staffMember'),
         number: order.number,
       }),
@@ -532,16 +534,13 @@ export const notificationService = {
     await createForUser(staff, {
       storeId: order.storeId,
       type: approved ? 'void_approved' : 'void_rejected',
-      title: t(approved ? 'notificationsContent.voidApprovedTitle' : 'notificationsContent.voidRejectedTitle'),
-      body: approved
-        ? t('notificationsContent.voidApprovedBody', { number: order.number })
-        : t('notificationsContent.voidRejectedBody', { number: order.number }),
+      ...createNotificationContent(approved ? 'void_approved' : 'void_rejected', { number: order.number }),
       entityType: 'order',
       entityId: order.id,
     });
   },
 
-  async publishSchedule(storeId: string, staffIds: string[], weekLabel: string): Promise<void> {
+  async publishSchedule(storeId: string, staffIds: string[], weekStart: string, weekEnd: string): Promise<void> {
     const store = await userService.getStore(storeId);
     if (!store) throw new Error('The store could not be found.');
     const staff = await Promise.all([...new Set(staffIds)].map((id) => userService.getUser(id)));
@@ -549,10 +548,9 @@ export const notificationService = {
       createForUser(member, {
         storeId,
         type: 'schedule_published',
-        title: t('notificationsContent.schedulePublishedTitle'),
-        body: t('notificationsContent.schedulePublishedBody', { week: weekLabel }),
+        ...createNotificationContent('schedule_published', { weekStart, weekEnd }),
         entityType: 'schedule',
-        entityId: weekLabel,
+        entityId: weekStart,
       }),
     ));
   },
@@ -568,8 +566,7 @@ export const notificationService = {
   async notifyLowStock(storeId: string, catalogItemId: string, itemName: string, stockCount: number, threshold: number): Promise<void> {
     await notifyOwner(storeId, {
       type: 'low_stock',
-      title: t('notificationsContent.lowStockTitle'),
-      body: t('notificationsContent.lowStockBody', { name: itemName, count: stockCount, threshold }),
+      ...createNotificationContent('low_stock', { name: itemName, count: stockCount, threshold }),
       entityType: 'catalog_item',
       entityId: catalogItemId,
       catalogItemId,
@@ -579,8 +576,7 @@ export const notificationService = {
   async notifyShiftOpened(shiftId: string, storeId: string, staffName: string): Promise<void> {
     await notifyOwner(storeId, {
       type: 'shift_opened',
-      title: t('notificationsContent.shiftOpenedTitle'),
-      body: t('notificationsContent.shiftOpenedBody', { name: staffName }),
+      ...createNotificationContent('shift_opened', { name: staffName }),
       entityType: 'shift',
       entityId: shiftId,
       shiftId,
@@ -590,8 +586,7 @@ export const notificationService = {
   async notifyShiftClosed(shiftId: string, storeId: string, staffName: string, differenceMillimes: number): Promise<void> {
     await notifyOwner(storeId, {
       type: 'shift_closed',
-      title: t('notificationsContent.shiftClosedTitle'),
-      body: t('notificationsContent.shiftClosedBody', { name: staffName }),
+      ...createNotificationContent('shift_closed', { name: staffName }),
       entityType: 'shift',
       entityId: shiftId,
       shiftId,
@@ -599,10 +594,9 @@ export const notificationService = {
     if (differenceMillimes !== 0) {
       await notifyOwner(storeId, {
         type: 'cash_difference',
-        title: t('notificationsContent.cashDifferenceTitle'),
-        body: t('notificationsContent.cashDifferenceBody', {
+        ...createNotificationContent('cash_difference', {
           name: staffName,
-          amount: formatTnd(differenceMillimes / 1000),
+          amount: differenceMillimes / 1000,
         }),
         entityType: 'shift',
         entityId: shiftId,
@@ -618,14 +612,11 @@ export const notificationService = {
     if (movement.kind !== 'out' || movement.amountMillimes <= thresholdMillimes) return;
     await notifyOwner(store.id, {
       type: 'cash_out_alert',
-      title: t('notificationsContent.cashOutTitle'),
-      body: t('notificationsContent.cashOutBody', {
+      ...createNotificationContent('cash_out_alert', {
         name: staffName,
-        amount: formatTnd(movement.amountMillimes / 1000),
+        amount: movement.amountMillimes / 1000,
         reason: movement.reason,
-        note: movement.note
-          ? t('notificationsContent.noteSuffix', { note: movement.note })
-          : '.',
+        note: movement.note ?? '',
       }),
       entityType: 'cash_movement',
       entityId: movement.id,
@@ -647,8 +638,7 @@ export const notificationService = {
     if (reached80) {
       await notifyOwner(storeId, {
         type: 'customer_credit_warning',
-        title: t('notificationsContent.customerCreditWarningTitle'),
-        body: t('notificationsContent.customerCreditWarningBody', { name: customerName }),
+        ...createNotificationContent('customer_credit_warning', { name: customerName }),
         entityType: 'customer',
         entityId: customerId,
         customerId,
@@ -657,8 +647,7 @@ export const notificationService = {
     if (reached100) {
       await notifyOwner(storeId, {
         type: 'customer_credit_limit',
-        title: t('notificationsContent.customerCreditLimitTitle'),
-        body: t('notificationsContent.customerCreditLimitBody', { name: customerName }),
+        ...createNotificationContent('customer_credit_limit', { name: customerName }),
         entityType: 'customer',
         entityId: customerId,
         customerId,
@@ -669,10 +658,7 @@ export const notificationService = {
   async notifyZReportClosed(storeId: string, reportId: string, zNumber?: number): Promise<void> {
     await notifyOwner(storeId, {
       type: 'z_report_closed',
-      title: t('notificationsContent.zReportClosedTitle'),
-      body: zNumber === undefined
-        ? t('notificationsContent.zReportClosedWithoutNumber')
-        : t('notificationsContent.zReportClosedBody', { number: zNumber }),
+      ...createNotificationContent('z_report_closed', zNumber === undefined ? {} : { number: zNumber }),
       entityType: 'report',
       entityId: reportId,
     });
@@ -686,16 +672,15 @@ export const notificationService = {
         notification.type === 'app_update' && notification.userId === user.id && notification.entityId === buildId,
       ) ? undefined : user;
     }));
-    const body = t('notificationsContent.appUpdateBody', { version, build: buildId });
+    const content = createNotificationContent('app_update', { version, build: buildId });
     await Promise.all(recipients.filter((user): user is NonNullable<typeof user> => Boolean(user)).map((user) => createForUser(user, {
       type: 'app_update',
-      title: t('notificationsContent.appUpdateTitle'),
-      body,
+      ...content,
       entityType: 'app',
       entityId: buildId,
     })));
     try {
-      await permissionService.showLocalNotification(t('notificationsContent.appUpdateTitle'), body);
+      await permissionService.showLocalNotification(content.title, content.body);
     } catch (error) {
       console.error('[notifications] Could not show the app update notification.', error);
     }

@@ -24,6 +24,7 @@ import { buildReportDocument } from '../services/reportDocument';
 import { buildTicketDocument } from '../services/ticketDocument';
 import { downloadThermalPdf, printOrSharePdf, shareThermalPdf } from '../services/receiptExport';
 import { useAuthStore } from '../stores/authStore';
+import { getNotificationContent } from '../lib/notificationContent';
 import { parseNonNegativeMillimes } from '../lib/millimes';
 import { t, type TranslationKey } from '../i18n/translations';
 import { getLanguage, localizeErrorMessage, subscribeToLanguage } from '../i18n';
@@ -987,12 +988,15 @@ export function SettingsScreen() {
           {scheduleNotifications.length > 0 && (
             <SettingsGlassSection heading={t('nav.notifications')} description={t('settings.recentScheduleUpdates')} icon="notifications_active" className="settings-warning-section">
               <div className="flex flex-col gap-2">
-                {scheduleNotifications.slice(0, 3).map((notification) => (
-                  <article key={notification.id}>
-                    <p className="font-body text-label-md text-on-warning-container">{notification.title}</p>
-                    <p className="font-body text-body-sm text-on-warning-container">{notification.body}</p>
-                  </article>
-                ))}
+                {scheduleNotifications.slice(0, 3).map((notification) => {
+                  const content = getNotificationContent(notification);
+                  return (
+                    <article key={notification.id}>
+                      <p className="font-body text-label-md text-on-warning-container">{content.title}</p>
+                      <p className="font-body text-body-sm text-on-warning-container">{content.body}</p>
+                    </article>
+                  );
+                })}
               </div>
             </SettingsGlassSection>
           )}

@@ -17,6 +17,7 @@ import { notificationPath } from '../lib/notificationPath';
 import { getNotificationAppearance } from '../lib/notificationAppearance';
 import type { NotificationRecord } from '../types/domain';
 import { NotificationTypeIcon } from '../components/NotificationTypeIcon';
+import { getNotificationContent } from '../lib/notificationContent';
 
 export function NotificationsScreen() {
   const navigate = useNavigate();
@@ -94,6 +95,7 @@ export function NotificationsScreen() {
           <CardGrid className="mobile-card-list mobile-gap-2">
           {group.entries.map((notification) => {
             const appearance = getNotificationAppearance(notification.type);
+            const content = getNotificationContent(notification);
             return (
             <article
               key={notification.id}
@@ -103,16 +105,16 @@ export function NotificationsScreen() {
                 type="button"
                 disabled={activeNotificationId === notification.id}
                 onClick={() => { void openNotification(notification); }}
-                aria-label={t('notifications.openItem', { title: notification.title })}
+                aria-label={t('notifications.openItem', { title: content.title })}
                 className="flex w-full min-w-0 items-start gap-3 text-left disabled:opacity-60"
               >
                 <NotificationTypeIcon type={notification.type} className="mt-1" />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-start justify-between gap-2">
-                    <span className="break-words font-body text-label-lg text-on-surface">{notification.title}</span>
+                    <span className="break-words font-body text-label-lg text-on-surface">{content.title}</span>
                     {!notification.readAt && <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-primary" aria-label={t('notifications.unread')} />}
                   </span>
-                  <span className="mt-1 block break-words font-body text-body-sm text-on-surface-variant">{notification.body}</span>
+                  <span className="mt-1 block break-words font-body text-body-sm text-on-surface-variant">{content.body}</span>
                   <span className="mt-2 block font-body text-body-xs text-outline">{new Date(notification.createdAt).toLocaleString(getLanguage())}</span>
                 </span>
                 <MaterialIcon name="chevron_right" className="mt-1 shrink-0 text-outline" />
@@ -122,7 +124,7 @@ export function NotificationsScreen() {
                   type="button"
                   disabled={activeNotificationId === notification.id}
                   onClick={() => { void markNotificationRead(notification.id); }}
-                  aria-label={t('notifications.markRead', { title: notification.title })}
+                  aria-label={t('notifications.markRead', { title: content.title })}
                   className="ml-12 mt-1 flex items-center gap-1 text-left font-body text-label-sm text-primary underline disabled:opacity-60"
                 >
                   <MaterialIcon name="done" className="text-base" />

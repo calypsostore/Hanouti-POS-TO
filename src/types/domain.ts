@@ -397,6 +397,7 @@ export interface NotificationRecord {
   shiftId?: string;
   cashMovementId?: string;
   dueAt?: string;
+  contentValues?: Record<string, string | number>;
 }
 
 export interface ShiftVoidAdjustment {

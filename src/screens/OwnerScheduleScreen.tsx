@@ -291,7 +291,7 @@ function OwnerScheduleContent() {
       let failure = '';
       if (affectedStaff.length > 0) {
         try {
-          await notificationService.publishSchedule(storeId, affectedStaff, weekTitle);
+          await notificationService.publishSchedule(storeId, affectedStaff, weekStart, weekEnd);
         } catch (notificationError) {
           failure = t('schedule.publishNotificationFailed', { reason: localizeErrorMessage(notificationError, t('schedule.unknownNotificationError')) });
         }

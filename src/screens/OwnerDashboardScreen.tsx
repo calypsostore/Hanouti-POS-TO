@@ -21,6 +21,7 @@ import { userService } from '../services/userService';
 import { customerService } from '../services/customerService';
 import { notificationService, selectOwnerDashboardNotifications } from '../services/notificationService';
 import { getNotificationAppearance } from '../lib/notificationAppearance';
+import { getNotificationContent } from '../lib/notificationContent';
 import { getSubscriptionDaysRemaining } from '../lib/subscriptionExpiry';
 import { NotificationTypeIcon } from '../components/NotificationTypeIcon';
 import { subscribeToStoreChanges } from '../data/repositories/realtimeRepository';
@@ -723,6 +724,7 @@ function DismissibleOwnerNotification({ notification, onDismiss }: {
   const revealOffset = 72;
   const dismissOffset = 148;
   const maxDragOffset = 184;
+  const content = getNotificationContent(notification);
 
   function handlePointerDown(event: PointerEvent<HTMLElement>) {
     if (!event.isPrimary || isDismissing || (event.pointerType === 'mouse' && event.button !== 0)) return;
@@ -793,7 +795,7 @@ function DismissibleOwnerNotification({ notification, onDismiss }: {
     <div className="owner-dashboard-notification-shell">
       <button
         type="button"
-        aria-label={`${t('common.dismiss')}: ${notification.title}`}
+        aria-label={`${t('common.dismiss')}: ${content.title}`}
         aria-hidden={dragX > -32 || isDismissing}
         tabIndex={dragX <= -32 && !isDismissing ? 0 : -1}
         onClick={() => setIsDismissing(true)}
@@ -812,10 +814,10 @@ function DismissibleOwnerNotification({ notification, onDismiss }: {
         className={`owner-dashboard-notification notification-type-card notification-type-card--${getNotificationAppearance(notification.type).tone} flex items-center gap-3 rounded-xl p-3${isDragging ? ' is-dragging' : ''}${isDismissing ? ' is-dismissing' : ''}`}
       >
         <NotificationTypeIcon type={notification.type} />
-        <span className="min-w-0 flex-1 font-body text-body-sm text-on-surface"><strong>{notification.title}:</strong> {notification.body}</span>
+        <span className="min-w-0 flex-1 font-body text-body-sm text-on-surface"><strong>{content.title}:</strong> {content.body}</span>
         <button
           type="button"
-          aria-label={`${t('common.dismiss')}: ${notification.title}`}
+          aria-label={`${t('common.dismiss')}: ${content.title}`}
           onClick={() => setIsDismissing(true)}
           className="owner-dashboard-notification-dismiss"
         >

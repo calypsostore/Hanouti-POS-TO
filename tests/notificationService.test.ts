@@ -10,6 +10,9 @@ import {
 } from '../src/services/notificationService';
 import { customerService } from '../src/services/customerService';
 import { userService } from '../src/services/userService';
+import { getLanguage, setDeviceLoginLanguage } from '../src/i18n';
+import { createNotificationContent, getNotificationContent } from '../src/lib/notificationContent';
+import { getPushNotificationContent } from '../supabase/functions/_shared/notificationContent';
 
 const owner: Pick<UserRecord, 'id' | 'role' | 'storeId'> = {
   id: 'owner-1',
@@ -80,6 +83,72 @@ describe('notification service', () => {
       body: legacy.body,
       created_at: legacy.createdAt,
     }).body).toBe("Staff's shift closed with a cash difference of -1.223 DT.");
+  });
+
+  it('renders persisted notifications in the active language, including existing app-update rows', () => {
+    const previousLanguage = getLanguage();
+    try {
+      setDeviceLoginLanguage('ar');
+      const localizedAtCreation = createNotificationContent('app_update', {
+        version: '1.0.14',
+        build: 'e9ed8a',
+      });
+      const saved = {
+        ...notification('app-update'),
+        ...localizedAtCreation,
+        type: 'app_update' as const,
+        entityId: 'e9ed8a',
+      };
+
+      expect(saved.title).toBe('يتوفر تحديث');
+      setDeviceLoginLanguage('en');
+      expect(getNotificationContent(saved)).toEqual({
+        title: 'Update available',
+        body: 'Version 1.0.14 (build e9ed8a) is ready to install.',
+      });
+
+      const legacyArabicRecord: NotificationRecord = {
+        ...notification('legacy-app-update'),
+        type: 'app_update',
+        title: 'يتوفر تحديث',
+        body: 'الإصدار 1.0.14 (البنية e9ed8a) جاهز للتثبيت.',
+        entityId: 'e9ed8a',
+      };
+      expect(getNotificationContent(legacyArabicRecord)).toEqual({
+        title: 'Update available',
+        body: 'Version 1.0.14 (build e9ed8a) is ready to install.',
+      });
+
+      const mappedRecord = mapNotificationRow({
+        id: 'database-app-update',
+        type: 'app_update',
+        title: localizedAtCreation.title,
+        body: localizedAtCreation.body,
+        entity_id: 'e9ed8a',
+        content_values: localizedAtCreation.contentValues,
+        created_at: new Date().toISOString(),
+      });
+      expect(getNotificationContent(mappedRecord)).toEqual({
+        title: 'Update available',
+        body: 'Version 1.0.14 (build e9ed8a) is ready to install.',
+      });
+    } finally {
+      setDeviceLoginLanguage(previousLanguage);
+    }
+  });
+
+  it('localizes background push content using the registered device language', () => {
+    expect(getPushNotificationContent(
+      'fr',
+      'cash_difference',
+      'Cash difference at close',
+      'Sarah’s shift closed with a cash difference of -1433.790 DT.',
+      'shift-1',
+      { name: 'Sarah', amount: -1433.79 },
+    )).toEqual({
+      title: 'Écart de caisse à la clôture',
+      body: 'Le service de Sarah a été clôturé avec un écart de caisse de -1 433,790 DT.',
+    });
   });
 
   it('paginates notifications with the same creation timestamp without skipping entries', async () => {

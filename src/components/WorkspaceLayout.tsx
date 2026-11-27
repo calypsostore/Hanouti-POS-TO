@@ -45,9 +45,11 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
   const visiblePrimaryLinks = ownerPrimaryLinks.filter((link) => visibleLinks.some((visible) => visible.to === link.to));
   const visibleMoreLinks = ownerMoreLinks.filter((link) => visibleLinks.some((visible) => visible.to === link.to));
   const isOwnerWorkspace = links.some((link) => link.to === '/owner/dashboard');
+  const isSuperAdminWorkspace = user?.role === 'super_admin';
   const isShiftWorkspace = location.pathname === '/owner/shifts';
   const isSettingsWorkspace = location.pathname === '/owner/settings' || location.pathname === '/settings';
   const usesOwnerTabletBottomNav = isOwnerWorkspace && location.pathname !== '/pos' && !isShiftWorkspace;
+  const usesTabletBottomNav = usesOwnerTabletBottomNav || isSuperAdminWorkspace;
   const isDashboardWorkspace = location.pathname === '/owner/dashboard' || location.pathname === '/admin/overview';
   const [moreOpen, setMoreOpen] = useState(false);
   const [pendingVoidCount, setPendingVoidCount] = useState(0);
@@ -160,7 +162,7 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
     : [{ title: 'nav.group.system', links }];
 
   return (
-    <div className={`workspace-layout min-h-screen bg-surface pb-6${isOwnerWorkspace ? ' owner-workspace' : ''}${isDashboardWorkspace ? ' dashboard-workspace' : ''}${isShiftWorkspace ? ' shift-screen-layout' : ''}${isSettingsWorkspace ? ' settings-screen-layout' : ''}${usesOwnerTabletBottomNav ? ' owner-tablet-bottom-nav' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
+    <div className={`workspace-layout min-h-screen bg-surface pb-6${isOwnerWorkspace ? ' owner-workspace' : ''}${isDashboardWorkspace ? ' dashboard-workspace' : ''}${isShiftWorkspace ? ' shift-screen-layout' : ''}${isSettingsWorkspace ? ' settings-screen-layout' : ''}${usesTabletBottomNav ? ' tablet-bottom-nav' : ''}${isSuperAdminWorkspace ? ' super-admin-bottom-nav' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
       <TopBar title={title} storeName={storeName} storeLogoId={storeLogoId} storeType={storeType} onProfileClick={() => navigate('/settings')} />
       <aside className="desktop-sidebar" aria-label={t('common.workspaceNavigation')}>
         <div className="desktop-sidebar__brand">
@@ -219,7 +221,7 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
           </button>
         </div>
       </aside>
-      <nav aria-label={t('common.workspaceNavigation')} className={`workspace-desktop-nav scrollbar-hidden sticky top-16 z-20 flex gap-2 overflow-x-auto border-b border-outline-variant bg-surface/95 px-3 py-2 backdrop-blur-xl${isOwnerWorkspace ? ' owner-desktop-nav' : ''}`}>
+      <nav aria-label={t('common.workspaceNavigation')} className={`workspace-desktop-nav scrollbar-hidden sticky top-16 z-20 flex gap-2 overflow-x-auto border-b border-outline-variant bg-surface/95 px-3 py-2 backdrop-blur-xl${isOwnerWorkspace ? ' owner-desktop-nav' : ''}${isSuperAdminWorkspace ? ' super-admin-desktop-nav' : ''}`}>
         {visibleLinks.map((link) => (
           <NavLink
             key={link.id ?? link.to}
@@ -241,6 +243,21 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
       <main className="workspace-main mx-auto w-full p-0">
         <PageContainer>{children}</PageContainer>
       </main>
+      {isSuperAdminWorkspace && (
+        <nav aria-label={t('common.workspaceNavigation')} className="owner-mobile-nav super-admin-mobile-nav">
+          {visibleLinks.map((link) => (
+            <NavLink
+              key={link.id ?? link.to}
+              to={link.to}
+              aria-label={t(link.label)}
+              className={({ isActive }) => `owner-mobile-nav__item${isActive ? ' is-active' : ''}`}
+            >
+              <MaterialIcon name={link.icon} className="owner-mobile-nav__icon" />
+              <span>{t(link.label)}</span>
+            </NavLink>
+          ))}
+        </nav>
+      )}
       {isOwnerWorkspace && (
         <>
           <nav aria-label={t('nav.ownerNavigation')} className="owner-mobile-nav">

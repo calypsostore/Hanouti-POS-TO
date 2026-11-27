@@ -1,5 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { resolveNotificationSoundId } from './notificationSounds.ts';
+import { getPushNotificationContent } from '../_shared/notificationContent.ts';
 
 interface NotificationWebhook {
   record?: {
@@ -70,7 +71,7 @@ Deno.serve(async (request) => {
 
   const { data: record, error: notificationError } = await admin
     .from('notifications')
-    .select('id, store_id, user_id, target_role, title, body, type')
+    .select('id, store_id, user_id, target_role, title, body, type, entity_id, content_values')
     .eq('id', notificationId)
     .maybeSingle();
   if (notificationError) return response(500, { error: notificationError.message });
@@ -92,7 +93,7 @@ Deno.serve(async (request) => {
 
   const { data: tokens, error: tokenError } = await admin
     .from('device_tokens')
-    .select('user_id, token')
+    .select('user_id, token, language_code')
     .eq('store_id', storeId)
     .in('user_id', recipientIds);
   if (tokenError) return response(500, { error: tokenError.message });
@@ -145,6 +146,14 @@ Deno.serve(async (request) => {
   const notificationType = String(record.type ?? '');
   for (const tokenRow of tokens ?? []) {
     const token = tokenRow.token as string;
+    const content = getPushNotificationContent(
+      tokenRow.language_code,
+      notificationType,
+      String(record.title ?? '7anouti-POS'),
+      String(record.body ?? ''),
+      typeof record.entity_id === 'string' ? record.entity_id : null,
+      record.content_values,
+    );
     const soundPreferences = soundPreferencesByUser.get(tokenRow.user_id);
     const requestedSound = notificationType.startsWith('void_')
       ? soundPreferences?.void_sound
@@ -161,8 +170,8 @@ Deno.serve(async (request) => {
         message: {
           token,
           notification: {
-            title: String(record.title ?? '7anouti-POS'),
-            body: String(record.body ?? ''),
+            title: content.title,
+            body: content.body,
           },
           android: {
             priority: 'HIGH',

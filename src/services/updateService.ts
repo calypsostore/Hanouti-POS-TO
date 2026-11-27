@@ -481,11 +481,9 @@ export const updateService = {
 
   async forceRefresh(): Promise<void> {
     const result = readLastResult();
-    if (!result?.updateAvailable || !result.latestBuild) {
-      throw new Error('The update build is not available.');
-    }
+    const targetBuild = result?.latestBuild ?? getBuildId();
     try {
-      localStorage.setItem(UPDATE_TARGET_KEY, result.latestBuild);
+      localStorage.setItem(UPDATE_TARGET_KEY, targetBuild);
     } catch (error) {
       throw new Error('Could not prepare the update reload.', { cause: error });
     }
@@ -501,7 +499,7 @@ export const updateService = {
       await Promise.all(cacheNames.map((cacheName) => caches.delete(cacheName)));
     }
     const reloadUrl = new URL('/', window.location.origin);
-    reloadUrl.searchParams.set('v', result.latestBuild);
+    reloadUrl.searchParams.set('v', targetBuild);
     window.location.replace(reloadUrl.toString());
   },
 

@@ -11,6 +11,7 @@ import { NotificationTypeIcon } from './NotificationTypeIcon';
 import { t } from '../i18n/translations';
 import { getLanguage } from '../i18n';
 import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
+import { getNotificationContent } from '../lib/notificationContent';
 
 interface NotificationsPopoverButtonProps {
   id?: string;
@@ -191,6 +192,7 @@ export function NotificationsPopoverButton({
                 <p role="status" className="notification-center-empty">{t('notifications.loading')}</p>
               ) : visibleNotifications.length > 0 ? visibleNotifications.map((notification) => {
                 const appearance = getNotificationAppearance(notification.type);
+                const content = getNotificationContent(notification);
                 const busy = activeNotificationId === notification.id || pendingBulkAction !== null;
                 return (
                   <article key={notification.id} className={`notification-center-card notification-type-card notification-type-card--${appearance.tone}`}>
@@ -198,16 +200,16 @@ export function NotificationsPopoverButton({
                       type="button"
                       disabled={busy}
                       onClick={() => { void openNotification(notification); }}
-                      aria-label={t('notifications.openItem', { title: notification.title })}
+                      aria-label={t('notifications.openItem', { title: content.title })}
                       className="notification-center-open"
                     >
                       <NotificationTypeIcon type={notification.type} />
                       <span className="notification-center-copy">
                         <span className="notification-center-title-row">
-                          <span className="notification-center-item-title">{notification.title}</span>
+                          <span className="notification-center-item-title">{content.title}</span>
                           {!notification.readAt && <span className="notification-center-unread" aria-label={t('notifications.unread')} />}
                         </span>
-                        <span className="notification-center-body">{notification.body}</span>
+                        <span className="notification-center-body">{content.body}</span>
                         <span className="notification-center-time">
                           <MaterialIcon name="schedule" />
                           {new Date(notification.createdAt).toLocaleString(getLanguage())}
@@ -220,7 +222,7 @@ export function NotificationsPopoverButton({
                         type="button"
                         disabled={busy}
                         onClick={() => { void markNotificationRead(notification.id); }}
-                        aria-label={t('notifications.markRead', { title: notification.title })}
+                        aria-label={t('notifications.markRead', { title: content.title })}
                         className="notification-center-read"
                       >
                         <MaterialIcon name="done" />

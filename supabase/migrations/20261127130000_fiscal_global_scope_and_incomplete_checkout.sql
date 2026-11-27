@@ -58,7 +58,7 @@ begin
           and assignment.effective_from <= p_transaction_date
           and (assignment.effective_through is null or assignment.effective_through >= p_transaction_date);
       elsif match_count = 1 then
-old_scope$,
+    $old_scope$,
     $new_scope$
       if match_count = 0 then
         select count(*) into match_count
@@ -102,7 +102,7 @@ old_scope$,
           raise exception 'Order line % has ambiguous category-level % classifications.', line_index, selected_tax_type;
         end if;
       elsif match_count = 1 then
-new_scope$
+    $new_scope$
   );
 
   definition := replace(
@@ -111,12 +111,12 @@ new_scope$
       if assignment_row.treatment = 'unconfigured' then
         raise exception 'Order line % has an unconfigured % treatment.', line_index, selected_tax_type;
       end if;
-old_treatment$,
+    $old_treatment$,
     $new_treatment$
       if assignment_row.treatment = 'unconfigured' then
         return null;
       end if;
-new_treatment$
+    $new_treatment$
   );
 
   if definition = original_definition

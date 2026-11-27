@@ -236,10 +236,14 @@ begin
   replacement := original || E'\n      or (p_purpose = ''void'' and public.has_store_permission(''resolve_voids''))\n      or (p_purpose = ''z_report'' and public.has_store_permission(''manage_shifts''))';
   if position(original in definition) = 0 then raise exception 'Could not locate delegated PIN authorization check.'; end if;
   definition := replace(definition, original, replacement);
-  original := 'select s\.admin_pin_hash into stored_hash\s+from public\.stores s\s+where s\.store_id = p_store_id;';
-  replacement := E'if (p_purpose = ''z_report'' and public.has_store_permission(''manage_shifts''))\n    or (p_purpose = ''void'' and public.has_store_permission(''resolve_voids'')) then\n    select profile.pin_hash into stored_hash\n    from public.profiles profile\n    where profile.id = (select auth.uid())\n      and profile.store_id = p_store_id\n      and profile.role = ''staff''\n      and profile.is_active;\n  else\n    select s.admin_pin_hash into stored_hash\n    from public.stores s\n    where s.store_id = p_store_id;\n  end if;';
-  if definition !~ original then raise exception 'Could not locate store PIN lookup.'; end if;
-  execute regexp_replace(definition, original, replacement);
+  original := 'select s.admin_pin_hash into stored_hash';
+  replacement := 'select case when profile.role = ''staff'' and ((p_purpose = ''z_report'' and public.has_store_permission(''manage_shifts'')) or (p_purpose = ''void'' and public.has_store_permission(''resolve_voids''))) then profile.pin_hash else s.admin_pin_hash end into stored_hash';
+  if position(original in definition) = 0 then raise exception 'Could not locate store PIN selection.'; end if;
+  definition := replace(definition, original, replacement);
+  original := 'from public.stores s';
+  replacement := original || ' left join public.profiles profile on profile.id = (select auth.uid()) and profile.store_id = p_store_id and profile.is_active';
+  if position(original in definition) = 0 then raise exception 'Could not locate store PIN source.'; end if;
+  execute replace(definition, original, replacement);
 
   definition := pg_get_functiondef('public.resolve_order_void(uuid,text,text,text)'::regprocedure);
   original := 'not public.is_store_owner(target.store_id)';

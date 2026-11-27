@@ -19,11 +19,16 @@ jobs:
       - name: Validate backup secrets
         shell: bash
         env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_DB_POOLER_URL: ${{ secrets.SUPABASE_DB_POOLER_URL }}
           BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
         run: |
           set -euo pipefail
-          test -n "$SUPABASE_DB_URL" || { echo "::error::Set the SUPABASE_DB_URL Actions secret."; exit 1; }
+          test -n "$SUPABASE_DB_POOLER_URL" || { echo "::error::Set SUPABASE_DB_POOLER_URL to this project's Supabase session-pooler connection string."; exit 1; }
+          echo "::add-mask::$SUPABASE_DB_POOLER_URL"
+          case "$SUPABASE_DB_POOLER_URL" in
+            postgresql://*@*.pooler.supabase.com:5432/*|postgres://*@*.pooler.supabase.com:5432/*) ;;
+            *) echo "::error::SUPABASE_DB_POOLER_URL must use the session pooler on port 5432."; exit 1 ;;
+          esac
           test -n "$BACKUP_ENCRYPTION_KEY" || { echo "::error::Set the BACKUP_ENCRYPTION_KEY Actions secret."; exit 1; }
 
       - name: Install PostgreSQL client
@@ -34,7 +39,7 @@ jobs:
       - name: Export and encrypt database
         shell: bash
         env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_DB_POOLER_URL: ${{ secrets.SUPABASE_DB_POOLER_URL }}
           BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
         run: |
           set -euo pipefail
@@ -44,7 +49,7 @@ jobs:
           trap 'rm -f "$dump" "$passphrase_file"' EXIT
           printf '%s' "$BACKUP_ENCRYPTION_KEY" > "$passphrase_file"
           chmod 600 "$passphrase_file"
-          pg_dump --format=custom --no-owner --no-acl --file="$dump" "$SUPABASE_DB_URL"
+          pg_dump --format=custom --no-owner --no-acl --file="$dump" "$SUPABASE_DB_POOLER_URL"
           test -s "$dump" || { echo "::error::Database dump is empty."; exit 1; }
           gpg --batch --yes --pinentry-mode loopback \
             --passphrase-file "$passphrase_file" \
@@ -64,7 +69,7 @@ jobs:
         if: success()
         shell: bash
         env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_DB_POOLER_URL: ${{ secrets.SUPABASE_DB_POOLER_URL }}
         run: |
           set -euo pipefail
-          psql "$SUPABASE_DB_URL" --set ON_ERROR_STOP=on --command "delete from public.login_rate_limits where window_started_at < now() - interval '1 day'"
+          psql "$SUPABASE_DB_POOLER_URL" --set ON_ERROR_STOP=on --command "delete from public.login_rate_limits where window_started_at < now() - interval '1 day'"

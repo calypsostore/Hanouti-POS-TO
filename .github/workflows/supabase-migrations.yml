@@ -5,7 +5,6 @@ on:
     branches:
       - main
     paths:
-      - '.github/workflows/supabase-migrations.yml'
       - 'supabase/migrations/**'
   workflow_dispatch:
 
@@ -29,20 +28,27 @@ jobs:
         with:
           version: 3.2.0
 
-      - name: Validate database connection secret
+      - name: Validate database pooler secret
         env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_DB_POOLER_URL: ${{ secrets.SUPABASE_DB_POOLER_URL }}
         run: |
-          test -n "$SUPABASE_DB_URL" || {
-            echo "::error::Set the SUPABASE_DB_URL Actions secret."
+          test -n "$SUPABASE_DB_POOLER_URL" || {
+            echo "::error::Set SUPABASE_DB_POOLER_URL to this project's Supabase session-pooler connection string."
             exit 1
           }
-          echo "::add-mask::$SUPABASE_DB_URL"
+          echo "::add-mask::$SUPABASE_DB_POOLER_URL"
+          case "$SUPABASE_DB_POOLER_URL" in
+            postgresql://*@*.pooler.supabase.com:5432/*|postgres://*@*.pooler.supabase.com:5432/*) ;;
+            *)
+              echo "::error::SUPABASE_DB_POOLER_URL must use the session pooler on port 5432, not the direct or transaction-pooler connection."
+              exit 1
+              ;;
+          esac
 
       - name: Apply pending production migrations
         env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_DB_POOLER_URL: ${{ secrets.SUPABASE_DB_POOLER_URL }}
         run: |
           supabase db push \
-            --remote="$SUPABASE_DB_URL" \
+            --remote="$SUPABASE_DB_POOLER_URL" \
             --yes

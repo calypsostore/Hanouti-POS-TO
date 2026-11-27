@@ -170,9 +170,10 @@ creates an encrypted PostgreSQL custom-format dump every day at 02:17 UTC and
 retains the encrypted artifact for 30 days. In repository **Settings >
 Secrets and variables > Actions**, add:
 
-- `SUPABASE_DB_URL`: the database connection string from the Supabase project
-  database settings. Use the direct connection or a session-mode pooler
-  reachable from GitHub Actions, not transaction mode.
+- `SUPABASE_DB_POOLER_URL`: this project's **Session pooler** connection string
+  from Supabase **Connect** settings (port `5432`). GitHub-hosted runners cannot
+  reliably reach Supabase's IPv6-only direct database endpoint. Do not use the
+  transaction pooler (port `6543`).
 - `BACKUP_ENCRYPTION_KEY`: a long, randomly generated passphrase. Store it
   separately from downloaded backups and restrict repository artifact access.
 
@@ -180,6 +181,9 @@ Run the workflow manually after setting the secrets and confirm that the
 encrypted artifact is uploaded. For provider-managed point-in-time recovery,
 also enable Supabase scheduled backups/PITR in the project dashboard where the
 plan supports it.
+
+The `.github/workflows/supabase-migrations.yml` workflow uses the same
+`SUPABASE_DB_POOLER_URL` secret for production migrations.
 
 To restore a workflow artifact, download it from the Actions run, then decrypt
 and restore it into a **separate recovery project** first. Use a PostgreSQL

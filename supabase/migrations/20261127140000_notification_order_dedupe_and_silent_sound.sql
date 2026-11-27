@@ -74,8 +74,8 @@ begin
   );
   definition := replace(
     original_definition,
-    E'  returning * into created;\n  return to_jsonb(created);',
-    E'  returning * into created;\n  if created.id is null then return null; end if;\n  return to_jsonb(created);'
+    'return to_jsonb(created);',
+    'if created.id is null then return null; end if; return to_jsonb(created);'
   );
   if definition = original_definition
     or position('if created.id is null then return null;' in definition) = 0 then

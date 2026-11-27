@@ -1,6 +1,9 @@
 name: VPS SSH Connectivity Test
 
 on:
+  push:
+    branches:
+      - feature/supabase-vps-deployment
   workflow_dispatch:
 
 permissions:

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { App as CapacitorApp } from '@capacitor/app';
 import { useNavigate } from 'react-router-dom';
@@ -19,11 +19,13 @@ import { useAuthStore } from '../stores/authStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { useFocusRefreshKey } from '../lib/useFocusRefreshKey';
 import { notificationPath } from '../lib/notificationPath';
+import { getNotificationContent } from '../lib/notificationContent';
 import { getNotificationAppearance } from '../lib/notificationAppearance';
 import { playNotificationSoundForEvent } from '../services/notificationSounds';
 import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
 import { NotificationTypeIcon } from './NotificationTypeIcon';
 import type { NotificationRecord } from '../types/domain';
+import { getLanguage, subscribeToLanguage } from '../i18n';
 
 const SHOWN_IDS_KEY = '7anouti.notification.shown.v1';
 
@@ -48,6 +50,7 @@ function rememberShownId(id: string): void {
 
 export function NotificationsBridge() {
   const navigate = useNavigate();
+  const language = useSyncExternalStore(subscribeToLanguage, getLanguage);
   const user = useAuthStore((state) => state.user);
   const locked = useAuthStore((state) => state.locked);
   const acceptInsert = useNotificationStore((state) => state.acceptInsert);
@@ -117,6 +120,7 @@ export function NotificationsBridge() {
         store_id: user.storeId,
         token,
         platform: 'android',
+        language_code: language,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'token' });
       if (error) console.error('[push] Could not register device token.', error);
@@ -163,7 +167,7 @@ export function NotificationsBridge() {
       void pushActionListener?.remove();
       void pushReceivedListener?.remove();
     };
-  }, [markRead, navigate, user]);
+  }, [language, markRead, navigate, user]);
 
   useEffect(() => {
     if (!isSupabaseDriver() || !user?.storeId || locked ||
@@ -199,7 +203,8 @@ export function NotificationsBridge() {
       const backgrounded = !document.visibilityState || document.visibilityState !== 'visible';
       if (backgrounded || !appActive.current) {
         if (!pushNotificationsEnabled) {
-          await permissionService.showLocalNotification(row.title, row.body, row);
+          const content = getNotificationContent(row);
+          await permissionService.showLocalNotification(content.title, content.body, row);
         }
         return;
       }
@@ -366,6 +371,7 @@ export function NotificationsBridge() {
 
   if (!banner) return null;
   const appearance = getNotificationAppearance(banner.type);
+  const content = getNotificationContent(banner);
   return createPortal(
     <button
       type="button"
@@ -382,8 +388,8 @@ export function NotificationsBridge() {
     >
       <NotificationTypeIcon type={banner.type} />
       <span className="min-w-0">
-        <span className="block font-body text-label-lg text-on-surface">{banner.title}</span>
-        <span className="mt-1 block font-body text-body-sm text-on-surface-variant">{banner.body}</span>
+        <span className="block font-body text-label-lg text-on-surface">{content.title}</span>
+        <span className="mt-1 block font-body text-body-sm text-on-surface-variant">{content.body}</span>
       </span>
     </button>,
     portalTarget,

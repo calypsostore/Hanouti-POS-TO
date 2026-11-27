@@ -238,6 +238,19 @@ describe('updateService.checkForUpdates', () => {
     expect(window.location.replace).not.toHaveBeenCalled();
   });
 
+  it('force-refreshes the current web build even when no update is available', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(
+      JSON.stringify({ version: '1.0.4', buildId: 'current-build' }),
+      { status: 200 },
+    ));
+
+    await updateService.checkForUpdates();
+    await updateService.forceRefresh();
+
+    expect(localStorage.getItem('7anouti-pos:updating-to')).toBe('current-build');
+    expect(window.location.replace).toHaveBeenCalledWith('https://hanoutipos.vercel.app/?v=current-build');
+  });
+
   it('reports an APK requirement when the release manifest has a newer APK version code', async () => {
     vi.stubGlobal('window', {
       location: { origin: 'https://localhost', reload: vi.fn() },

@@ -29,20 +29,20 @@ jobs:
         with:
           version: 3.2.0
 
-      - name: Validate database secret
+      - name: Validate database connection secret
         env:
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
-          test -n "$SUPABASE_DB_PASSWORD" || {
-            echo "::error::Set the SUPABASE_DB_PASSWORD Actions secret."
+          test -n "$SUPABASE_DB_URL" || {
+            echo "::error::Set the SUPABASE_DB_URL Actions secret."
             exit 1
           }
+          echo "::add-mask::$SUPABASE_DB_URL"
 
       - name: Apply pending production migrations
         env:
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
           supabase db push \
-            --remote=xokqhrmtvfcvvddvdete \
-            --password "$SUPABASE_DB_PASSWORD" \
+            --remote="$SUPABASE_DB_URL" \
             --yes

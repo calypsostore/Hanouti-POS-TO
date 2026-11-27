@@ -4,11 +4,11 @@ declare
   original text;
 begin
   definition := pg_get_functiondef('public.record_report(jsonb,text)'::regprocedure);
-  original := E'or ((cash_difference <> 0 or card_difference <> 0 or other_difference <> 0)\n      and nullif(btrim(p_report->>''cashDifferenceNote''), '''') is null)';
+  original := 'nullif(btrim(p_report->>''cashDifferenceNote''), '''') is null';
   if position(original in definition) = 0 then
     raise exception 'Could not locate Z-report required-note validation.';
   end if;
-  definition := replace(definition, original, 'or false');
+  definition := replace(definition, original, 'false');
 
   original := 'Z counts are incomplete, require a note, or do not reconcile with the server ledger.';
   if position(original in definition) = 0 then

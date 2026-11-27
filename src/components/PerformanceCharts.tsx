@@ -10,6 +10,7 @@ import {
   YAxis,
 } from 'recharts';
 import { formatTnd } from '../lib/format';
+import { getLanguage, t } from '../i18n';
 
 interface PeakHour {
   hour: number;
@@ -32,8 +33,7 @@ interface NamedSales {
 }
 
 function formatHour(hour: number): string {
-  const suffix = hour < 12 ? 'AM' : 'PM';
-  return `${hour % 12 || 12} ${suffix}`;
+  return new Date(2000, 0, 1, hour).toLocaleTimeString(getLanguage(), { hour: 'numeric' });
 }
 
 export function PeakHoursChart({ data }: { data: PeakHour[] }) {
@@ -44,7 +44,7 @@ export function PeakHoursChart({ data }: { data: PeakHour[] }) {
         <XAxis dataKey="hour" tick={{ fontSize: 10 }} interval={2} tickFormatter={(hour) => formatHour(Number(hour))} />
         <YAxis allowDecimals={false} width={28} tick={{ fontSize: 10 }} />
         <Tooltip labelFormatter={(hour) => formatHour(Number(hour))} />
-        <Bar dataKey="orders" name="Orders" fill="#3B82F6" radius={[4, 4, 0, 0]} />
+        <Bar dataKey="orders" name={t('reportsPage.orders')} fill="#3B82F6" radius={[4, 4, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -57,8 +57,8 @@ export function DashboardSalesByDateChart({ data }: { data: LabeledSales[] }) {
         <CartesianGrid stroke="#E6EBF7" vertical={false} />
         <XAxis dataKey="label" tick={{ fontSize: 10 }} minTickGap={20} />
         <YAxis width={48} tick={{ fontSize: 10 }} />
-        <Tooltip formatter={(value) => [`${formatTnd(Number(value))} DT`, 'Sales']} />
-        <Bar dataKey="sales" name="Sales" fill="#F8A81A" radius={[4, 4, 0, 0]} />
+        <Tooltip formatter={(value) => [`${formatTnd(Number(value))} DT`, t('reportsPage.sales')]} />
+        <Bar dataKey="sales" name={t('reportsPage.sales')} fill="#F8A81A" radius={[4, 4, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -71,8 +71,8 @@ export function DashboardSalesByStaffChart({ data }: { data: NamedSales[] }) {
         <CartesianGrid stroke="#E6EBF7" vertical={false} />
         <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} />
         <YAxis tick={{ fontSize: 11 }} />
-        <Tooltip formatter={(value) => [`${formatTnd(Number(value))} DT`, 'Sales']} />
-        <Bar dataKey="sales" name="Sales" fill="#2FA878" radius={[6, 6, 0, 0]} />
+        <Tooltip formatter={(value) => [`${formatTnd(Number(value))} DT`, t('reportsPage.sales')]} />
+        <Bar dataKey="sales" name={t('reportsPage.sales')} fill="#2FA878" radius={[6, 6, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -85,8 +85,8 @@ export function ReportSalesByDayChart({ data }: { data: LabeledSales[] }) {
         <CartesianGrid stroke="#E1ECEE" vertical={false} />
         <XAxis dataKey="label" tick={{ fontSize: 10 }} minTickGap={20} />
         <YAxis width={42} tick={{ fontSize: 10 }} />
-        <Tooltip formatter={(value) => [`${formatTnd(Number(value))} DT`, 'Sales']} />
-        <Line type="monotone" dataKey="sales" name="Sales" stroke="#0F5F6E" strokeWidth={2} dot={{ r: 2 }} />
+        <Tooltip formatter={(value) => [`${formatTnd(Number(value))} DT`, t('reportsPage.sales')]} />
+        <Line type="monotone" dataKey="sales" name={t('reportsPage.sales')} stroke="#0F5F6E" strokeWidth={2} dot={{ r: 2 }} />
       </LineChart>
     </ResponsiveContainer>
   );
@@ -101,9 +101,9 @@ export function ReportSalesByHourChart({ data }: { data: HourlySales[] }) {
         <YAxis width={42} tick={{ fontSize: 10 }} />
         <Tooltip
           labelFormatter={(hour) => formatHour(Number(hour))}
-          formatter={(value) => [`${formatTnd(Number(value))} DT`, 'Sales']}
+          formatter={(value) => [`${formatTnd(Number(value))} DT`, t('reportsPage.sales')]}
         />
-        <Bar dataKey="sales" name="Sales" fill="#0F5F6E" radius={[4, 4, 0, 0]} />
+        <Bar dataKey="sales" name={t('reportsPage.sales')} fill="#0F5F6E" radius={[4, 4, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );

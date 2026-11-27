@@ -8,6 +8,7 @@ import { t } from '../i18n/translations';
 import { useAuthStore } from '../stores/authStore';
 import { requiresCredentialSetup } from '../services/credentialSetup';
 import apk1Logo from '../../logos/apk1.png';
+import { localizeErrorMessage } from '../i18n';
 
 type LoginRole = 'staff' | 'admin';
 
@@ -198,7 +199,7 @@ export function LoginScreen() {
       const user = await login(identifier, password, [...allowedRoles], remember);
       navigate(requiresCredentialSetup(user) ? '/set-password' : user.role === 'staff' ? '/dashboard' : user.role === 'owner' ? '/owner/dashboard' : '/admin/overview');
     } catch (loginError) {
-      setError(loginError instanceof Error ? loginError.message : t('login.unableToSignIn'));
+      setError(localizeErrorMessage(loginError, t('login.unableToSignIn')));
     } finally {
       setSubmitting(false);
     }
@@ -281,7 +282,7 @@ export function LoginScreen() {
           <p className="login-tagline">{t('login.tagline')}</p>
         </header>
 
-        <div className="login-role-switch" role="group" aria-label="Choose account type">
+        <div className="login-role-switch" role="group" aria-label={t('login.chooseAccountType')}>
           <span
             className={`login-role-indicator${role === 'staff' ? ' login-role-indicator--staff' : ''}`}
             aria-hidden="true"

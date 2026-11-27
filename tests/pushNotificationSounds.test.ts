@@ -11,6 +11,11 @@ describe('push notification sound preferences', () => {
     expect(resolveNotificationSoundId('cash_difference', 'alert5')).toBe('alert5');
   });
 
+  it('preserves silent mode for both notification categories', () => {
+    expect(resolveNotificationSoundId('void_requested', 'silent')).toBe('silent');
+    expect(resolveNotificationSoundId('cash_difference', 'silent')).toBe('silent');
+  });
+
   it('uses the UI defaults when a preference is missing or legacy', () => {
     expect(resolveNotificationSoundId('void_approved', null)).toBe('alert7');
     expect(resolveNotificationSoundId('void_rejected', 'alert2')).toBe('alert7');

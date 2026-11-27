@@ -6,8 +6,10 @@ import { StatusTag } from '../../../components/StatusTag';
 import { PageHeader } from '../../../components/layout';
 import { ShiftNotificationsButton } from '../../../components/ShiftNotificationsButton';
 import { WorkspaceSearch } from '../../../components/WorkspaceSearch';
+import { useAuthStore } from '../../../stores/authStore';
 import type { ShiftRecord, StoreRecord } from '../../../types/domain';
 import { t } from '../../../i18n/translations';
+import { getLanguage } from '../../../i18n';
 
 interface ShiftHeaderProps {
   ownerMode: boolean;
@@ -34,20 +36,22 @@ export function ShiftHeader({
   openCount, openStartingCashSheet, openCountedCashSheet, dayStatusMessage,
   dayIsClosed, error, notice, activeTab, changeActiveTab, userId,
 }: ShiftHeaderProps) {
+  const user = useAuthStore((state) => state.user);
+  const canSearchWorkspace = user?.role === 'owner';
   return (
     <>
 {ownerMode && (
         <div className="shift-topbar shift-topbar--search">
-          <Link to="/owner/dashboard" className="shift-topbar-brand" aria-label="Go to 7anouti-POS dashboard">
+          <Link to="/owner/dashboard" className="shift-topbar-brand" aria-label={t('shift.dashboardAria')}>
             <span className="shift-topbar-logo" aria-hidden="true">
               <img src="/logo1.png" alt="" />
             </span>
             <span className="shift-topbar-brand-copy">
               <strong>7anouti-POS</strong>
-              <span>Smart Business</span>
+              <span>{t('shift.brandTagline')}</span>
             </span>
           </Link>
-          <WorkspaceSearch key={storeId} storeId={storeId} />
+          {canSearchWorkspace && <WorkspaceSearch key={storeId} storeId={storeId} />}
           <div className="shift-topbar-actions">
             <ShiftNotificationsButton />
           </div>
@@ -59,9 +63,9 @@ export function ShiftHeader({
           <p className="mt-1 font-body text-body-md text-on-surface-variant">{store?.name}</p>
         </div>
         {ownerMode && !ownOpenShift
-          ? <Button className="shift-open-button" onClick={openStartingCashSheet}><MaterialIcon name="lock_open" />Open my shift</Button>
+          ? <Button className="shift-open-button" onClick={openStartingCashSheet}><MaterialIcon name="lock_open" />{t('shift.openMyShift')}</Button>
           : ownerMode
-            ? <StatusTag status="started">{`${openCount} open`}</StatusTag>
+            ? <StatusTag status="started">{t('shift.openCount', { count: openCount })}</StatusTag>
             : canOpenCloseShift && !ownOpenShift && mayOpenShift
               ? <Button className="shift-open-button" onClick={openStartingCashSheet}><MaterialIcon name="lock_open" />{t('shift.openShift')}</Button>
               : null}
@@ -73,37 +77,37 @@ export function ShiftHeader({
               <MaterialIcon name="payments" className="text-2xl" />
             </span>
             <div className="min-w-0">
-              <h1 className="truncate font-display text-headline-md text-on-surface">Shift Management</h1>
-              <p className="mt-0.5 truncate font-body text-body-sm text-on-surface-variant">Manage your shifts and view daily reports</p>
+              <h1 className="truncate font-display text-headline-md text-on-surface">{t('shift.management')}</h1>
+              <p className="mt-0.5 truncate font-body text-body-sm text-on-surface-variant">{t('shift.managementSubtitle')}</p>
             </div>
             <span className="shift-location-chip">
               <MaterialIcon name="location_on" />
-              <span>{store?.address || store?.name || 'Your store'}</span>
+              <span>{store?.address || store?.name || t('shift.yourStore')}</span>
               <MaterialIcon name="expand_more" />
             </span>
           </div>
           <div className="shift-owner-header-actions">
             {ownOpenShift ? (
               <>
-                <span className="shift-open-status" aria-label={`Shift open since ${new Date(ownOpenShift.openedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`}>
+                <span className="shift-open-status" aria-label={t('shift.openSince', { time: new Date(ownOpenShift.openedAt).toLocaleTimeString(getLanguage(), { hour: '2-digit', minute: '2-digit' }) })}>
                   <span className="shift-open-status__dot" aria-hidden="true" />
                   <span className="shift-open-status__copy">
-                    <strong>Shift Open</strong>
-                    <small>Since {new Date(ownOpenShift.openedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</small>
+                    <strong>{t('shift.shiftOpen')}</strong>
+                    <small>{t('shift.since', { time: new Date(ownOpenShift.openedAt).toLocaleTimeString(getLanguage(), { hour: '2-digit', minute: '2-digit' }) })}</small>
                   </span>
                 </span>
                 {canOpenCloseShift && (
                   <Button className="shift-open-button" onClick={openCountedCashSheet}>
-                    <MaterialIcon name="crop_square" />Close Shift
+                    <MaterialIcon name="crop_square" />{t('shift.closeShift')}
                   </Button>
                 )}
               </>
             ) : (
-              <StatusTag status="closed">No shift open</StatusTag>
+              <StatusTag status="closed">{t('shift.noOpenShift')}</StatusTag>
             )}
             {!ownOpenShift && (
               <Button className="shift-open-button" onClick={openStartingCashSheet}>
-                <MaterialIcon name="lock_open" />Open Shift
+                <MaterialIcon name="lock_open" />{t('shift.openShift')}
               </Button>
             )}
           </div>
@@ -126,16 +130,16 @@ export function ShiftHeader({
         </p>
       )}
       {ownerMode && (
-        <nav className="shift-section-tabs mb-4 grid grid-cols-3 gap-1 p-1" aria-label="Shift and report sections">
+        <nav className="shift-section-tabs mb-4 grid grid-cols-3 gap-1 p-1" aria-label={t('shift.tabsAria')}>
           <span
             className={`shift-section-indicator shift-section-indicator--${activeTab}`}
             aria-hidden="true"
           />
           {([
-            ['shifts', 'Shift', 'schedule'],
-            ['reports', 'Z Reports', 'analytics'],
-            ['archive', 'Daily Reports', 'description'],
-          ] as const).map(([tab, label, icon]) => (
+            ['shifts', 'shift.tabShifts', 'schedule'],
+            ['reports', 'shift.tabReports', 'analytics'],
+            ['archive', 'shift.tabArchive', 'description'],
+          ] as const).map(([tab, labelKey, icon]) => (
             <Button
               key={tab}
               variant="ghost"
@@ -144,7 +148,7 @@ export function ShiftHeader({
               onClick={() => changeActiveTab(tab)}
             >
               <MaterialIcon name={icon} className="text-lg" />
-              {label}
+              {t(labelKey)}
             </Button>
           ))}
         </nav>

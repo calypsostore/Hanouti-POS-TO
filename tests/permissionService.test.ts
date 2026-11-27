@@ -100,14 +100,19 @@ describe('permissionService', () => {
       id: 'orders_v2_alert8',
       sound: 'alert8.mp3',
     }));
+    expect(createChannel).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'orders_v2_silent',
+      importance: 2,
+      vibration: false,
+    }));
     expect(schedule).toHaveBeenCalledWith({
       notifications: [expect.objectContaining({
         title: 'Update available',
         body: 'A new build is ready.',
         channelId: 'system_v2_alert6',
         smallIcon: 'ic_stat_notification',
+        largeIcon: 'ic_notification_large',
       })],
     });
-    expect(schedule.mock.calls[0]?.[0].notifications[0]).not.toHaveProperty('largeIcon');
   });
 });

@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { LazyBatch } from '../LazyBatch';
+import { t } from '../../i18n/translations';
 
 export interface DataTableColumn<T> {
   key: string;
@@ -53,7 +54,7 @@ export function DataTable<T>({ rows, columns, getRowKey, mobileCards, empty, row
                   <button
                     type="button"
                     className="inline-flex min-h-9 items-center gap-1 text-left hover:text-primary"
-                    aria-label={`Sort by ${column.label}${sortKey === column.key ? (descending ? ', descending' : ', ascending') : ''}`}
+                    aria-label={`${t('common.sortBy', { label: column.label })}${sortKey === column.key ? `, ${t(descending ? 'common.descending' : 'common.ascending')}` : ''}`}
                     onClick={() => {
                       if (sortKey === column.key) setDescending((value) => !value);
                       else { setSortKey(column.key); setDescending(false); }

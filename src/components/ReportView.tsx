@@ -7,6 +7,8 @@ import { downloadOrSharePdf, downloadThermalPdf, printOrSharePdf } from '../serv
 import { buildReportDocument } from '../services/reportDocument';
 import type { ReportRecord, StoreRecord, StoreSettings } from '../types/domain';
 import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
+import { ticketT } from '../i18n/tickets';
+import { localizeErrorMessage } from '../i18n';
 
 type ReportStore = Pick<StoreRecord, 'name' | 'address' | 'phone' | 'taxId'>;
 
@@ -93,7 +95,7 @@ export function ReportView({
       });
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return;
-      setShareError(error instanceof Error ? error.message : 'Unable to create or share this report PDF.');
+      setShareError(localizeErrorMessage(error, ticketT('Unable to create or share this report PDF.')));
     }
   }
 
@@ -108,7 +110,7 @@ export function ReportView({
       ));
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return;
-      setShareError(error instanceof Error ? error.message : 'Unable to print this report.');
+      setShareError(localizeErrorMessage(error, ticketT('Unable to print this report.')));
     }
   }
 
@@ -116,15 +118,15 @@ export function ReportView({
     <>
       <div className="receipt-actions no-print">
         <Button variant="secondary" onClick={() => { void printReport(); }}>
-          <MaterialIcon name="print" className="text-lg" />Print
+          <MaterialIcon name="print" className="text-lg" />{ticketT('Print')}
         </Button>
         <Button variant="secondary" onClick={() => { void exportPdf('thermal'); }}>
-          <MaterialIcon name="receipt_long" className="text-lg" />Thermal PDF
+          <MaterialIcon name="receipt_long" className="text-lg" />{ticketT('Thermal PDF')}
         </Button>
         <Button variant="secondary" onClick={() => { void exportPdf('a4'); }}>
-          <MaterialIcon name="picture_as_pdf" className="text-lg" />A4 PDF
+          <MaterialIcon name="picture_as_pdf" className="text-lg" />{ticketT('A4 PDF')}
         </Button>
-        <Button variant="ghost" onClick={onClose}>Close</Button>
+        <Button variant="ghost" onClick={onClose}>{ticketT('Close')}</Button>
       </div>
       {shareError && <p role="alert" className="no-print receipt-error">{shareError}</p>}
       <ReceiptDocumentView
@@ -139,12 +141,12 @@ export function ReportView({
   );
 
   if (inline) {
-    return <section className="receipt-inline-report" aria-label={`${document.title} preview`}>{content}</section>;
+    return <section className="receipt-inline-report" aria-label={ticketT('Report preview')}>{content}</section>;
   }
 
   return createPortal(
     <div className="glass-modal-backdrop receipt-overlay" style={{ zIndex }} onMouseDown={onClose}>
-      <section ref={dialogRef} role="dialog" aria-modal="true" aria-label={`${document.title} report`} className="glass-modal-panel receipt-dialog report-dialog" onMouseDown={(event) => event.stopPropagation()}>
+      <section ref={dialogRef} role="dialog" aria-modal="true" aria-label={`${document.title} ${ticketT('Report')}`} className="glass-modal-panel receipt-dialog report-dialog" onMouseDown={(event) => event.stopPropagation()}>
         {content}
       </section>
     </div>,

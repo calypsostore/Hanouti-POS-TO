@@ -2,6 +2,7 @@ import { formatTnd } from '../lib/format';
 import type { ReportRecord, StoreRecord, StoreSettings } from '../types/domain';
 import { resolveStoreSettings } from '../types/domain';
 import { getLogoSrc } from '../data/logoCatalog';
+import { formatTicketDateTime, formatTicketPaymentMethod, ticketT } from '../i18n/tickets';
 
 export interface ReceiptLine {
   text: string;
@@ -29,7 +30,7 @@ export interface ReportDocument extends ThermalReceiptDocument {
 }
 
 const money = (amount: number | undefined) => `${formatTnd((amount ?? 0) / 1000)} DT`;
-const localDateTime = (value: string | undefined) => value ? new Date(value).toLocaleString() : 'Not recorded';
+const localDateTime = (value: string | undefined) => value ? formatTicketDateTime(value) : ticketT('Not recorded');
 const columns = (width: 58 | 80) => width === 58 ? 32 : 48;
 const divider = (width: 58 | 80) => '-'.repeat(columns(width));
 
@@ -106,68 +107,68 @@ export function buildReportDocument(
   const cashSales = paymentSplit?.cash ?? report.cashSalesMillimes;
   const drawerCashSales = report.cashSalesMillimes ?? cashSales;
   const tabSales = paymentSplit?.tab ?? report.tabSalesMillimes;
-  appendSection(sections, 'SALES', [
-    { label: 'Transactions', value: String(report.orderCount) },
-    { label: 'Gross sales', value: money(report.grossMillimes ?? report.salesMillimes) },
+  appendSection(sections, ticketT('SALES'), [
+    { label: ticketT('Transactions'), value: String(report.orderCount) },
+    { label: ticketT('Gross sales'), value: money(report.grossMillimes ?? report.salesMillimes) },
     ...(report.discountsMillimes !== undefined && report.discountsMillimes !== 0
-      ? [{ label: 'Discounts', value: money(report.discountsMillimes) }]
+      ? [{ label: ticketT('Discounts'), value: money(report.discountsMillimes) }]
       : []),
-    { label: 'Net sales', value: money(report.netMillimes ?? report.salesMillimes), emphasized: true },
-    ...(report.salesCollectedMillimes === undefined ? [] : [{ label: 'Sales collected', value: money(report.salesCollectedMillimes) }]),
-    ...(cashSales === undefined ? [] : [{ label: 'Cash', value: money(cashSales) }]),
+    { label: ticketT('Net sales'), value: money(report.netMillimes ?? report.salesMillimes), emphasized: true },
+    ...(report.salesCollectedMillimes === undefined ? [] : [{ label: ticketT('Sales collected'), value: money(report.salesCollectedMillimes) }]),
+    ...(cashSales === undefined ? [] : [{ label: ticketT('Cash'), value: money(cashSales) }]),
     ...(paymentSplit ? [
-      { label: 'Card', value: money(paymentSplit.card), emphasized: true },
-      { label: 'Other', value: money(paymentSplit.other) },
+      { label: ticketT('Card'), value: money(paymentSplit.card), emphasized: true },
+      { label: ticketT('Other'), value: money(paymentSplit.other) },
     ] : []),
-    ...(tabSales === undefined ? [] : [{ label: 'Tab sales', value: money(tabSales) }]),
+    ...(tabSales === undefined ? [] : [{ label: ticketT('Tab sales'), value: money(tabSales) }]),
   ]);
   if (report.fiscalSummary) {
     const fiscal = report.fiscalSummary;
-    appendSection(sections, 'FISCAL SNAPSHOTS (HISTORICAL DATA ONLY)', [
-      { label: 'Completed orders with snapshots', value: `${fiscal.ordersWithFiscalSnapshot} / ${fiscal.completedOrderCount}` },
+    appendSection(sections, ticketT('FISCAL SNAPSHOTS (HISTORICAL DATA ONLY)'), [
+      { label: ticketT('Completed orders with snapshots'), value: `${fiscal.ordersWithFiscalSnapshot} / ${fiscal.completedOrderCount}` },
       ...(fiscal.ordersMissingFiscalSnapshot === 0 ? [] : [{
-        label: 'Completed orders missing fiscal snapshots',
+        label: ticketT('Completed orders missing fiscal snapshots'),
         value: String(fiscal.ordersMissingFiscalSnapshot),
         emphasized: true,
       }]),
-      { label: 'Snapshot net amount (HT)', value: money(fiscal.netAmountMillimes) },
-      { label: 'Snapshot tax amount', value: money(fiscal.taxAmountMillimes) },
-      { label: 'Snapshot gross amount (TTC)', value: money(fiscal.grossAmountMillimes), emphasized: true },
+      { label: ticketT('Snapshot net amount (HT)'), value: money(fiscal.netAmountMillimes) },
+      { label: ticketT('Snapshot tax amount'), value: money(fiscal.taxAmountMillimes) },
+      { label: ticketT('Snapshot gross amount (TTC)'), value: money(fiscal.grossAmountMillimes), emphasized: true },
       ...fiscal.taxes.flatMap((tax) => [
         {
-          label: `${tax.taxType} · ${tax.treatment}${tax.ruleId ? ` · ${tax.ruleId} v${tax.ruleVersion}` : ''} base`,
+          label: `${ticketT(tax.taxType)} · ${ticketT(tax.treatment)}${tax.ruleId ? ` · ${tax.ruleId} v${tax.ruleVersion}` : ''} ${ticketT('Base')}`,
           value: money(tax.taxableBaseMillimes),
         },
         {
-            label: `${tax.taxType} · ${tax.treatment}${tax.ruleId ? ` · ${tax.ruleId} v${tax.ruleVersion}` : ''} tax`,
+            label: `${ticketT(tax.taxType)} · ${ticketT(tax.treatment)}${tax.ruleId ? ` · ${tax.ruleId} v${tax.ruleVersion}` : ''} ${ticketT('Tax')}`,
             value: money(tax.amountMillimes),
         },
       ]),
-      { label: 'Not a tax declaration or compliance certification', value: '' },
+      { label: ticketT('Not a tax declaration or compliance certification'), value: '' },
     ]);
-    appendSection(sections, 'FISCAL VOID REVERSALS (ORIGINAL SNAPSHOTS)', [
-      { label: 'Voided orders with snapshots', value: `${fiscal.voidedOrdersWithFiscalSnapshot ?? 0} / ${fiscal.voidedOrderCount ?? 0}` },
+    appendSection(sections, ticketT('FISCAL VOID REVERSALS (ORIGINAL SNAPSHOTS)'), [
+      { label: ticketT('Voided orders with snapshots'), value: `${fiscal.voidedOrdersWithFiscalSnapshot ?? 0} / ${fiscal.voidedOrderCount ?? 0}` },
       ...((fiscal.voidedOrdersMissingFiscalSnapshot ?? 0) === 0 ? [] : [{
-        label: 'Voided orders missing fiscal snapshots',
+        label: ticketT('Voided orders missing fiscal snapshots'),
         value: String(fiscal.voidedOrdersMissingFiscalSnapshot),
         emphasized: true,
       }]),
-      { label: 'Reversed net amount (HT)', value: money(fiscal.reversedNetAmountMillimes ?? 0) },
-      { label: 'Reversed tax amount', value: money(fiscal.reversedTaxAmountMillimes ?? 0) },
-      { label: 'Reversed gross amount (TTC)', value: money(fiscal.reversedGrossAmountMillimes ?? 0), emphasized: true },
+      { label: ticketT('Reversed net amount (HT)'), value: money(fiscal.reversedNetAmountMillimes ?? 0) },
+      { label: ticketT('Reversed tax amount'), value: money(fiscal.reversedTaxAmountMillimes ?? 0) },
+      { label: ticketT('Reversed gross amount (TTC)'), value: money(fiscal.reversedGrossAmountMillimes ?? 0), emphasized: true },
       ...(fiscal.reversedTaxes ?? []).map((tax) => ({
-        label: `${tax.taxType} · ${tax.treatment}${tax.ruleId ? ` · ${tax.ruleId} v${tax.ruleVersion}` : ''} reversal`,
+        label: `${ticketT(tax.taxType)} · ${ticketT(tax.treatment)}${tax.ruleId ? ` · ${tax.ruleId} v${tax.ruleVersion}` : ''} ${ticketT('Reversal')}`,
         value: money(tax.amountMillimes),
       })),
     ]);
   }
   if (report.expensesMillimes !== undefined || report.netProfitMillimes !== undefined || report.expenseDetails?.length) {
-    appendSection(sections, 'EXPENSES / NET', [
-      ...(report.expensesMillimes === undefined ? [] : [{ label: 'Expenses', value: money(report.expensesMillimes) }]),
-      ...(report.netProfitMillimes === undefined ? [] : [{ label: 'Net after expenses', value: money(report.netProfitMillimes), emphasized: true }]),
+    appendSection(sections, ticketT('EXPENSES / NET'), [
+      ...(report.expensesMillimes === undefined ? [] : [{ label: ticketT('Expenses'), value: money(report.expensesMillimes) }]),
+      ...(report.netProfitMillimes === undefined ? [] : [{ label: ticketT('Net after expenses'), value: money(report.netProfitMillimes), emphasized: true }]),
       ...(report.expenseDetails ?? []).map((expense) => ({
-        label: `${expense.date} · ${expense.category}${expense.supplierId ? ` · Supplier ${expense.supplierId}` : ''} · ${expense.createdBy}${expense.note ? ` · ${expense.note}` : ''}`,
-        value: `${money(expense.amountMillimes)} (${money(expense.paidMillimes)} paid)`,
+        label: `${expense.date} · ${ticketT(expense.category)}${expense.supplierId ? ` · ${ticketT('Supplier {id}', { id: expense.supplierId })}` : ''} · ${expense.createdBy}${expense.note ? ` · ${expense.note}` : ''}`,
+        value: `${money(expense.amountMillimes)} ${ticketT('({amount} paid)', { amount: money(expense.paidMillimes) })}`,
       })),
     ]);
   }
@@ -175,7 +176,7 @@ export function buildReportDocument(
   const items = report.itemsSold ?? [];
   const itemGroups = new Map<string, typeof items>();
   for (const item of items) {
-    const category = item.categoryName ?? 'Other';
+    const category = item.categoryName ?? ticketT('Other');
     const group = itemGroups.get(category) ?? [];
     group.push(item);
     itemGroups.set(category, group);
@@ -190,51 +191,55 @@ export function buildReportDocument(
       });
     }
     itemLines.push({
-      label: `${category} subtotal`,
+      label: ticketT('{category} subtotal', { category }),
       value: money(categoryItems.reduce((sum, item) => sum + item.totalMillimes, 0)),
       emphasized: true,
     });
   }
-  appendSection(sections, 'ITEMS SOLD', itemLines);
+  appendSection(sections, ticketT('ITEMS SOLD'), itemLines);
 
   if (report.voids) {
-    appendSection(sections, 'VOIDED ORDERS', [
-      { label: 'Voided order count', value: String(report.voids.count), emphasized: true },
-      { label: 'Voided order total', value: money(report.voids.totalMillimes) },
+    appendSection(sections, ticketT('VOIDED ORDERS'), [
+      { label: ticketT('Voided order count'), value: String(report.voids.count), emphasized: true },
+      { label: ticketT('Voided order total'), value: money(report.voids.totalMillimes) },
       ...report.voids.orders.map((item) => ({
         label: item.autoApprovedAtForcedClose
-          ? `#${item.ticketNumber} auto-approved at forced close`
-          : `#${item.ticketNumber} ${item.reason || 'Reason not recorded'} · ${item.approvedBy ?? 'Unknown'}`,
+          ? ticketT('#{ticket} auto-approved at forced close', { ticket: item.ticketNumber })
+          : ticketT('#{ticket} {reason} · {approver}', {
+            ticket: item.ticketNumber,
+            reason: item.reason || ticketT('Reason not recorded'),
+            approver: item.approvedBy ?? ticketT('Unknown'),
+          }),
         value: money(item.totalMillimes),
       })),
     ]);
   }
 
   if (report.type === 'X' || report.type === 'Z') {
-    appendSection(sections, 'PENDING VOIDS (TREATED AS VOIDED FOR SALES AND CASH UNTIL REJECTED)', [
-      { label: 'Pending void count', value: report.pendingVoids ? String(report.pendingVoids.count) : 'Not recorded', emphasized: true },
-      { label: 'Pending void total', value: report.pendingVoids ? money(report.pendingVoids.totalMillimes) : 'Not recorded' },
-      { label: 'Stock handling', value: 'Stock is held until approval.' },
+    appendSection(sections, ticketT('PENDING VOIDS (TREATED AS VOIDED FOR SALES AND CASH UNTIL REJECTED)'), [
+      { label: ticketT('Pending void count'), value: report.pendingVoids ? String(report.pendingVoids.count) : ticketT('Not recorded'), emphasized: true },
+      { label: ticketT('Pending void total'), value: report.pendingVoids ? money(report.pendingVoids.totalMillimes) : ticketT('Not recorded') },
+      { label: ticketT('Stock handling'), value: ticketT('Stock is held until approval.') },
       ...(report.pendingVoids?.orders ?? []).map((item) => ({
-        label: `#${item.ticketNumber} · ${item.staffName} · ${item.reason || 'Reason not recorded'}`,
+        label: ticketT('#{ticket} · {staff} · {reason}', { ticket: item.ticketNumber, staff: item.staffName, reason: item.reason || ticketT('Reason not recorded') }),
         value: money(item.amountMillimes),
       })),
     ]);
   }
 
   if ((tabPayments !== undefined && tabPayments !== 0) || (nonCashTabPayments !== undefined && nonCashTabPayments !== 0)) {
-    appendSection(sections, 'TAB PAYMENTS', [
-      ...(tabPayments === undefined ? [] : [{ label: 'Payments received in cash', value: money(tabPayments) }]),
-      ...(nonCashTabPayments === undefined ? [] : [{ label: 'Payments received by card / other (not cash)', value: money(nonCashTabPayments) }]),
+    appendSection(sections, ticketT('TAB PAYMENTS'), [
+      ...(tabPayments === undefined ? [] : [{ label: ticketT('Payments received in cash'), value: money(tabPayments) }]),
+      ...(nonCashTabPayments === undefined ? [] : [{ label: ticketT('Payments received by card / other (not cash)'), value: money(nonCashTabPayments) }]),
     ]);
   }
   if (customerTabDetails.length) {
-    appendSection(sections, 'CUSTOMER TABS', [
-      { label: 'Issued / settled / outstanding', value: `${money(report.tabsIssuedMillimes ?? customerTabDetails.reduce((sum, item) => sum + item.issuedMillimes, 0))} / ${money(allTabPayments ?? customerTabDetails.reduce((sum, item) => sum + item.paymentsMillimes, 0))} / ${money(report.tabsOutstandingMillimes ?? report.receivableMillimes ?? customerTabDetails.reduce((sum, item) => sum + item.outstandingMillimes, 0))}`, emphasized: true },
+    appendSection(sections, ticketT('CUSTOMER TABS'), [
+      { label: ticketT('Issued / settled / outstanding'), value: `${money(report.tabsIssuedMillimes ?? customerTabDetails.reduce((sum, item) => sum + item.issuedMillimes, 0))} / ${money(allTabPayments ?? customerTabDetails.reduce((sum, item) => sum + item.paymentsMillimes, 0))} / ${money(report.tabsOutstandingMillimes ?? report.receivableMillimes ?? customerTabDetails.reduce((sum, item) => sum + item.outstandingMillimes, 0))}`, emphasized: true },
       ...customerTabDetails.flatMap((customer) => [
         { label: customer.customerName, value: '' },
-        { label: 'Issued / paid', value: `${money(customer.issuedMillimes)} / ${money(customer.paymentsMillimes)}` },
-        { label: 'Outstanding', value: money(customer.outstandingMillimes), emphasized: true },
+        { label: ticketT('Issued / paid'), value: `${money(customer.issuedMillimes)} / ${money(customer.paymentsMillimes)}` },
+        { label: ticketT('Outstanding'), value: money(customer.outstandingMillimes), emphasized: true },
       ]),
     ]);
   } else if (
@@ -243,9 +248,9 @@ export function buildReportDocument(
     report.tabsOutstandingMillimes !== undefined ||
     report.receivableMillimes !== undefined
   ) {
-    appendSection(sections, 'CUSTOMER TABS', [
+    appendSection(sections, ticketT('CUSTOMER TABS'), [
       {
-        label: 'Issued / paid / outstanding',
+        label: ticketT('Issued / paid / outstanding'),
         value: `${money(report.tabsIssuedMillimes)} / ${money(allTabPayments)} / ${money(report.tabsOutstandingMillimes ?? report.receivableMillimes)}`,
         emphasized: true,
       },
@@ -253,29 +258,29 @@ export function buildReportDocument(
   }
 
   if (report.unresolvedTabReversals?.length) {
-    appendSection(sections, 'UNRESOLVED TAB REVERSALS — NOT INCLUDED IN VERIFIED TOTALS', report.unresolvedTabReversals.map((reversal) => ({
-      label: `${reversal.paymentMethod.toUpperCase()} · Reversal ${reversal.reversalId} · Settlement ${reversal.originalSettlementId} · Shift ${reversal.reversalShiftId} · ${reversal.reversalCreatedAt}`,
-      value: `UNRESOLVED ${money(reversal.amountMillimes)}${reversal.reason ? ` · ${reversal.reason}` : ''}`,
+    appendSection(sections, ticketT('UNRESOLVED TAB REVERSALS — NOT INCLUDED IN VERIFIED TOTALS'), report.unresolvedTabReversals.map((reversal) => ({
+      label: `${formatTicketPaymentMethod(reversal.paymentMethod)} · ${ticketT('Reversal {id}', { id: reversal.reversalId })} · ${ticketT('Settlement {id}', { id: reversal.originalSettlementId })} · ${ticketT('Shift {id}', { id: reversal.reversalShiftId })} · ${formatTicketDateTime(reversal.reversalCreatedAt)}`,
+      value: ticketT('UNRESOLVED {amount}', { amount: `${money(reversal.amountMillimes)}${reversal.reason ? ` · ${reversal.reason}` : ''}` }),
     })));
   }
 
   if (report.voidAdjustments?.length) {
-    appendSection(sections, 'POST-CLOSE VOID ADJUSTMENTS', report.voidAdjustments.map((adjustment) => ({
-      label: `Ticket #${adjustment.orderNumber} · ${adjustment.staffName} · ${new Date(adjustment.createdAt).toLocaleString()}`,
+    appendSection(sections, ticketT('POST-CLOSE VOID ADJUSTMENTS'), report.voidAdjustments.map((adjustment) => ({
+      label: ticketT('Ticket #{number} · {staff} · {date}', { number: adjustment.orderNumber, staff: adjustment.staffName, date: formatTicketDateTime(adjustment.createdAt) }),
       value: `${adjustment.amountMillimes > 0 ? '+' : adjustment.amountMillimes < 0 ? '-' : ''}${money(Math.abs(adjustment.amountMillimes))}`,
     })));
   }
 
   const cashMovements: ReportSection['lines'] = [];
-  if (drawerCashSales !== undefined) cashMovements.push({ label: 'Cash sales', value: `+${money(drawerCashSales)}` });
-  if (tabPayments !== undefined) cashMovements.push({ label: 'Tab payments received', value: `+${money(tabPayments)}` });
-  if (report.cashInMillimes !== undefined) cashMovements.push({ label: 'Cash in', value: `+${money(report.cashInMillimes)}` });
-  if (report.cashOutMillimes !== undefined) cashMovements.push({ label: 'Cash out', value: `-${money(report.cashOutMillimes)}` });
-  if (report.cashRefundsMillimes !== undefined) cashMovements.push({ label: 'Cash refunds', value: `-${money(report.cashRefundsMillimes)}` });
+  if (drawerCashSales !== undefined) cashMovements.push({ label: ticketT('Cash sales'), value: `+${money(drawerCashSales)}` });
+  if (tabPayments !== undefined) cashMovements.push({ label: ticketT('Tab payments received'), value: `+${money(tabPayments)}` });
+  if (report.cashInMillimes !== undefined) cashMovements.push({ label: ticketT('Cash in'), value: `+${money(report.cashInMillimes)}` });
+  if (report.cashOutMillimes !== undefined) cashMovements.push({ label: ticketT('Cash out'), value: `-${money(report.cashOutMillimes)}` });
+  if (report.cashRefundsMillimes !== undefined) cashMovements.push({ label: ticketT('Cash refunds'), value: `-${money(report.cashRefundsMillimes)}` });
   const voidAdjustmentTotal = (report.voidAdjustments ?? []).reduce((sum, adjustment) => sum + adjustment.amountMillimes, 0);
   if (voidAdjustmentTotal !== 0) {
     cashMovements.push({
-      label: 'Post-close void adjustments',
+      label: ticketT('Post-close void adjustments'),
       value: `${voidAdjustmentTotal > 0 ? '+' : '-'}${money(Math.abs(voidAdjustmentTotal))}`,
     });
   }
@@ -285,13 +290,13 @@ export function buildReportDocument(
   }));
   for (const movement of detailedMovements) {
     cashMovements.push({
-      label: `${movement.kind === 'in' ? 'Cash in' : 'Cash out'} · ${movement.reason.replaceAll('_', ' ')} · ${movement.staffName} · ${localDateTime(movement.createdAt)} · Shift ${movement.shiftId}`,
+      label: `${ticketT(movement.kind === 'in' ? 'Cash in' : 'Cash out')} · ${ticketT(movement.reason)} · ${movement.staffName} · ${localDateTime(movement.createdAt)} · ${ticketT('Shift {id}', { id: movement.shiftId })}`,
       value: money(movement.amountMillimes),
     });
     const lastLine = cashMovements[cashMovements.length - 1];
     if (movement.note) lastLine.label += ` · ${movement.note}`;
   }
-  appendSection(sections, 'CASH MOVEMENTS', cashMovements);
+  appendSection(sections, ticketT('CASH MOVEMENTS'), cashMovements);
 
   const employees = new Map<string, {
     staffId?: string;
@@ -333,7 +338,7 @@ export function buildReportDocument(
     if (!order.staffId) continue;
     const employee = employees.get(order.staffId) ?? {
       staffId: order.staffId,
-      name: order.staffName ?? 'Staff',
+      name: order.staffName ?? ticketT('Staff'),
       shifts: [],
       voidedOrderCount: 0,
       voidedTotalMillimes: 0,
@@ -360,13 +365,13 @@ export function buildReportDocument(
           + (shift.otherSalesMillimes ?? 0) + (shift.tabSalesMillimes ?? 0)
     ));
     employeeLines.push({
-      label: `${employee.name} · ${orderCount === undefined ? 'Order count unavailable' : `${orderCount} orders`}`,
-      value: salesMillimes === undefined ? 'Sales not recorded' : money(salesMillimes),
+      label: `${employee.name} · ${orderCount === undefined ? ticketT('Order count unavailable') : ticketT('{count} orders', { count: orderCount })}`,
+      value: salesMillimes === undefined ? ticketT('Sales not recorded') : money(salesMillimes),
       emphasized: true,
     });
     if (employee.voidedOrderCount > 0) {
       employeeLines.push({
-        label: 'Voided orders / total',
+        label: ticketT('Voided orders / total'),
         value: `${employee.voidedOrderCount} / ${money(employee.voidedTotalMillimes)}`,
       });
     }
@@ -380,26 +385,26 @@ export function buildReportDocument(
     ];
     if (paymentFields.some((value) => value !== undefined)) {
       employeeLines.push({
-        label: 'Cash / card / other / tab sales',
-        value: paymentFields.map((value) => value === undefined ? 'Not recorded' : money(value)).join(' / '),
+        label: ticketT('Cash / card / other / tab sales'),
+        value: paymentFields.map((value) => value === undefined ? ticketT('Not recorded') : money(value)).join(' / '),
       });
     }
     employeeLines.push({
-      label: 'Shift count / starting cash',
+      label: ticketT('Shift count / starting cash'),
       value: `${shifts.length} / ${money(sumShiftValue((shift) => shift.startingCashMillimes))}`,
     });
     const expected = sumShiftValue((shift) => shift.expectedCashMillimes);
     const counted = sumShiftValue((shift) => shift.countedCashMillimes);
     employeeLines.push({
-      label: 'Expected / counted cash',
-      value: `${expected === undefined ? 'Not recorded' : money(expected)} / ${counted === undefined ? 'Not recorded' : money(counted)}`,
+      label: ticketT('Expected / counted cash'),
+      value: `${expected === undefined ? ticketT('Not recorded') : money(expected)} / ${counted === undefined ? ticketT('Not recorded') : money(counted)}`,
     });
     const cashIn = sumShiftValue((shift) => shift.cashInMillimes);
     const cashOut = sumShiftValue((shift) => shift.cashOutMillimes);
     if (cashIn !== undefined || cashOut !== undefined) {
       employeeLines.push({
-        label: 'Cash in / out',
-        value: `${cashIn === undefined ? 'Not recorded' : money(cashIn)} / ${cashOut === undefined ? 'Not recorded' : money(cashOut)}`,
+        label: ticketT('Cash in / out'),
+        value: `${cashIn === undefined ? ticketT('Not recorded') : money(cashIn)} / ${cashOut === undefined ? ticketT('Not recorded') : money(cashOut)}`,
       });
     }
     const shiftIds = new Set(shifts.map((shift) => shift.shiftId));
@@ -408,64 +413,64 @@ export function buildReportDocument(
       const count = (kind: NonNullable<ReportRecord['voidAdjustments']>[number]['kind']) =>
         postCloseVoids.filter((item) => item.kind === kind).length;
       employeeLines.push({
-        label: 'Post-close cash adjustment records (request / approval / rejection)',
+        label: ticketT('Post-close cash adjustment records (request / approval / rejection)'),
         value: `${count('requested')} / ${count('approved')} / ${count('rejected')}`,
       });
     }
   }
-  appendSection(sections, 'BY EMPLOYEE', employeeLines);
+  appendSection(sections, ticketT('BY EMPLOYEE'), employeeLines);
 
   if (reportShifts.length) {
-    appendSection(sections, 'BY SHIFT / PERSON', reportShifts.flatMap((shift) => {
+    appendSection(sections, ticketT('BY SHIFT / PERSON'), reportShifts.flatMap((shift) => {
       const lines: ReportSection['lines'] = [
         {
-          label: `${shift.staffName} · ${shift.orderCount === undefined ? 'Order count unavailable' : `${shift.orderCount} orders`} · ${shift.status === 'in_progress' ? 'Open' : shift.status === 'closed' ? 'Closed' : 'Status unavailable'}`,
+          label: `${shift.staffName} · ${shift.orderCount === undefined ? ticketT('Order count unavailable') : ticketT('{count} orders', { count: shift.orderCount })} · ${shift.status === 'in_progress' ? ticketT('Open') : shift.status === 'closed' ? ticketT('Closed') : ticketT('Status unavailable')}`,
           value: '',
         },
-        { label: 'Shift ID', value: shift.shiftId },
-        { label: 'Opened', value: localDateTime(shift.openedAt) },
-        ...(shift.closedAt ? [{ label: 'Closed', value: localDateTime(shift.closedAt) }] : []),
-        { label: 'Starting cash', value: money(shift.startingCashMillimes) },
-        { label: 'Closed by force', value: shift.forceClosedByOwner ? 'Yes · UNVERIFIED' : 'No' },
+        { label: ticketT('Shift ID'), value: shift.shiftId },
+        { label: ticketT('Opened'), value: localDateTime(shift.openedAt) },
+        ...(shift.closedAt ? [{ label: ticketT('Closed'), value: localDateTime(shift.closedAt) }] : []),
+        { label: ticketT('Starting cash'), value: money(shift.startingCashMillimes) },
+        { label: ticketT('Closed by force'), value: shift.forceClosedByOwner ? `${ticketT('Yes')} · ${ticketT('UNVERIFIED · force-closed')}` : ticketT('No') },
         ...(shift.voidsAutoApprovedCount
-          ? [{ label: 'Voids auto-approved at forced close', value: String(shift.voidsAutoApprovedCount) }]
+          ? [{ label: ticketT('Voids auto-approved at forced close'), value: String(shift.voidsAutoApprovedCount) }]
           : []),
       ];
-      if (shift.cashSalesMillimes !== undefined) lines.push({ label: 'Cash sales', value: money(shift.cashSalesMillimes) });
-      if (shift.cardSalesMillimes !== undefined) lines.push({ label: 'Card sales', value: money(shift.cardSalesMillimes), emphasized: true });
-      if (shift.otherSalesMillimes !== undefined) lines.push({ label: 'Other sales', value: money(shift.otherSalesMillimes) });
-      if (shift.tabSalesMillimes !== undefined) lines.push({ label: 'Tab sales', value: money(shift.tabSalesMillimes) });
-      if (shift.tabPaymentsMillimes !== undefined) lines.push({ label: 'Tab payments', value: money(shift.tabPaymentsMillimes) });
+      if (shift.cashSalesMillimes !== undefined) lines.push({ label: ticketT('Cash sales'), value: money(shift.cashSalesMillimes) });
+      if (shift.cardSalesMillimes !== undefined) lines.push({ label: ticketT('Card sales'), value: money(shift.cardSalesMillimes), emphasized: true });
+      if (shift.otherSalesMillimes !== undefined) lines.push({ label: ticketT('Other sales'), value: money(shift.otherSalesMillimes) });
+      if (shift.tabSalesMillimes !== undefined) lines.push({ label: ticketT('Tab sales'), value: money(shift.tabSalesMillimes) });
+      if (shift.tabPaymentsMillimes !== undefined) lines.push({ label: ticketT('Tab payments'), value: money(shift.tabPaymentsMillimes) });
       if (shift.expectedCashMillimes !== undefined || shift.countedCashMillimes !== undefined) {
         lines.push({
-          label: 'Expected / counted cash',
-          value: `${shift.expectedCashMillimes === undefined ? 'Not recorded' : money(shift.expectedCashMillimes)} / ${shift.countedCashMillimes === undefined ? 'Not recorded' : money(shift.countedCashMillimes)}`,
+          label: ticketT('Expected / counted cash'),
+          value: `${shift.expectedCashMillimes === undefined ? ticketT('Not recorded') : money(shift.expectedCashMillimes)} / ${shift.countedCashMillimes === undefined ? ticketT('Not recorded') : money(shift.countedCashMillimes)}`,
         });
       }
       if (shift.voidAdjustmentMillimes !== undefined) {
-        lines.push({ label: 'Post-close void adjustments', value: money(shift.voidAdjustmentMillimes) });
+        lines.push({ label: ticketT('Post-close void adjustments'), value: money(shift.voidAdjustmentMillimes) });
       }
       if (shift.voidRequestsMillimes !== undefined) {
-        lines.push({ label: 'Void requests', value: `${shift.voidRequestsMillimes < 0 ? '-' : '+'}${money(Math.abs(shift.voidRequestsMillimes))}` });
+        lines.push({ label: ticketT('Void requests'), value: `${shift.voidRequestsMillimes < 0 ? '-' : '+'}${money(Math.abs(shift.voidRequestsMillimes))}` });
       }
       if (shift.voidRejectionsMillimes !== undefined) {
-        lines.push({ label: 'Void rejections', value: `${shift.voidRejectionsMillimes < 0 ? '-' : '+'}${money(Math.abs(shift.voidRejectionsMillimes))}` });
+        lines.push({ label: ticketT('Void rejections'), value: `${shift.voidRejectionsMillimes < 0 ? '-' : '+'}${money(Math.abs(shift.voidRejectionsMillimes))}` });
       }
       if (report.type === 'Z' && shift.differenceMillimes !== undefined) {
         const difference = shift.differenceMillimes;
         lines.push({
-          label: 'Cash difference',
+          label: ticketT('Cash difference'),
           value: difference < 0
-            ? `SHORT ${money(Math.abs(difference))}`
+            ? ticketT('SHORT {amount}', { amount: money(Math.abs(difference)) })
             : difference > 0
-              ? `OVER ${money(difference)}`
-              : 'BALANCED',
+              ? ticketT('OVER {amount}', { amount: money(difference) })
+              : ticketT('BALANCED'),
           emphasized: true,
         });
       }
       if (shift.cashInMillimes !== undefined || shift.cashOutMillimes !== undefined) {
         lines.push({
-          label: 'Cash in / out',
+          label: ticketT('Cash in / out'),
           value: `${shift.cashInMillimes === undefined ? '—' : money(shift.cashInMillimes)} / ${shift.cashOutMillimes === undefined ? '—' : money(shift.cashOutMillimes)}`,
         });
       }
@@ -473,125 +478,125 @@ export function buildReportDocument(
     }));
   }
 
-  appendSection(sections, 'BY CATEGORY', (report.salesByCategory ?? []).map((category) => ({
+  appendSection(sections, ticketT('BY CATEGORY'), (report.salesByCategory ?? []).map((category) => ({
     label: `${category.quantity} x ${category.name}`,
     value: money(category.totalMillimes),
   })));
 
   if (report.comps) {
-    appendSection(sections, 'STAFF ITEMS / COMPS', [
-      { label: 'Comp count / quantity', value: `${report.comps.count} / ${report.comps.quantity}`, emphasized: true },
-      { label: 'Comp value', value: money(report.comps.totalMillimes) },
+    appendSection(sections, ticketT('STAFF ITEMS / COMPS'), [
+      { label: ticketT('Comp count / quantity'), value: `${report.comps.count} / ${report.comps.quantity}`, emphasized: true },
+      { label: ticketT('Comp value'), value: money(report.comps.totalMillimes) },
       ...report.comps.records.map((item) => ({
-        label: `${item.quantity} x ${item.itemName} · ${item.staffName} · ${item.reason.replaceAll('_', ' ')}${item.createdAt ? ` · ${localDateTime(item.createdAt)}` : ''}${item.note ? ` · ${item.note}` : ''}`,
+        label: `${item.quantity} x ${item.itemName} · ${item.staffName} · ${ticketT(item.reason)}${item.createdAt ? ` · ${localDateTime(item.createdAt)}` : ''}${item.note ? ` · ${item.note}` : ''}`,
         value: money(item.valueMillimes),
       })),
     ]);
   }
 
   const finalCashLines: ReportSection['lines'] = [
-    { label: 'Cash sales', value: money(report.cashSalesMillimes ?? paymentSplit?.cash) },
-    { label: 'Tab payments received in cash', value: money(tabPayments) },
-    { label: 'Cash in', value: money(report.cashInMillimes) },
-    { label: 'Cash out', value: money(report.cashOutMillimes) },
-    ...(voidAdjustmentTotal === 0 ? [] : [{ label: 'Post-close void adjustments', value: money(voidAdjustmentTotal) }]),
+    { label: ticketT('Cash sales'), value: money(report.cashSalesMillimes ?? paymentSplit?.cash) },
+    { label: ticketT('Tab payments received in cash'), value: money(tabPayments) },
+    { label: ticketT('Cash in'), value: money(report.cashInMillimes) },
+    { label: ticketT('Cash out'), value: money(report.cashOutMillimes) },
+    ...(voidAdjustmentTotal === 0 ? [] : [{ label: ticketT('Post-close void adjustments'), value: money(voidAdjustmentTotal) }]),
     {
-      label: 'EXPECTED CASH',
-      value: expectedCashForDrawer === undefined ? 'Not recorded' : money(expectedCashForDrawer),
+      label: ticketT('EXPECTED CASH'),
+      value: expectedCashForDrawer === undefined ? ticketT('Not recorded') : money(expectedCashForDrawer),
       emphasized: true,
       size: 'double',
     },
     ...(report.type === 'Z' ? [
       {
-        label: report.countedCashIncludesFloat ? 'COUNTED CASH' : 'COUNTED CASH (EXCLUDING FLOAT)',
-        value: countedCashForDrawer === undefined ? 'Not recorded' : money(countedCashForDrawer),
+        label: ticketT(report.countedCashIncludesFloat ? 'COUNTED CASH' : 'COUNTED CASH (EXCLUDING FLOAT)'),
+        value: countedCashForDrawer === undefined ? ticketT('Not recorded') : money(countedCashForDrawer),
         emphasized: true,
         size: 'double' as const,
       },
       {
         label: cashDifference === undefined
-          ? 'DIFFERENCE NOT RECORDED'
+          ? ticketT('DIFFERENCE NOT RECORDED')
           : cashDifference < 0
-            ? `SHORT ${money(Math.abs(cashDifference))}`
+            ? ticketT('SHORT {amount}', { amount: money(Math.abs(cashDifference)) })
             : cashDifference > 0
-              ? `OVER ${money(cashDifference)}`
-              : 'BALANCED',
+              ? ticketT('OVER {amount}', { amount: money(cashDifference) })
+              : ticketT('BALANCED'),
         value: '',
         emphasized: true,
         size: 'double' as const,
       },
-      ...(report.cashDifferenceNote ? [{ label: 'Note', value: report.cashDifferenceNote }] : []),
-      { label: 'Counted card', value: money(report.countedCardMillimes) },
-      { label: 'Expected card (sales + tab payments)', value: money(report.expectedCardMillimes) },
+      ...(report.cashDifferenceNote ? [{ label: ticketT('Note'), value: report.cashDifferenceNote }] : []),
+      { label: ticketT('Counted card'), value: money(report.countedCardMillimes) },
+      { label: ticketT('Expected card (sales + tab payments)'), value: money(report.expectedCardMillimes) },
       {
-        label: 'Card difference',
+        label: ticketT('Card difference'),
         value: report.cardDifferenceMillimes === undefined
-          ? 'Not recorded'
+          ? ticketT('Not recorded')
           : report.cardDifferenceMillimes < 0
-            ? `SHORT ${money(Math.abs(report.cardDifferenceMillimes))}`
+            ? ticketT('SHORT {amount}', { amount: money(Math.abs(report.cardDifferenceMillimes)) })
             : report.cardDifferenceMillimes > 0
-              ? `OVER ${money(report.cardDifferenceMillimes)}`
-              : 'BALANCED',
+              ? ticketT('OVER {amount}', { amount: money(report.cardDifferenceMillimes) })
+              : ticketT('BALANCED'),
         emphasized: true,
       },
       ...(report.countedOtherMillimes === undefined ? [] : [
-        { label: 'Counted other', value: money(report.countedOtherMillimes) },
-        { label: 'Expected other (sales + tab payments)', value: money(report.expectedOtherMillimes) },
+        { label: ticketT('Counted other'), value: money(report.countedOtherMillimes) },
+        { label: ticketT('Expected other (sales + tab payments)'), value: money(report.expectedOtherMillimes) },
         {
-          label: 'Other difference',
+          label: ticketT('Other difference'),
           value: report.otherDifferenceMillimes === undefined
-            ? 'Not recorded'
+            ? ticketT('Not recorded')
             : report.otherDifferenceMillimes < 0
-              ? `SHORT ${money(Math.abs(report.otherDifferenceMillimes))}`
+              ? ticketT('SHORT {amount}', { amount: money(Math.abs(report.otherDifferenceMillimes)) })
               : report.otherDifferenceMillimes > 0
-                ? `OVER ${money(report.otherDifferenceMillimes)}`
-                : 'BALANCED',
+                ? ticketT('OVER {amount}', { amount: money(report.otherDifferenceMillimes) })
+                : ticketT('BALANCED'),
           emphasized: true,
         },
       ]),
-      ...(report.nonCashDifferenceNote ? [{ label: 'Card / other difference note', value: report.nonCashDifferenceNote }] : []),
+      ...(report.nonCashDifferenceNote ? [{ label: ticketT('Card / other difference note'), value: report.nonCashDifferenceNote }] : []),
     ] : [
-      { label: 'Not counted - X report is interim', value: '' },
+      { label: ticketT('Not counted - X report is interim'), value: '' },
     ]),
   ];
-  appendSection(sections, report.countedCashIncludesFloat ? 'FLOAT (INCLUDED IN DRAWER COUNT)' : 'FLOAT (NOT COUNTED)', [
+  appendSection(sections, ticketT(report.countedCashIncludesFloat ? 'FLOAT (INCLUDED IN DRAWER COUNT)' : 'FLOAT (NOT COUNTED)'), [
     ...reportShifts.map((shift) => ({
       label: `${shift.staffName} · ${localDateTime(shift.openedAt)}`,
       value: money(shift.startingCashMillimes),
     })),
-    { label: 'Total float', value: money(cashFloat), emphasized: true },
+    { label: ticketT('Total float'), value: money(cashFloat), emphasized: true },
   ]);
-  appendSection(sections, 'CASH FLOW BY SHIFT', reportShifts.map((shift) => {
+  appendSection(sections, ticketT('CASH FLOW BY SHIFT'), reportShifts.map((shift) => {
     const flow = shift.cashFlowExFloatMillimes ??
       (shift.expectedCashMillimes === undefined ? undefined : shift.expectedCashMillimes - shift.startingCashMillimes);
     return {
       label: `${shift.staffName} · ${localDateTime(shift.openedAt)}`,
-      value: flow === undefined ? 'Not recorded' : money(flow),
+      value: flow === undefined ? ticketT('Not recorded') : money(flow),
     };
   }));
   if (report.type === 'Z') {
     const forcedShifts = reportShifts.filter((shift) => shift.forceClosedByOwner);
-    appendSection(sections, 'SHIFT DIFFERENCES', [
-      { label: 'Total shift differences', value: money(report.totalDifferenceMillimes), emphasized: true },
+    appendSection(sections, ticketT('SHIFT DIFFERENCES'), [
+      { label: ticketT('Total shift differences'), value: money(report.totalDifferenceMillimes), emphasized: true },
       ...reportShifts.map((shift) => ({
-        label: `${shift.staffName} · ${shift.forceClosedByOwner ? 'UNVERIFIED · force-closed' : 'shift count'}`,
+        label: `${shift.staffName} · ${shift.forceClosedByOwner ? ticketT('UNVERIFIED · force-closed') : ticketT('shift count')}`,
         value: shift.differenceMillimes === undefined
-          ? 'Not recorded'
+          ? ticketT('Not recorded')
           : shift.differenceMillimes < 0
-            ? `SHORT ${money(Math.abs(shift.differenceMillimes))}`
+            ? ticketT('SHORT {amount}', { amount: money(Math.abs(shift.differenceMillimes)) })
             : shift.differenceMillimes > 0
-              ? `OVER ${money(shift.differenceMillimes)}`
-              : 'BALANCED',
+              ? ticketT('OVER {amount}', { amount: money(shift.differenceMillimes) })
+              : ticketT('BALANCED'),
       })),
       ...forcedShifts.map((shift) => ({
-        label: `${shift.staffName} · force-closed auto-approved voids`,
+        label: `${shift.staffName} · ${ticketT('force-closed auto-approved voids')}`,
         value: String(shift.voidsAutoApprovedCount ?? 0),
       })),
     ]);
   }
-  appendSection(sections, report.countedCashIncludesFloat
+  appendSection(sections, ticketT(report.countedCashIncludesFloat
     ? 'CASH TO HAVE IN DRAWER (INCLUDING FLOAT)'
-    : 'CASH TO HAVE IN DRAWER (EXCLUDING FLOAT)', finalCashLines);
+    : 'CASH TO HAVE IN DRAWER (EXCLUDING FLOAT)'), finalCashLines);
 
   const lines: ReceiptLine[] = [
     { text: storeName, align: 'center', bold: true, size: 'double' },
@@ -601,23 +606,23 @@ export function buildReportDocument(
     ...(resolved.showPhone && (report.frozenStorePhone ?? store.phone)
       ? [{ text: report.frozenStorePhone ?? store.phone ?? '', align: 'center' as const }]
       : []),
-    ...(report.frozenStoreTaxId ?? store.taxId ? [{ text: `Tax ID: ${report.frozenStoreTaxId ?? store.taxId}`, align: 'center' as const }] : []),
+    ...(report.frozenStoreTaxId ?? store.taxId ? [{ text: `${ticketT('Tax ID')}: ${report.frozenStoreTaxId ?? store.taxId}`, align: 'center' as const }] : []),
     { text: divider(width), kind: 'divider' },
-    { text: report.type === 'Z' ? 'Z REPORT' : 'X REPORT', align: 'center', bold: true, size: 'double' },
-    { text: report.type === 'Z' ? 'OFFICIAL DAY CLOSE' : 'INTERIM - DAY REMAINS OPEN', align: 'center', bold: true },
-    { text: formatReceiptRow('Report no.', report.reportNumber ?? `${report.type}-${report.id.slice(-6).toUpperCase()}`, width) },
-    { text: formatReceiptRow('Business date', report.businessDate, width) },
-    { text: formatReceiptRow('Opened', localDateTime(report.dayOpenedAt ?? report.periodFrom), width) },
-    { text: formatReceiptRow(report.type === 'Z' ? 'Closed' : 'Printed', localDateTime(report.dayClosedAt ?? report.periodTo ?? report.createdAt), width) },
-    { text: formatReceiptRow('Generated by', report.generatedBy ?? 'Owner', width) },
+    { text: ticketT(report.type === 'Z' ? 'Z REPORT' : 'X REPORT'), align: 'center', bold: true, size: 'double' },
+    { text: ticketT(report.type === 'Z' ? 'OFFICIAL DAY CLOSE' : 'INTERIM - DAY REMAINS OPEN'), align: 'center', bold: true },
+    { text: formatReceiptRow(ticketT('Report no.'), report.reportNumber ?? `${report.type}-${report.id.slice(-6).toUpperCase()}`, width) },
+    { text: formatReceiptRow(ticketT('Business date'), report.businessDate, width) },
+    { text: formatReceiptRow(ticketT('Opened'), localDateTime(report.dayOpenedAt ?? report.periodFrom), width) },
+    { text: formatReceiptRow(ticketT(report.type === 'Z' ? 'Closed' : 'Printed'), localDateTime(report.dayClosedAt ?? report.periodTo ?? report.createdAt), width) },
+    { text: formatReceiptRow(ticketT('Generated by'), report.generatedBy ?? ticketT('Owner'), width) },
     ...(report.type === 'Z' && report.pinVerified !== undefined
-      ? [{ text: formatReceiptRow('Owner PIN verified', report.pinVerified ? 'Yes' : 'No', width) }]
+      ? [{ text: formatReceiptRow(ticketT('Owner PIN verified'), ticketT(report.pinVerified ? 'Yes' : 'No'), width) }]
       : []),
     ...(report.firstTicketNumber === undefined ? [] : [
-      { text: formatReceiptRow('First sale ticket', String(report.firstTicketNumber), width) },
+      { text: formatReceiptRow(ticketT('First sale ticket'), String(report.firstTicketNumber), width) },
     ]),
     ...(report.lastTicketNumber === undefined ? [] : [
-      { text: formatReceiptRow('Last sale ticket', String(report.lastTicketNumber), width) },
+      { text: formatReceiptRow(ticketT('Last sale ticket'), String(report.lastTicketNumber), width) },
     ]),
     { text: divider(width), kind: 'divider' },
     ...sections.flatMap((section) => [
@@ -629,13 +634,13 @@ export function buildReportDocument(
       })),
       { text: divider(width), kind: 'divider' as const },
     ]),
-    { text: formatReceiptRow('Report generated', localDateTime(report.createdAt), width) },
+    { text: formatReceiptRow(ticketT('Report generated'), localDateTime(report.createdAt), width) },
     ...(report.frozenReportFooterText ?? resolved.reportFooterText)
       .map((text) => ({ text, align: 'center' as const, kind: 'footer' as const })),
   ];
   return {
-    title: report.type === 'Z' ? 'Z REPORT' : 'X REPORT',
-    subtitle: report.type === 'Z' ? 'Official day close' : 'The business day remains open',
+    title: ticketT(report.type === 'Z' ? 'Z REPORT' : 'X REPORT'),
+    subtitle: ticketT(report.type === 'Z' ? 'Official day close' : 'The business day remains open'),
     width,
     logoSrc: resolved.showLogo ? getLogoSrc(resolved.storeLogoId) : undefined,
     lines,

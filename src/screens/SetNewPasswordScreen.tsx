@@ -7,6 +7,7 @@ import { useAuthStore } from '../stores/authStore';
 import { userService } from '../services/userService';
 import { t } from '../i18n/translations';
 import { getCredentialSetupStep, isValidPinConfirmation, requiresCredentialSetup } from '../services/credentialSetup';
+import { localizeErrorMessage } from '../i18n';
 
 interface SetNewPasswordScreenProps {
   onSetupComplete: () => void;
@@ -39,7 +40,7 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
   const activeStepIndex = setupSteps.findIndex((step) => step.id === setupStep);
   const completedSteps = activeStepIndex < 0 ? setupSteps.length : activeStepIndex;
   const stepCounter = activeStepIndex < 0
-    ? 'Setup complete'
+    ? t('password.setupComplete')
     : t('password.stepCounter', { current: String(activeStepIndex + 1), total: String(setupSteps.length) });
 
   const longEnough = password.length >= 6;
@@ -49,7 +50,7 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
     event.preventDefault();
     if (setupStep === 'personal-pin') {
       if (!/^\d{4}$/.test(pin)) {
-        setError('Personal PIN must contain exactly 4 digits.');
+        setError(t('password.personalPinDigits'));
         return;
       }
       if (!isValidPinConfirmation(pin, personalPinConfirmation)) {
@@ -66,17 +67,17 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
           navigate(updatedUser.role === 'staff' ? '/dashboard' : updatedUser.role === 'owner' ? '/owner/dashboard' : '/admin/overview');
         }
       } catch (pinError) {
-        setError(pinError instanceof Error ? pinError.message : 'Unable to set your PIN.');
+        setError(localizeErrorMessage(pinError, t('password.unableToSetPin')));
       }
       return;
     }
     if (setupStep === 'store-pin') {
       if (!/^\d{4}$/.test(storePin)) {
-        setError('Store PIN must contain exactly 4 digits.');
+        setError(t('password.storePinDigits'));
         return;
       }
       if (!user?.storeId || user.role !== 'owner') {
-        setError('Only a signed-in store owner can set the Store PIN.');
+        setError(t('password.ownerStorePinOnly'));
         return;
       }
       if (!isValidPinConfirmation(storePin, storePinConfirmation)) {
@@ -92,7 +93,7 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
         onSetupComplete();
         navigate('/owner/dashboard');
       } catch (pinError) {
-        setError(pinError instanceof Error ? pinError.message : 'Unable to set the Store PIN.');
+        setError(localizeErrorMessage(pinError, t('password.unableToSetStorePin')));
       }
       return;
     }
@@ -115,7 +116,7 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
       onSetupComplete();
       navigate(updatedUser.role === 'staff' ? '/dashboard' : updatedUser.role === 'owner' ? '/owner/dashboard' : '/admin/overview');
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : t('password.unableToUpdate'));
+      setError(localizeErrorMessage(saveError, t('password.unableToUpdate')));
     }
   }
 
@@ -127,7 +128,7 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
     void userService.getStore(user.storeId).then((loadedStore) => {
       if (active) setStore(loadedStore);
     }).catch((storeError: unknown) => {
-      if (active) setError(storeError instanceof Error ? storeError.message : 'Unable to load store details.');
+      if (active) setError(localizeErrorMessage(storeError, t('password.unableToLoadStore')));
     });
     return () => { active = false; };
   }, [user?.storeId]);
@@ -167,7 +168,7 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
         <p role="status" className="mb-2 font-body text-label-sm text-on-surface-variant">
           {stepCounter}
         </p>
-        <ol aria-label="Account setup steps" className="mb-5 grid gap-2">
+        <ol aria-label={t('password.accountSetupSteps')} className="mb-5 grid gap-2">
           {setupSteps.map((step, index) => {
             const isComplete = index < completedSteps;
             const isCurrent = index === activeStepIndex;
@@ -203,7 +204,7 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
               <p className="truncate font-display text-headline-sm text-on-surface">{accountName}</p>
               <p className="flex items-center gap-1 truncate font-body text-body-sm text-on-surface-variant">
                 <MaterialIcon name="storefront" className="text-sm text-outline" />
-                {store?.name ?? '7anouti Platform'}
+                {store?.name ?? t('password.platformFallback')}
               </p>
             </div>
           </div>
@@ -340,9 +341,9 @@ export function SetNewPasswordScreen({ onSetupComplete }: SetNewPasswordScreenPr
           >
             <MaterialIcon name="check" filled />
             {setupStep === 'personal-pin'
-              ? 'Set Personal PIN and continue'
+              ? t('password.setPersonalContinue')
               : setupStep === 'store-pin'
-                ? 'Set Store PIN and finish'
+                ? t('password.setStoreFinish')
                 : t('password.saveContinue')}
           </Button>
         </form>

@@ -20,6 +20,8 @@ interface ItemCardProps {
   onRemove?: () => void;
   canToggleStock?: boolean;
   onToggleStock?: () => void;
+  canEditStockCount?: boolean;
+  onEditStockCount?: () => void;
   onOpenOutOfStock?: () => void;
   largeButtons?: boolean;
   viewMode?: 'grid' | 'list';
@@ -34,6 +36,8 @@ export function ItemCard({
   onRemove,
   canToggleStock = false,
   onToggleStock,
+  canEditStockCount = false,
+  onEditStockCount,
   onOpenOutOfStock,
   largeButtons = false,
   viewMode = 'grid',
@@ -89,13 +93,13 @@ export function ItemCard({
           </button>
         </div>
       )}
-      {canToggleStock && onToggleStock && (
+      {(canToggleStock && onToggleStock || canEditStockCount && onEditStockCount) && (
         <div className={`flex ${isListView ? 'relative z-10 ml-1 shrink-0' : 'absolute right-1 top-1 z-10 flex-col items-end'}`}>
           <button
             type="button"
             aria-expanded={stockMenuOpen}
             aria-haspopup="menu"
-            aria-label={`Item actions: ${item.name}`}
+            aria-label={t('pos.itemActions', { item: item.name })}
             onClick={onStockMenuToggle}
             className={`flex h-12 w-12 items-center justify-center rounded-xl ${
               isListView ? 'bg-surface-container-low text-primary hover:bg-surface-container-high' : 'text-on-surface-variant hover:bg-surface-container-high'
@@ -105,19 +109,35 @@ export function ItemCard({
           </button>
           {stockMenuOpen && (
             <div role="menu" className={`absolute right-0 z-20 ${isListView ? 'bottom-full mb-1' : 'top-12'} min-w-44 rounded-xl border border-outline-variant bg-surface-container-lowest p-1 shadow-overlay`}>
-              <button
-                type="button"
-                role="menuitem"
-                aria-pressed={item.outOfStock}
-                onClick={() => {
-                  onStockMenuToggle();
-                  onToggleStock();
-                }}
-                className="flex min-h-12 w-full items-center gap-2 rounded-lg px-3 text-left font-body text-label-md text-on-surface hover:bg-surface-container-low"
-              >
-                <MaterialIcon name={item.outOfStock ? 'check' : 'block'} className="text-lg text-primary" />
-                {t(item.outOfStock ? 'pos.markAvailable' : 'pos.markOutOfStock')}
-              </button>
+              {canToggleStock && onToggleStock && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  aria-pressed={item.outOfStock}
+                  onClick={() => {
+                    onStockMenuToggle();
+                    onToggleStock();
+                  }}
+                  className="flex min-h-12 w-full items-center gap-2 rounded-lg px-3 text-left font-body text-label-md text-on-surface hover:bg-surface-container-low"
+                >
+                  <MaterialIcon name={item.outOfStock ? 'check' : 'block'} className="text-lg text-primary" />
+                  {t(item.outOfStock ? 'pos.markAvailable' : 'pos.markOutOfStock')}
+                </button>
+              )}
+              {canEditStockCount && onEditStockCount && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    onStockMenuToggle();
+                    onEditStockCount();
+                  }}
+                  className="flex min-h-12 w-full items-center gap-2 rounded-lg px-3 text-left font-body text-label-md text-on-surface hover:bg-surface-container-low"
+                >
+                  <MaterialIcon name="inventory_2" className="text-lg text-primary" />
+                  {t('pos.editStockCount')}
+                </button>
+              )}
             </div>
           )}
         </div>

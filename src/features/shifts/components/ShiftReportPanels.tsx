@@ -8,6 +8,7 @@ import { ReportView } from '../../../components/ReportView';
 import { formatTnd } from '../../../lib/format';
 import { getReportCloseDate } from '../../../lib/reportArchive';
 import type { OrderRecord, ReportRecord, ShiftRecord, StoreRecord } from '../../../types/domain';
+import { getTicketDateLocale, ticketT } from '../../../i18n/tickets';
 
 interface ShiftReportsProps {
   ownerMode: boolean;
@@ -41,20 +42,20 @@ export function ShiftReports({
                   <MaterialIcon name="summarize" className="text-2xl" />
                 </span>
                 <div className="min-w-0">
-                  <p className="font-body text-label-sm text-primary">Live preview</p>
-                  <h2 className="font-display text-headline-md text-on-surface">X report</h2>
+                  <p className="font-body text-label-sm text-primary">{ticketT('Live preview')}</p>
+                  <h2 className="font-display text-headline-md text-on-surface">{ticketT('X report')}</h2>
                 </div>
               </div>
-              <StatusTag className="shift-report-status" status={reportDisabledReason ? 'closed' : 'started'}>{reportDisabledReason ? 'Unavailable' : 'Live'}</StatusTag>
+              <StatusTag className="shift-report-status" status={reportDisabledReason ? 'closed' : 'started'}>{reportDisabledReason ? ticketT('Unavailable') : ticketT('Live')}</StatusTag>
             </div>
-            <p className="mt-3 font-body text-body-sm text-on-surface-variant">A frozen cash snapshot for review. The business day remains open.</p>
+            <p className="mt-3 font-body text-body-sm text-on-surface-variant">{ticketT('A frozen cash snapshot for review. The business day remains open.')}</p>
             <div className="shift-report-meta mt-4 grid grid-cols-2 gap-2">
-              <div><p>Open shifts</p><strong>{openCount}</strong></div>
-              <div><p>Pending voids</p><strong>{pendingVoidOrders.length}</strong></div>
+              <div><p>{ticketT('Open shifts')}</p><strong>{openCount}</strong></div>
+              <div><p>{ticketT('Pending voids')}</p><strong>{pendingVoidOrders.length}</strong></div>
             </div>
             {reportDisabledReason && <p className="mt-2 font-body text-body-sm text-outline">{reportDisabledReason}</p>}
             <Button disabled={Boolean(reportDisabledReason)} className="shift-report-action mt-4 w-full" onClick={() => { void createXReport(); }}>
-              <MaterialIcon name="summarize" />Print X report
+              <MaterialIcon name="summarize" />{ticketT('Print X report')}
             </Button>
           </article>
           <article className="shift-report-card shift-z-card rounded-2xl p-4">
@@ -64,46 +65,46 @@ export function ShiftReports({
                   <MaterialIcon name="lock" className="text-2xl" />
                 </span>
                 <div className="min-w-0">
-                  <p className="font-body text-label-sm text-warning-dark">Final close</p>
-                  <h2 className="font-display text-headline-md text-on-surface">Z report</h2>
+                  <p className="font-body text-label-sm text-warning-dark">{ticketT('Final close')}</p>
+                  <h2 className="font-display text-headline-md text-on-surface">{ticketT('Z report')}</h2>
                 </div>
               </div>
-              <StatusTag className="shift-report-status" status={zDisabledReason ? 'closed' : 'started'}>{zDisabledReason ? 'Blocked' : 'Ready'}</StatusTag>
+              <StatusTag className="shift-report-status" status={zDisabledReason ? 'closed' : 'started'}>{zDisabledReason ? ticketT('Blocked') : ticketT('Ready')}</StatusTag>
             </div>
-            <p className="mt-3 font-body text-body-sm text-on-surface-variant">Requires your owner PIN. All shifts and voids must be resolved first.</p>
+            <p className="mt-3 font-body text-body-sm text-on-surface-variant">{ticketT('Requires your owner PIN. All shifts and voids must be resolved first.')}</p>
             {(openShifts.length > 0 || pendingVoidOrders.length > 0) && (
               <div className="shift-resolution-panel mt-3">
                 <div className="flex items-center justify-between gap-3">
-                  <h3 className="font-display text-label-lg text-on-surface">Before closing</h3>
+                  <h3 className="font-display text-label-lg text-on-surface">{ticketT('Before closing')}</h3>
                   <span className="shift-resolution-count">{openShifts.length + pendingVoidOrders.length}</span>
                 </div>
                 <div className="mt-2 flex max-h-24 flex-col gap-1.5 overflow-y-auto">
                   {openShifts.map((shift) => (
                     <p key={shift.id} className="shift-resolution-row font-body text-body-sm">
                       <MaterialIcon name="schedule" className="text-base" />
-                      <span>Open shift · {staffNames[shift.staffId] ?? 'Staff'}</span>
+                      <span>{ticketT('Open shift · {staff}', { staff: staffNames[shift.staffId] ?? ticketT('Staff') })}</span>
                     </p>
                   ))}
                   {pendingVoidOrders.map((order) => (
                     <p key={order.id} className="shift-resolution-row font-body text-body-sm">
                       <MaterialIcon name="pending_actions" className="text-base" />
-                      <span>Void #{order.number} · {formatTnd(order.totalMillimes / 1000)} DT</span>
+                      <span>{ticketT('Void #{number} · {amount} DT', { number: order.number, amount: formatTnd(order.totalMillimes / 1000) })}</span>
                     </p>
                   ))}
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <Link to="/owner/voids" className="shift-resolution-link flex min-h-11 items-center justify-center gap-2 rounded-xl px-3 font-body text-label-md">
                     <MaterialIcon name="rule" className="text-lg" />
-                    Review voids
+                    {ticketT('Review voids')}
                   </Link>
                   <Button variant="danger" className="shift-force-button min-h-11" onClick={() => { void openZCloseDialog(true); }}>
-                    Force close everything
+                    {ticketT('Force close everything')}
                   </Button>
                 </div>
               </div>
             )}
             <Button disabled={Boolean(zDisabledReason)} variant="danger" className="shift-report-action shift-z-action mt-4 w-full" onClick={() => { void openZCloseDialog(); }}>
-              <MaterialIcon name="lock" />Close day: Z report
+              <MaterialIcon name="lock" />{ticketT('Close day: Z report')}
             </Button>
           </article>
           {reportPreview && <div className="tablet:col-span-2"><ReportView inline report={reportPreview} store={store ?? undefined} settings={store?.settings} storeName={store?.name ?? ''} onClose={() => setReportPreview(undefined)} /></div>}
@@ -165,13 +166,13 @@ export function ShiftArchive({
             <div className="shift-archive-date-filter">
               <label htmlFor="shift-archive-date">
                 <MaterialIcon name="calendar_month" />
-                <span>Closed date</span>
+                <span>{ticketT('Closed date')}</span>
               </label>
               <input
                 id="shift-archive-date"
                 type="date"
                 value={archiveDate}
-                aria-label="Filter Z reports by close date"
+                aria-label={ticketT('Filter Z reports by close date')}
                 onChange={(event) => {
                   const nextDate = event.currentTarget.value;
                   if (!nextDate) return;
@@ -181,7 +182,7 @@ export function ShiftArchive({
                 }}
               />
               <span className="shift-archive-date-count">
-                {filteredArchiveReports.length} Z {filteredArchiveReports.length === 1 ? 'report' : 'reports'}
+                {ticketT(filteredArchiveReports.length === 1 ? '{count} report' : '{count} reports', { count: filteredArchiveReports.length })}
               </span>
             </div>
           </div>
@@ -190,31 +191,31 @@ export function ShiftArchive({
               <div className="shift-archive-card-heading">
                 <h2 className="font-display text-headline-md text-on-surface">
                   <MaterialIcon name="description" />
-                  Reports History
+                  {ticketT('Reports History')}
                 </h2>
                 <label className="shift-sort-control">
-                  <span>Sort by:</span>
+                  <span>{ticketT('Sort by:')}</span>
                   <select
                     value={archiveSort}
                     onChange={(event) => setArchiveSort(event.target.value as typeof archiveSort)}
-                    aria-label="Sort reports"
+                    aria-label={ticketT('Sort reports')}
                   >
-                    <option value="newest">Newest</option>
-                    <option value="oldest">Oldest</option>
-                    <option value="amount-desc">Amount: high to low</option>
-                    <option value="amount-asc">Amount: low to high</option>
+                    <option value="newest">{ticketT('Newest')}</option>
+                    <option value="oldest">{ticketT('Oldest')}</option>
+                    <option value="amount-desc">{ticketT('Amount: high to low')}</option>
+                    <option value="amount-asc">{ticketT('Amount: low to high')}</option>
                   </select>
                 </label>
               </div>
-            {loading ? <ListSkeleton label="Loading daily reports" /> : (
+            {loading ? <ListSkeleton label={ticketT('Loading daily reports')} /> : (
               <div className="shift-archive-list flex flex-col gap-2">
                 {filteredArchiveReports.map((report) => {
                   const selected = isArchivePreview?.id === report.id;
                   const closedDate = getReportCloseDate(report, reportTimeZone);
                   const reportDateLabel = closedDate === todayOverviewDate
-                    ? 'Today'
+                    ? ticketT('Today')
                     : closedDate;
-                  const reportTime = new Date(report.createdAt).toLocaleTimeString([], {
+                  const reportTime = new Date(report.createdAt).toLocaleTimeString(getTicketDateLocale(), {
                     timeZone: reportTimeZone,
                     hour: '2-digit',
                     minute: '2-digit',
@@ -234,13 +235,13 @@ export function ShiftArchive({
                       <span className="shift-archive-row-copy">
                         <strong className="text-on-surface">{report.reportNumber ?? `Z-${String(report.zNumber ?? 0).padStart(6, '0')}`}</strong>
                         <span className="font-body text-body-sm text-on-surface-variant">
-                          {reportDateLabel} · {reportTime} · Business date {report.businessDate}
+                          {reportDateLabel} · {reportTime} · {ticketT('Business date {date}', { date: report.businessDate })}
                         </span>
                       </span>
                       <span className="shift-archive-row-summary">
                         <strong>{formatTnd((report.salesCollectedMillimes ?? report.salesMillimes) / 1000)} DT</strong>
                         <StatusTag className="shift-archive-status" status={report.pinVerified === false ? 'pending' : 'started'}>
-                          {report.pinVerified === false ? 'PIN unavailable' : 'Verified'}
+                          {report.pinVerified === false ? ticketT('PIN unavailable') : ticketT('Verified')}
                         </StatusTag>
                       </span>
                       <MaterialIcon name="chevron_right" className="shift-archive-row-chevron" />
@@ -250,7 +251,7 @@ export function ShiftArchive({
                 {filteredArchiveReports.length === 0 && (
                   <div className="shift-archive-empty">
                     <MaterialIcon name="event_busy" className="text-2xl text-outline" />
-                    <p className="font-body text-body-sm text-on-surface-variant">No Z reports found closed on this date.</p>
+                    <p className="font-body text-body-sm text-on-surface-variant">{ticketT('No Z reports found closed on this date.')}</p>
                   </div>
                 )}
               </div>
@@ -259,16 +260,16 @@ export function ShiftArchive({
           {isArchivePreview ? (
             <div className="shift-archive-preview">
               <ReportView inline report={isArchivePreview} store={store ?? undefined} settings={store?.settings} storeName={store?.name ?? ''} previewZoom={previewZoom} onClose={() => { setReportPreview(undefined); setArchivePreviewDismissed(true); }} />
-              <div className="shift-preview-zoom" role="group" aria-label="Report preview zoom">
-                <button type="button" aria-label="Zoom out" disabled={previewZoom <= 70} onClick={() => setPreviewZoom((zoom) => Math.max(70, zoom - 10))}>−</button>
+              <div className="shift-preview-zoom" role="group" aria-label={ticketT('Report preview zoom')}>
+                <button type="button" aria-label={ticketT('Zoom out')} disabled={previewZoom <= 70} onClick={() => setPreviewZoom((zoom) => Math.max(70, zoom - 10))}>−</button>
                 <span>{previewZoom}%</span>
-                <button type="button" aria-label="Zoom in" disabled={previewZoom >= 150} onClick={() => setPreviewZoom((zoom) => Math.min(150, zoom + 10))}>+</button>
+                <button type="button" aria-label={ticketT('Zoom in')} disabled={previewZoom >= 150} onClick={() => setPreviewZoom((zoom) => Math.min(150, zoom + 10))}>+</button>
               </div>
             </div>
           ) : (
             <div className="shift-archive-preview shift-archive-preview--empty">
               <MaterialIcon name="description" className="text-3xl text-outline" />
-              <p className="font-body text-body-sm text-on-surface-variant">Select a Z report to preview it.</p>
+              <p className="font-body text-body-sm text-on-surface-variant">{ticketT('Select a Z report to preview it.')}</p>
             </div>
           )}
           </div>

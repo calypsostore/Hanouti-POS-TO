@@ -9,6 +9,7 @@ import { getSupabaseClient } from '../data/supabaseClient';
 import { isSupabaseDriver } from '../data/driver';
 import {
   mapNotificationRow,
+  notificationRecipientFilter,
   notificationService,
   OWNER_NOTIFICATIONS_CHANGED_EVENT,
   shouldRegisterPushNotifications,
@@ -54,6 +55,7 @@ export function NotificationsBridge() {
   const markRead = useNotificationStore((state) => state.markRead);
   const load = useNotificationStore((state) => state.load);
   const reset = useNotificationStore((state) => state.reset);
+  const notificationStatus = useNotificationStore((state) => state.status);
   const [banner, setBanner] = useState<NotificationRecord | null>(null);
   const portalTarget = useOverlayTarget();
   const bannerZIndex = useOverlayLifecycle({
@@ -84,6 +86,7 @@ export function NotificationsBridge() {
         const notificationId = action.notification.extra?.notificationId;
         const route = action.notification.extra?.route;
         if (typeof notificationId === 'string') {
+          rememberShownId(notificationId);
           const current = useAuthStore.getState().user;
           if (current) void markRead(current, notificationId).catch(() => undefined);
         }
@@ -121,6 +124,7 @@ export function NotificationsBridge() {
     let registrationListener: { remove: () => Promise<void> } | undefined;
     let refreshListener: { remove: () => Promise<void> } | undefined;
     let pushActionListener: { remove: () => Promise<void> } | undefined;
+    let pushReceivedListener: { remove: () => Promise<void> } | undefined;
     void (async () => {
       await permissionService.createDefaultChannel();
       const status = await PushNotifications.checkPermissions();
@@ -136,10 +140,18 @@ export function NotificationsBridge() {
     void PushNotifications.addListener('registrationError', (error) => {
       console.error('[push] Device registration failed.', error);
     }).then((listener) => { refreshListener = listener; });
+    void PushNotifications.addListener('pushNotificationReceived', (action) => {
+      const notificationId = action.data?.notificationId;
+      if (typeof notificationId === 'string' &&
+        (!appActive.current || document.visibilityState !== 'visible')) {
+        rememberShownId(notificationId);
+      }
+    }).then((listener) => { pushReceivedListener = listener; });
     void PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
       const notificationId = action.notification.data?.notificationId;
       const route = action.notification.data?.route;
       if (typeof notificationId === 'string') {
+        rememberShownId(notificationId);
         void markRead(user, notificationId).catch(() => undefined);
       }
       if (typeof route === 'string') navigate(route);
@@ -149,11 +161,13 @@ export function NotificationsBridge() {
       void registrationListener?.remove();
       void refreshListener?.remove();
       void pushActionListener?.remove();
+      void pushReceivedListener?.remove();
     };
   }, [markRead, navigate, user]);
 
   useEffect(() => {
-    if (!isSupabaseDriver() || !user?.storeId || locked) return;
+    if (!isSupabaseDriver() || !user?.storeId || locked ||
+      notificationStatus === 'idle' || notificationStatus === 'loading') return;
     let disposed = false;
     let retry = 0;
     let retryTimer = 0;
@@ -163,6 +177,12 @@ export function NotificationsBridge() {
     let removingChannel: ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | undefined;
     let channel: ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | undefined;
     const channelTopic = `notifications-app-shell:${user.storeId}:${user.id}:${crypto.randomUUID()}`;
+    const pushNotificationsEnabled = shouldRegisterPushNotifications(
+      import.meta.env.VITE_ANDROID_PUSH_ENABLED === 'true',
+      Capacitor.isNativePlatform(),
+      isSupabaseDriver(),
+      user.storeId,
+    );
 
     const handleAcceptedInsert = async (row: NotificationRecord) => {
       if (disposed || !recipientMatches(row, user.id, user.role)) return;
@@ -178,7 +198,9 @@ export function NotificationsBridge() {
 
       const backgrounded = !document.visibilityState || document.visibilityState !== 'visible';
       if (backgrounded || !appActive.current) {
-        await permissionService.showLocalNotification(row.title, row.body, row);
+        if (!pushNotificationsEnabled) {
+          await permissionService.showLocalNotification(row.title, row.body, row);
+        }
         return;
       }
       setBanner(row);
@@ -220,7 +242,9 @@ export function NotificationsBridge() {
           filter: `store_id=eq.${user.storeId}`,
         }, (payload) => {
           const row = mapNotificationRow(payload.new as Record<string, unknown>);
-          void handleAcceptedInsert(row);
+          void handleAcceptedInsert(row).catch((error: unknown) => {
+            console.error('[notifications] Could not process a realtime notification.', error);
+          });
         });
         nextChannel.on('postgres_changes', {
           event: 'UPDATE',
@@ -238,6 +262,7 @@ export function NotificationsBridge() {
             retry = 0;
             window.clearTimeout(retryTimer);
             retryTimer = 0;
+            void catchUp();
             return;
           }
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
@@ -254,30 +279,32 @@ export function NotificationsBridge() {
     };
 
     const catchUp = async () => {
-      if (disposed || catchUpInProgress) return;
+      if (disposed || catchUpInProgress || useNotificationStore.getState().status !== 'ready') return;
       catchUpInProgress = true;
       let hasMore = false;
       try {
         let pages = 0;
         do {
-          const before = useNotificationStore.getState().lastSeenCreatedAt;
-          let query = getSupabaseClient()
+          const cursor = useNotificationStore.getState().lastSeenCursor;
+          const query = getSupabaseClient()
             .from('notifications')
             .select('*')
             .eq('store_id', user.storeId!)
-            .or(`user_id.eq.${user.id},and(user_id.is.null,target_role.eq.${user.role})`)
-            .order('created_at', { ascending: Boolean(before) })
+            .or(notificationRecipientFilter(user, cursor, 'after'))
+            .order('created_at', { ascending: Boolean(cursor) })
+            .order('id', { ascending: Boolean(cursor) })
             .limit(50);
-          if (before) query = query.gt('created_at', before);
           const { data, error } = await query;
           if (error) {
             console.error('[notifications] Realtime catch-up failed.', error);
             return;
           }
           const rows = (data ?? []).map((item) => mapNotificationRow(item as unknown as Record<string, unknown>));
-          if (!before) rows.reverse();
-          for (const row of rows) await handleAcceptedInsert(row);
-          hasMore = Boolean(before) && rows.length === 50;
+          if (!cursor) rows.reverse();
+          for (const row of rows) {
+            if (!disposed && recipientMatches(row, user.id, user.role)) acceptInsert(row);
+          }
+          hasMore = Boolean(cursor) && rows.length === 50;
           pages += 1;
         } while (!disposed && hasMore && pages < 3);
       } catch (error) {
@@ -308,7 +335,13 @@ export function NotificationsBridge() {
     const localEvent = () => {
       if (disposed) return;
       void notificationService.listFor(user).then((items) => {
-        if (items[0]) acceptInsert(items[0]);
+        const latest = items[0];
+        if (!latest) return;
+        const alreadyPresent = useNotificationStore.getState().items.some((item) => item.id === latest.id);
+        if (alreadyPresent) acceptRealtimeUpdate(latest);
+        else void handleAcceptedInsert(latest).catch((error: unknown) => {
+          console.error('[notifications] Could not process a locally created notification.', error);
+        });
       }).catch((error: unknown) => console.error('[notifications] Could not refresh after a local change.', error));
     };
     window.addEventListener(OWNER_NOTIFICATIONS_CHANGED_EVENT, localEvent);
@@ -329,7 +362,7 @@ export function NotificationsBridge() {
         }).catch((error: unknown) => console.error('[notifications] Could not remove realtime channel.', error));
       }
     };
-  }, [acceptInsert, acceptRealtimeUpdate, locked, markRead, navigate, user]);
+  }, [acceptInsert, acceptRealtimeUpdate, locked, markRead, navigate, notificationStatus, user]);
 
   if (!banner) return null;
   const appearance = getNotificationAppearance(banner.type);

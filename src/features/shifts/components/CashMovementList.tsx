@@ -1,25 +1,28 @@
 import { MaterialIcon } from '../../../components/MaterialIcon';
 import { formatTnd } from '../../../lib/format';
+import { t } from '../../../i18n/translations';
+import { getLanguage } from '../../../i18n';
 import type { CashMovementReason, CashMovementRecord } from '../../../types/domain';
 
-export function CashMovementList({ movements, staffNames, className = '', presentation = 'default', onShowMore }: {
+export function CashMovementList({ movements, staffNames, className = '', presentation = 'default', onShowMore, blind = false }: {
   movements: CashMovementRecord[];
   staffNames: Record<string, string>;
   className?: string;
   presentation?: 'default' | 'modal';
   onShowMore?: () => void;
+  blind?: boolean;
 }) {
   const reasonLabel = (reason: CashMovementReason) => {
-    if (reason === 'supplier') return 'Bought milk';
-    if (reason === 'change') return 'Change float';
-    if (reason === 'expense') return 'Expense';
-    return 'Other';
+    if (reason === 'supplier') return t('shift.reasonBoughtMilk');
+    if (reason === 'change') return t('shift.reasonChangeFloat');
+    if (reason === 'expense') return t('shift.reasonExpense');
+    return t('shift.reasonOther');
   };
   const isModal = presentation === 'modal';
   const visibleMovements = isModal ? movements : movements.slice(0, 2);
   return (
     <section className={`mt-4 w-full border-t border-outline-variant pt-3 ${className}`}>
-      <h3 className="mb-2 font-body text-label-md text-on-surface">Cash movements</h3>
+      <h3 className="mb-2 font-body text-label-md text-on-surface">{t('shift.cashMovements')}</h3>
       {movements.length > 0 ? (
         <ul className={`flex flex-col gap-2${isModal ? ' cash-movement-history-transactions' : ''}`}>
           {visibleMovements.map((movement) => (
@@ -34,24 +37,24 @@ export function CashMovementList({ movements, staffNames, className = '', presen
               )}
               <div className="shift-history-card__movement-copy min-w-0">
                 <p className="font-body text-label-md text-on-surface">
-                  {movement.kind === 'in' ? 'Cash in' : 'Cash out'} · {reasonLabel(movement.reason)}
+                  {t(movement.kind === 'in' ? 'shift.cashIn' : 'shift.cashOut')} · {reasonLabel(movement.reason)}
                 </p>
                 <p className={`mt-0.5 font-body text-body-sm text-outline${isModal ? ' cash-movement-history-meta' : ''}`}>
                   {isModal && <MaterialIcon name="schedule" />}
-                  {staffNames[movement.staffId] ?? 'Staff'} · {new Date(movement.createdAt).toLocaleString()}
+                  {staffNames[movement.staffId] ?? t('shift.staff')} · {new Date(movement.createdAt).toLocaleString(getLanguage())}
                 </p>
                 {movement.note && <p className="mt-0.5 break-words font-body text-body-sm text-on-surface-variant">{movement.note}</p>}
               </div>
-              <strong className={`shrink-0 font-display tabular-nums ${movement.kind === 'in' ? 'text-success-dark' : 'text-error-dark'}${isModal ? ` cash-movement-history-amount cash-movement-history-amount--${movement.kind}` : ''}`}>
-                {movement.kind === 'in' ? '+' : '−'}{formatTnd(movement.amountMillimes / 1000)} DT
+              <strong aria-label={blind ? t('shift.hidden') : undefined} className={`shrink-0 font-display tabular-nums ${movement.kind === 'in' ? 'text-success-dark' : 'text-error-dark'}${isModal ? ` cash-movement-history-amount cash-movement-history-amount--${movement.kind}` : ''}`}>
+                {blind ? '*****' : `${movement.kind === 'in' ? '+' : '−'}${formatTnd(movement.amountMillimes / 1000)} DT`}
               </strong>
             </li>
           ))}
         </ul>
-      ) : <p className="font-body text-body-sm text-outline">No cash movements for this shift.</p>}
+      ) : <p className="font-body text-body-sm text-outline">{t('shift.noCashMovements')}</p>}
       {!isModal && movements.length > visibleMovements.length && onShowMore && (
         <button type="button" className="shift-history-card__movements-show-more" onClick={onShowMore}>
-          Show more <MaterialIcon name="chevron_right" />
+          {t('shift.showMore')} <MaterialIcon name="chevron_right" />
         </button>
       )}
     </section>

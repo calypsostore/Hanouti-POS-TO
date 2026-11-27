@@ -10,6 +10,8 @@ import { PERMISSIONS_CHANGED_EVENT, userService } from '../services/userService'
 import { scheduleService } from '../services/scheduleService';
 import { shiftService } from '../services/shiftService';
 import { useAuthStore } from '../stores/authStore';
+import { getLanguage, localizeErrorMessage } from '../i18n';
+import { t, type TranslationKey } from '../i18n/translations';
 import type { PermissionDefinition, ScheduleShiftRecord, ShiftRecord, StoreRecord } from '../types/domain';
 
 function dateKey(date: Date): string {
@@ -33,11 +35,11 @@ function periodMinutes(shifts: ShiftRecord[], from: Date, until: Date, now: numb
 }
 
 function formatHours(minutes: number): string {
-  return `${(minutes / 60).toFixed(1)} h`;
+  return t('staff.self.hours.format' as TranslationKey, { hours: (minutes / 60).toFixed(1) });
 }
 
 function formatDateTime(value: string): string {
-  return new Date(value).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return new Date(value).toLocaleString(getLanguage(), { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
 function scheduleStart(shift: ScheduleShiftRecord): number {
@@ -48,10 +50,12 @@ export function StaffProfileScreen() {
   const location = useLocation();
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
+  const device = useAuthStore((state) => state.device);
   const lock = useAuthStore((state) => state.lock);
   const logout = useAuthStore((state) => state.logout);
+  const deviceBoundSession = Boolean(device && user);
   const [store, setStore] = useState<StoreRecord>();
-  const [positionName, setPositionName] = useState('Unassigned');
+  const [positionName, setPositionName] = useState('');
   const [permissionDefinitions, setPermissionDefinitions] = useState<PermissionDefinition[]>([]);
   const [effectivePermissions, setEffectivePermissions] = useState<string[]>([]);
   const [schedule, setSchedule] = useState<ScheduleShiftRecord[]>([]);
@@ -78,7 +82,7 @@ export function StaffProfileScreen() {
         hasHoursPermission ? shiftService.listShifts(user.storeId) : Promise.resolve([]),
       ]);
       setStore(nextStore);
-      setPositionName(positions.find((position) => position.id === user.positionId)?.name ?? 'Unassigned');
+      setPositionName(positions.find((position) => position.id === user.positionId)?.name ?? '');
       setPermissionDefinitions(definitions);
       setEffectivePermissions(permissionIds);
       setSchedule(nextSchedule.filter((shift) => Boolean(shift.publishedAt)));
@@ -98,7 +102,7 @@ export function StaffProfileScreen() {
       void refresh().catch((loadError: unknown) => {
         if (active && currentRequestId === requestId) {
           console.error('Unable to load the staff profile.', loadError);
-          setError('Unable to load your profile. Please try again.');
+          setError(t('staff.self.error.load' as TranslationKey));
         }
       });
     };
@@ -147,7 +151,7 @@ export function StaffProfileScreen() {
       await logout();
       navigate('/', { replace: true });
     } catch (logoutError) {
-      setError(logoutError instanceof Error ? logoutError.message : 'Unable to end your session.');
+      setError(localizeErrorMessage(logoutError, t('staff.self.error.endSession' as TranslationKey)));
     }
   }
 
@@ -157,7 +161,7 @@ export function StaffProfileScreen() {
       await lock();
       navigate('/lock', { state: { from: location.pathname } });
     } catch (lockError) {
-      setError(lockError instanceof Error ? lockError.message : 'Unable to lock the terminal.');
+      setError(localizeErrorMessage(lockError, t('staff.self.error.lockTerminal' as TranslationKey)));
     }
   }
 
@@ -172,12 +176,12 @@ export function StaffProfileScreen() {
             <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-primary-fixed font-display text-headline-md text-primary">{initials}</span>
             <div className="min-w-0">
               <h1 className="truncate font-display text-headline-lg text-on-surface">{user?.name}</h1>
-              <p className="truncate font-body text-body-md text-on-surface-variant">@{user?.username ?? 'No username'}</p>
+              <p className="truncate font-body text-body-md text-on-surface-variant">@{user?.username ?? t('staff.self.username.none' as TranslationKey)}</p>
             </div>
           </div>
           <div className="mt-4 grid gap-3 border-t border-outline-variant pt-4 sm:grid-cols-2">
-            <ProfileDetail label="Position" value={positionName} />
-            <ProfileDetail label="Store" value={store?.name ?? 'Loading store…'} />
+            <ProfileDetail label={t('staff.self.position' as TranslationKey)} value={positionName || t('staff.self.positionUnassigned' as TranslationKey)} />
+            <ProfileDetail label={t('staff.self.store' as TranslationKey)} value={store?.name ?? t('staff.self.storeLoading' as TranslationKey)} />
           </div>
         </header>
 
@@ -186,21 +190,21 @@ export function StaffProfileScreen() {
         {canViewSchedule && (
           <>
             <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-              <h2 className="mb-3 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="event" className="text-primary" />Next shift</h2>
-              {loading ? <ListSkeleton rows={1} label="Loading your next shift" /> : nextShift ? (
+              <h2 className="mb-3 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="event" className="text-primary" />{t('staff.self.schedule.next' as TranslationKey)}</h2>
+              {loading ? <ListSkeleton rows={1} label={t('staff.self.schedule.loadingNext' as TranslationKey)} /> : nextShift ? (
                 <ScheduleCard shift={nextShift} />
               ) : (
-                <p className="font-body text-body-sm text-outline">No upcoming published shifts.</p>
+                <p className="font-body text-body-sm text-outline">{t('staff.self.schedule.noneUpcoming' as TranslationKey)}</p>
               )}
             </section>
             <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-              <h2 className="mb-3 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="calendar_month" className="text-primary" />This week’s schedule</h2>
-              {loading ? <ListSkeleton rows={2} label="Loading this week’s schedule" /> : weekSchedule.length > 0 ? (
+              <h2 className="mb-3 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="calendar_month" className="text-primary" />{t('staff.self.schedule.thisWeek' as TranslationKey)}</h2>
+              {loading ? <ListSkeleton rows={2} label={t('staff.self.schedule.loadingWeek' as TranslationKey)} /> : weekSchedule.length > 0 ? (
                 <div className="flex flex-col gap-2">
                   {weekSchedule.map((shift) => <ScheduleCard key={shift.id} shift={shift} />)}
                 </div>
               ) : (
-                <p className="font-body text-body-sm text-outline">No published shifts this week.</p>
+                <p className="font-body text-body-sm text-outline">{t('staff.self.schedule.noneWeek' as TranslationKey)}</p>
               )}
             </section>
           </>
@@ -208,34 +212,34 @@ export function StaffProfileScreen() {
 
         {canViewHours && (
           <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-            <h2 className="mb-3 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="schedule" className="text-primary" />My hours</h2>
+            <h2 className="mb-3 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="schedule" className="text-primary" />{t('staff.self.hours.title' as TranslationKey)}</h2>
             <div className="mb-4 grid gap-3 sm:grid-cols-2">
-              <HourMetric label="This week" value={formatHours(weekHours)} />
-              <HourMetric label="This month" value={formatHours(monthHours)} />
+              <HourMetric label={t('staff.self.hours.thisWeek' as TranslationKey)} value={formatHours(weekHours)} />
+              <HourMetric label={t('staff.self.hours.thisMonth' as TranslationKey)} value={formatHours(monthHours)} />
             </div>
-            <h3 className="mb-2 font-body text-label-md text-on-surface">Last 5 shifts</h3>
-            {loading ? <ListSkeleton rows={2} label="Loading recent shifts" /> : recentShifts.length > 0 ? (
+            <h3 className="mb-2 font-body text-label-md text-on-surface">{t('staff.self.shifts.lastFive' as TranslationKey)}</h3>
+            {loading ? <ListSkeleton rows={2} label={t('staff.self.shifts.loading' as TranslationKey)} /> : recentShifts.length > 0 ? (
               <div className="flex flex-col gap-2">
                 {recentShifts.map((shift) => (
                   <article key={shift.id} className="rounded-xl bg-surface-container-low p-3">
                     <p className="font-body text-label-md text-on-surface">{formatDateTime(shift.openedAt)}</p>
                     <p className="mt-1 font-body text-body-sm text-on-surface-variant">
-                      Opened {new Date(shift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · Closed {shift.closedAt ? new Date(shift.closedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'In progress'}
+                      {t('staff.self.shifts.opened' as TranslationKey)} {new Date(shift.openedAt).toLocaleTimeString(getLanguage(), { hour: '2-digit', minute: '2-digit' })} · {t('staff.self.shifts.closed' as TranslationKey)} {shift.closedAt ? new Date(shift.closedAt).toLocaleTimeString(getLanguage(), { hour: '2-digit', minute: '2-digit' }) : t('staff.self.shifts.inProgress' as TranslationKey)}
                     </p>
                   </article>
                 ))}
               </div>
             ) : (
-              <p className="font-body text-body-sm text-outline">No shifts recorded yet.</p>
+              <p className="font-body text-body-sm text-outline">{t('staff.self.shifts.none' as TranslationKey)}</p>
             )}
           </section>
         )}
 
         <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-          <h2 className="mb-1 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="verified_user" className="text-primary" />My permissions</h2>
-          <p className="mb-4 font-body text-body-sm text-on-surface-variant">These permissions determine which actions and buttons are available to you.</p>
+          <h2 className="mb-1 flex items-center gap-2 font-display text-headline-md text-on-surface"><MaterialIcon name="verified_user" className="text-primary" />{t('staff.self.permissions.title' as TranslationKey)}</h2>
+          <p className="mb-4 font-body text-body-sm text-on-surface-variant">{t('staff.self.permissions.help' as TranslationKey)}</p>
           <div className="flex flex-col gap-4">
-            {loading ? <ListSkeleton rows={2} label="Loading your permissions" /> : groupedPermissions.map(([group, permissions]) => (
+            {loading ? <ListSkeleton rows={2} label={t('staff.self.permissions.loading' as TranslationKey)} /> : groupedPermissions.map(([group, permissions]) => (
               <div key={group}>
                 <h3 className="mb-2 font-body text-label-md text-on-surface">{group}</h3>
                 <ul className="flex flex-col gap-2">
@@ -245,7 +249,7 @@ export function StaffProfileScreen() {
                       <li key={permission.id} className="flex items-center gap-2 font-body text-body-sm text-on-surface-variant">
                         <MaterialIcon name={allowed ? 'check_circle' : 'block'} className={allowed ? 'text-success-dark' : 'text-outline'} />
                         <span className="flex-1">{permission.label}</span>
-                        <span className={allowed ? 'text-success-dark' : 'text-outline'}>{allowed ? 'Allowed' : 'Not allowed'}</span>
+                        <span className={allowed ? 'text-success-dark' : 'text-outline'}>{t(allowed ? 'staff.self.permissions.allowed' as TranslationKey : 'staff.self.permissions.notAllowed' as TranslationKey)}</span>
                       </li>
                     );
                   })}
@@ -259,9 +263,10 @@ export function StaffProfileScreen() {
         {notice && <p role="status" className="rounded-lg bg-success-container p-3 font-body text-body-sm text-on-success-container">{notice}</p>}
 
         <div className="staff-profile-actions flex flex-col gap-4">
-          <Button variant="secondary" onClick={() => navigate('/settings')} className="w-full"><MaterialIcon name="settings" />Settings</Button>
-          <Button variant="danger" onClick={() => { void lockNow(); }} className="w-full"><MaterialIcon name="lock" />Lock now</Button>
-          <Button variant="ghost" onClick={() => { void endSession(); }} className="w-full"><MaterialIcon name="logout" />Log out</Button>
+          <Button variant="secondary" onClick={() => navigate('/settings')} className="w-full"><MaterialIcon name="settings" />{t('staff.self.action.settings' as TranslationKey)}</Button>
+          <Button variant="danger" onClick={() => { void lockNow(); }} className="w-full"><MaterialIcon name="lock" />{t('staff.self.action.lock' as TranslationKey)}</Button>
+          {deviceBoundSession && <p role="note" className="font-body text-body-sm text-on-surface-variant">{t('devices.deviceLogoutDisabled')}</p>}
+          <Button variant="ghost" disabled={deviceBoundSession} onClick={() => { void endSession(); }} className="w-full"><MaterialIcon name="logout" />{t('staff.self.action.logout' as TranslationKey)}</Button>
         </div>
       </PageContainer>
       </main>
@@ -282,7 +287,7 @@ function ProfileDetail({ label, value }: { label: string; value: string }) {
 function ScheduleCard({ shift }: { shift: ScheduleShiftRecord }) {
   return (
     <article className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-low p-3">
-      <p className="font-body text-label-md text-on-surface">{new Date(`${shift.date}T00:00:00`).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short' })}</p>
+      <p className="font-body text-label-md text-on-surface">{new Date(`${shift.date}T00:00:00`).toLocaleDateString(getLanguage(), { weekday: 'long', day: 'numeric', month: 'short' })}</p>
       <p className="shrink-0 font-body text-label-md tabular-nums text-primary">{shift.startTime}–{shift.endTime}</p>
     </article>
   );

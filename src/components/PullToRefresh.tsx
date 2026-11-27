@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { MaterialIcon } from './MaterialIcon';
 import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
+import { t } from '../i18n/translations';
 
 interface PullToRefreshProps {
   enabled: boolean;
@@ -135,7 +136,7 @@ export function PullToRefresh({ enabled, children }: PullToRefreshProps) {
             name="refresh"
             className={refreshing ? 'animate-spin' : ''}
           />
-          {refreshing ? 'Refreshing…' : readyToRefresh ? 'Release to refresh' : 'Pull to refresh'}
+          {refreshing ? t('common.refreshing') : readyToRefresh ? t('common.releaseToRefresh') : t('common.pullToRefresh')}
         </div>,
         portalTarget,
       )}

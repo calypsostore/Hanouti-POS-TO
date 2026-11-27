@@ -154,8 +154,8 @@ describe('fiscal report exports', () => {
     const csv = createFiscalCsv(report, 'transactions');
 
     expect(csv.charCodeAt(0)).toBe(0xfeff);
-    expect(csv).toContain('Store,Fiscal Fixture Store,Period,"2026-03-01 to 2026-03-02 (exclusive), Africa/Tunis"');
-    expect(csv).toContain('Order,Business date (store timezone),Timestamp (ISO),Customer,Staff,Items,HT TND,VAT rate,VAT TND,TTC TND,Payment,Payment status,Status,Void reason');
+    expect(csv).toContain('Store,Fiscal Fixture Store,Period,"2026-03-01 to 2026-03-02 (end exclusive), Africa/Tunis"');
+    expect(csv).toContain('Order,Business date (store timezone),Timestamp (ISO),Customer,Staff,Items,Net HT (TND),VAT rate,VAT (TND),Gross TTC (TND),Payment,Payment status,Status,Void reason');
     expect(csv).toContain('1,2026-03-01,2026-03-01T10:00:00.000Z,,,Fixture product x1,2.521,19%,0.479,3.000,cash,paid,done,');
     expect(csv).toContain('Gross TTC (TND),3.000');
     expect(new TextDecoder('utf-8').decode(new TextEncoder().encode(csv))).toContain('Fiscal Fixture Store');

@@ -16,16 +16,18 @@ import { scheduleService } from '../services/scheduleService';
 import { shiftService } from '../services/shiftService';
 import { userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
+import { getLanguage, localizeErrorMessage } from '../i18n';
+import { t, type TranslationKey } from '../i18n/translations';
 import type { CompRecord, OrderRecord, PermissionDefinition, PermissionOverrides, PositionRecord, ScheduleShiftRecord, ShiftRecord, UserSummary } from '../types/domain';
 
 type ProfileTab = 'overview' | 'schedule' | 'hours' | 'performance' | 'activity';
 
-const PROFILE_TABS: { id: ProfileTab; label: string }[] = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'schedule', label: 'Schedule' },
-  { id: 'hours', label: 'Hours' },
-  { id: 'performance', label: 'Performance' },
-  { id: 'activity', label: 'Activity' },
+const PROFILE_TABS: { id: ProfileTab; key: string }[] = [
+  { id: 'overview', key: 'staff.profile.tab.overview' },
+  { id: 'schedule', key: 'staff.profile.tab.schedule' },
+  { id: 'hours', key: 'staff.profile.tab.hours' },
+  { id: 'performance', key: 'staff.profile.tab.performance' },
+  { id: 'activity', key: 'staff.profile.tab.activity' },
 ];
 
 function startOfWeek(date: Date): Date {
@@ -39,7 +41,7 @@ function dateRangeLabel(start: Date, days: number): string {
   const end = new Date(start);
   end.setDate(end.getDate() + days - 1);
   const options: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' };
-  return `${start.toLocaleDateString([], options)} – ${end.toLocaleDateString([], options)}`;
+  return `${start.toLocaleDateString(getLanguage(), options)} – ${end.toLocaleDateString(getLanguage(), options)}`;
 }
 
 function localDateKey(date: Date): string {
@@ -67,11 +69,11 @@ function lateMinutesFor(shift: ShiftRecord, schedule: ScheduleShiftRecord[]): nu
 
 function formatHours(milliseconds: number): string {
   const totalMinutes = Math.max(0, Math.round(milliseconds / 60_000));
-  return `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`;
+  return t('staff.profile.hours.duration' as TranslationKey, { hours: Math.floor(totalMinutes / 60), minutes: totalMinutes % 60 });
 }
 
 function formatShiftTime(value: string): string {
-  return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  return new Date(value).toLocaleTimeString(getLanguage(), { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 function overridesFor(user: UserSummary): PermissionOverrides {
@@ -139,7 +141,7 @@ function ProfileContent() {
     setEffectivePermissions(nextEffectivePermissions);
     if (!nextStaff || nextStaff.role !== 'staff' || nextStaff.storeId !== storeId) {
       setStaff(null);
-      throw new Error('Staff account could not be found.');
+      throw new Error(t('staff.profile.error.notFound' as TranslationKey));
     }
     setStaff(nextStaff);
   }, [id, storeId]);
@@ -149,7 +151,7 @@ function ProfileContent() {
     const load = () => {
       void refresh().catch((loadError: unknown) => {
         console.error('Unable to load the staff profile.', loadError);
-        if (active) setError('Unable to load this staff profile. Please try again.');
+        if (active) setError(t('staff.profile.error.load' as TranslationKey));
       }).finally(() => {
         if (active) setLoading(false);
       });
@@ -167,7 +169,7 @@ function ProfileContent() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const positionName = staff ? positions.find((position) => position.id === staff.positionId)?.name ?? 'Unassigned' : '';
+  const positionName = staff ? positions.find((position) => position.id === staff.positionId)?.name ?? t('staff.self.positionUnassigned' as TranslationKey) : '';
   const inheritedPermissions = staff
     ? positions.find((position) => position.id === staff.positionId)?.permissionIds ?? []
     : [];
@@ -218,9 +220,9 @@ function ProfileContent() {
       });
       await refresh();
       setEditOpen(false);
-      setNotice('Staff profile updated.');
+      setNotice(t('staff.profile.notice.updated' as TranslationKey));
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Unable to update staff profile.');
+      setError(localizeErrorMessage(saveError, t('staff.profile.error.update' as TranslationKey)));
     } finally {
       setBusy(false);
     }
@@ -233,9 +235,9 @@ function ProfileContent() {
     try {
       await userService.updateStaff(staff.id, { isActive: !staff.isActive });
       await refresh();
-      setNotice(staff.isActive ? 'Staff member suspended.' : 'Staff member enabled.');
+      setNotice(t(staff.isActive ? 'staff.profile.notice.suspended' as TranslationKey : 'staff.profile.notice.enabled' as TranslationKey));
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : 'Unable to update staff status.');
+      setError(localizeErrorMessage(updateError, t('staff.profile.error.updateStatus' as TranslationKey)));
     } finally {
       setBusy(false);
     }
@@ -252,7 +254,7 @@ function ProfileContent() {
       setNotice('');
       await refresh();
     } catch (resetError) {
-      setError(resetError instanceof Error ? resetError.message : 'Unable to reset the staff password.');
+      setError(localizeErrorMessage(resetError, t('staff.profile.error.resetPassword' as TranslationKey)));
     } finally {
       setBusy(false);
     }
@@ -268,7 +270,7 @@ function ProfileContent() {
       setGeneratedStaffPin(pin);
       await refresh();
     } catch (resetError) {
-      setError(resetError instanceof Error ? resetError.message : 'Unable to generate the staff PIN.');
+      setError(localizeErrorMessage(resetError, t('staff.profile.error.generatePin' as TranslationKey)));
     } finally {
       setBusy(false);
     }
@@ -281,9 +283,9 @@ function ProfileContent() {
     try {
       await userService.forceLogoutStaff(staff.id);
       setConfirmation(null);
-      setNotice('The staff session has been revoked.');
+      setNotice(t('staff.profile.notice.sessionRevoked' as TranslationKey));
     } catch (logoutError) {
-      setError(logoutError instanceof Error ? logoutError.message : 'Unable to revoke the staff session.');
+      setError(localizeErrorMessage(logoutError, t('staff.profile.error.forceLogout' as TranslationKey)));
     } finally {
       setBusy(false);
     }
@@ -307,7 +309,7 @@ function ProfileContent() {
       await userService.setPermissionOverrides(staff.id, nextOverrides);
       await refresh();
     } catch (permissionError) {
-      setError(permissionError instanceof Error ? permissionError.message : 'Unable to update permissions.');
+      setError(localizeErrorMessage(permissionError, t('staff.profile.error.updatePermissions' as TranslationKey)));
     } finally {
       setBusy(false);
     }
@@ -339,9 +341,9 @@ function ProfileContent() {
       }, editingSchedule?.id);
       await refresh();
       setScheduleEditorOpen(false);
-      setNotice('Planned shift saved.');
+      setNotice(t('staff.profile.notice.shiftSaved' as TranslationKey));
     } catch (scheduleError) {
-      setError(scheduleError instanceof Error ? scheduleError.message : 'Unable to save the planned shift.');
+      setError(localizeErrorMessage(scheduleError, t('staff.profile.error.saveShift' as TranslationKey)));
     } finally {
       setBusy(false);
     }
@@ -354,9 +356,9 @@ function ProfileContent() {
       await scheduleService.delete(shift.id, storeId);
       await refresh();
       setScheduleEditorOpen(false);
-      setNotice('Planned shift deleted.');
+      setNotice(t('staff.profile.notice.shiftDeleted' as TranslationKey));
     } catch (scheduleError) {
-      setError(scheduleError instanceof Error ? scheduleError.message : 'Unable to delete the planned shift.');
+      setError(localizeErrorMessage(scheduleError, t('staff.profile.error.deleteShift' as TranslationKey)));
     } finally {
       setBusy(false);
     }
@@ -364,21 +366,21 @@ function ProfileContent() {
 
   async function copyPassword() {
     try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable.');
+      if (!navigator.clipboard?.writeText) throw new Error(t('staff.profile.error.clipboardUnavailable' as TranslationKey));
       await navigator.clipboard.writeText(temporaryPassword);
-      setNotice('Temporary password copied.');
+      setNotice(t('staff.profile.notice.passwordCopied' as TranslationKey));
     } catch (copyError) {
-      setError(copyError instanceof Error ? copyError.message : 'Unable to copy the temporary password.');
+      setError(localizeErrorMessage(copyError, t('staff.profile.error.copyPassword' as TranslationKey)));
     }
   }
 
   async function copyGeneratedStaffPin() {
     try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable.');
+      if (!navigator.clipboard?.writeText) throw new Error(t('staff.profile.error.clipboardUnavailable' as TranslationKey));
       await navigator.clipboard.writeText(generatedStaffPin);
-      setNotice('Staff PIN copied.');
+      setNotice(t('staff.profile.notice.pinCopied' as TranslationKey));
     } catch (copyError) {
-      setError(copyError instanceof Error ? copyError.message : 'Unable to copy the staff PIN.');
+      setError(localizeErrorMessage(copyError, t('staff.profile.error.copyPin' as TranslationKey)));
     }
   }
 
@@ -417,14 +419,14 @@ function ProfileContent() {
   const performance30 = statsForDays(30);
 
   return (
-    <WorkspaceLayout title="Staff profile" storeName={storeName} links={ownerWorkspaceLinks}>
+    <WorkspaceLayout title={t('staff.profile.title' as TranslationKey)} storeName={storeName} links={ownerWorkspaceLinks}>
       <Link to="/owner/staff" className="mb-4 inline-flex min-h-12 items-center gap-2 rounded-lg pr-3 font-body text-label-md text-primary hover:bg-surface-container-low">
         <MaterialIcon name="arrow_back" />
-        Back to staff
+        {t('staff.profile.back' as TranslationKey)}
       </Link>
 
       {loading ? (
-        <ListSkeleton rows={3} label="Loading staff profile" />
+        <ListSkeleton rows={3} label={t('staff.profile.loading' as TranslationKey)} />
       ) : staff ? (
         <>
           <section className="mb-5 rounded-2xl bg-surface-container-lowest p-4 shadow-card sm:p-6">
@@ -435,37 +437,37 @@ function ProfileContent() {
                 </span>
                 <div className="min-w-0 flex-1">
                   <h1 className="break-words font-display text-headline-lg text-on-surface">{staff.name}</h1>
-                  <p className="mt-1 break-all font-body text-body-sm text-outline">{staff.username ?? 'No username'}</p>
+                  <p className="mt-1 break-all font-body text-body-sm text-outline">{staff.username ?? t('staff.profile.username.none' as TranslationKey)}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <span className="rounded-full bg-secondary-container px-3 py-1.5 font-body text-label-sm text-on-secondary-container">{positionName}</span>
-                    <StatusTag status={staff.isActive ? 'open' : 'suspended'}>{staff.isActive ? 'Active' : 'Suspended'}</StatusTag>
+                    <StatusTag status={staff.isActive ? 'open' : 'suspended'}>{t(staff.isActive ? 'staff.profile.status.active' as TranslationKey : 'staff.profile.status.suspended' as TranslationKey)}</StatusTag>
                     <span className={`rounded-full px-3 py-1.5 font-body text-label-sm ${staff.mustSetPin ? 'bg-warning-container text-on-warning-container' : 'bg-success-container text-success-dark'}`}>
-                      {staff.mustSetPin ? 'PIN not assigned' : 'PIN assigned'}
+                      {t(staff.mustSetPin ? 'staff.profile.pin.unassigned' as TranslationKey : 'staff.profile.pin.assigned' as TranslationKey)}
                     </span>
                   </div>
                 </div>
               </div>
               <dl className="grid gap-3 rounded-xl bg-surface-container-low p-3 sm:grid-cols-3 sm:p-4">
-                <ProfileDetail label="Phone" value={staff.phone || 'Not provided'} />
-                <ProfileDetail label="Hire date" value={new Date(staff.createdAt).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })} />
-                <ProfileDetail label="Notes" value={staff.notes || 'No notes'} />
+                <ProfileDetail label={t('staff.profile.detail.phone' as TranslationKey)} value={staff.phone || t('staff.profile.detail.phoneMissing' as TranslationKey)} />
+                <ProfileDetail label={t('staff.profile.detail.hireDate' as TranslationKey)} value={new Date(staff.createdAt).toLocaleDateString(getLanguage(), { day: 'numeric', month: 'short', year: 'numeric' })} />
+                <ProfileDetail label={t('staff.profile.detail.notes' as TranslationKey)} value={staff.notes || t('staff.profile.detail.notesMissing' as TranslationKey)} />
               </dl>
               <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-                <Button variant="secondary" onClick={openEdit}><MaterialIcon name="edit" />Edit</Button>
-                <Button variant="secondary" onClick={() => { setError(''); setConfirmation('reset'); }}><MaterialIcon name="lock_reset" />Reset password</Button>
+                <Button variant="secondary" onClick={openEdit}><MaterialIcon name="edit" />{t('staff.profile.action.edit' as TranslationKey)}</Button>
+                <Button variant="secondary" onClick={() => { setError(''); setConfirmation('reset'); }}><MaterialIcon name="lock_reset" />{t('staff.profile.action.resetPassword' as TranslationKey)}</Button>
                 <Button variant="secondary" disabled={busy} onClick={() => { setError(''); setGeneratedStaffPin(''); setPinResetOpen(true); }}>
-                  <MaterialIcon name="pin" />{staff.mustSetPin ? 'Generate PIN' : 'Replace PIN'}
+                  <MaterialIcon name="pin" />{t(staff.mustSetPin ? 'staff.profile.action.generatePin' as TranslationKey : 'staff.profile.action.replacePin' as TranslationKey)}
                 </Button>
                 <Button variant={staff.isActive ? 'danger' : 'secondary'} disabled={busy} onClick={() => { void toggleActive(); }}>
                   <MaterialIcon name={staff.isActive ? 'person_off' : 'person'} />
-                  {staff.isActive ? 'Suspend' : 'Enable'}
+                  {t(staff.isActive ? 'staff.profile.action.suspend' as TranslationKey : 'staff.profile.action.enable' as TranslationKey)}
                 </Button>
-                <Button variant="secondary" disabled={busy} onClick={() => { setError(''); setConfirmation('logout'); }}><MaterialIcon name="logout" />Force logout</Button>
+                <Button variant="secondary" disabled={busy} onClick={() => { setError(''); setConfirmation('logout'); }}><MaterialIcon name="logout" />{t('staff.profile.action.forceLogout' as TranslationKey)}</Button>
               </div>
             </div>
           </section>
 
-          <div role="tablist" aria-label="Staff profile sections" className="scrollbar-hidden mb-4 flex gap-2 overflow-x-auto rounded-xl bg-surface-container-low p-1">
+          <div role="tablist" aria-label={t('staff.profile.tabs.label' as TranslationKey)} className="scrollbar-hidden mb-4 flex gap-2 overflow-x-auto rounded-xl bg-surface-container-low p-1">
             {PROFILE_TABS.map((tab) => (
               <button
                 key={tab.id}
@@ -477,7 +479,7 @@ function ProfileContent() {
                 onClick={() => setActiveTab(tab.id)}
                 className={`min-h-12 shrink-0 rounded-lg px-4 font-body text-label-md ${activeTab === tab.id ? 'bg-primary text-on-primary shadow-card' : 'text-on-surface-variant hover:bg-surface-container-high'}`}
               >
-                {tab.label}
+                {t(tab.key as TranslationKey)}
               </button>
             ))}
           </div>
@@ -486,15 +488,15 @@ function ProfileContent() {
             {activeTab === 'overview' && (
               <div className="flex flex-col gap-5">
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <ProfileDetailCard label="Phone" value={staff.phone || 'Not provided'} icon="call" />
-                  <ProfileDetailCard label="Hire date" value={new Date(staff.createdAt).toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' })} icon="event" />
-                  <ProfileDetailCard label="Position" value={positionName} icon="badge" />
-                  <ProfileDetailCard label="Account status" value={staff.isActive ? 'Active' : 'Suspended'} icon={staff.isActive ? 'check_circle' : 'block'} />
+                  <ProfileDetailCard label={t('staff.profile.detail.phone' as TranslationKey)} value={staff.phone || t('staff.profile.detail.phoneMissing' as TranslationKey)} icon="call" />
+                  <ProfileDetailCard label={t('staff.profile.detail.hireDate' as TranslationKey)} value={new Date(staff.createdAt).toLocaleDateString(getLanguage(), { day: 'numeric', month: 'long', year: 'numeric' })} icon="event" />
+                  <ProfileDetailCard label={t('staff.profile.edit.position' as TranslationKey)} value={positionName} icon="badge" />
+                  <ProfileDetailCard label={t('staff.profile.accountStatus' as TranslationKey)} value={t(staff.isActive ? 'staff.profile.status.active' as TranslationKey : 'staff.profile.status.suspended' as TranslationKey)} icon={staff.isActive ? 'check_circle' : 'block'} />
                 </div>
                 <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
                   <div className="mb-4">
-                    <h2 className="font-display text-headline-md text-on-surface">Effective permissions</h2>
-                    <p className="mt-1 font-body text-body-sm text-outline">Switch permissions to override the selected position. Inherited permissions follow the position.</p>
+                    <h2 className="font-display text-headline-md text-on-surface">{t('staff.profile.permissions.title' as TranslationKey)}</h2>
+                    <p className="mt-1 font-body text-body-sm text-outline">{t('staff.profile.permissions.help' as TranslationKey)}</p>
                   </div>
                   <div className="flex flex-col gap-5">
                     {groupedPermissions.map(([group, groupPermissions]) => (
@@ -505,7 +507,7 @@ function ProfileContent() {
                           const blocked = currentOverrides.revoked.includes(permission.id);
                           const granted = currentOverrides.granted.includes(permission.id);
                           const enabled = effectivePermissions.includes(permission.id);
-                          const state = blocked ? 'Blocked' : granted ? 'Granted' : 'Inherited';
+                          const state = t(blocked ? 'staff.owner.permissions.blocked' as TranslationKey : granted ? 'staff.owner.permissions.granted' as TranslationKey : 'staff.owner.permissions.inherited' as TranslationKey);
                           return (
                             <PermissionOverrideRow
                               key={permission.id}
@@ -527,35 +529,35 @@ function ProfileContent() {
             {activeTab === 'schedule' && (
               <div className="flex flex-col gap-4">
                 <div className="flex items-center justify-between gap-3">
-                  <h2 className="font-display text-headline-md text-on-surface">Planned shifts</h2>
-                  <Button onClick={() => openScheduleEditor()}><MaterialIcon name="edit_calendar" />Edit</Button>
+                  <h2 className="font-display text-headline-md text-on-surface">{t('staff.profile.shift.planned' as TranslationKey)}</h2>
+                  <Button onClick={() => openScheduleEditor()}><MaterialIcon name="edit_calendar" />{t('staff.profile.action.edit' as TranslationKey)}</Button>
                 </div>
-                <PlannedShiftWeek title="This week" range={dateRangeLabel(weekStart, 7)} shifts={thisWeekShifts} onEdit={openScheduleEditor} />
-                <PlannedShiftWeek title="Next week" range={dateRangeLabel(nextWeekStart, 7)} shifts={nextWeekShifts} onEdit={openScheduleEditor} />
+                <PlannedShiftWeek title={t('staff.profile.shift.thisWeek' as TranslationKey)} range={dateRangeLabel(weekStart, 7)} shifts={thisWeekShifts} onEdit={openScheduleEditor} />
+                <PlannedShiftWeek title={t('staff.profile.shift.nextWeek' as TranslationKey)} range={dateRangeLabel(nextWeekStart, 7)} shifts={nextWeekShifts} onEdit={openScheduleEditor} />
               </div>
             )}
 
             {activeTab === 'hours' && (
               <div className="flex flex-col gap-4">
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <HoursSummary title="This week" shifts={weekShifts} duration={durationFor(weekShifts)} difference={differenceFor(weekShifts)} />
-                  <HoursSummary title="This month" shifts={monthShifts} duration={durationFor(monthShifts)} difference={differenceFor(monthShifts)} />
+                  <HoursSummary title={t('staff.profile.shift.thisWeek' as TranslationKey)} shifts={weekShifts} duration={durationFor(weekShifts)} difference={differenceFor(weekShifts)} />
+                  <HoursSummary title={t('staff.profile.shift.thisMonth' as TranslationKey)} shifts={monthShifts} duration={durationFor(monthShifts)} difference={differenceFor(monthShifts)} />
                 </div>
                 <section className="overflow-hidden rounded-2xl bg-surface-container-lowest shadow-card">
-                  <h2 className="p-4 font-display text-headline-md text-on-surface">Shift history</h2>
+                  <h2 className="p-4 font-display text-headline-md text-on-surface">{t('staff.profile.shift.history' as TranslationKey)}</h2>
                   {shifts.length === 0 ? (
-                    <p className="px-4 pb-4 font-body text-body-sm text-outline">No shifts recorded yet.</p>
+                    <p className="px-4 pb-4 font-body text-body-sm text-outline">{t('staff.profile.shift.noneRecorded' as TranslationKey)}</p>
                   ) : (
                     <div className="overflow-x-auto">
                       <table className="mobile-card-table w-full min-w-[640px] border-collapse text-left">
                         <thead className="bg-surface-container-low font-body text-label-sm text-outline">
                           <tr>
-                            <th className="px-4 py-3">Date</th>
-                            <th className="px-4 py-3">Opened</th>
-                            <th className="px-4 py-3">Closed</th>
-                            <th className="px-4 py-3">Total hours</th>
-                            <th className="px-4 py-3">Punctuality</th>
-                            <th className="px-4 py-3">Cash difference</th>
+                            <th className="px-4 py-3">{t('staff.profile.table.date' as TranslationKey)}</th>
+                            <th className="px-4 py-3">{t('staff.profile.table.opened' as TranslationKey)}</th>
+                            <th className="px-4 py-3">{t('staff.profile.table.closed' as TranslationKey)}</th>
+                            <th className="px-4 py-3">{t('staff.profile.table.totalHours' as TranslationKey)}</th>
+                            <th className="px-4 py-3">{t('staff.profile.table.punctuality' as TranslationKey)}</th>
+                            <th className="px-4 py-3">{t('staff.profile.table.cashDifference' as TranslationKey)}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -564,12 +566,12 @@ function ProfileContent() {
                             const closedAt = shift.closedAt ? new Date(shift.closedAt) : new Date(now);
                             return (
                               <tr key={shift.id} className="border-t border-outline-variant font-body text-body-sm text-on-surface">
-                                <td data-label="Date">{openedAt.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}</td>
-                                <td data-label="Opened">{formatShiftTime(shift.openedAt)}</td>
-                                <td data-label="Closed">{shift.closedAt ? formatShiftTime(shift.closedAt) : 'Open'}</td>
-                                <td data-label="Total hours">{formatHours(closedAt.getTime() - openedAt.getTime())}</td>
-                                <td data-label="Punctuality">{lateMinutesFor(shift, plannedShifts) > 0 ? `Late ${lateMinutesFor(shift, plannedShifts)} min` : '—'}</td>
-                                <td data-label="Cash difference">{shift.differenceMillimes === undefined ? '—' : `${formatTnd(shift.differenceMillimes / 1000)} DT`}</td>
+                                <td data-label={t('staff.profile.table.date' as TranslationKey)}>{openedAt.toLocaleDateString(getLanguage(), { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                                <td data-label={t('staff.profile.table.opened' as TranslationKey)}>{formatShiftTime(shift.openedAt)}</td>
+                                <td data-label={t('staff.profile.table.closed' as TranslationKey)}>{shift.closedAt ? formatShiftTime(shift.closedAt) : t('staff.profile.shift.open' as TranslationKey)}</td>
+                                <td data-label={t('staff.profile.table.totalHours' as TranslationKey)}>{formatHours(closedAt.getTime() - openedAt.getTime())}</td>
+                                <td data-label={t('staff.profile.table.punctuality' as TranslationKey)}>{lateMinutesFor(shift, plannedShifts) > 0 ? t('staff.profile.shift.late' as TranslationKey, { minutes: lateMinutesFor(shift, plannedShifts) }) : '—'}</td>
+                                <td data-label={t('staff.profile.table.cashDifference' as TranslationKey)}>{shift.differenceMillimes === undefined ? '—' : `${formatTnd(shift.differenceMillimes / 1000)} DT`}</td>
                               </tr>
                             );
                           })}
@@ -583,16 +585,16 @@ function ProfileContent() {
 
             {activeTab === 'performance' && (
               <div className="grid gap-4 lg:grid-cols-2">
-                <PerformanceCard title="Last 7 days" stats={performance7} />
-                <PerformanceCard title="Last 30 days" stats={performance30} />
+                <PerformanceCard title={t('staff.profile.performance.last7Days' as TranslationKey)} stats={performance7} />
+                <PerformanceCard title={t('staff.profile.performance.last30Days' as TranslationKey)} stats={performance30} />
               </div>
             )}
 
             {activeTab === 'activity' && (
               <div className="rounded-2xl bg-surface-container-lowest px-5 py-10 text-center shadow-card">
                 <MaterialIcon name="history" className="text-4xl text-outline" />
-                <h2 className="mt-3 font-display text-headline-md text-on-surface">No activity yet</h2>
-                <p className="mt-1 font-body text-body-sm text-outline">Activity entries will appear here when activity tracking is available.</p>
+                <h2 className="mt-3 font-display text-headline-md text-on-surface">{t('staff.profile.activity.none' as TranslationKey)}</h2>
+                <p className="mt-1 font-body text-body-sm text-outline">{t('staff.profile.activity.help' as TranslationKey)}</p>
               </div>
             )}
           </section>
@@ -602,62 +604,62 @@ function ProfileContent() {
       ) : (
         <div className="rounded-2xl bg-surface-container-lowest p-6 text-center shadow-card">
           <MaterialIcon name="person_off" className="text-4xl text-outline" />
-          <h1 className="mt-3 font-display text-headline-md text-on-surface">Staff member not found</h1>
+          <h1 className="mt-3 font-display text-headline-md text-on-surface">{t('staff.profile.notFound' as TranslationKey)}</h1>
           {error && <p role="alert" className="mt-2 font-body text-body-sm text-error-dark">{error}</p>}
         </div>
       )}
 
-      <BottomSheet open={editOpen} onClose={() => setEditOpen(false)} title="Edit staff profile">
+      <BottomSheet open={editOpen} onClose={() => setEditOpen(false)} title={t('staff.profile.edit.title' as TranslationKey)}>
         <form onSubmit={(event) => { void saveProfile(event); }} className="flex flex-col gap-3">
-          <label className="font-body text-label-md">Name
+          <label className="font-body text-label-md">{t('staff.profile.edit.name' as TranslationKey)}
             <input required value={editName} onChange={(event) => setEditName(event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" />
           </label>
-          <label className="font-body text-label-md">Username
+          <label className="font-body text-label-md">{t('staff.profile.edit.username' as TranslationKey)}
             <input readOnly value={staff?.username ?? ''} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 font-mono text-body-sm" />
           </label>
-          <label className="font-body text-label-md">Phone
+          <label className="font-body text-label-md">{t('staff.profile.detail.phone' as TranslationKey)}
             <input type="tel" value={editPhone} onChange={(event) => setEditPhone(event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" />
           </label>
-          <label className="font-body text-label-md">Position
+          <label className="font-body text-label-md">{t('staff.profile.edit.position' as TranslationKey)}
             <select required value={editPositionId} onChange={(event) => setEditPositionId(event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3">
-              <option value="">Select a position</option>
+              <option value="">{t('staff.profile.edit.selectPosition' as TranslationKey)}</option>
               {positions.map((position) => <option key={position.id} value={position.id}>{position.name}</option>)}
             </select>
           </label>
-          <label className="font-body text-label-md">Notes
+          <label className="font-body text-label-md">{t('staff.profile.detail.notes' as TranslationKey)}
             <textarea rows={3} value={editNotes} onChange={(event) => setEditNotes(event.target.value)} className="mt-1 w-full rounded-lg bg-surface-container-low px-3 py-3" />
           </label>
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
-          <Button type="submit" disabled={busy}>Save changes</Button>
+          <Button type="submit" disabled={busy}>{t('staff.profile.edit.save' as TranslationKey)}</Button>
         </form>
       </BottomSheet>
 
-      <BottomSheet open={confirmation !== null} onClose={() => setConfirmation(null)} title={confirmation === 'reset' ? 'Reset password?' : 'Force logout?'}>
+      <BottomSheet open={confirmation !== null} onClose={() => setConfirmation(null)} title={t(confirmation === 'reset' ? 'staff.profile.password.confirmTitle' as TranslationKey : 'staff.profile.logout.confirmTitle' as TranslationKey)}>
         <div className="flex flex-col gap-4">
           <p className="font-body text-body-md text-on-surface-variant">
             {confirmation === 'reset'
-              ? `Create a new temporary password for ${staff?.name}? This will clear their current PIN. They must change the password at next sign-in; you can generate a new PIN separately.`
-              : `End ${staff?.name}'s current session? They will need to sign in again.`}
+              ? t('staff.profile.password.confirmDescription' as TranslationKey, { name: staff?.name ?? '' })
+              : t('staff.profile.logout.confirmDescription' as TranslationKey, { name: staff?.name ?? '' })}
           </p>
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
           <div className="grid grid-cols-2 gap-2">
-            <Button type="button" variant="secondary" disabled={busy} onClick={() => setConfirmation(null)}>Cancel</Button>
+            <Button type="button" variant="secondary" disabled={busy} onClick={() => setConfirmation(null)}>{t('staff.profile.action.cancel' as TranslationKey)}</Button>
             <Button type="button" disabled={busy} onClick={() => { void (confirmation === 'reset' ? resetPassword() : forceLogout()); }}>
-              {confirmation === 'reset' ? 'Reset password' : 'Force logout'}
+              {t(confirmation === 'reset' ? 'staff.profile.action.reset' as TranslationKey : 'staff.profile.action.forceLogout' as TranslationKey)}
             </Button>
           </div>
         </div>
       </BottomSheet>
 
-      <BottomSheet open={Boolean(temporaryPassword)} onClose={() => setTemporaryPassword('')} title="Temporary password">
+      <BottomSheet open={Boolean(temporaryPassword)} onClose={() => setTemporaryPassword('')} title={t('staff.profile.password.title' as TranslationKey)}>
         {staff && temporaryPassword && (
           <div className="flex flex-col gap-4">
-            <p className="font-body text-body-md text-on-surface">New temporary password for {staff.name}</p>
+            <p className="font-body text-body-md text-on-surface">{t('staff.profile.password.new' as TranslationKey, { name: staff.name })}</p>
             <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
               <input readOnly value={temporaryPassword} className="h-12 min-w-0 rounded-lg bg-surface-container-low px-3 font-mono tracking-widest" />
-              <Button type="button" variant="secondary" className="px-3" onClick={() => { void copyPassword(); }}>Copy</Button>
+              <Button type="button" variant="secondary" className="px-3" onClick={() => { void copyPassword(); }}>{t('staff.profile.password.copy' as TranslationKey)}</Button>
             </div>
-            <p className="rounded-lg bg-primary-fixed/40 p-3 font-body text-body-sm text-on-surface">They must set a new password at their next login. Staff PINs are generated and managed by the owner separately.</p>
+            <p className="rounded-lg bg-primary-fixed/40 p-3 font-body text-body-sm text-on-surface">{t('staff.profile.password.instructions' as TranslationKey)}</p>
             {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
           </div>
         )}
@@ -666,32 +668,32 @@ function ProfileContent() {
       <BottomSheet
         open={pinResetOpen}
         onClose={() => { setPinResetOpen(false); setGeneratedStaffPin(''); }}
-        title={generatedStaffPin ? 'Staff PIN generated' : staff?.mustSetPin ? 'Generate staff PIN' : 'Replace staff PIN'}
+        title={t(generatedStaffPin ? 'staff.profile.pin.generatedTitle' as TranslationKey : staff?.mustSetPin ? 'staff.profile.pin.generateTitle' as TranslationKey : 'staff.profile.pin.replaceTitle' as TranslationKey)}
       >
         <div className="flex flex-col gap-4">
           {generatedStaffPin ? (
             <>
-              <p className="font-body text-body-md text-on-surface">Share this PIN with {staff?.name}. It will only be shown here once.</p>
+              <p className="font-body text-body-md text-on-surface">{t('staff.profile.pin.share' as TranslationKey, { name: staff?.name ?? '' })}</p>
               <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-                <input readOnly value={generatedStaffPin} aria-label="Generated staff PIN" className="h-14 min-w-0 rounded-lg bg-surface-container-low px-3 text-center font-mono text-headline-md tracking-[0.5em]" />
-                <Button type="button" variant="secondary" className="px-3" onClick={() => { void copyGeneratedStaffPin(); }}>Copy</Button>
+                <input readOnly value={generatedStaffPin} aria-label={t('staff.profile.pin.inputLabel' as TranslationKey)} className="h-14 min-w-0 rounded-lg bg-surface-container-low px-3 text-center font-mono text-headline-md tracking-[0.5em]" />
+                <Button type="button" variant="secondary" className="px-3" onClick={() => { void copyGeneratedStaffPin(); }}>{t('staff.profile.password.copy' as TranslationKey)}</Button>
               </div>
               {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
-              <Button type="button" onClick={() => { setPinResetOpen(false); setGeneratedStaffPin(''); }}>Done</Button>
+              <Button type="button" onClick={() => { setPinResetOpen(false); setGeneratedStaffPin(''); }}>{t('staff.profile.pin.done' as TranslationKey)}</Button>
             </>
           ) : (
             <>
               <p className="font-body text-body-md text-on-surface-variant">
                 {staff?.mustSetPin
-                  ? `Generate a secure 4-digit PIN for ${staff?.name}.`
-                  : `Generate a replacement PIN for ${staff?.name}. Their current PIN will stop working immediately.`}
-                {' '}The PIN is shown once and cannot be changed by the staff member.
+                  ? t('staff.profile.pin.generateDescription' as TranslationKey, { name: staff?.name ?? '' })
+                  : t('staff.profile.pin.replaceDescription' as TranslationKey, { name: staff?.name ?? '' })}
+                {' '}{t('staff.profile.pin.instructions' as TranslationKey)}
               </p>
               {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
               <div className="grid grid-cols-2 gap-2">
-                <Button type="button" variant="secondary" disabled={busy} onClick={() => setPinResetOpen(false)}>Cancel</Button>
+                <Button type="button" variant="secondary" disabled={busy} onClick={() => setPinResetOpen(false)}>{t('staff.profile.action.cancel' as TranslationKey)}</Button>
                 <Button type="button" disabled={busy} onClick={() => { void generateStaffPin(); }}>
-                  {busy ? 'Generating...' : staff?.mustSetPin ? 'Generate PIN' : 'Replace PIN'}
+                  {busy ? t('staff.profile.pin.generating' as TranslationKey) : t(staff?.mustSetPin ? 'staff.profile.action.generatePin' as TranslationKey : 'staff.profile.action.replacePin' as TranslationKey)}
                 </Button>
               </div>
             </>
@@ -699,27 +701,27 @@ function ProfileContent() {
         </div>
       </BottomSheet>
 
-      <BottomSheet open={scheduleEditorOpen} onClose={() => setScheduleEditorOpen(false)} title={editingSchedule ? 'Edit planned shift' : 'Add planned shift'}>
+      <BottomSheet open={scheduleEditorOpen} onClose={() => setScheduleEditorOpen(false)} title={t(editingSchedule ? 'staff.profile.schedule.edit' as TranslationKey : 'staff.profile.schedule.add' as TranslationKey)}>
         <form onSubmit={(event) => { void saveSchedule(event); }} className="flex flex-col gap-3">
-          <label className="font-body text-label-md">Date
+          <label className="font-body text-label-md">{t('staff.profile.schedule.date' as TranslationKey)}
             <input required type="date" value={scheduleDate} onChange={(event) => setScheduleDate(event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" />
           </label>
           <div className="grid grid-cols-2 gap-3">
-            <label className="font-body text-label-md">Start time
+            <label className="font-body text-label-md">{t('staff.profile.schedule.start' as TranslationKey)}
               <input required type="time" value={scheduleStartTime} onChange={(event) => setScheduleStartTime(event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" />
             </label>
-            <label className="font-body text-label-md">End time
+            <label className="font-body text-label-md">{t('staff.profile.schedule.end' as TranslationKey)}
               <input required type="time" value={scheduleEndTime} onChange={(event) => setScheduleEndTime(event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" />
             </label>
           </div>
-          <label className="font-body text-label-md">Note (optional)
+          <label className="font-body text-label-md">{t('staff.profile.schedule.noteOptional' as TranslationKey)}
             <textarea rows={2} value={scheduleNote} onChange={(event) => setScheduleNote(event.target.value)} className="mt-1 w-full rounded-lg bg-surface-container-low px-3 py-3" />
           </label>
           {editingSchedule && (
-            <Button type="button" variant="danger" disabled={busy} onClick={() => { void deleteSchedule(editingSchedule); }}>Delete planned shift</Button>
+            <Button type="button" variant="danger" disabled={busy} onClick={() => { void deleteSchedule(editingSchedule); }}>{t('staff.profile.schedule.delete' as TranslationKey)}</Button>
           )}
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
-          <Button type="submit" disabled={busy}>Save planned shift</Button>
+          <Button type="submit" disabled={busy}>{t('staff.profile.schedule.save' as TranslationKey)}</Button>
         </form>
       </BottomSheet>
     </WorkspaceLayout>
@@ -778,20 +780,20 @@ function PlannedShiftWeek({ title, range, shifts, onEdit }: {
         <p className="font-body text-body-sm text-outline">{range}</p>
       </div>
       {shifts.length === 0 ? (
-        <p className="rounded-lg bg-surface-container-low p-3 font-body text-body-sm text-outline">No planned shifts.</p>
+        <p className="rounded-lg bg-surface-container-low p-3 font-body text-body-sm text-outline">{t('staff.profile.schedule.none' as TranslationKey)}</p>
       ) : (
         <div className="flex flex-col gap-2">
           {shifts.map((shift) => (
             <div key={shift.id} className="flex items-center justify-between gap-3 rounded-lg bg-surface-container-low p-3">
               <div className="min-w-0">
                 <p className="font-body text-label-md text-on-surface">
-                  {new Date(`${shift.date}T00:00:00`).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}
+                  {new Date(`${shift.date}T00:00:00`).toLocaleDateString(getLanguage(), { weekday: 'short', day: 'numeric', month: 'short' })}
                   {' · '}
                   {shift.startTime}–{shift.endTime}
                 </p>
                 {shift.note && <p className="mt-0.5 truncate font-body text-body-sm text-outline">{shift.note}</p>}
               </div>
-              <Button type="button" variant="secondary" className="shrink-0 px-3" onClick={() => onEdit(shift)}>Edit</Button>
+              <Button type="button" variant="secondary" className="shrink-0 px-3" onClick={() => onEdit(shift)}>{t('staff.profile.action.edit' as TranslationKey)}</Button>
             </div>
           ))}
         </div>
@@ -805,7 +807,7 @@ function HoursSummary({ title, shifts, duration, difference }: { title: string; 
     <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
       <h3 className="font-body text-label-md text-outline">{title}</h3>
       <p className="mt-1 font-display text-headline-md text-on-surface">{formatHours(duration)}</p>
-      <p className="mt-2 font-body text-body-sm text-outline">{shifts.length} shifts · Cash difference {formatTnd(difference / 1000)} DT</p>
+      <p className="mt-2 font-body text-body-sm text-outline">{t('staff.profile.hours.summary' as TranslationKey, { count: shifts.length, amount: formatTnd(difference / 1000) })}</p>
     </section>
   );
 }
@@ -818,11 +820,11 @@ function PerformanceCard({ title, stats }: {
     <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
       <h2 className="mb-3 font-display text-headline-md text-on-surface">{title}</h2>
       <dl className="flex flex-col gap-3">
-        <ProfileDetail label="Orders" value={String(stats.orderCount)} />
-        <ProfileDetail label="Sales" value={`${formatTnd(stats.sales / 1000)} DT`} />
-        <ProfileDetail label="Average order value" value={`${formatTnd(stats.average / 1000)} DT`} />
-        <ProfileDetail label="Voids requested" value={String(stats.voidRequests)} />
-        <ProfileDetail label="Comps" value={`${stats.compCount} · ${formatTnd(stats.compValue / 1000)} DT`} />
+        <ProfileDetail label={t('staff.profile.performance.orders' as TranslationKey)} value={String(stats.orderCount)} />
+        <ProfileDetail label={t('staff.profile.performance.sales' as TranslationKey)} value={`${formatTnd(stats.sales / 1000)} DT`} />
+        <ProfileDetail label={t('staff.profile.performance.averageOrder' as TranslationKey)} value={`${formatTnd(stats.average / 1000)} DT`} />
+        <ProfileDetail label={t('staff.profile.performance.voids' as TranslationKey)} value={String(stats.voidRequests)} />
+        <ProfileDetail label={t('staff.profile.performance.comps' as TranslationKey)} value={`${stats.compCount} · ${formatTnd(stats.compValue / 1000)} DT`} />
       </dl>
     </section>
   );

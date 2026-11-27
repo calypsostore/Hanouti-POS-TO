@@ -3,6 +3,8 @@ import { authService } from '../services/authService';
 import { Button } from './Button';
 import { MaterialIcon } from './MaterialIcon';
 import { SettingsGlassSection } from './settings/SettingsGlassSection';
+import { t } from '../i18n/translations';
+import { localizeErrorMessage } from '../i18n';
 
 interface ChangePersonalPinFormProps {
   userId: string;
@@ -21,7 +23,7 @@ export function ChangePersonalPinForm({ userId }: ChangePersonalPinFormProps) {
     setError('');
     setNotice('');
     if (newPin !== confirmation) {
-      setError('The new PINs do not match.');
+      setError(t('password.personalPinsMismatch'));
       return;
     }
     setBusy(true);
@@ -30,21 +32,21 @@ export function ChangePersonalPinForm({ userId }: ChangePersonalPinFormProps) {
       setCurrentPin('');
       setNewPin('');
       setConfirmation('');
-      setNotice('Your personal PIN was changed.');
+      setNotice(t('password.personalPinChanged'));
     } catch (changeError) {
-      setError(changeError instanceof Error ? changeError.message : 'Unable to change your PIN.');
+      setError(localizeErrorMessage(changeError, t('password.personalPinChangeUnable')));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <SettingsGlassSection heading="Change owner personal PIN" description="Enter your current PIN, then choose a new 4-digit PIN." icon="pin">
+    <SettingsGlassSection heading={t('password.personalChangeHeading')} description={t('password.personalChangeDescription')} icon="pin">
       <form onSubmit={submit} className="settings-glass-form flex flex-col gap-3">
       {[
-        { label: 'Current PIN', value: currentPin, onChange: setCurrentPin },
-        { label: 'New PIN', value: newPin, onChange: setNewPin },
-        { label: 'Confirm new PIN', value: confirmation, onChange: setConfirmation },
+        { label: t('password.currentPin'), value: currentPin, onChange: setCurrentPin },
+        { label: t('password.newPin'), value: newPin, onChange: setNewPin },
+        { label: t('password.confirmNewPin'), value: confirmation, onChange: setConfirmation },
       ].map((field) => (
         <label key={field.label} className="font-body text-label-md">
           {field.label}
@@ -65,7 +67,7 @@ export function ChangePersonalPinForm({ userId }: ChangePersonalPinFormProps) {
       {notice && <p role="status" className="font-body text-body-sm text-success-dark">{notice}</p>}
       <Button type="submit" disabled={busy || !/^\d{4}$/.test(currentPin) || !/^\d{4}$/.test(newPin) || !/^\d{4}$/.test(confirmation)}>
         <MaterialIcon name="lock_reset" />
-        {busy ? 'Changing PIN...' : 'Change PIN'}
+        {busy ? t('password.changingPin') : t('password.changePin')}
       </Button>
       </form>
     </SettingsGlassSection>

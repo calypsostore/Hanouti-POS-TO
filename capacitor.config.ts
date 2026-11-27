@@ -17,7 +17,7 @@ const config: CapacitorConfig = {
   plugins: {
     LocalNotifications: {
       smallIcon: 'ic_stat_notification',
-      iconColor: '#0F5E6E',
+      iconColor: '#238636',
     },
     PushNotifications: {
       presentationOptions: ['badge', 'alert'],

@@ -4,6 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import { PRODUCTION_URL } from '../config/appConfig';
 import { parseAppUpdateManifest } from './appUpdateManifest';
 import { UPDATE_GITHUB_REPOSITORY } from '../config/updateConfig';
+import { t } from '../i18n';
 import { confirmUpdateIfUnsaved, getPostUpdateStatus, sanitizeStoredResult } from './updateModalLogic';
 
 declare const __APP_VERSION__: string;
@@ -512,11 +513,11 @@ export const updateService = {
     if (this.getMode() === 'bundled') {
       const result = readLastResult();
       if (!result?.latestApkUrl) throw new Error('The APK download link is not available.');
-      if (!confirmUpdateIfUnsaved(this.hasUnsavedChanges(), window.confirm.bind(window))) return;
+      if (!confirmUpdateIfUnsaved(this.hasUnsavedChanges(), window.confirm.bind(window), t('updates.confirmDiscard'))) return;
       await Browser.open({ url: result.latestApkUrl });
       return;
     }
-    if (!confirmUpdateIfUnsaved(this.hasUnsavedChanges(), window.confirm.bind(window))) return;
+    if (!confirmUpdateIfUnsaved(this.hasUnsavedChanges(), window.confirm.bind(window), t('updates.confirmDiscard'))) return;
     await this.forceRefresh();
   },
 

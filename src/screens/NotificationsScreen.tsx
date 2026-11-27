@@ -9,6 +9,7 @@ import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { CardGrid, PageContainer, PageHeader } from '../components/layout';
 import { adminWorkspaceLinks, ownerWorkspaceLinks } from '../app/navigation';
 import { t } from '../i18n/translations';
+import { getLanguage } from '../i18n';
 import { userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
 import { useNotificationStore } from '../stores/notificationStore';
@@ -36,8 +37,8 @@ export function NotificationsScreen() {
   const groups = useMemo(() => {
     const today = new Date().toDateString();
     return [
-      { title: 'Today', entries: notifications.filter((notification) => new Date(notification.createdAt).toDateString() === today) },
-      { title: 'Earlier', entries: notifications.filter((notification) => new Date(notification.createdAt).toDateString() !== today) },
+      { title: t('common.today'), entries: notifications.filter((notification) => new Date(notification.createdAt).toDateString() === today) },
+      { title: t('notifications.earlier'), entries: notifications.filter((notification) => new Date(notification.createdAt).toDateString() !== today) },
     ].filter((group) => group.entries.length > 0);
   }, [notifications]);
 
@@ -47,7 +48,7 @@ export function NotificationsScreen() {
       await markAllReadStore(user);
     } catch (markError) {
       console.error('Unable to mark notifications as read.', markError);
-      setError('Unable to mark notifications as read. Please try again.');
+      setError(t('notifications.markAllReadFailed'));
     }
   }
 
@@ -59,7 +60,7 @@ export function NotificationsScreen() {
       navigate(notificationPath(notification, user.role));
     } catch (markError) {
       console.error('Unable to open this notification.', markError);
-      setError('Unable to open this notification. Please try again.');
+      setError(t('notifications.openFailed'));
     } finally {
       setActiveNotificationId('');
     }
@@ -72,7 +73,7 @@ export function NotificationsScreen() {
       await markRead(user, notificationId);
     } catch (markError) {
       console.error('Unable to mark this notification as read.', markError);
-      setError('Unable to mark this notification as read. Please try again.');
+      setError(t('notifications.markReadFailed'));
     } finally {
       setActiveNotificationId('');
     }
@@ -80,14 +81,14 @@ export function NotificationsScreen() {
 
   const content = (
     <div className="flex flex-col gap-4">
-      <PageHeader title={t('nav.notifications')} subtitle={unreadCount > 0 ? `${unreadCount} unread` : undefined} actions={unreadCount > 0 ? (
+      <PageHeader title={t('nav.notifications')} subtitle={unreadCount > 0 ? t('notifications.unreadSummary', { count: unreadCount }) : undefined} actions={unreadCount > 0 ? (
           <Button variant="secondary" className="min-h-11 shrink-0 px-3" onClick={() => { void markAllRead(); }}>
             <MaterialIcon name="done_all" className="text-lg" />
-            Mark all read
+            {t('notifications.readAll')}
           </Button>
         ) : undefined} />
       {error && <p role="alert" className="rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
-      {loading ? <ListSkeleton label="Loading notifications" /> : groups.map((group) => (
+      {loading ? <ListSkeleton label={t('notifications.loading')} /> : groups.map((group) => (
         <section key={group.title} aria-label={group.title} className="flex flex-col gap-2">
           <h2 className="px-1 font-body text-label-lg text-on-surface-variant">{group.title}</h2>
           <CardGrid className="mobile-card-list mobile-gap-2">
@@ -102,17 +103,17 @@ export function NotificationsScreen() {
                 type="button"
                 disabled={activeNotificationId === notification.id}
                 onClick={() => { void openNotification(notification); }}
-                aria-label={`Open notification: ${notification.title}`}
+                aria-label={t('notifications.openItem', { title: notification.title })}
                 className="flex w-full min-w-0 items-start gap-3 text-left disabled:opacity-60"
               >
                 <NotificationTypeIcon type={notification.type} className="mt-1" />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-start justify-between gap-2">
                     <span className="break-words font-body text-label-lg text-on-surface">{notification.title}</span>
-                    {!notification.readAt && <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-primary" aria-label="Unread" />}
+                    {!notification.readAt && <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-primary" aria-label={t('notifications.unread')} />}
                   </span>
                   <span className="mt-1 block break-words font-body text-body-sm text-on-surface-variant">{notification.body}</span>
-                  <span className="mt-2 block font-body text-body-xs text-outline">{new Date(notification.createdAt).toLocaleString()}</span>
+                  <span className="mt-2 block font-body text-body-xs text-outline">{new Date(notification.createdAt).toLocaleString(getLanguage())}</span>
                 </span>
                 <MaterialIcon name="chevron_right" className="mt-1 shrink-0 text-outline" />
               </button>
@@ -121,11 +122,11 @@ export function NotificationsScreen() {
                   type="button"
                   disabled={activeNotificationId === notification.id}
                   onClick={() => { void markNotificationRead(notification.id); }}
-                  aria-label={`Mark notification as read: ${notification.title}`}
+                  aria-label={t('notifications.markRead', { title: notification.title })}
                   className="ml-12 mt-1 flex items-center gap-1 text-left font-body text-label-sm text-primary underline disabled:opacity-60"
                 >
                   <MaterialIcon name="done" className="text-base" />
-                  Mark as read
+                  {t('notifications.markAsRead')}
                 </button>
               )}
             </article>

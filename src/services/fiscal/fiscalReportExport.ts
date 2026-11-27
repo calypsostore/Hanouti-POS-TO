@@ -1,88 +1,127 @@
 import {
   formatFiscalTimestamp,
   getFiscalReportCounts,
-  getFiscalReconciliationStatus,
   getFiscalSnapshotAmount,
-  getFiscalSnapshotNotice,
   hasSnapshotBackedFiscalAmounts,
   type FiscalReport,
   type FiscalTransaction,
   type FiscalVatLine,
 } from './fiscalReportService';
+import { t } from '../../i18n';
+import { formatMillimesWithThousands } from '../../lib/millimes';
+
+const unavailable = () => t('fiscal.common.unavailable');
+
+function taxTreatmentLabel(treatment: string): string {
+  const keys: Record<string, string> = {
+    taxable: 'fiscal.treatment.taxable',
+    exempt: 'fiscal.treatment.exempt',
+    outside_scope: 'fiscal.treatment.outsideScope',
+    suspended: 'fiscal.treatment.suspended',
+    special: 'fiscal.treatment.special',
+  };
+  return keys[treatment] ? t(keys[treatment] as never) : treatment.replaceAll('_', ' ');
+}
+
+function taxTypeLabel(taxType: string): string {
+  const keys: Record<string, string> = {
+    vat: 'fiscal.taxType.vat',
+    consumption: 'fiscal.taxType.consumption',
+    other: 'fiscal.taxType.other',
+  };
+  return keys[taxType] ? t(keys[taxType] as never) : taxType;
+}
+
+function snapshotNotice(report: FiscalReport): string {
+  const missingCount = report.summary.missingSnapshotCount;
+  return missingCount === 0
+    ? t('fiscalReports.snapshotNoticeNone')
+    : t('fiscalReports.snapshotNoticeMissing', { count: missingCount });
+}
+
+function reconciliationStatus(report: FiscalReport): string {
+  const snapshotOnly = report.summary.missingSnapshotCount > 0;
+  if (snapshotOnly && !hasSnapshotBackedFiscalAmounts(report)) return t('fiscalReports.reconciliationNotVerifiable');
+  const result = t(report.summary.reconciliationValid ? 'fiscalReports.reconciliationPass' : 'fiscalReports.reconciliationFail');
+  return snapshotOnly ? t('fiscalReports.reconciliationSnapshotOnly', { result }) : result;
+}
+
+function reportTimestamp(value: string, timezone: string): string {
+  const formatted = formatFiscalTimestamp(value, timezone);
+  return formatted === 'Unavailable' ? unavailable() : formatted;
+}
 
 export function formatFiscalMillimes(value: number): string {
-  if (!Number.isSafeInteger(value)) return 'Unavailable';
-  const sign = value < 0 ? '-' : '';
-  const absolute = Math.abs(value);
-  return `${sign}${Math.floor(absolute / 1000).toLocaleString('en-US')}.${String(absolute % 1000).padStart(3, '0')}`;
+  if (!Number.isSafeInteger(value)) return unavailable();
+  return formatMillimesWithThousands(value);
 }
 
 function formatFiscalCsvMillimes(value: number): string {
-  if (!Number.isSafeInteger(value)) return 'Unavailable';
+  if (!Number.isSafeInteger(value)) return unavailable();
   const sign = value < 0 ? '-' : '';
   const absolute = Math.abs(value);
   return `${sign}${Math.floor(absolute / 1000)}.${String(absolute % 1000).padStart(3, '0')}`;
 }
 
 function vatRate(line: FiscalVatLine): string {
-  if (line.ratePpm === undefined) return line.treatment === 'exempt' ? 'Exempt' : line.treatment.replaceAll('_', ' ');
+  if (line.ratePpm === undefined) return taxTreatmentLabel(line.treatment);
   return `${(line.ratePpm / 10000).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}%`;
 }
 
 function reportAmount(report: FiscalReport, value: number): string {
-  if (report.summary.missingSnapshotCount > 0 && !hasSnapshotBackedFiscalAmounts(report)) return 'Unavailable';
+  if (report.summary.missingSnapshotCount > 0 && !hasSnapshotBackedFiscalAmounts(report)) return unavailable();
   return formatFiscalMillimes(value);
 }
 
 function reportAmountTnd(report: FiscalReport, value: number): number | string {
-  if (report.summary.missingSnapshotCount > 0 && !hasSnapshotBackedFiscalAmounts(report)) return 'Unavailable';
-  return Number.isSafeInteger(value) ? value / 1000 : 'Unavailable';
+  if (report.summary.missingSnapshotCount > 0 && !hasSnapshotBackedFiscalAmounts(report)) return unavailable();
+  return Number.isSafeInteger(value) ? value / 1000 : unavailable();
 }
 
 function reportAmountCsv(report: FiscalReport, value: number): string {
-  if (report.summary.missingSnapshotCount > 0 && !hasSnapshotBackedFiscalAmounts(report)) return 'Unavailable';
+  if (report.summary.missingSnapshotCount > 0 && !hasSnapshotBackedFiscalAmounts(report)) return unavailable();
   return formatFiscalCsvMillimes(value);
 }
 
 function reportAmountLabel(report: FiscalReport, label: string): string {
-  return report.summary.missingSnapshotCount > 0 ? `Snapshot-backed ${label}` : label;
+  return report.summary.missingSnapshotCount > 0 ? t('fiscalReports.snapshotBacked', { label }) : label;
 }
 
 function reportAmountText(report: FiscalReport, value: number): string {
   const amount = reportAmount(report, value);
-  return amount === 'Unavailable' ? amount : `${amount} TND`;
+  return amount === unavailable() ? amount : `${amount} TND`;
 }
 
 function transactionAmountTnd(report: FiscalReport, transaction: FiscalTransaction, key: 'netAmountMillimes' | 'totalTaxMillimes' | 'totalAmountMillimes'): number | string {
   const amount = getFiscalSnapshotAmount(transaction, key);
-  return amount === undefined ? 'Unavailable' : reportAmountTnd(report, amount);
+  return amount === undefined ? unavailable() : reportAmountTnd(report, amount);
 }
 
 function transactionCsvAmount(transaction: FiscalTransaction, key: 'netAmountMillimes' | 'totalTaxMillimes' | 'totalAmountMillimes'): string {
   const amount = getFiscalSnapshotAmount(transaction, key);
-  return amount === undefined ? 'Unavailable' : formatFiscalCsvMillimes(amount);
+  return amount === undefined ? unavailable() : formatFiscalCsvMillimes(amount);
 }
 
 function fiscalReportMetadataRows(report: FiscalReport, period: string): string[][] {
   const counts = getFiscalReportCounts(report);
   return [
-    ['Store', report.store.name, 'Period', period],
-    ['Completed transactions', String(counts.completed), 'Voided transactions', String(counts.voided)],
-    ['Pending void transactions', String(counts.pendingVoid), 'Transactions missing fiscal snapshots', String(counts.missingSnapshots)],
-    [reportAmountLabel(report, 'Gross TTC (TND)'), reportAmountCsv(report, report.summary.grossAmountMillimes)],
-    [reportAmountLabel(report, 'Net HT (TND)'), reportAmountCsv(report, report.summary.netAmountMillimes)],
-    [reportAmountLabel(report, 'VAT (TND)'), reportAmountCsv(report, report.summary.vatAmountMillimes)],
-    [reportAmountLabel(report, 'Final payable (TND)'), reportAmountCsv(report, report.summary.payableAmountMillimes)],
-    ['Snapshot reconciliation', getFiscalReconciliationStatus(report)],
-    ['Reconciliation basis', 'HT + VAT = TTC using stored fiscal snapshots only'],
-    ['Fiscal snapshot notice', getFiscalSnapshotNotice(report)],
-    ['Refunds and credit notes', 'Unavailable in the existing data model; not included'],
+    [t('fiscalExport.store'), report.store.name, t('fiscalReports.period'), period],
+    [t('fiscalReports.completedTransactions'), String(counts.completed), t('fiscalReports.voidedTransactions'), String(counts.voided)],
+    [t('fiscalReports.pendingVoidTransactions'), String(counts.pendingVoid), t('fiscalExport.missingSnapshots'), String(counts.missingSnapshots)],
+    [reportAmountLabel(report, t('fiscalReports.grossTtcTnd')), reportAmountCsv(report, report.summary.grossAmountMillimes)],
+    [reportAmountLabel(report, t('fiscalReports.netHtTnd')), reportAmountCsv(report, report.summary.netAmountMillimes)],
+    [reportAmountLabel(report, t('fiscalReports.vatTnd')), reportAmountCsv(report, report.summary.vatAmountMillimes)],
+    [reportAmountLabel(report, t('fiscalReports.finalPayableTnd')), reportAmountCsv(report, report.summary.payableAmountMillimes)],
+    [t('fiscalExport.snapshotReconciliation'), reconciliationStatus(report)],
+    [t('fiscalExport.reconciliationBasis'), t('fiscalExport.reconciliationBasisValue')],
+    [t('fiscalExport.snapshotNotice'), snapshotNotice(report)],
+    [t('fiscalExport.refundsCredits'), t('fiscalExport.refundsUnavailable')],
   ];
 }
 
 function snapshotRates(transaction: FiscalTransaction): string {
   const rawLines = transaction.snapshot?.lines;
-  if (!Array.isArray(rawLines)) return 'Unavailable';
+  if (!Array.isArray(rawLines)) return unavailable();
   const rates = new Set<string>();
   for (const rawLine of rawLines) {
     if (!rawLine || typeof rawLine !== 'object') continue;
@@ -94,11 +133,11 @@ function snapshotRates(transaction: FiscalTransaction): string {
       if (typeof tax.ratePpm === 'number' && Number.isSafeInteger(tax.ratePpm)) {
         rates.add(`${(tax.ratePpm / 10000).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}%`);
       } else if (typeof tax.treatment === 'string') {
-        rates.add(tax.treatment.replaceAll('_', ' '));
+        rates.add(taxTreatmentLabel(tax.treatment));
       }
     }
   }
-  return [...rates].join(', ') || 'Unavailable';
+  return [...rates].join(', ') || unavailable();
 }
 
 function downloadBlob(blob: Blob, filename: string): void {
@@ -117,14 +156,14 @@ function csvCell(value: unknown): string {
 }
 
 export function createFiscalCsv(report: FiscalReport, kind: 'transactions' | 'vat'): string {
-  const period = `${report.period.startDate} to ${report.period.endDateExclusive} (exclusive), ${report.period.timezone}`;
+  const period = t('fiscalReports.periodRangeExclusive', { start: report.period.startDate, end: report.period.endDateExclusive, timezone: report.period.timezone });
   const metadataRows = fiscalReportMetadataRows(report, period);
   let rows: string[][];
   if (kind === 'transactions') {
     rows = [
       ...metadataRows,
       [],
-      ['Order', 'Business date (store timezone)', 'Timestamp (ISO)', 'Customer', 'Staff', 'Items', 'HT TND', 'VAT rate', 'VAT TND', 'TTC TND', 'Payment', 'Payment status', 'Status', 'Void reason'],
+      [t('fiscalReports.order'), t('fiscalExport.businessDateStoreTimezone'), t('fiscalExport.timestampIso'), t('fiscalReports.customer'), t('fiscalReports.staff'), t('fiscalReports.items'), t('fiscalReports.netHtTnd'), t('fiscalReports.vatRate'), t('fiscalReports.vatTnd'), t('fiscalReports.grossTtcTnd'), t('fiscalReports.payment'), t('fiscalExport.paymentStatus'), t('fiscalReports.status'), t('fiscalReports.voidReason')],
       ...report.transactions.map((transaction) => [
         String(transaction.number),
         transaction.businessDate,
@@ -133,7 +172,7 @@ export function createFiscalCsv(report: FiscalReport, kind: 'transactions' | 'va
         transaction.staff ?? '',
         transaction.items.map((item) => `${item.name} x${item.quantity}`).join(' | '),
         transactionCsvAmount(transaction, 'netAmountMillimes'),
-        transaction.snapshot ? snapshotRates(transaction) : 'Unavailable',
+        transaction.snapshot ? snapshotRates(transaction) : unavailable(),
         transactionCsvAmount(transaction, 'totalTaxMillimes'),
         transactionCsvAmount(transaction, 'totalAmountMillimes'),
         transaction.paymentMethod,
@@ -145,14 +184,14 @@ export function createFiscalCsv(report: FiscalReport, kind: 'transactions' | 'va
   } else {
     rows = [
       ...metadataRows,
-      ['VAT breakdown availability', report.vatBreakdown.length === 0
-        ? 'No snapshot-backed VAT breakdown is available for this period.'
-        : 'Snapshot-backed VAT breakdown available.'],
+      [t('fiscalExport.vatBreakdownAvailability'), report.vatBreakdown.length === 0
+        ? t('fiscalReports.noVatBreakdown')
+        : t('fiscalExport.vatBreakdownAvailable')],
       [],
-      ['Rate / treatment', 'Tax type', 'Taxable HT TND', 'VAT TND', 'TTC TND', 'Transaction count'],
+      [t('fiscalExport.rateTreatment'), t('fiscal.profile.taxType'), 'Taxable HT TND', 'VAT TND', 'TTC TND', t('fiscalReports.transactionCount')],
       ...report.vatBreakdown.map((line) => [
         vatRate(line),
-        line.taxType,
+        taxTypeLabel(line.taxType),
         formatFiscalCsvMillimes(line.taxableHTMillimes),
         formatFiscalCsvMillimes(line.vatMillimes),
         formatFiscalCsvMillimes(line.ttcMillimes),
@@ -165,60 +204,65 @@ export function createFiscalCsv(report: FiscalReport, kind: 'transactions' | 'va
 
 export function exportFiscalCsv(report: FiscalReport, kind: 'transactions' | 'vat'): void {
   const csv = createFiscalCsv(report, kind);
-  downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `fiscal-${kind}-${report.period.startDate}-${report.period.endDateExclusive}.csv`);
+  const fileKind = kind === 'transactions' ? t('fiscalReports.export.transactionsCsvFile') : t('fiscalReports.export.vatCsvFile');
+  downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `${fileKind}-${report.period.startDate}-${report.period.endDateExclusive}.csv`);
 }
 
 export async function createFiscalWorkbook(report: FiscalReport) {
   const XLSX = await import('xlsx');
   const workbook = XLSX.utils.book_new();
   const counts = getFiscalReportCounts(report);
-  const period = `${report.period.startDate} to ${report.period.endDateExclusive} (end exclusive)`;
+  const period = t('fiscalReports.periodRangeExclusiveShort', { start: report.period.startDate, end: report.period.endDateExclusive });
   const summaryRows = [
-    ['Fiscal report - Internal accounting support'],
-    [getFiscalSnapshotNotice(report)],
-    ['Store', report.store.name],
-    ['Legal name', report.profile?.legalName ?? report.store.name],
-    ['Tax identifier', report.profile?.taxId ?? report.store.taxId ?? 'Not configured'],
-    ['Reporting period', period],
-    ['Timezone', report.period.timezone],
-    ['Generated at', report.generatedAt],
-    ['Currency', 'TND'],
+    [t('fiscalExport.workbookTitle')],
+    [snapshotNotice(report)],
+    [t('fiscalExport.store'), report.store.name],
+    [t('fiscalExport.legalName'), report.profile?.legalName ?? report.store.name],
+    [t('fiscalExport.taxIdentifier'), report.profile?.taxId ?? report.store.taxId ?? t('fiscal.common.notConfigured')],
+    [t('fiscalExport.reportingPeriod'), period],
+    [t('fiscalExport.timezone'), report.period.timezone],
+    [t('fiscalExport.generatedAt'), report.generatedAt],
+    [t('fiscalExport.currency'), 'TND'],
     [],
-    ['Completed transactions', counts.completed],
-    ['Voided transactions', counts.voided],
-    ['Pending void transactions', counts.pendingVoid],
-    ['Transactions missing fiscal snapshots', counts.missingSnapshots],
-    [reportAmountLabel(report, 'Gross TTC (TND)'), reportAmountTnd(report, report.summary.grossAmountMillimes)],
-    [reportAmountLabel(report, 'Net HT (TND)'), reportAmountTnd(report, report.summary.netAmountMillimes)],
-    [reportAmountLabel(report, 'VAT (TND)'), reportAmountTnd(report, report.summary.vatAmountMillimes)],
-    [reportAmountLabel(report, 'Final payable (TND)'), reportAmountTnd(report, report.summary.payableAmountMillimes)],
-    ['Snapshot reconciliation', getFiscalReconciliationStatus(report)],
-    ['Reconciliation basis', 'HT + VAT = TTC using stored fiscal snapshots only'],
-    ['Refunds and credit notes', 'Unavailable in the existing data model; not included'],
+    [t('fiscalReports.completedTransactions'), counts.completed],
+    [t('fiscalReports.voidedTransactions'), counts.voided],
+    [t('fiscalReports.pendingVoidTransactions'), counts.pendingVoid],
+    [t('fiscalExport.missingSnapshots'), counts.missingSnapshots],
+    [reportAmountLabel(report, t('fiscalReports.grossTtcTnd')), reportAmountTnd(report, report.summary.grossAmountMillimes)],
+    [reportAmountLabel(report, t('fiscalReports.netHtTnd')), reportAmountTnd(report, report.summary.netAmountMillimes)],
+    [reportAmountLabel(report, t('fiscalReports.vatTnd')), reportAmountTnd(report, report.summary.vatAmountMillimes)],
+    [reportAmountLabel(report, t('fiscalReports.finalPayableTnd')), reportAmountTnd(report, report.summary.payableAmountMillimes)],
+    [t('fiscalExport.snapshotReconciliation'), reconciliationStatus(report)],
+    [t('fiscalExport.reconciliationBasis'), t('fiscalExport.reconciliationBasisValue')],
+    [t('fiscalExport.refundsCredits'), t('fiscalExport.refundsUnavailable')],
     [],
-    ['Payment', 'Sales (TND)', 'Collected (TND)'],
-    ['Cash', report.payments.sales.cash / 1000, report.payments.collected.cash / 1000],
-    ['Card', report.payments.sales.card / 1000, report.payments.collected.card / 1000],
-    ['Other', report.payments.sales.other / 1000, report.payments.collected.other / 1000],
-    ['Tab', report.payments.sales.tab / 1000, report.payments.collected.tab / 1000],
+    [t('fiscalReports.payment'), t('fiscalReports.salesTnd'), t('fiscalReports.collectedTnd')],
+    [t('fiscalReports.payment.cash'), report.payments.sales.cash / 1000, report.payments.collected.cash / 1000],
+    [t('fiscalReports.payment.card'), report.payments.sales.card / 1000, report.payments.collected.card / 1000],
+    [t('fiscalReports.payment.other'), report.payments.sales.other / 1000, report.payments.collected.other / 1000],
+    [t('fiscalReports.payment.tab'), report.payments.sales.tab / 1000, report.payments.collected.tab / 1000],
   ];
   const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows);
   summarySheet['!merges'] = [{ s: { r: 1, c: 0 }, e: { r: 1, c: 2 } }];
   summarySheet['!rows'] = [];
   summarySheet['!rows'][1] = { hpt: 36 };
-  XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary');
+  const summarySheetName = t('fiscalExport.sheet.summary');
+  const vatSheetName = t('fiscalExport.sheet.vatBreakdown');
+  const transactionSheetName = t('fiscalExport.sheet.transactions');
+  const adjustmentsSheetName = t('fiscalExport.sheet.adjustments');
+  XLSX.utils.book_append_sheet(workbook, summarySheet, summarySheetName);
 
   const vatRows = [
-    ['VAT rate', 'Tax type', 'Treatment', 'Taxable HT (TND)', 'VAT (TND)', 'TTC (TND)', 'Transactions'],
+    [t('fiscalReports.vatRate'), t('fiscal.profile.taxType'), t('fiscal.classification.treatment'), t('fiscalExport.taxableHtTnd'), t('fiscalReports.vatTnd'), t('fiscalReports.grossTtcTnd'), t('fiscalReports.transactions')],
     ...report.vatBreakdown.map((line) => [
-      vatRate(line), line.taxType, line.treatment,
+      vatRate(line), taxTypeLabel(line.taxType), taxTreatmentLabel(line.treatment),
       line.taxableHTMillimes / 1000, line.vatMillimes / 1000, line.ttcMillimes / 1000, line.transactionCount,
     ]),
   ];
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(vatRows), 'VAT Breakdown');
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(vatRows), vatSheetName);
 
   const transactionRows = [
-    ['Order', 'Business date (store timezone)', 'Timestamp (ISO)', 'Customer', 'Staff', 'Items', 'HT (TND)', 'VAT rate(s)', 'VAT (TND)', 'TTC (TND)', 'Payment', 'Status'],
+    [t('fiscalReports.order'), t('fiscalExport.businessDateStoreTimezone'), t('fiscalExport.timestampIso'), t('fiscalReports.customer'), t('fiscalReports.staff'), t('fiscalReports.items'), t('fiscalReports.netHtTnd'), t('fiscalReports.vatRates'), t('fiscalReports.vatTnd'), t('fiscalReports.grossTtcTnd'), t('fiscalReports.payment'), t('fiscalReports.status')],
     ...report.transactions.map((transaction) => {
       const amounts = transaction.snapshot
         ? [
@@ -227,7 +271,7 @@ export async function createFiscalWorkbook(report: FiscalReport) {
             transactionAmountTnd(report, transaction, 'totalTaxMillimes'),
             transactionAmountTnd(report, transaction, 'totalAmountMillimes'),
           ]
-        : ['Unavailable', 'Unavailable', 'Unavailable', 'Unavailable'];
+        : [unavailable(), unavailable(), unavailable(), unavailable()];
       return [
         transaction.number, transaction.businessDate, transaction.createdAt, transaction.customer ?? '', transaction.staff ?? '',
         transaction.items.map((item) => `${item.name} x${item.quantity}`).join(' | '),
@@ -237,42 +281,42 @@ export async function createFiscalWorkbook(report: FiscalReport) {
     }),
   ];
   const transactionSheet = XLSX.utils.aoa_to_sheet(transactionRows);
-  XLSX.utils.book_append_sheet(workbook, transactionSheet, 'Transactions');
+  XLSX.utils.book_append_sheet(workbook, transactionSheet, transactionSheetName);
 
   const adjustmentRows = [
-    ['Adjustment', 'Reference', 'Amount (TND)', 'Timestamp', 'Detail'],
+    [t('fiscalExport.adjustment'), t('fiscalExport.reference'), t('fiscalExport.amountTnd'), t('fiscalExport.timestamp'), t('fiscalExport.detail')],
     ...report.adjustments.voidAdjustments.map((row) => [
-      'Void adjustment',
+      t('fiscalExport.voidAdjustment'),
       String(row.orderNumber ?? row.orderId ?? ''),
-      typeof row.amountMillimes === 'number' && Number.isSafeInteger(row.amountMillimes) ? row.amountMillimes / 1000 : 'Unavailable',
+      typeof row.amountMillimes === 'number' && Number.isSafeInteger(row.amountMillimes) ? row.amountMillimes / 1000 : unavailable(),
       String(row.createdAt ?? ''),
       '',
     ]),
     ...report.adjustments.cashMovements.map((row) => [
-      `Cash movement ${String(row.kind ?? '')}`,
+      t('fiscalExport.cashMovement', { kind: String(row.kind ?? '') }),
       String(row.reason ?? ''),
       typeof row.amountMillimes === 'number' && Number.isSafeInteger(row.amountMillimes)
         ? (row.kind === 'out' ? -row.amountMillimes : row.amountMillimes) / 1000
-        : 'Unavailable',
+        : unavailable(),
       String(row.createdAt ?? ''),
       String(row.note ?? ''),
     ]),
   ];
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(adjustmentRows), 'Adjustments');
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(adjustmentRows), adjustmentsSheetName);
 
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
     for (const [address, cell] of Object.entries(sheet)) {
       if (!address.startsWith('!') && cell && typeof cell === 'object' && typeof cell.v === 'number') {
         const { r, c } = XLSX.utils.decode_cell(address);
-        const monetaryCell = sheetName === 'Summary'
-          ? (c === 1 && ['Gross TTC (TND)', 'Snapshot-backed Gross TTC (TND)', 'Net HT (TND)', 'Snapshot-backed Net HT (TND)', 'VAT (TND)', 'Snapshot-backed VAT (TND)', 'Final payable (TND)', 'Snapshot-backed Final payable (TND)'].includes(String(sheet[XLSX.utils.encode_cell({ r, c: 0 })]?.v)))
-            || (c === 1 || c === 2) && ['Cash', 'Card', 'Other', 'Tab'].includes(String(sheet[XLSX.utils.encode_cell({ r, c: 0 })]?.v))
-          : sheetName === 'VAT Breakdown'
+        const monetaryCell = sheetName === summarySheetName
+          ? (c === 1 && r >= 14 && r <= 17)
+            || (c === 1 || c === 2) && r >= 23
+          : sheetName === vatSheetName
             ? c >= 3 && c <= 5 && r > 0
-            : sheetName === 'Transactions'
+            : sheetName === transactionSheetName
               ? [6, 8, 9].includes(c) && r > 0
-              : sheetName === 'Adjustments' && c === 2 && r > 0;
+              : sheetName === adjustmentsSheetName && c === 2 && r > 0;
         if (monetaryCell) {
           cell.z = '#,##0.000 "TND"';
         }
@@ -300,7 +344,7 @@ export async function exportFiscalXlsx(report: FiscalReport): Promise<void> {
   const blob = new Blob([contents], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
-  downloadBlob(blob, `fiscal-report-${report.period.startDate}-${report.period.endDateExclusive}.xlsx`);
+  downloadBlob(blob, `${t('fiscalReports.export.xlsxFile')}-${report.period.startDate}-${report.period.endDateExclusive}.xlsx`);
 }
 
 export async function createFiscalPdfBlob(report: FiscalReport): Promise<Blob> {
@@ -308,7 +352,7 @@ export async function createFiscalPdfBlob(report: FiscalReport): Promise<Blob> {
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(16);
-  pdf.text('Fiscal Reports & Tax Tracking', 14, 16);
+  pdf.text(t('fiscalReports.title'), 14, 16);
   pdf.setFont('helvetica', 'normal');
   pdf.setFontSize(9);
   let y = 24;
@@ -320,15 +364,18 @@ export async function createFiscalPdfBlob(report: FiscalReport): Promise<Blob> {
       y += 5;
     }
   };
-  line(`Store: ${report.profile?.tradingName ?? report.profile?.legalName ?? report.store.name}`);
-  line(`Address: ${report.store.address ?? 'Not configured'} | Phone: ${report.store.phone ?? 'Not configured'}`);
-  line(`Tax identifier: ${report.profile?.taxId ?? report.store.taxId ?? 'Not configured'}`);
-  line(`Period: ${report.period.startDate} to ${report.period.endDateExclusive} (end exclusive), ${report.period.timezone}`);
-  line(`Generated: ${report.generatedAt}`);
-  line('Currency: TND');
-  line('This is an internal fiscal/accounting report. It is not an official Tunisian tax declaration.');
+  line(`${t('fiscalExport.store')}: ${report.profile?.tradingName ?? report.profile?.legalName ?? report.store.name}`);
+  line(t('fiscalExport.addressPhone', {
+    address: report.store.address ?? t('fiscal.common.notConfigured'),
+    phone: report.store.phone ?? t('fiscal.common.notConfigured'),
+  }));
+  line(`${t('fiscalExport.taxIdentifier')}: ${report.profile?.taxId ?? report.store.taxId ?? t('fiscal.common.notConfigured')}`);
+  line(`${t('fiscalReports.period')}: ${t('fiscalReports.periodRangeExclusive', { start: report.period.startDate, end: report.period.endDateExclusive, timezone: report.period.timezone })}`);
+  line(`${t('fiscalExport.generatedAt')}: ${report.generatedAt}`);
+  line(`${t('fiscalExport.currency')}: TND`);
+  line(t('fiscalExport.pdfDisclaimer'));
   if (report.summary.missingSnapshotCount > 0) {
-    const warning = pdf.splitTextToSize(getFiscalSnapshotNotice(report), 174) as string[];
+    const warning = pdf.splitTextToSize(snapshotNotice(report), 174) as string[];
     const warningHeight = warning.length * 5 + 6;
     if (y + warningHeight > 278) { pdf.addPage(); y = 14; }
     pdf.setDrawColor(180, 83, 9);
@@ -345,47 +392,79 @@ export async function createFiscalPdfBlob(report: FiscalReport): Promise<Blob> {
     pdf.setFont('helvetica', 'normal');
     y += 5;
   } else {
-    line(getFiscalSnapshotNotice(report));
+    line(snapshotNotice(report));
   }
   const counts = getFiscalReportCounts(report);
   y += 3;
-  line(`Completed transactions: ${counts.completed}`);
-  line(`Voided transactions: ${counts.voided}`);
-  line(`Pending void transactions: ${counts.pendingVoid}`);
-  line(`Transactions missing fiscal snapshots: ${counts.missingSnapshots}`);
-  line(`${reportAmountLabel(report, 'Gross TTC')}: ${reportAmountText(report, report.summary.grossAmountMillimes)}`);
-  line(`${reportAmountLabel(report, 'Net HT')}: ${reportAmountText(report, report.summary.netAmountMillimes)}`);
-  line(`${reportAmountLabel(report, 'VAT')}: ${reportAmountText(report, report.summary.vatAmountMillimes)}`);
-  line(`${reportAmountLabel(report, 'Final payable')}: ${reportAmountText(report, report.summary.payableAmountMillimes)}`);
+  line(`${t('fiscalReports.completedTransactions')}: ${counts.completed}`);
+  line(`${t('fiscalReports.voidedTransactions')}: ${counts.voided}`);
+  line(`${t('fiscalReports.pendingVoidTransactions')}: ${counts.pendingVoid}`);
+  line(`${t('fiscalExport.missingSnapshots')}: ${counts.missingSnapshots}`);
+  line(`${reportAmountLabel(report, t('fiscalReports.grossTtc'))}: ${reportAmountText(report, report.summary.grossAmountMillimes)}`);
+  line(`${reportAmountLabel(report, t('fiscalReports.netHt'))}: ${reportAmountText(report, report.summary.netAmountMillimes)}`);
+  line(`${reportAmountLabel(report, t('fiscalReports.vat'))}: ${reportAmountText(report, report.summary.vatAmountMillimes)}`);
+  line(`${reportAmountLabel(report, t('fiscalReports.finalPayable'))}: ${reportAmountText(report, report.summary.payableAmountMillimes)}`);
   y += 3;
-  line('VAT breakdown');
+  line(t('fiscalReports.vatBreakdown'));
   if (report.vatBreakdown.length === 0) {
-    line('No VAT breakdown is available from stored fiscal snapshots.');
+    line(t('fiscalReports.noVatBreakdownStored'));
   } else {
     for (const vat of report.vatBreakdown) {
-      line(`${vatRate(vat)} | HT ${formatFiscalMillimes(vat.taxableHTMillimes)} | VAT ${formatFiscalMillimes(vat.vatMillimes)} | TTC ${formatFiscalMillimes(vat.ttcMillimes)} | transactions ${vat.transactionCount}`);
+      line(t('fiscalExport.vatLine', {
+        rate: vatRate(vat),
+        ht: formatFiscalMillimes(vat.taxableHTMillimes),
+        vat: formatFiscalMillimes(vat.vatMillimes),
+        ttc: formatFiscalMillimes(vat.ttcMillimes),
+        count: vat.transactionCount,
+      }));
     }
   }
   y += 3;
-  line(`Payments - Sales cash/card/other/tab: ${formatFiscalMillimes(report.payments.sales.cash)} / ${formatFiscalMillimes(report.payments.sales.card)} / ${formatFiscalMillimes(report.payments.sales.other)} / ${formatFiscalMillimes(report.payments.sales.tab)} TND`);
-  line(`Payments - Collected cash/card/other/tab: ${formatFiscalMillimes(report.payments.collected.cash)} / ${formatFiscalMillimes(report.payments.collected.card)} / ${formatFiscalMillimes(report.payments.collected.other)} / ${formatFiscalMillimes(report.payments.collected.tab)} TND`);
+  line(t('fiscalExport.paymentTotals', {
+    label: t('fiscalReports.sales'),
+    cash: formatFiscalMillimes(report.payments.sales.cash),
+    card: formatFiscalMillimes(report.payments.sales.card),
+    other: formatFiscalMillimes(report.payments.sales.other),
+    tab: formatFiscalMillimes(report.payments.sales.tab),
+  }));
+  line(t('fiscalExport.paymentTotals', {
+    label: t('fiscalReports.collected'),
+    cash: formatFiscalMillimes(report.payments.collected.cash),
+    card: formatFiscalMillimes(report.payments.collected.card),
+    other: formatFiscalMillimes(report.payments.collected.other),
+    tab: formatFiscalMillimes(report.payments.collected.tab),
+  }));
   y += 3;
-  line(`Voids: ${counts.voided} transactions, ${formatFiscalMillimes(report.adjustments.voidedGrossMillimes)} TND`);
-  line('Refunds and credit notes: unavailable in the existing data model; not included');
-  line(`Snapshot reconciliation: ${getFiscalReconciliationStatus(report)}`);
-  line('Reconciliation basis: HT + VAT = TTC using stored fiscal snapshots only');
+  line(t('fiscalExport.voidSummary', { count: counts.voided, amount: formatFiscalMillimes(report.adjustments.voidedGrossMillimes) }));
+  line(`${t('fiscalExport.refundsCredits')}: ${t('fiscalExport.refundsUnavailable')}`);
+  line(`${t('fiscalExport.snapshotReconciliation')}: ${reconciliationStatus(report)}`);
+  line(`${t('fiscalExport.reconciliationBasis')}: ${t('fiscalExport.reconciliationBasisValue')}`);
   y += 3;
-  line('Transactions');
+  line(t('fiscalReports.transactions'));
   for (const transaction of report.transactions) {
-    const fiscalAmounts = `HT ${transactionAmountTnd(report, transaction, 'netAmountMillimes')} | VAT ${transactionAmountTnd(report, transaction, 'totalTaxMillimes')} | TTC ${transactionAmountTnd(report, transaction, 'totalAmountMillimes')}`;
-    line(`#${transaction.number} | ${transaction.businessDate} ${formatFiscalTimestamp(transaction.createdAt, report.period.timezone)} (${report.period.timezone}) | ${transaction.customer ?? 'Walk-in'} | Staff ${transaction.staff ?? 'Unknown'} | ${fiscalAmounts} | ${transaction.paymentMethod} | ${transaction.status}`);
+    const fiscalAmounts = t('fiscalExport.transactionAmounts', {
+      ht: transactionAmountTnd(report, transaction, 'netAmountMillimes'),
+      vat: transactionAmountTnd(report, transaction, 'totalTaxMillimes'),
+      ttc: transactionAmountTnd(report, transaction, 'totalAmountMillimes'),
+    });
+    line(t('fiscalExport.transactionLine', {
+      number: transaction.number,
+      date: transaction.businessDate,
+      timestamp: reportTimestamp(transaction.createdAt, report.period.timezone),
+      timezone: report.period.timezone,
+      customer: transaction.customer ?? t('fiscal.common.walkIn'),
+      staff: transaction.staff ?? t('fiscal.common.unknown'),
+      amounts: fiscalAmounts,
+      payment: transaction.paymentMethod,
+      status: transaction.status,
+    }));
   }
   return pdf.output('blob');
 }
 
 export async function downloadFiscalPdf(report: FiscalReport): Promise<void> {
   const blob = await createFiscalPdfBlob(report);
-  downloadBlob(blob, `fiscal-report-${report.period.startDate}-${report.period.endDateExclusive}.pdf`);
+  downloadBlob(blob, `${t('fiscalReports.export.pdfFile')}-${report.period.startDate}-${report.period.endDateExclusive}.pdf`);
 }
 
 export async function previewFiscalPdf(report: FiscalReport): Promise<string> {
@@ -396,6 +475,6 @@ export async function previewFiscalPdf(report: FiscalReport): Promise<string> {
 export async function printFiscalPdf(report: FiscalReport): Promise<void> {
   const url = await previewFiscalPdf(report);
   const printWindow = window.open(url, '_blank', 'noopener,noreferrer');
-  if (!printWindow) throw new Error('Your browser blocked the PDF print window.');
+  if (!printWindow) throw new Error(t('fiscalReports.error.popupBlocked'));
   printWindow.addEventListener('load', () => printWindow.print());
 }

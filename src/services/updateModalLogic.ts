@@ -42,6 +42,7 @@ export function shouldSnoozeUpdate(
 export function confirmUpdateIfUnsaved(
   hasUnsavedWork: boolean,
   confirm: (message: string) => boolean,
+  message: string,
 ): boolean {
-  return !hasUnsavedWork || confirm('You have unsaved work. Updating now will reload the app and discard it. Continue?');
+  return !hasUnsavedWork || confirm(message);
 }

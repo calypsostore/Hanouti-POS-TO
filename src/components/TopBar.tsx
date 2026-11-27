@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { MaterialIcon } from './MaterialIcon';
 import { NotificationsPopoverButton } from './NotificationsPopoverButton';
@@ -10,6 +10,7 @@ import type { ProfileAvatarId, StoreType } from '../types/domain';
 import { getLogoDefinition } from '../data/logoCatalog';
 import { DEFAULT_PROFILE_AVATAR_ID, PROFILE_AVATARS } from '../data/profileAvatars';
 import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
+import { localizeErrorMessage } from '../i18n';
 
 interface TopBarProps {
   title: string;
@@ -22,10 +23,15 @@ interface TopBarProps {
 }
 
 export function TopBar({ title, storeName, storeLogoId, storeType = 'general', onProfileClick, onDashboardClick, onLockClick }: TopBarProps) {
+  const location = useLocation();
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
+  const device = useAuthStore((state) => state.device);
   const logout = useAuthStore((state) => state.logout);
+  const lock = useAuthStore((state) => state.lock);
   const updateProfileAvatar = useAuthStore((state) => state.updateProfileAvatar);
+  const canLockSession = user?.role === 'staff' || user?.role === 'owner';
+  const deviceBoundSession = Boolean(device && user);
   const displayedStoreName = storeName?.trim() || t('common.appName');
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -33,6 +39,7 @@ export function TopBar({ title, storeName, storeLogoId, storeType = 'general', o
   const [profileError, setProfileError] = useState('');
   const [savingAvatar, setSavingAvatar] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [locking, setLocking] = useState(false);
   const profileButtonRef = useRef<HTMLButtonElement>(null);
   const profilePanelRef = useRef<HTMLElement>(null);
   const portalTarget = useOverlayTarget();
@@ -68,9 +75,30 @@ export function TopBar({ title, storeName, storeLogoId, storeType = 'general', o
       navigate('/', { replace: true });
     } catch (error) {
       console.error('Unable to log out from the profile menu.', error);
-      setProfileError(error instanceof Error ? error.message : 'Unable to log out. Please try again.');
+      setProfileError(localizeErrorMessage(error, t('profile.unableToLogOut')));
     } finally {
       setLoggingOut(false);
+    }
+  }
+
+  async function handleLock() {
+    if (onLockClick) {
+      onLockClick();
+      return;
+    }
+    if (!canLockSession || locking) return;
+    setProfileError('');
+    setLocking(true);
+    try {
+      await lock();
+      setProfileOpen(false);
+      navigate('/lock', { replace: true, state: { from: location.pathname } });
+    } catch (lockError) {
+      console.error('Unable to lock the shared-device session.', lockError);
+      setProfileError(localizeErrorMessage(lockError, t('profile.unableToLockTerminal')));
+      setProfileOpen(true);
+    } finally {
+      setLocking(false);
     }
   }
 
@@ -81,7 +109,7 @@ export function TopBar({ title, storeName, storeLogoId, storeType = 'general', o
       await updateProfileAvatar(avatarId);
     } catch (error) {
       console.error('Unable to update the profile avatar.', error);
-      setProfileError(error instanceof Error ? error.message : 'Unable to update your avatar. Please try again.');
+      setProfileError(localizeErrorMessage(error, t('profile.unableToUpdateAvatar')));
     } finally {
       setSavingAvatar(false);
     }
@@ -131,8 +159,8 @@ export function TopBar({ title, storeName, storeLogoId, storeType = 'general', o
               <span className="hidden tablet:inline">{t('nav.dashboard')}</span>
             </button>
           )}
-          {onLockClick && (
-            <button type="button" aria-label="Lock terminal" onClick={onLockClick} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-container text-primary">
+          {(onLockClick || canLockSession) && (
+            <button type="button" aria-label={t('profile.lockTerminal')} disabled={locking} onClick={() => { void handleLock(); }} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300 disabled:opacity-60">
               <MaterialIcon name="lock" />
             </button>
           )}
@@ -188,7 +216,7 @@ export function TopBar({ title, storeName, storeLogoId, storeType = 'general', o
               </span>
               <span className="min-w-0">
                 <span className="block truncate font-body text-label-lg text-on-surface">{user.name}</span>
-                <span className="block truncate font-body text-body-sm capitalize text-on-surface-variant">{user.role.replace('_', ' ')}</span>
+                <span className="block truncate font-body text-body-sm text-on-surface-variant">{t(user.role === 'owner' ? 'common.roleOwner' : user.role === 'staff' ? 'common.roleStaff' : 'common.roleSuperAdmin')}</span>
               </span>
             </div>
             <button
@@ -203,32 +231,32 @@ export function TopBar({ title, storeName, storeLogoId, storeType = 'general', o
           <dl className="mb-3 grid grid-cols-1 gap-2 rounded-lg bg-surface-container-low p-3 font-body text-body-sm">
             {(user.email || user.username) && (
               <div className="min-w-0">
-                <dt className="text-outline">{user.email ? 'Email' : 'Username'}</dt>
+                <dt className="text-outline">{user.email ? t('profile.email') : t('profile.username')}</dt>
                 <dd className="truncate text-on-surface">{user.email ?? user.username}</dd>
               </div>
             )}
             {user.phone && (
               <div>
-                <dt className="text-outline">Phone</dt>
+                <dt className="text-outline">{t('profile.phone')}</dt>
                 <dd className="text-on-surface">{user.phone}</dd>
               </div>
             )}
             {displayedStoreName && (
               <div className="min-w-0">
-                <dt className="text-outline">Store</dt>
+                <dt className="text-outline">{t('profile.store')}</dt>
                 <dd className="truncate text-on-surface">{displayedStoreName}</dd>
               </div>
             )}
           </dl>
           <div className="mb-3">
-            <p className="mb-2 font-body text-label-sm text-on-surface-variant">Choose your avatar</p>
+            <p className="mb-2 font-body text-label-sm text-on-surface-variant">{t('profile.chooseAvatar')}</p>
             <div className="grid grid-cols-6 gap-2">
               {PROFILE_AVATARS.map((avatar) => (
                 <button
                   key={avatar.id}
                   type="button"
                   disabled={savingAvatar || loggingOut}
-                  aria-label={`Choose ${avatar.label} avatar`}
+                  aria-label={t('profile.chooseAvatarLabel', { avatar: avatar.label })}
                   aria-pressed={(user.avatarId ?? DEFAULT_PROFILE_AVATAR_ID) === avatar.id}
                   onClick={() => { void handleAvatarChange(avatar.id); }}
                   className={`flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border-2 p-0 transition disabled:opacity-60 ${
@@ -256,30 +284,32 @@ export function TopBar({ title, storeName, storeLogoId, storeType = 'general', o
               <MaterialIcon name="manage_accounts" className="text-primary" />
               {t('common.profileSettings')}
             </button>
-            {onLockClick && (
+            {(onLockClick || canLockSession) && (
               <button
                 type="button"
-                disabled={loggingOut}
-                onClick={() => {
-                  setProfileOpen(false);
-                  onLockClick();
-                }}
-                className="flex min-h-11 items-center gap-3 rounded-lg bg-surface-container-low px-3 text-left font-body text-label-md text-on-surface hover:bg-surface-container disabled:opacity-60"
+                disabled={loggingOut || locking}
+                onClick={() => { void handleLock(); }}
+                className="flex min-h-11 items-center gap-3 rounded-lg bg-red-600 px-3 text-left font-body text-label-md text-white hover:bg-red-700 disabled:opacity-60"
               >
-                <MaterialIcon name="lock" className="text-primary" />
-                Lock terminal
+                <MaterialIcon name={locking ? 'sync' : 'lock'} className={locking ? 'animate-spin' : ''} />
+                {t('profile.lockTerminal')}
               </button>
             )}
             {profileError && <p role="alert" className="rounded-lg bg-error-container p-2 font-body text-body-sm text-on-error-container">{profileError}</p>}
             <button
               type="button"
-              disabled={loggingOut}
+              disabled={loggingOut || deviceBoundSession}
               onClick={() => { void handleLogout(); }}
               className="flex min-h-11 items-center gap-3 rounded-lg bg-error-container px-3 text-left font-body text-label-md text-on-error-container hover:opacity-90 disabled:opacity-60"
             >
               <MaterialIcon name={loggingOut ? 'sync' : 'logout'} className={loggingOut ? 'animate-spin' : ''} />
-              {loggingOut ? 'Signing out…' : t('app.logOut')}
+              {loggingOut ? t('profile.signingOut') : t('app.logOut')}
             </button>
+            {deviceBoundSession && (
+              <p role="note" className="font-body text-body-sm text-on-surface-variant">
+                {t('devices.deviceLogoutDisabled')}
+              </p>
+            )}
           </div>
         </section>
       </div>,

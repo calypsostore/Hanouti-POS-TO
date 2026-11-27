@@ -27,7 +27,7 @@ interface AuthState {
   refreshPermissions: () => Promise<void>;
   login: (identifier: string, password: string, roles?: UserRole[], keepSignedIn?: boolean) => Promise<UserSummary>;
   loginDevice: (username: string, password: string) => Promise<DeviceSessionSummary>;
-  loginStaffWithDevicePin: (pin: string) => Promise<UserSummary>;
+  loginWithDevicePin: (pin: string) => Promise<UserSummary>;
   changeDevicePassword: (password: string) => Promise<void>;
   setInitialPassword: (password: string) => Promise<UserSummary>;
   setInitialPin: (pin: string) => Promise<UserSummary>;
@@ -51,6 +51,10 @@ async function getEffectivePermissions(userId: string): Promise<string[]> {
   return userService.getEffectivePermissions(userId);
 }
 
+function matchesDeviceStore(user: UserSummary, device: DeviceSessionSummary): boolean {
+  return (user.role === 'staff' || user.role === 'owner') && user.storeId === device.storeId;
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   device: null,
@@ -66,7 +70,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       await Promise.all([assertExpectedSchemaVersion(), initializeMockData()]);
       let user = await authService.getCurrentUser();
       const device = await deviceService.getCurrentDevice();
-      if (device && user && (user.role !== 'staff' || user.storeId !== device.storeId)) {
+      if (device && user && !matchesDeviceStore(user, device)) {
         const { error } = await getSupabaseClient().auth.signOut({ scope: 'local' });
         if (error) throw new Error(`Could not clear the session that does not match this device: ${error.message}`, { cause: error });
         user = null;
@@ -119,7 +123,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         if (!device) throw error;
         console.warn('[devices] Could not refresh the shared device session; retaining its current screen state.', error);
       }
-      if (device && user && (user.role !== 'staff' || user.storeId !== device.storeId)) {
+      if (device && user && !matchesDeviceStore(user, device)) {
         const { error } = await getSupabaseClient().auth.signOut({ scope: 'local' });
         if (error) throw new Error(`Could not clear the session that does not match this device: ${error.message}`, { cause: error });
         user = null;
@@ -185,15 +189,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   });
   return device;
   },
-  loginStaffWithDevicePin: async (pin) => {
+  loginWithDevicePin: async (pin) => {
   const device = get().device;
-  if (!device) throw new Error('Sign in to the device before entering a staff PIN.');
-  await deviceService.loginStaffWithPin(pin);
+  if (!device) throw new Error('Sign in to the device before entering an account PIN.');
+  await deviceService.loginWithPin(pin);
   const user = await authService.getCurrentUser();
-  if (!user || user.role !== 'staff' || user.storeId !== device.storeId) {
+  if (!user || !matchesDeviceStore(user, device)) {
     const { error } = await getSupabaseClient().auth.signOut({ scope: 'local' });
-    if (error) console.error('[devices] Could not clear a staff session that did not match the device.', error);
-    throw new Error('The staff account could not be matched to this store device.');
+    if (error) console.error('[devices] Could not clear an account session that did not match the device.', error);
+    throw new Error('The account could not be matched to this store device.');
   }
   authRefreshGeneration += 1;
   permissionRefreshGeneration += 1;
@@ -266,10 +270,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ user, locked: false });
   },
   logout: async () => {
+    const { user, device } = get();
+    if (device && user) {
+      throw new Error('Lock the account session before signing out of a shared device.');
+    }
     authRefreshGeneration += 1;
     if (isSupabaseDriver()) {
       try {
-        const user = get().user;
         if (user) {
           await getSupabaseClient().from('device_tokens').delete().eq('user_id', user.id);
         }
@@ -277,7 +284,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         console.error('[push] Could not remove device tokens during logout.', error);
       }
     }
-    const device = get().device;
     let logoutError: unknown;
     try {
       await authService.logout();
@@ -289,7 +295,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         await deviceService.logoutDevice();
       } catch (error) {
         if (!logoutError) logoutError = error;
-        else console.error('[devices] Device sign-out also failed after employee sign-out failed.', error);
+        else console.error('[devices] Device sign-out also failed after account sign-out failed.', error);
       }
     }
     resetStoreAppearance();

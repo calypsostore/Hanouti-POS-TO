@@ -18,6 +18,8 @@ export interface WorkspaceLink {
   label: TranslationKey;
   icon: string;
   id?: string;
+  permission?: string | string[];
+  ownerOnly?: boolean;
 }
 
 interface WorkspaceLayoutProps {
@@ -31,6 +33,17 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
   const navigate = useNavigate();
   const location = useLocation();
   const user = useAuthStore((state) => state.user);
+  const permissions = useAuthStore((state) => state.permissions);
+  const hasPermission = (permission: string | string[] | undefined) => !permission ||
+    (Array.isArray(permission) ? permission.some((id) => permissions.includes(id)) : permissions.includes(permission));
+  const visibleLinks = links.filter((link) =>
+    user?.role === 'owner' || (
+      !link.ownerOnly &&
+      hasPermission(link.permission)
+    ),
+  );
+  const visiblePrimaryLinks = ownerPrimaryLinks.filter((link) => visibleLinks.some((visible) => visible.to === link.to));
+  const visibleMoreLinks = ownerMoreLinks.filter((link) => visibleLinks.some((visible) => visible.to === link.to));
   const isOwnerWorkspace = links.some((link) => link.to === '/owner/dashboard');
   const isShiftWorkspace = location.pathname === '/owner/shifts';
   const isSettingsWorkspace = location.pathname === '/owner/settings' || location.pathname === '/settings';
@@ -96,7 +109,7 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
     return 0;
   };
   const totalBadgeCount = pendingVoidCount + unreadNotificationCount;
-  const isMoreActive = ownerMoreLinks.some((link) =>
+  const isMoreActive = visibleMoreLinks.some((link) =>
     location.pathname === link.to || location.pathname.startsWith(`${link.to}/`),
   );
   const toggleSidebar = () => {
@@ -136,15 +149,15 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
       nav.removeEventListener('scroll', updateActivePosition);
     };
   }, [location.pathname, sidebarCollapsed, links]);
-  const sidebarGroups: Array<{ title: string; links: WorkspaceLink[] }> = isOwnerWorkspace
+  const sidebarGroups: Array<{ title: TranslationKey; links: WorkspaceLink[] }> = isOwnerWorkspace
     ? [
-        { title: 'Operations', links: links.filter((link) => ['/owner/dashboard', '/pos', '/orders', '/owner/shifts', '/owner/voids'].includes(link.to)) },
-        { title: 'People', links: links.filter((link) => ['/owner/staff', '/owner/devices', '/owner/schedule', '/customers'].includes(link.to)) },
-        { title: 'Catalog', links: links.filter((link) => ['/owner/catalog', '/owner/inventory', '/owner/waste'].includes(link.to)) },
-        { title: 'Money', links: links.filter((link) => ['/owner/reports', '/owner/fiscal-reports', '/owner/fiscal', '/owner/expenses', '/owner/suppliers'].includes(link.to)) },
-        { title: 'System', links: links.filter((link) => ['/owner/activity', '/notifications', '/owner/settings'].includes(link.to)) },
+        { title: 'nav.group.operations', links: visibleLinks.filter((link) => ['/owner/dashboard', '/pos', '/orders', '/owner/shifts', '/owner/voids'].includes(link.to)) },
+        { title: 'nav.group.people', links: visibleLinks.filter((link) => ['/owner/staff', '/owner/devices', '/owner/schedule', '/customers'].includes(link.to)) },
+        { title: 'nav.group.catalog', links: visibleLinks.filter((link) => ['/owner/catalog', '/owner/inventory', '/owner/waste'].includes(link.to)) },
+        { title: 'nav.group.money', links: visibleLinks.filter((link) => ['/owner/reports', '/owner/fiscal-reports', '/owner/fiscal', '/owner/expenses', '/owner/suppliers'].includes(link.to)) },
+        { title: 'nav.group.system', links: visibleLinks.filter((link) => ['/owner/activity', '/notifications', '/owner/settings'].includes(link.to)) },
       ]
-    : [{ title: 'System', links }];
+    : [{ title: 'nav.group.system', links }];
 
   return (
     <div className={`workspace-layout min-h-screen bg-surface pb-6${isOwnerWorkspace ? ' owner-workspace' : ''}${isDashboardWorkspace ? ' dashboard-workspace' : ''}${isShiftWorkspace ? ' shift-screen-layout' : ''}${isSettingsWorkspace ? ' settings-screen-layout' : ''}${usesOwnerTabletBottomNav ? ' owner-tablet-bottom-nav' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
@@ -167,7 +180,7 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
           />
           {sidebarGroups.map((group) => (
             <div className="desktop-sidebar__group" key={group.title}>
-              {!sidebarCollapsed && <p className="desktop-sidebar__group-title">{group.title}</p>}
+              {!sidebarCollapsed && <p className="desktop-sidebar__group-title">{t(group.title)}</p>}
               <div className="desktop-sidebar__group-card">
                 {group.links.map((link) => (
                   <NavLink
@@ -190,24 +203,24 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
           ))}
         </nav>
         <div className="desktop-sidebar__footer">
-          <button type="button" className="desktop-sidebar__user" onClick={() => navigate('/settings')} aria-label="Open profile and settings">
+          <button type="button" className="desktop-sidebar__user" onClick={() => navigate('/settings')} aria-label={t('common.profileSettings')}>
             <span className="desktop-sidebar__avatar">
               <ProfileAvatar avatarId={user?.avatarId} className="h-full w-full" />
             </span>
             {!sidebarCollapsed && user && (
               <span className="desktop-sidebar__user-copy">
                 <span className="desktop-sidebar__user-name">{user.name}</span>
-                <span className="desktop-sidebar__user-role">{user.role === 'owner' ? 'Manager' : user.role === 'staff' ? 'Staff' : 'Administrator'}</span>
+                <span className="desktop-sidebar__user-role">{t(user.role === 'owner' ? 'common.roleManager' : user.role === 'staff' ? 'common.roleStaff' : 'common.roleSuperAdmin')}</span>
               </span>
             )}
           </button>
-          <button type="button" className="desktop-sidebar__collapse" onClick={toggleSidebar} aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+          <button type="button" className="desktop-sidebar__collapse" onClick={toggleSidebar} aria-label={t(sidebarCollapsed ? 'nav.expandSidebar' : 'nav.collapseSidebar')}>
             <MaterialIcon name={sidebarCollapsed ? 'keyboard_arrow_right' : 'keyboard_arrow_left'} />
           </button>
         </div>
       </aside>
       <nav aria-label={t('common.workspaceNavigation')} className={`workspace-desktop-nav scrollbar-hidden sticky top-16 z-20 flex gap-2 overflow-x-auto border-b border-outline-variant bg-surface/95 px-3 py-2 backdrop-blur-xl${isOwnerWorkspace ? ' owner-desktop-nav' : ''}`}>
-        {links.map((link) => (
+        {visibleLinks.map((link) => (
           <NavLink
             key={link.id ?? link.to}
             to={link.to}
@@ -218,7 +231,7 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
             <MaterialIcon name={link.icon} className="text-lg" />
             {t(link.label)}
             {badgeCountFor(link) > 0 && (
-              <span className="workspace-nav-badge" aria-label={`${badgeCountFor(link)} pending`}>
+              <span className="workspace-nav-badge" aria-label={t('nav.pendingCount', { count: badgeCountFor(link) })}>
                 {badgeCountFor(link) > 99 ? '99+' : badgeCountFor(link)}
               </span>
             )}
@@ -231,7 +244,7 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
       {isOwnerWorkspace && (
         <>
           <nav aria-label={t('nav.ownerNavigation')} className="owner-mobile-nav">
-            {ownerPrimaryLinks.map((link) => (
+            {visiblePrimaryLinks.map((link) => (
               <NavLink
                 key={link.to}
                 to={link.to}
@@ -277,7 +290,7 @@ export function WorkspaceLayout({ title, storeName, links, children }: Workspace
             panelClassName="owner-more-panel"
           >
             <nav id="owner-more-navigation" aria-label={t('nav.moreNavigation')} className="owner-more-list">
-              {ownerMoreLinks.map((link) => {
+              {visibleMoreLinks.map((link) => {
                 const badgeCount = badgeCountFor(link);
                 return (
                   <NavLink

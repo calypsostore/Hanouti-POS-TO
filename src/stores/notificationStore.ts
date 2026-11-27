@@ -1,13 +1,14 @@
 import { create } from 'zustand';
 import type { NotificationRecord, UserSummary } from '../types/domain';
 import { notificationService } from '../services/notificationService';
+import { compareNotificationsNewestFirst, type NotificationCursor } from '../lib/notificationOrder';
 
 const MAX_NOTIFICATION_ITEMS = 200;
 
 interface NotificationState {
   items: NotificationRecord[];
   unreadCount: number;
-  lastSeenCreatedAt: string | undefined;
+  lastSeenCursor: NotificationCursor | undefined;
   status: 'idle' | 'loading' | 'ready' | 'error';
   load: (user: UserSummary) => Promise<void>;
   loadMore: (user: UserSummary) => Promise<void>;
@@ -25,14 +26,14 @@ function mergeItems(current: NotificationRecord[], incoming: NotificationRecord[
     if (!existing || !existing.readAt || item.readAt) byId.set(item.id, item);
   }
   return [...byId.values()]
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .sort(compareNotificationsNewestFirst)
     .slice(0, MAX_NOTIFICATION_ITEMS);
 }
 
 export const useNotificationStore = create<NotificationState>((set, get) => ({
   items: [],
   unreadCount: 0,
-  lastSeenCreatedAt: undefined,
+  lastSeenCursor: undefined,
   status: 'idle',
   load: async (user) => {
     set({ status: 'loading' });
@@ -41,10 +42,13 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
         notificationService.listFor(user),
         notificationService.unreadCount(user),
       ]);
+      const mergedItems = mergeItems([], items);
       set({
-        items: mergeItems([], items),
+        items: mergedItems,
         unreadCount,
-        lastSeenCreatedAt: items[0]?.createdAt,
+        lastSeenCursor: mergedItems[0]
+          ? { createdAt: mergedItems[0].createdAt, id: mergedItems[0].id }
+          : undefined,
         status: 'ready',
       });
     } catch (error) {
@@ -53,7 +57,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     }
   },
   loadMore: async (user) => {
-    const before = get().items.at(-1)?.createdAt;
+    const before = get().items.at(-1);
     if (!before) return;
     const more = await notificationService.listFor(user, before);
     set({ items: mergeItems(get().items, more), status: 'ready' });
@@ -62,15 +66,16 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     set((state) => {
       const alreadyPresent = state.items.some((item) => item.id === notification.id);
       const items = mergeItems(state.items, [notification]);
+      const lastSeenCursor = !state.lastSeenCursor ||
+        compareNotificationsNewestFirst(notification, state.lastSeenCursor) < 0
+        ? { createdAt: notification.createdAt, id: notification.id }
+        : state.lastSeenCursor;
       return {
         items,
         unreadCount: alreadyPresent
           ? state.unreadCount
           : state.unreadCount + (!notification.readAt ? 1 : 0),
-        lastSeenCreatedAt: !state.lastSeenCreatedAt ||
-          notification.createdAt > state.lastSeenCreatedAt
-          ? notification.createdAt
-          : state.lastSeenCreatedAt,
+        lastSeenCursor,
       };
     });
   },
@@ -114,5 +119,5 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       throw error;
     }
   },
-  reset: () => set({ items: [], unreadCount: 0, lastSeenCreatedAt: undefined, status: 'idle' }),
+  reset: () => set({ items: [], unreadCount: 0, lastSeenCursor: undefined, status: 'idle' }),
 }));

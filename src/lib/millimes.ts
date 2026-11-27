@@ -1,3 +1,5 @@
+import { getLanguage } from '../i18n';
+
 export function parseNonNegativeMillimes(value: string): number | undefined {
   const trimmed = value.trim();
   if (!trimmed) return undefined;
@@ -26,11 +28,21 @@ export function formatMillimes(amountMillimes: number): string {
 
 export function formatMillimesWithThousands(amountMillimes: number): string {
   if (!Number.isSafeInteger(amountMillimes)) return '—';
+  const locale = getLanguage();
   const sign = amountMillimes < 0 ? '-' : '';
   const absolute = Math.abs(amountMillimes);
   const dinars = Math.floor(absolute / 1000);
   const millimes = absolute % 1000;
-  return `${sign}${dinars.toLocaleString('en-US')}.${String(millimes).padStart(3, '0')}`;
+  const integer = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(dinars);
+  const decimal = new Intl.NumberFormat(locale, {
+    useGrouping: false,
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).formatToParts(0.1).find((part) => part.type === 'decimal')?.value ?? '.';
+  const formatDigit = new Intl.NumberFormat(locale, { useGrouping: false });
+  const fraction = String(millimes).padStart(3, '0')
+    .replace(/\d/g, (digit) => formatDigit.format(Number(digit)));
+  return `${sign}${integer}${decimal}${fraction}`;
 }
 
 export function formatMetricWithUnit(value: string, unit?: string): string {

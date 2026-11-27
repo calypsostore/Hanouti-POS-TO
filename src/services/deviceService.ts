@@ -227,16 +227,16 @@ export const deviceService = {
     if (device) cacheDevice({ ...device, mustChangePassword: false });
   },
 
-  async loginStaffWithPin(pin: string): Promise<void> {
+  async loginWithPin(pin: string): Promise<void> {
     requireSupabase();
     const { data, error } = await getDeviceSupabaseClient().functions.invoke<{
       access_token: string;
       refresh_token: string;
       must_change_password: boolean;
     }>('device-staff-pin', { body: { pin } });
-    if (error) await throwFunctionError(error, 'Could not verify the staff PIN');
+    if (error) await throwFunctionError(error, 'Could not verify the account PIN');
     if (!data?.access_token || !data.refresh_token) {
-      throw new Error('The staff sign-in service returned an invalid session.');
+      throw new Error('The account sign-in service returned an invalid session.');
     }
     const { error: sessionError } = await getSupabaseClient().auth.setSession({
       access_token: data.access_token,
@@ -244,8 +244,8 @@ export const deviceService = {
     });
     if (sessionError) {
       const { error: signOutError } = await getSupabaseClient().auth.signOut({ scope: 'local' });
-      if (signOutError) console.error('[devices] Could not clear an incomplete staff session.', signOutError);
-      throw new Error(`Could not establish the staff session: ${sessionError.message}`, { cause: sessionError });
+      if (signOutError) console.error('[devices] Could not clear an incomplete account session.', signOutError);
+      throw new Error(`Could not establish the account session: ${sessionError.message}`, { cause: sessionError });
     }
   },
 

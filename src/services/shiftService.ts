@@ -1,4 +1,4 @@
-import type { CashMovementReason, CashMovementRecord, ShiftRecord, TabRecord } from '../types/domain';
+import { resolveStoreSettings, type CashMovementReason, type CashMovementRecord, type ShiftRecord, type TabRecord } from '../types/domain';
 import { readData, writeData } from './storage';
 import { seedShiftsForStore } from './seedData';
 import { userService } from './userService';
@@ -9,6 +9,8 @@ import { authService } from './authService';
 import { offlineOrderQueue } from './offlineOrderQueue';
 import { isSupabaseDriver } from '../data/driver';
 import { requireOnlineForAction } from './offlineAvailability';
+import { requiresShiftDifferenceNote } from '../lib/shiftClosePolicy';
+import { t } from '../i18n';
 import {
   closeShift as closeRemoteShift,
   forceCloseDay as forceCloseRemoteDay,
@@ -184,7 +186,7 @@ export const shiftService = {
       entityId: shift.id,
       meta: { after: shift },
     });
-    await notificationService.notifyShiftOpened(shift.id, storeId, actor?.name ?? 'A staff member');
+    await notificationService.notifyShiftOpened(shift.id, storeId, actor?.name ?? t('notificationsContent.staffMember'));
     if (store.dayClosedOn === todayKey()) await userService.clearDayClosed(storeId);
     return shift;
   },
@@ -211,7 +213,17 @@ export const shiftService = {
     const expectedCashMillimes = await this.getExpectedCash(shiftId);
     if (expectedCashMillimes === null) throw new Error('Expected cash is not available for blind shift closing.');
     const differenceMillimes = countedCashMillimes - expectedCashMillimes;
-    const cleanedDifferenceNote = validateDifferenceNote(differenceMillimes, differenceNote);
+    const [store, sessionActor] = await Promise.all([
+      userService.getStore(shift.storeId),
+      authService.getCurrentUser(),
+    ]);
+    const blindStaffClose = Boolean(
+      store &&
+      sessionActor?.role === 'staff' &&
+      sessionActor.id === shift.staffId &&
+      resolveStoreSettings(store.settings).blindShiftClosing,
+    );
+    const cleanedDifferenceNote = validateDifferenceNote(differenceMillimes, differenceNote, blindStaffClose);
     const closedAt = new Date().toISOString();
     const updated: ShiftRecord = {
       ...shift,
@@ -236,7 +248,7 @@ export const shiftService = {
       entityId: shift.id,
       meta: { before: shift, after: updated },
     });
-    await notificationService.notifyShiftClosed(shift.id, shift.storeId, actor?.name ?? 'A staff member', differenceMillimes);
+    await notificationService.notifyShiftClosed(shift.id, shift.storeId, actor?.name ?? t('notificationsContent.staffMember'), differenceMillimes);
     return updated;
   },
 
@@ -248,10 +260,12 @@ export const shiftService = {
     if (!shift) throw new Error('Open shift could not be found.');
     const store = await userService.getStore(shift.storeId);
     const actor = await authService.getCurrentUser();
-    if (!store || !actor || actor.role !== 'owner' || actor.id !== store.ownerId || actor.storeId !== store.id) {
-      throw new Error('Only this store owner can force-close the shift.');
+    const isOwner = Boolean(store && actor && actor.role === 'owner' && actor.id === store.ownerId);
+    if (!store || !actor || actor.storeId !== store.id ||
+      (!isOwner && !await userService.hasPermission(actor.id, 'manage_shifts'))) {
+      throw new Error('This account does not have permission to force-close the shift.');
     }
-    if (!await userService.verifyStorePin(store.id, ownerPin, 'z_report')) throw new Error('Incorrect owner PIN.');
+    if (!await userService.verifyStorePin(store.id, ownerPin, 'z_report')) throw new Error('The PIN is incorrect.');
     const autoApproved = await orderService.autoApprovePendingVoids(store.id, actor.id, shift.id);
     const expectedCashMillimes = await this.getExpectedCash(shiftId);
     if (expectedCashMillimes === null) throw new Error('Expected cash is not available for blind shift closing.');
@@ -281,7 +295,7 @@ export const shiftService = {
       meta: { before: shift, after: updated },
     });
     const staff = await userService.getUser(shift.staffId);
-    await notificationService.notifyShiftClosed(shift.id, shift.storeId, staff?.name ?? 'A staff member', 0);
+    await notificationService.notifyShiftClosed(shift.id, shift.storeId, staff?.name ?? t('notificationsContent.staffMember'), 0);
     return updated;
   },
 
@@ -293,10 +307,11 @@ export const shiftService = {
     if (isSupabaseDriver()) return forceCloseRemoteDay(ownerPin);
     const actor = await authService.getCurrentUser();
     const store = actor?.storeId ? await userService.getStore(actor.storeId) : undefined;
-    if (!actor || actor.role !== 'owner' || !store || store.ownerId !== actor.id) {
-      throw new Error('Only this store owner can force-close the business day.');
+    const isOwner = Boolean(actor && store && actor.role === 'owner' && store.ownerId === actor.id);
+    if (!actor || !store || (!isOwner && !await userService.hasPermission(actor.id, 'manage_shifts'))) {
+      throw new Error('This account does not have permission to force-close the business day.');
     }
-    if (!await userService.verifyStorePin(store.id, ownerPin, 'z_report')) throw new Error('Incorrect owner PIN.');
+    if (!await userService.verifyStorePin(store.id, ownerPin, 'z_report')) throw new Error('The PIN is incorrect.');
     const approvedOrders = await orderService.autoApprovePendingVoids(store.id, actor.id);
     let storeShifts = getShifts();
     const approvedCounts = new Map<string, number>();
@@ -339,7 +354,7 @@ export const shiftService = {
         meta: { before: shift, after: updated },
       });
       const staff = await userService.getUser(shift.staffId);
-      await notificationService.notifyShiftClosed(shift.id, store.id, staff?.name ?? 'A staff member', 0);
+      await notificationService.notifyShiftClosed(shift.id, store.id, staff?.name ?? t('notificationsContent.staffMember'), 0);
     }
     return {
       shifts: closed,
@@ -406,9 +421,11 @@ export const shiftService = {
   },
 };
 
-function validateDifferenceNote(differenceMillimes: number, note?: string): string | undefined {
+function validateDifferenceNote(differenceMillimes: number, note?: string, blindClose = false): string | undefined {
   const cleanedNote = note?.trim();
-  if (differenceMillimes !== 0 && !cleanedNote) throw new Error('Add a short note explaining the cash difference.');
+  if (requiresShiftDifferenceNote(differenceMillimes, blindClose) && !cleanedNote) {
+    throw new Error('Add a short note explaining the cash difference.');
+  }
   if (cleanedNote && cleanedNote.length > 200) throw new Error('Cash difference note must be 200 characters or fewer.');
   return cleanedNote || undefined;
 }

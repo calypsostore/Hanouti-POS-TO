@@ -80,6 +80,10 @@ describe('fiscal checkout preparation', () => {
   });
 
   it('uses the item classification ahead of its category classification', () => {
+    const allProducts = assignment({
+      id: 'all-products',
+      categoryId: undefined,
+    });
     const exempt = assignment({
       id: 'item-exemption',
       itemId: 'item-a',
@@ -95,7 +99,7 @@ describe('fiscal checkout preparation', () => {
       lines: [line],
       profile,
       rules: [rule],
-      assignments: [assignment(), exempt],
+      assignments: [allProducts, assignment(), exempt],
     });
 
     expect(snapshot?.totalAmountMillimes).toBe(1_000);
@@ -105,7 +109,57 @@ describe('fiscal checkout preparation', () => {
     });
   });
 
-  it('fails closed when active rules exist without configured tax types or classification', () => {
+  it('uses an all-products classification when an item and category have no specific match', () => {
+    const allProducts = assignment({
+      id: 'all-products',
+      categoryId: undefined,
+    });
+    const snapshot = calculateFiscalCheckoutSnapshot({
+      storeId: 'store-a',
+      transactionDate: '2026-02-01',
+      lines: [{ ...line, itemId: 'uncategorized-item', categoryId: 'uncategorized-category' }],
+      profile,
+      rules: [rule],
+      assignments: [allProducts],
+    });
+
+    expect(snapshot).toMatchObject({
+      totalAmountMillimes: 1_100,
+      totalTaxMillimes: 100,
+    });
+  });
+
+  it('leaves POS checkout available when any required line lacks a classification', () => {
+    const snapshot = calculateFiscalCheckoutSnapshot({
+      storeId: 'store-a',
+      transactionDate: '2026-02-01',
+      lines: [line, { ...line, itemId: 'item-b', categoryId: 'category-b' }],
+      profile,
+      rules: [rule],
+      assignments: [assignment()],
+    });
+
+    expect(snapshot).toBeUndefined();
+  });
+
+  it('leaves POS checkout available for unconfigured classifications', () => {
+    const snapshot = calculateFiscalCheckoutSnapshot({
+      storeId: 'store-a',
+      transactionDate: '2026-02-01',
+      lines: [line],
+      profile,
+      rules: [rule],
+      assignments: [assignment({
+        treatment: 'unconfigured',
+        ruleId: undefined,
+        ruleVersion: undefined,
+      })],
+    });
+
+    expect(snapshot).toBeUndefined();
+  });
+
+  it('rejects active rules without configured tax types', () => {
     expect(() => calculateFiscalCheckoutSnapshot({
       storeId: 'store-a',
       transactionDate: '2026-02-01',
@@ -114,13 +168,14 @@ describe('fiscal checkout preparation', () => {
       assignments: [],
     })).toThrow('no configured line-tax types');
 
-    expect(() => calculateFiscalCheckoutSnapshot({
+    const incompleteSnapshot = calculateFiscalCheckoutSnapshot({
       storeId: 'store-a',
       transactionDate: '2026-02-01',
       lines: [line],
       profile,
       rules: [rule],
       assignments: [],
-    })).toThrow('needs an effective vat classification');
+    });
+    expect(incompleteSnapshot).toBeUndefined();
   });
 });

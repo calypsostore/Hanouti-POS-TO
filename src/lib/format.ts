@@ -1,8 +1,9 @@
+import { getLanguage } from '../i18n';
 import { formatMillimesWithThousands } from './millimes';
 
 export function formatTnd(amountInDinars: number): string {
   if (!Number.isFinite(amountInDinars)) return '—';
-  return new Intl.NumberFormat('en-US', {
+  return new Intl.NumberFormat(getLanguage(), {
     useGrouping: true,
     minimumFractionDigits: 3,
     maximumFractionDigits: 3,

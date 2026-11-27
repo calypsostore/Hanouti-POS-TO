@@ -4,12 +4,13 @@ import { Button } from '../components/Button';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { deviceService, DEVICE_PAGE_SIZE, type DeviceCredentialResult, type DeviceSummary } from '../services/deviceService';
+import { getLanguage, localizeErrorMessage } from '../i18n';
 import { t } from '../i18n/translations';
 
 function formatLastSeen(value: string | null): string {
   if (!value) return t('devices.neverUsed');
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? t('devices.neverUsed') : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? t('devices.neverUsed') : date.toLocaleString(getLanguage());
 }
 
 export function OwnerDevicesScreen() {
@@ -34,7 +35,7 @@ export function OwnerDevicesScreen() {
       setTotalCount(page.totalCount);
       nextOffsetRef.current = page.devices.length;
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : t('devices.loadFailed'));
+      setError(localizeErrorMessage(loadError, t('devices.loadFailed')));
     } finally {
       setLoading(false);
     }
@@ -55,7 +56,7 @@ export function OwnerDevicesScreen() {
       setTotalCount(page.totalCount);
       nextOffsetRef.current = offset + page.devices.length;
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : t('devices.loadFailed'));
+      setError(localizeErrorMessage(loadError, t('devices.loadFailed')));
     } finally {
       loadingMoreRef.current = false;
       setLoadingMore(false);
@@ -80,7 +81,7 @@ export function OwnerDevicesScreen() {
       setName('');
       setNotice(result.auditWarning ?? '');
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : t('devices.createFailed'));
+      setError(localizeErrorMessage(createError, t('devices.createFailed')));
     } finally {
       setSaving(false);
     }
@@ -95,7 +96,7 @@ export function OwnerDevicesScreen() {
       setDevices((current) => current.map((item) => item.id === device.id ? result.device : item));
       setNotice(result.auditWarning ?? '');
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : t('devices.updateFailed'));
+      setError(localizeErrorMessage(updateError, t('devices.updateFailed')));
     } finally {
       setSaving(false);
     }
@@ -113,7 +114,7 @@ export function OwnerDevicesScreen() {
       setCredentials(result);
       setNotice(result.auditWarning ?? '');
     } catch (resetError) {
-      setError(resetError instanceof Error ? resetError.message : t('devices.resetFailed'));
+      setError(localizeErrorMessage(resetError, t('devices.resetFailed')));
     } finally {
       setSaving(false);
     }

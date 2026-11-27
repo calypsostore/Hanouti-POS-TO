@@ -442,6 +442,12 @@ export const orderService = {
   },
 
   async createOrder(input: { storeId: string; staffId: string; items: OrderLineRecord[]; paymentMethod?: PaymentMethod; customerId?: string; location?: string; adminPin?: string; note?: string; idempotencyKey?: string; fiscalSnapshot?: FiscalOrderSnapshot | null }): Promise<OrderRecord> {
+    if (input.note?.trim() && !isSupabaseDriver()) {
+      const actor = await userService.getUser(input.staffId);
+      if (actor?.role === 'staff' && !await userService.hasPermission(input.staffId, 'add_order_note')) {
+        throw new Error('Your position does not allow order notes.');
+      }
+    }
     if (isSupabaseDriver()) {
       if (input.items.length === 0) throw new Error('Add at least one item before completing an order.');
       const idempotencyKey = input.idempotencyKey ?? crypto.randomUUID();
@@ -768,8 +774,15 @@ export const orderService = {
     if (isSupabaseDriver()) {
       const order = await getRemoteOrder(orderId);
       if (!order) throw new Error('Pending void request could not be found.');
-      const store = await userService.getStore(order.storeId);
-      if (!store || store.ownerId !== ownerId) throw new Error('Only this store owner can resolve the request.');
+      const [store, actor] = await Promise.all([
+        userService.getStore(order.storeId),
+        userService.getUser(ownerId),
+      ]);
+      const isOwner = Boolean(store && actor && actor.role === 'owner' && store.ownerId === actor.id);
+      if (!store || !actor || actor.storeId !== store.id ||
+        (!isOwner && !await userService.hasPermission(ownerId, 'resolve_voids'))) {
+        throw new Error('This account does not have permission to resolve void requests.');
+      }
       const cleanedReason = reason?.trim() || order.voidReason?.trim() || '';
       if (decision === 'approve' && !cleanedReason) throw new Error('A reason is required to void an order.');
       return resolveRemoteVoid(orderId, decision, cleanedReason, '');
@@ -778,13 +791,18 @@ export const orderService = {
     const order = orders.find((candidate) => candidate.id === orderId && candidate.status === 'pending_void');
     if (!order) throw new Error('Pending void request could not be found.');
     assertOrderNotArchivedInZ(order);
-    const store = await userService.getStore(order.storeId);
-    if (!store || store.ownerId !== ownerId) {
-      throw new Error('Only this store owner can resolve the request.');
+    const [store, actor] = await Promise.all([
+      userService.getStore(order.storeId),
+      userService.getUser(ownerId),
+    ]);
+    const isOwner = Boolean(store && actor && actor.role === 'owner' && store.ownerId === actor.id);
+    if (!store || !actor || actor.storeId !== store.id ||
+      (!isOwner && !await userService.hasPermission(ownerId, 'resolve_voids'))) {
+      throw new Error('This account does not have permission to resolve void requests.');
     }
     const cleanedReason = reason?.trim() || order.voidReason?.trim() || '';
     const updated: OrderRecord = decision === 'approve'
-      ? { ...order, status: 'voided', voidRequestedAt: undefined, voidedAt: new Date().toISOString(), voidedBy: 'owner', voidedByUserId: ownerId, voidReason: cleanedReason }
+      ? { ...order, status: 'voided', voidRequestedAt: undefined, voidedAt: new Date().toISOString(), voidedBy: actor.role === 'owner' ? 'owner' : 'staff', voidedByUserId: ownerId, voidReason: cleanedReason }
       : { ...order, status: 'done', voidRequestedAt: undefined, voidReason: undefined };
     if (decision === 'approve' && !updated.voidReason) throw new Error('A reason is required to void an order.');
     saveOrders(orders.map((candidate) => candidate.id === orderId ? updated : candidate));
@@ -829,8 +847,10 @@ export const orderService = {
     if (isSupabaseDriver()) throw new Error('Pending void auto-approval is handled by the shift workflow.');
     const store = await userService.getStore(storeId);
     const owner = await userService.getUser(ownerId);
-    if (!store || store.ownerId !== ownerId || owner?.role !== 'owner' || owner.storeId !== storeId) {
-      throw new Error('Only this store owner can auto-approve pending voids.');
+    const isOwner = Boolean(store && owner && owner.role === 'owner' && store.ownerId === owner.id);
+    if (!store || !owner || owner.storeId !== storeId ||
+      (!isOwner && !await userService.hasPermission(ownerId, 'resolve_voids'))) {
+      throw new Error('This account does not have permission to auto-approve pending voids.');
     }
     const orders = getOrders();
     const pending = orders.filter((order) => order.storeId === storeId &&
@@ -841,7 +861,7 @@ export const orderService = {
       status: 'voided' as const,
       voidRequestedAt: undefined,
       voidedAt: approvedAt,
-      voidedBy: 'owner',
+      voidedBy: owner.role === 'owner' ? 'owner' : 'staff',
       voidedByUserId: ownerId,
       voidReason: 'Auto-approved at forced close',
     }));

@@ -169,7 +169,8 @@ Deno.serve(async (request) => {
             notification: {
               channel_id: channelId,
               icon: 'ic_stat_notification',
-              color: '#0F5E6E',
+              color: '#238636',
+              image: 'https://hanoutipos.vercel.app/notification-logo.png',
             },
           },
           data: {

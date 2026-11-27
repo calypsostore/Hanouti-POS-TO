@@ -10,10 +10,10 @@ import { useNotificationStore } from '../stores/notificationStore';
 import { PERMISSIONS_CHANGED_EVENT, userService } from '../services/userService';
 
 const staffNavigation = [
-  { to: '/pos', label: 'nav.pos', icon: 'point_of_sale' },
-  { to: '/orders', label: 'nav.orders', icon: 'receipt_long' },
-  { to: '/customers', label: 'nav.customers', icon: 'group' },
-  { to: '/shift', label: 'nav.shift', icon: 'payments' },
+  { to: '/pos', label: 'nav.pos', icon: 'point_of_sale', permissions: ['take_orders'] },
+  { to: '/orders', label: 'nav.orders', icon: 'receipt_long', permissions: ['view_order_history', 'view_all_orders', 'request_void'] },
+  { to: '/customers', label: 'nav.customers', icon: 'group', permissions: ['customers_view', 'customers_create', 'customers_edit', 'use_tabs', 'settle_tabs'] },
+  { to: '/shift', label: 'nav.shift', icon: 'payments', permissions: ['open_close_shift', 'print_x_report', 'cash_in_out'] },
 ] as const;
 
 const staffMoreLinks = [
@@ -30,33 +30,34 @@ export function BottomNav() {
   const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem('hanouti.sidebar-collapsed.v1') === 'true');
   const [moreOpen, setMoreOpen] = useState(false);
   const [pendingVoidCount, setPendingVoidCount] = useState(0);
-  const [canViewCustomers, setCanViewCustomers] = useState(false);
+  const [visibleStaffPaths, setVisibleStaffPaths] = useState<string[]>([]);
   const unreadNotificationCount = useNotificationStore((state) => state.unreadCount);
 
   useEffect(() => {
     if (user?.role !== 'staff') {
-      setCanViewCustomers(false);
+      setVisibleStaffPaths([]);
       return;
     }
     let active = true;
-    const refreshCustomerPermission = () => {
-      void Promise.all([
-        userService.hasPermission(user.id, 'customers_view'),
-        userService.hasPermission(user.id, 'use_tabs'),
-        userService.hasPermission(user.id, 'settle_tabs'),
-      ]).then((permissions) => {
-        if (active) setCanViewCustomers(permissions.some(Boolean));
+    const refreshStaffNavigation = () => {
+      void Promise.all(staffNavigation.map(async (item) => {
+        const permissions = await Promise.all(item.permissions.map((permissionId) =>
+          userService.hasPermission(user.id, permissionId),
+        ));
+        return permissions.some(Boolean) ? item.to : null;
+      })).then((paths) => {
+        if (active) setVisibleStaffPaths(paths.filter((path) => path !== null));
       }).catch((error: unknown) => {
-        console.error('Could not load staff customer navigation permission.', error);
+        console.error('Could not load staff navigation permissions.', error);
       });
     };
-    refreshCustomerPermission();
-    window.addEventListener('focus', refreshCustomerPermission);
-    window.addEventListener(PERMISSIONS_CHANGED_EVENT, refreshCustomerPermission);
+    refreshStaffNavigation();
+    window.addEventListener('focus', refreshStaffNavigation);
+    window.addEventListener(PERMISSIONS_CHANGED_EVENT, refreshStaffNavigation);
     return () => {
       active = false;
-      window.removeEventListener('focus', refreshCustomerPermission);
-      window.removeEventListener(PERMISSIONS_CHANGED_EVENT, refreshCustomerPermission);
+      window.removeEventListener('focus', refreshStaffNavigation);
+      window.removeEventListener(PERMISSIONS_CHANGED_EVENT, refreshStaffNavigation);
     };
   }, [user?.id, user?.role]);
 
@@ -173,11 +174,14 @@ export function BottomNav() {
   return (
     <>
       <nav aria-label={t('nav.staffNavigation')} className="staff-bottom-nav">
-        <button type="button" className="staff-sidebar-collapse" onClick={toggleCollapsed} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+        <button type="button" className="staff-sidebar-collapse" onClick={toggleCollapsed} aria-label={t(collapsed ? 'nav.expandSidebar' : 'nav.collapseSidebar')}>
           <MaterialIcon name={collapsed ? 'chevron_right' : 'chevron_left'} />
         </button>
-        <div className={`staff-bottom-nav__items${canViewCustomers ? '' : ' staff-bottom-nav__items--without-customers'}`}>
-          {staffNavigation.filter((item) => item.to !== '/customers' || canViewCustomers).map((item) => (
+        <div
+          className="staff-bottom-nav__items"
+          style={{ gridTemplateColumns: `repeat(${visibleStaffPaths.length + 1}, minmax(0, 1fr))` }}
+        >
+          {staffNavigation.filter((item) => visibleStaffPaths.includes(item.to)).map((item) => (
           <NavLink
             key={item.to}
             to={item.to}

@@ -18,6 +18,7 @@ import { useLocation } from 'react-router-dom';
 import { parseNonNegativeMillimes } from '../lib/millimes';
 import { getReportCloseDate } from '../lib/reportArchive';
 import { dateKeyInTimezone } from '../lib/date';
+import { getLanguage, localizeErrorMessage } from '../i18n';
 import { ClosedShiftSummary } from '../features/shifts/components/ShiftCloseComponents';
 import { ShiftOverview } from '../features/shifts/components/ShiftOverview';
 import { ShiftHistory } from '../features/shifts/components/ShiftHistory';
@@ -183,7 +184,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
     setOverviewAnalytics(undefined);
     setOverviewError('');
     if (!overviewRange) {
-      setOverviewError('Choose an end date on or after the start date.');
+      setOverviewError(t('shift.chooseValidDateRange'));
       setOverviewLoading(false);
       return () => { active = false; };
     }
@@ -195,7 +196,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       })
       .catch((loadError: unknown) => {
         console.error('Unable to load shift KPI analytics.', loadError);
-        if (active) setOverviewError(loadError instanceof Error ? loadError.message : 'Unable to load KPI analytics.');
+        if (active) setOverviewError(localizeErrorMessage(loadError, t('shift.unableToLoadKpi')));
       })
       .finally(() => {
         if (active) setOverviewLoading(false);
@@ -217,9 +218,9 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       setStartingCashEdited(false);
       await refresh();
       setOpenShiftSheetOpen(false);
-      setNotice('Shift opened.');
+      setNotice(t('shift.shiftOpened'));
     } catch (openError) {
-      setError(openError instanceof Error ? openError.message : 'Unable to open the shift.');
+      setError(localizeErrorMessage(openError, t('shift.unableToOpen')));
     }
   }
 
@@ -265,21 +266,21 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       setCloseShiftSheetOpen(false);
       setNotice(
         shift.differenceMillimes === undefined
-          ? 'Cash reconciliation is available to the owner.'
+          ? t('shift.reconciliationAvailable')
           : shift.differenceMillimes === 0
             ? t('shift.zeroDifference')
             : t('shift.cashDifferenceRecorded'),
       );
     } catch (closeError) {
-      setError(closeError instanceof Error ? closeError.message : 'Unable to close the shift.');
+      setError(localizeErrorMessage(closeError, t('shift.unableToClose')));
     }
   }
 
   async function forceCloseShift(event: FormEvent<HTMLFormElement>, shift: ShiftRecord) {
     event.preventDefault();
-    if (!user || user.role !== 'owner') return;
+    if (!user || (user.role !== 'owner' && !await userService.hasPermission(user.id, 'manage_shifts'))) return;
     if (!forceShiftConfirmed) {
-      setError('Confirm the zero-difference force close first.');
+      setError(t('shift.confirmForceCloseFirst'));
       return;
     }
     setError('');
@@ -291,9 +292,9 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       setForceShiftConfirmed(false);
       await refresh();
       setForceCloseShiftTarget(null);
-      setNotice(`Closed at zero difference, ${closedShift.voidsAutoApprovedCount ?? 0} voids auto-approved.`);
+      setNotice(t('shift.forceCloseSuccess', { count: closedShift.voidsAutoApprovedCount ?? 0 }));
     } catch (closeError) {
-      setError(closeError instanceof Error ? closeError.message : 'Unable to force-close this shift.');
+      setError(localizeErrorMessage(closeError, t('shift.unableToForceClose')));
     }
   }
 
@@ -341,9 +342,9 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
         ? await reportService.createXReport(storeId, user.name)
         : await reportService.createOwnShiftXReport(storeId, user.id, user.name);
       setReportPreview(report);
-      setNotice(ownerMode ? 'X report created. The day remains open.' : 'Own-shift X preview created. Nothing was recorded as a Z report.');
+      setNotice(t(ownerMode ? 'shift.xReportCreated' : 'shift.ownXPreviewCreated'));
     } catch (reportError) {
-      setError(reportError instanceof Error ? reportError.message : 'Unable to create the X report.');
+      setError(localizeErrorMessage(reportError, t('shift.unableToCreateXReport')));
     }
   }
 
@@ -355,12 +356,12 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       if (latestDayStatus.dayIsClosed) {
         setZSheetOpen(false);
         setNotice(latestDayStatus.lastZ
-          ? `${latestDayStatus.lastZ.reportNumber} is already closed. Open a new shift to start another period.`
-          : 'The Z reporting period is already closed.');
+          ? t('shift.zAlreadyClosed', { reportNumber: latestDayStatus.lastZ.reportNumber })
+          : t('shift.zPeriodAlreadyClosed'));
         return;
       }
     } catch (statusError) {
-      setError(statusError instanceof Error ? statusError.message : 'Unable to verify whether the Z reporting period is closed.');
+      setError(localizeErrorMessage(statusError, t('shift.unableToCheckZStatus')));
       return;
     }
     setOwnerPin('');
@@ -403,16 +404,16 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
         return;
       }
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Unable to check open shifts and pending voids.');
+      setError(localizeErrorMessage(loadError, t('shift.unableToCheckOpenShiftsVoids')));
       return;
     }
     setZSheetOpen(true);
   }
 
   async function forceCloseEverything() {
-    if (!user || user.role !== 'owner') return;
+    if (!user || (user.role !== 'owner' && !await userService.hasPermission(user.id, 'manage_shifts'))) return;
     if (!forceEverythingConfirmed) {
-      setError('Confirm that all pending voids will be approved and open shifts closed at zero difference.');
+      setError(t('shift.confirmForceCloseEverything'));
       return;
     }
     setError('');
@@ -423,9 +424,9 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       setOwnerPin('');
       setForceEverythingConfirmed(false);
       setZStep(1);
-      setNotice(`Closed ${result.shifts.length} shifts at zero difference; ${result.orders.length} voids auto-approved.`);
+      setNotice(t('shift.forceCloseEverythingSuccess', { shifts: result.shifts.length, voids: result.orders.length }));
     } catch (closeError) {
-      setError(closeError instanceof Error ? closeError.message : 'Unable to force-close everything.');
+      setError(localizeErrorMessage(closeError, t('shift.unableToForceCloseEverything')));
     } finally {
       setZBusy(false);
     }
@@ -434,13 +435,13 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   async function verifyZOwnerPin() {
     setError('');
     if (!/^\d{4}$/.test(ownerPin)) {
-      setError('Enter the 4-digit owner PIN.');
+      setError(t(user?.role === 'owner' ? 'shift.enterOwnerPin' : 'shift.enterStaffPin'));
       return;
     }
     setZBusy(true);
     try {
       if (!await userService.verifyStorePin(storeId, ownerPin, 'z_report')) {
-        throw new Error('The owner PIN is incorrect.');
+        throw new Error(t(user?.role === 'owner' ? 'shift.incorrectOwnerPin' : 'shift.incorrectStaffPin'));
       }
       const live = await reportService.getCurrentPeriodSummary(storeId);
       setZExpectedCash(live.expectedCashExFloatMillimes);
@@ -456,7 +457,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       setZReviewed(false);
       setZStep(2);
     } catch (pinError) {
-      setError(pinError instanceof Error ? pinError.message : 'Unable to verify the owner PIN.');
+      setError(localizeErrorMessage(pinError, t('shift.unableToVerifyPin')));
     } finally {
       setZBusy(false);
     }
@@ -476,22 +477,19 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       const latestDayStatus = await reportService.getDayStatus(storeId);
       setDayStatus(latestDayStatus);
       if (latestDayStatus.dayIsClosed) {
-        throw new Error('This Z reporting period is already closed. A duplicate Z report was not created.');
+        throw new Error(t('shift.duplicateZNotCreated'));
       }
       if (zUnresolvedReversals.length > 0) {
-        throw new Error('Resolve every ambiguous tab reversal before closing the Z report.');
+        throw new Error(t('shift.resolveTabReversals'));
       }
-      if (!ownerPin || !/^\d{4}$/.test(ownerPin)) throw new Error('Owner PIN is required for every Z report.');
+      if (!ownerPin || !/^\d{4}$/.test(ownerPin)) {
+        throw new Error(t(user.role === 'owner' ? 'shift.ownerPinRequired' : 'shift.staffPinRequired'));
+      }
       const countedCashMillimes = parseMillimes(zCountedCash);
-      const countedCardMillimes = parseMillimes(zCountedCard);
-      const countedOtherMillimes = store?.allowOtherPayments ? parseMillimes(zCountedOther) : 0;
-      const differenceMillimes = countedCashMillimes - zExpectedCash;
-      const cardDifferenceMillimes = countedCardMillimes - zExpectedCard;
-      const otherDifferenceMillimes = countedOtherMillimes - zExpectedOther;
-      if (differenceMillimes !== 0 && !zNote.trim()) throw new Error('A note is required for a cash difference.');
-      if ((cardDifferenceMillimes !== 0 || otherDifferenceMillimes !== 0) && !zNote.trim()) {
-        throw new Error('A note is required for a card or other payment difference.');
-      }
+      const countedCardMillimes = zExpectedCard > 0 ? parseMillimes(zCountedCard) : undefined;
+      const countedOtherMillimes = store?.allowOtherPayments && zExpectedOther > 0
+        ? parseMillimes(zCountedOther)
+        : undefined;
       const report = await reportService.closeDayWithZReport(storeId, user.name, ownerPin, {
         countedCashMillimes,
         countedCardMillimes,
@@ -521,11 +519,11 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       try {
         await refresh();
       } catch (refreshError) {
-        setError(`Z report was saved, but the screen could not refresh: ${refreshError instanceof Error ? refreshError.message : 'Unknown refresh error'}`);
+        setError(t('shift.zSavedRefreshFailed', { error: localizeErrorMessage(refreshError, t('common.refreshFailed')) }));
       }
-      setNotice('Z report created and the business day closed.');
+      setNotice(t('shift.zReportCreated'));
     } catch (reportError) {
-      setError(reportError instanceof Error ? reportError.message : 'Unable to close the business day.');
+      setError(localizeErrorMessage(reportError, t('shift.unableToCloseBusinessDay')));
     } finally {
       setZBusy(false);
       zSubmissionRef.current = false;
@@ -549,20 +547,20 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
         note: movementNote,
       });
       recorded = true;
-      setNotice(movementKind === 'in' ? 'Cash in recorded.' : 'Cash out recorded.');
+      setNotice(t(movementKind === 'in' ? 'shift.cashInRecorded' : 'shift.cashOutRecorded'));
       setMovementSheetOpen(false);
     } catch (movementError) {
       if (movementError instanceof CashMovementNotificationError) {
         recorded = true;
         setMovementSheetOpen(false);
       }
-      setError(movementError instanceof Error ? movementError.message : 'Unable to record the cash movement.');
+      setError(localizeErrorMessage(movementError, t('shift.unableToRecordCashMovement')));
     } finally {
       if (recorded) {
         try {
           await refresh();
         } catch (refreshError) {
-          setError(`Cash movement was recorded, but the shift could not refresh: ${refreshError instanceof Error ? refreshError.message : t('common.refreshFailed')}`);
+          setError(t('shift.cashMovementRefreshFailed', { error: localizeErrorMessage(refreshError, t('common.refreshFailed')) }));
         }
       }
       setMovementBusy(false);
@@ -572,44 +570,51 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
   const openCount = shifts.filter((shift) => shift.status === 'open').length;
   const enteredMovementMillimes = parseNonNegativeMillimes(movementAmount);
   const ownBreakdown = ownOpenShift ? breakdownsByShift[ownOpenShift.id] ?? emptyShiftBreakdown : emptyShiftBreakdown;
+  const blindStaffId = user?.role === 'staff' && resolveStoreSettings(store?.settings).blindShiftClosing
+    ? user.id
+    : undefined;
+  const blind = Boolean(blindStaffId);
 
   const pageTitle = t('shift.title');
   const openShifts = shifts.filter((shift) => shift.status === 'open');
-  const openStaffNames = openShifts.map((shift) => staffNames[shift.staffId] ?? 'Staff').join(', ');
+  const openStaffNames = openShifts.map((shift) => staffNames[shift.staffId] ?? t('shift.staff')).join(', ');
   const dayStatusMessage = !ownerMode && dayStatus.dayIsClosed
-    ? 'Day closed. Open a shift to start a new day.'
+    ? t('shift.dayClosedOpenToStart')
     : openCount > 0
-    ? `Day open - ${openCount} ${openCount === 1 ? 'shift' : 'shifts'} running${openStaffNames ? `: ${openStaffNames}` : ''}`
+    ? openStaffNames
+      ? t('shift.dayOpenWithStaff', { status: t(openCount === 1 ? 'shift.dayOpenOne' : 'shift.dayOpenMany', { count: openCount }), staff: openStaffNames })
+      : t(openCount === 1 ? 'shift.dayOpenOne' : 'shift.dayOpenMany', { count: openCount })
     : dayStatus.dayIsClosed
-      ? `Day closed - ${dayStatus.lastZ?.reportNumber ?? 'Z report'} at ${dayStatus.lastZ ? new Date(dayStatus.lastZ.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}. Open a shift to start a new day.`
+      ? t('shift.dayClosedAt', { reportNumber: dayStatus.lastZ?.reportNumber ?? t('shift.zReport'), time: dayStatus.lastZ ? new Date(dayStatus.lastZ.createdAt).toLocaleTimeString(getLanguage(), { hour: '2-digit', minute: '2-digit' }) : '--:--' })
       : dayStatus.hasActivity
-        ? 'Day open - no shifts running'
-        : 'No shift opened yet today';
+        ? t('shift.dayOpenNoShifts')
+        : t('shift.noShiftOpenedToday');
   const reportDisabledReason = dayStatus.dayIsClosed
-    ? 'The business day is closed. Open a new shift before creating another report.'
+    ? t('shift.businessDayClosedReport')
     : !dayStatus.hasActivity
-      ? 'No shift has been opened yet today.'
+      ? t('shift.noShiftOpenedToday')
       : '';
   const zDisabledReason = reportDisabledReason ||
-    (openCount > 0 ? 'Close every open shift before creating a Z report.' : '') ||
-    (pendingVoidOrders.length > 0 ? 'Resolve every void request before creating a Z report.' : '');
+    (openCount > 0 ? t('shift.closeOpenShiftsBeforeZ') : '') ||
+    (pendingVoidOrders.length > 0 ? t('shift.resolveVoidsBeforeZ') : '');
   const parsedZCountedCash = parseNonNegativeMillimes(zCountedCash);
   const zDifference = parsedZCountedCash === undefined ? undefined : parsedZCountedCash - zExpectedCash;
   const parsedZCardMillimes = parseNonNegativeMillimes(zCountedCard);
   const parsedZOtherMillimes = parseNonNegativeMillimes(zCountedOther);
-  const zCardDifference = parsedZCardMillimes === undefined ? undefined : parsedZCardMillimes - zExpectedCard;
-  const zOtherDifference = store?.allowOtherPayments
+  const shouldCountCard = zExpectedCard > 0;
+  const shouldCountOther = Boolean(store?.allowOtherPayments && zExpectedOther > 0);
+  const zCardDifference = shouldCountCard && parsedZCardMillimes !== undefined
+    ? parsedZCardMillimes - zExpectedCard
+    : undefined;
+  const zOtherDifference = shouldCountOther
     ? parsedZOtherMillimes === undefined ? undefined : parsedZOtherMillimes - zExpectedOther
-    : 0;
+    : undefined;
   const hasZCountInputs = parsedZCountedCash !== undefined &&
-    parsedZCardMillimes !== undefined &&
-    (!store?.allowOtherPayments || parsedZOtherMillimes !== undefined);
-  const hasZDifference = Boolean(zDifference !== undefined && zDifference !== 0 ||
-    zCardDifference !== undefined && zCardDifference !== 0 ||
-    zOtherDifference !== undefined && zOtherDifference !== 0);
+    (!shouldCountCard || parsedZCardMillimes !== undefined) &&
+    (!shouldCountOther || parsedZOtherMillimes !== undefined);
   const filteredHistory = shifts.filter((shift) => {
-    const staffName = staffNames[shift.staffId] ?? 'Staff';
-    const searchText = `${staffName} ${new Date(shift.openedAt).toLocaleString()} ${shift.closedAt ? new Date(shift.closedAt).toLocaleString() : ''}`.toLocaleLowerCase();
+    const staffName = staffNames[shift.staffId] ?? t('shift.staff');
+    const searchText = `${staffName} ${new Date(shift.openedAt).toLocaleString(getLanguage())} ${shift.closedAt ? new Date(shift.closedAt).toLocaleString(getLanguage()) : ''}`.toLocaleLowerCase(getLanguage());
     return (historyStatus === 'all' || shift.status === historyStatus)
       && (historyStaff === 'all' || shift.staffId === historyStaff)
       && (!ownerMode || !historyDate || localDateKey(new Date(shift.openedAt)) === historyDate)
@@ -705,7 +710,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
           shift={closedShiftSummary.shift}
           breakdown={closedShiftSummary.breakdown}
           onDone={() => setClosedShiftSummary(undefined)}
-          blind={resolveStoreSettings(store?.settings).blindShiftClosing && !ownerMode}
+          blind={blind}
         />
       )}
 
@@ -715,6 +720,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
         <ShiftCurrent
           ownOpenShift={ownOpenShift}
           ownerMode={ownerMode}
+          blind={blind}
           ownBreakdown={ownBreakdown}
           store={store}
           cashMovements={cashMovements}
@@ -736,6 +742,7 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       {(!ownerMode || activeTab === 'shifts') && <ShiftHistory
           ownerMode={ownerMode}
           isOwnerUser={user?.role === 'owner'}
+          blindStaffId={blindStaffId}
           loading={loading}
           error={error}
           filteredHistory={filteredHistory}
@@ -762,6 +769,8 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
       )}
       <ShiftDialogs
         ownerMode={ownerMode}
+        blind={blind}
+        blindStaffId={blindStaffId}
         store={store}
         openShiftSheetOpen={openShiftSheetOpen}
         closeStartingCashSheet={closeStartingCashSheet}
@@ -811,7 +820,6 @@ function ShiftContent({ ownerMode }: { ownerMode: boolean }) {
         parsedZCountedCash={parsedZCountedCash}
         parsedZCardMillimes={parsedZCardMillimes}
         parsedZOtherMillimes={parsedZOtherMillimes}
-        hasZDifference={hasZDifference}
         hasZCountInputs={hasZCountInputs}
         closeShiftSheetOpen={closeShiftSheetOpen}
         ownOpenShift={ownOpenShift}

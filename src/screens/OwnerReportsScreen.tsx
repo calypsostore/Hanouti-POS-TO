@@ -5,7 +5,10 @@ import { StatusTag } from '../components/StatusTag';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
 import { PageHeader, SplitView } from '../components/layout';
-import { t, type TranslationKey } from '../i18n/translations';
+import { getLanguage, t as baseT, type TranslationKey, type TranslationValues } from '../i18n';
+import { enReports } from '../i18n/locales/en/reports';
+import { frReports } from '../i18n/locales/fr/reports';
+import { arReports } from '../i18n/locales/ar/reports';
 import { formatTnd } from '../lib/format';
 import { reportService } from '../services/reportService';
 import { useAuthStore } from '../stores/authStore';
@@ -18,6 +21,14 @@ type DashboardSummary = Awaited<ReturnType<typeof reportService.getDashboard>>;
 type InsightsData = Awaited<ReturnType<typeof reportService.getInsights>>;
 type Period = 'day' | 'week' | 'month' | 'year';
 type InsightRange = 'today' | 'yesterday' | 'last7' | 'last30' | 'month' | 'custom';
+type ReportsKey = keyof typeof enReports;
+const reportsLocales = { en: enReports, fr: frReports, ar: arReports };
+
+function t(key: TranslationKey | ReportsKey, values: TranslationValues = {}): string {
+  const localized = reportsLocales[getLanguage()][key as ReportsKey];
+  if (localized === undefined) return baseT(key as TranslationKey, values);
+  return localized.replace(/\{(\w+)\}/g, (_match, name: string) => String(values[name] ?? `{${name}}`));
+}
 const ReportSalesByDayChart = lazy(() => import('../components/PerformanceCharts').then((module) => ({ default: module.ReportSalesByDayChart })));
 const ReportSalesByHourChart = lazy(() => import('../components/PerformanceCharts').then((module) => ({ default: module.ReportSalesByHourChart })));
 const periodLabels: Record<Period, TranslationKey> = {
@@ -165,7 +176,7 @@ function OwnerReportsContent() {
     setLoading(true);
     if (insightFrom === undefined || insightTo === undefined) {
       setInsights(null);
-      setInsightsError('Choose an end date on or after the start date.');
+      setInsightsError(t('reportsPage.invalidDateRange'));
     } else {
       setInsightsError('');
     }
@@ -194,11 +205,11 @@ function OwnerReportsContent() {
 
   return (
     <WorkspaceLayout title={t('reports.title')} storeName={store?.name} links={ownerWorkspaceLinks}>
-      <PageHeader title={t('reports.title')} subtitle="X reports are live snapshots. Z reports close the current reporting period." />
+      <PageHeader title={t('reports.title')} subtitle={t('reportsPage.xzSubtitle')} />
 
       <section className="mb-4 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="font-display text-headline-md text-on-surface">Financial summary</h2>
+          <h2 className="font-display text-headline-md text-on-surface">{t('reportsPage.financialSummary')}</h2>
           <div className="flex gap-1 rounded-xl bg-surface-container-high p-1">
             {(['day', 'week', 'month', 'year'] as Period[]).map((value) => (
               <button
@@ -219,18 +230,18 @@ function OwnerReportsContent() {
 
       <section aria-labelledby="insights-title" className="mb-6 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
         <div className="mb-4">
-          <h2 id="insights-title" className="font-display text-headline-md text-on-surface">Insights</h2>
-          <p className="mt-1 font-body text-body-sm text-on-surface-variant">Explore sales, staff performance, and profitability.</p>
+          <h2 id="insights-title" className="font-display text-headline-md text-on-surface">{t('reportsPage.insights')}</h2>
+          <p className="mt-1 font-body text-body-sm text-on-surface-variant">{t('reportsPage.insightsHelp')}</p>
         </div>
         <div className="mb-4 flex flex-wrap gap-1 rounded-xl bg-surface-container-high p-1">
           {([
-            ['today', 'Today'],
-            ['yesterday', 'Yesterday'],
-            ['last7', 'Last 7 days'],
-            ['last30', 'Last 30 days'],
-            ['month', 'Month'],
-            ['custom', 'Custom'],
-          ] as [InsightRange, string][]).map(([value, label]) => (
+            ['today', 'reportsPage.today'],
+            ['yesterday', 'reportsPage.yesterday'],
+            ['last7', 'reportsPage.last7Days'],
+            ['last30', 'reportsPage.last30Days'],
+            ['month', 'reportsPage.month'],
+            ['custom', 'reportsPage.custom'],
+          ] as [InsightRange, ReportsKey][]).map(([value, label]) => (
             <button
               key={value}
               type="button"
@@ -238,16 +249,16 @@ function OwnerReportsContent() {
               onClick={() => setInsightRangeType(value)}
               className={`min-h-10 rounded-lg px-3 font-body text-label-sm ${insightRangeType === value ? 'bg-primary text-on-primary shadow-card' : 'text-on-surface-variant'}`}
             >
-              {label}
+              {t(label)}
             </button>
           ))}
         </div>
         {insightRangeType === 'custom' && (
           <div className="mb-4 grid gap-3 sm:grid-cols-2">
-            <label className="font-body text-label-md text-on-surface">From
+            <label className="font-body text-label-md text-on-surface">{t('reportsPage.from')}
               <input type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" />
             </label>
-            <label className="font-body text-label-md text-on-surface">To
+            <label className="font-body text-label-md text-on-surface">{t('reportsPage.to')}
               <input type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" />
             </label>
           </div>
@@ -256,12 +267,12 @@ function OwnerReportsContent() {
         {insights && (
           <div className="flex flex-col gap-3">
             <article className="rounded-xl bg-surface-container-low p-3">
-              <h3 className="font-display text-title-md text-on-surface">Sales by day</h3>
+              <h3 className="font-display text-title-md text-on-surface">{t('reportsPage.salesByDay')}</h3>
               <div className="mt-3 h-56 min-w-0">
                 <Suspense fallback={<div className="h-full" aria-hidden="true" />}>
                   <ReportSalesByDayChart data={insights.salesByDay.map((day) => ({
                     ...day,
-                    label: new Date(`${day.date}T00:00:00`).toLocaleDateString([], { month: 'short', day: 'numeric' }),
+                    label: new Date(`${day.date}T00:00:00`).toLocaleDateString(getLanguage(), { month: 'short', day: 'numeric' }),
                     sales: day.salesMillimes / 1000,
                   }))} />
                 </Suspense>
@@ -270,7 +281,7 @@ function OwnerReportsContent() {
 
             <div className="grid gap-3 lg:grid-cols-2">
               <article className="min-w-0 rounded-xl bg-surface-container-low p-3">
-                <h3 className="font-display text-title-md text-on-surface">Sales by hour</h3>
+                <h3 className="font-display text-title-md text-on-surface">{t('reportsPage.salesByHour')}</h3>
                 <div className="mt-3 h-56">
                   <Suspense fallback={<div className="h-full" aria-hidden="true" />}>
                     <ReportSalesByHourChart data={insights.salesByHour.map((hour) => ({
@@ -280,15 +291,15 @@ function OwnerReportsContent() {
                   </Suspense>
                 </div>
               </article>
-              <RankedSales title="Sales by staff" items={insights.salesByStaff.map((member) => ({ name: member.name, salesMillimes: member.salesMillimes }))} />
+              <RankedSales title={t('reportsPage.salesByStaff')} items={insights.salesByStaff.map((member) => ({ name: member.name, salesMillimes: member.salesMillimes }))} />
             </div>
 
-            <RankedSales title="Sales by category" items={insights.salesByCategory.map((category) => ({ name: category.name, salesMillimes: category.totalMillimes }))} />
+            <RankedSales title={t('reportsPage.salesByCategory')} items={insights.salesByCategory.map((category) => ({ name: category.name, salesMillimes: category.totalMillimes }))} />
 
             <article className="rounded-xl bg-surface-container-low p-3">
-              <h3 className="mb-3 font-display text-title-md text-on-surface">Staff performance</h3>
+              <h3 className="mb-3 font-display text-title-md text-on-surface">{t('reportsPage.staffPerformance')}</h3>
               <div className="flex flex-col gap-2 sm:hidden">
-                {loading ? <ListSkeleton rows={2} label="Loading staff performance" /> : insights.staffPerformance.map((member) => (
+                {loading ? <ListSkeleton rows={2} label={t('reportsPage.loadingStaffPerformance')} /> : insights.staffPerformance.map((member) => (
                   <StaffPerformanceCard key={member.staffId} member={member} />
                 ))}
                 {!loading && !error && insights.staffPerformance.length === 0 && <p className="rounded-lg bg-surface-container-lowest p-3 font-body text-body-sm text-outline">{t('common.noData')}</p>}
@@ -296,7 +307,7 @@ function OwnerReportsContent() {
               <div className="hidden overflow-x-auto sm:block">
                 <table className="w-full min-w-[680px] text-left font-body text-body-sm">
                   <thead><tr className="border-b border-outline-variant text-label-sm text-on-surface-variant">
-                    <th className="px-2 py-2">Staff</th><th className="px-2 py-2">Orders</th><th className="px-2 py-2">Sales</th><th className="px-2 py-2">Average order</th><th className="px-2 py-2">Voids</th><th className="px-2 py-2">Comps</th><th className="px-2 py-2">Cash difference</th>
+                    <th className="px-2 py-2">{t('reportsPage.staff')}</th><th className="px-2 py-2">{t('reportsPage.orders')}</th><th className="px-2 py-2">{t('reportsPage.sales')}</th><th className="px-2 py-2">{t('reportsPage.averageOrder')}</th><th className="px-2 py-2">{t('reportsPage.voids')}</th><th className="px-2 py-2">{t('reportsPage.comps')}</th><th className="px-2 py-2">{t('reportsPage.cashDifference')}</th>
                   </tr></thead>
                   <tbody>{insights.staffPerformance.map((member) => (
                     <tr key={member.staffId} className="border-b border-outline-variant/50 last:border-0">
@@ -310,17 +321,17 @@ function OwnerReportsContent() {
 
             <div className="grid gap-3 sm:grid-cols-2">
               <article className="rounded-xl bg-surface-container-low p-3">
-                <h3 className="font-display text-title-md text-on-surface">Today vs same weekday last week</h3>
+                <h3 className="font-display text-title-md text-on-surface">{t('reportsPage.sameWeekdayComparison')}</h3>
                 <div className="mt-3 grid grid-cols-2 gap-2">
-                  <ComparisonValue label="Today" sales={insights.dayComparison.today.salesMillimes} orders={insights.dayComparison.today.orderCount} />
-                  <ComparisonValue label="Last week" sales={insights.dayComparison.lastWeek.salesMillimes} orders={insights.dayComparison.lastWeek.orderCount} />
+                  <ComparisonValue label={t('reportsPage.today')} sales={insights.dayComparison.today.salesMillimes} orders={insights.dayComparison.today.orderCount} />
+                  <ComparisonValue label={t('reportsPage.lastWeek')} sales={insights.dayComparison.lastWeek.salesMillimes} orders={insights.dayComparison.lastWeek.orderCount} />
                 </div>
               </article>
               <div className="grid grid-cols-2 gap-2">
-                <InsightMetric label="Waste and comps" value={insights.compsMillimes} />
-                <InsightMetric label="Expenses" value={insights.expensesMillimes} />
-                <InsightMetric label="Net profit" value={insights.netProfitMillimes} emphasized />
-                <InsightMetric label="Sales collected" value={insights.salesCollectedMillimes} />
+                <InsightMetric label={t('reportsPage.wasteAndComps')} value={insights.compsMillimes} />
+                <InsightMetric label={t('reportsPage.expenses')} value={insights.expensesMillimes} />
+                <InsightMetric label={t('reportsPage.netProfit')} value={insights.netProfitMillimes} emphasized />
+                <InsightMetric label={t('reportsPage.salesCollected')} value={insights.salesCollectedMillimes} />
               </div>
             </div>
           </div>
@@ -329,9 +340,9 @@ function OwnerReportsContent() {
 
       <section className="grid gap-3 md:grid-cols-2">
         <article className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-          <h2 className="font-display text-headline-sm">X / Z reports moved to Shifts</h2>
-          <p className="mt-2 font-body text-body-sm text-outline">Create live X reports, count and close the day with Z, and browse the daily archive.</p>
-          <a href="/owner/shifts" className="mt-4 inline-flex h-11 items-center rounded-xl bg-primary px-4 font-body text-label-lg text-on-primary">Open Shift reports</a>
+          <h2 className="font-display text-headline-sm">{t('reportsPage.xzMovedTitle')}</h2>
+          <p className="mt-2 font-body text-body-sm text-outline">{t('reportsPage.xzMovedHelp')}</p>
+          <a href="/owner/shifts" className="mt-4 inline-flex h-11 items-center rounded-xl bg-primary px-4 font-body text-label-lg text-on-primary">{t('reportsPage.openShiftReports')}</a>
         </article>
       </section>
 
@@ -339,11 +350,11 @@ function OwnerReportsContent() {
 
       <SplitView className="reports-split-view mt-6" list={
         <section>
-          <h2 className="mb-3 font-display text-headline-md text-on-surface">Report history</h2>
+          <h2 className="mb-3 font-display text-headline-md text-on-surface">{t('reportsPage.reportHistory')}</h2>
           <div className="flex flex-col gap-2">
-            {loading ? <ListSkeleton label="Loading report history" /> : reports.map((report) => (
+            {loading ? <ListSkeleton label={t('reportsPage.loadingReportHistory')} /> : reports.map((report) => (
               <button type="button" key={report.id} aria-pressed={selectedReport?.id === report.id} onClick={() => setSelectedReport(report)} className={`flex items-center justify-between gap-3 rounded-xl p-4 text-left shadow-card ${selectedReport?.id === report.id ? 'bg-primary-fixed/50' : 'bg-surface-container-lowest'}`}>
-                <div><p className="font-body text-label-md text-on-surface">{report.type} report • {report.businessDate}</p><p className="mt-1 font-body text-body-sm text-outline">{new Date(report.createdAt).toLocaleString()} • {report.orderCount} orders • Sales {formatTnd((report.salesCollectedMillimes ?? report.salesMillimes) / 1000)} DT • Expenses {formatTnd((report.expensesMillimes ?? 0) / 1000)} DT • Net {formatTnd((report.netProfitMillimes ?? 0) / 1000)} DT</p></div>
+                <div><p className="font-body text-label-md text-on-surface">{t('reportsPage.reportSummary', { type: report.type, date: report.businessDate })}</p><p className="mt-1 font-body text-body-sm text-outline">{new Date(report.createdAt).toLocaleString(getLanguage())} • {t('reportsPage.reportDetails', { orders: report.orderCount, sales: formatTnd((report.salesCollectedMillimes ?? report.salesMillimes) / 1000), expenses: formatTnd((report.expensesMillimes ?? 0) / 1000), net: formatTnd((report.netProfitMillimes ?? 0) / 1000) })}</p></div>
                 <span className="flex items-center gap-2"><StatusTag status={report.type === 'Z' ? 'closed' : 'open'}>{report.type}</StatusTag><MaterialIcon name="open_in_new" /></span>
               </button>
             ))}
@@ -353,7 +364,7 @@ function OwnerReportsContent() {
       } detail={
         selectedReport
           ? <ReportView inline report={selectedReport} store={store} settings={store?.settings} storeName={store?.name ?? ''} onClose={() => setSelectedReport(null)} />
-          : <p className="rounded-xl bg-surface-container-lowest p-6 font-body text-body-sm text-on-surface-variant">Select a report to preview it here.</p>
+          : <p className="rounded-xl bg-surface-container-lowest p-6 font-body text-body-sm text-on-surface-variant">{t('reportsPage.selectReportPreview')}</p>
       } />
       {selectedReport && <div className="reports-mobile-preview"><ReportView report={selectedReport} store={store} settings={store?.settings} storeName={store?.name ?? ''} onClose={() => setSelectedReport(null)} /></div>}
     </WorkspaceLayout>
@@ -363,10 +374,10 @@ function OwnerReportsContent() {
 
 function FinanceSummary({ summary }: { summary: DashboardSummary }) {
   const values = [
-    { label: t('finance.sales'), value: summary.salesCollectedMillimes, tone: 'text-primary' },
-    { label: t('finance.expenses'), value: summary.expensesMillimes, tone: 'text-error-dark' },
-    { label: t('finance.netProfit'), value: summary.netProfitMillimes, tone: summary.netProfitMillimes < 0 ? 'text-error-dark' : 'text-success-dark' },
-    { label: t('finance.receivable'), value: summary.receivableMillimes, tone: 'text-on-surface' },
+    { label: t('reportsPage.sales'), value: summary.salesCollectedMillimes, tone: 'text-primary' },
+    { label: t('reportsPage.expenses'), value: summary.expensesMillimes, tone: 'text-error-dark' },
+    { label: t('reportsPage.netProfit'), value: summary.netProfitMillimes, tone: summary.netProfitMillimes < 0 ? 'text-error-dark' : 'text-success-dark' },
+    { label: t('reportsPage.receivable'), value: summary.receivableMillimes, tone: 'text-on-surface' },
   ];
   return (
     <div className="grid grid-cols-2 gap-3 tablet:grid-cols-4">
@@ -411,11 +422,11 @@ function RankedSales({ title, items }: { title: string; items: { name: string; s
 
 function StaffPerformanceCard({ member }: { member: InsightsData['staffPerformance'][number] }) {
   const metrics = [
-    { label: 'Orders', value: member.orders.toLocaleString() },
-    { label: 'Average order', value: `${formatTnd(member.averageOrderMillimes / 1000)} DT` },
-    { label: 'Voids', value: member.voids.toLocaleString() },
-    { label: 'Comps', value: `${formatTnd(member.compsMillimes / 1000)} DT` },
-    { label: 'Cash difference', value: formatSignedTnd(member.cashDifferenceMillimes) },
+    { label: t('reportsPage.staffOrders'), value: member.orders.toLocaleString(getLanguage()) },
+    { label: t('reportsPage.staffAverageOrder'), value: `${formatTnd(member.averageOrderMillimes / 1000)} DT` },
+    { label: t('reportsPage.staffVoids'), value: member.voids.toLocaleString(getLanguage()) },
+    { label: t('reportsPage.staffComps'), value: `${formatTnd(member.compsMillimes / 1000)} DT` },
+    { label: t('reportsPage.staffCashDifference'), value: formatSignedTnd(member.cashDifferenceMillimes) },
   ];
   return (
     <article className="rounded-lg bg-surface-container-lowest p-3">
@@ -440,7 +451,7 @@ function ComparisonValue({ label, sales, orders }: { label: string; sales: numbe
     <div className="rounded-lg bg-surface-container-lowest p-3">
       <p className="font-body text-label-sm text-outline">{label}</p>
       <p className="mt-1 font-display text-title-md tabular-nums text-primary">{formatTnd(sales / 1000)} DT</p>
-      <p className="mt-1 font-body text-body-sm text-on-surface-variant">{orders} orders</p>
+      <p className="mt-1 font-body text-body-sm text-on-surface-variant">{t('reportsPage.ordersCount', { count: orders })}</p>
     </div>
   );
 }

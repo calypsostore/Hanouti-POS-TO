@@ -101,35 +101,35 @@ describe('device service authentication boundaries', () => {
     expect(mocks.mainSetSession).not.toHaveBeenCalled();
   });
 
-  it('uses the server-issued staff session after PIN verification, not the device identity', async () => {
+  it('uses the server-issued account session after PIN verification, not the device identity', async () => {
     mocks.deviceInvoke.mockResolvedValue({
       data: {
-        access_token: 'staff-access',
-        refresh_token: 'staff-refresh',
+        access_token: 'account-access',
+        refresh_token: 'account-refresh',
         must_change_password: false,
       },
       error: null,
     });
 
-    await deviceService.loginStaffWithPin('4826');
+    await deviceService.loginWithPin('4826');
 
     expect(mocks.deviceInvoke).toHaveBeenCalledWith('device-staff-pin', { body: { pin: '4826' } });
     expect(mocks.mainSetSession).toHaveBeenCalledWith({
-      access_token: 'staff-access',
-      refresh_token: 'staff-refresh',
+      access_token: 'account-access',
+      refresh_token: 'account-refresh',
     });
   });
 
-  it('surfaces a rejected PIN without attempting to establish an employee session', async () => {
+  it('surfaces a rejected PIN without attempting to establish an account session', async () => {
     mocks.deviceInvoke.mockResolvedValue({
       data: null,
       error: {
         message: 'Edge Function returned a non-2xx status code',
-        context: new Response(JSON.stringify({ error: 'The staff PIN is incorrect or unavailable.' }), { status: 401 }),
+        context: new Response(JSON.stringify({ error: 'The PIN is incorrect or unavailable.' }), { status: 401 }),
       },
     });
 
-    await expect(deviceService.loginStaffWithPin('0000')).rejects.toThrow('The staff PIN is incorrect or unavailable.');
+    await expect(deviceService.loginWithPin('0000')).rejects.toThrow('The PIN is incorrect or unavailable.');
     expect(mocks.mainSetSession).not.toHaveBeenCalled();
   });
 

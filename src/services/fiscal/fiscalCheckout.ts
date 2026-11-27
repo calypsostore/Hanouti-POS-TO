@@ -1,5 +1,6 @@
 import type { OrderLineRecord } from '../../types/domain';
 import type {
+  FiscalLineTaxInput,
   FiscalOrderSnapshot,
   FiscalProfileRecord,
   FiscalTaxAssignmentRecord,
@@ -20,18 +21,22 @@ function resolveAssignment(
   taxType: FiscalTaxType,
   date: string,
   assignments: FiscalTaxAssignmentRecord[],
-): FiscalTaxAssignmentRecord {
+): FiscalTaxAssignmentRecord | undefined {
   const effective = assignments.filter((assignment) =>
     assignment.storeId === storeId &&
     assignment.taxType === taxType &&
     isEffective(date, assignment.effectiveFrom, assignment.effectiveThrough));
   const itemMatches = effective.filter((assignment) => assignment.itemId === item.itemId);
-  const matches = itemMatches.length ? itemMatches : effective.filter((assignment) =>
-    !assignment.itemId && assignment.categoryId === item.categoryId);
-  if (matches.length !== 1) {
-    throw new Error(matches.length
-      ? `Order line ${item.itemId} has ambiguous ${taxType} classifications.`
-      : `Order line ${item.itemId} needs an effective ${taxType} classification.`);
+  const categoryMatches = effective.filter((assignment) =>
+    !assignment.itemId && assignment.categoryId && assignment.categoryId === item.categoryId);
+  const matches = itemMatches.length
+    ? itemMatches
+    : categoryMatches.length
+      ? categoryMatches
+      : effective.filter((assignment) => !assignment.itemId && !assignment.categoryId);
+  if (matches.length > 1) {
+    const scope = itemMatches.length ? 'item' : categoryMatches.length ? 'category' : 'all-products';
+    throw new Error(`Order line ${item.itemId} has ambiguous ${scope}-level ${taxType} classifications.`);
   }
   return matches[0];
 }
@@ -67,17 +72,20 @@ export function calculateFiscalCheckoutSnapshot(input: {
   }
   if (!input.lines.length) throw new Error('A fiscal calculation needs at least one order line.');
 
-  const lines = input.lines.map((line, index) => {
-    const resolved = requiredTaxTypes.map((taxType) => ({
-      taxType,
-      assignment: resolveAssignment(
+  const lines: FiscalLineTaxInput[] = [];
+  for (const [index, line] of input.lines.entries()) {
+    const resolved: Array<{ taxType: FiscalTaxType; assignment: FiscalTaxAssignmentRecord }> = [];
+    for (const taxType of requiredTaxTypes) {
+      const assignment = resolveAssignment(
         input.storeId,
         line,
         taxType,
         input.transactionDate,
         input.assignments,
-      ),
-    }));
+      );
+      if (!assignment || assignment.treatment === 'unconfigured') return undefined;
+      resolved.push({ taxType, assignment });
+    }
     const treatments = resolved.map(({ taxType, assignment }) => ({
       taxType,
       treatment: assignment.treatment,
@@ -95,7 +103,7 @@ export function calculateFiscalCheckoutSnapshot(input: {
       }
       return [rule];
     });
-    return {
+    lines.push({
       lineId: `line-${index + 1}`,
       itemId: line.itemId,
       categoryId: line.categoryId,
@@ -105,7 +113,7 @@ export function calculateFiscalCheckoutSnapshot(input: {
       requiredTaxTypes,
       treatments,
       rules,
-    };
-  });
+    });
+  }
   return calculateFiscalOrder(input.storeId, input.transactionDate, lines);
 }

@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { hexToRgbTriplet, resolveStoreAppearance, type ColorMode, type StoreAppearance } from '../theme/themeRegistry';
 import type { DesignTokens, ThemePalette } from '../theme/designTokens';
 import { applyStoreAppearance } from '../lib/storeAppearance';
+import { t, type TranslationKey } from '../i18n/translations';
 import { MaterialIcon } from './MaterialIcon';
 import { SettingsGlassSection } from './settings/SettingsGlassSection';
+import { localizeErrorMessage } from '../i18n';
 
 interface AppearanceSettingsProps {
   appearance: StoreAppearance;
@@ -11,95 +13,95 @@ interface AppearanceSettingsProps {
   onSave: (appearance: StoreAppearance) => Promise<StoreAppearance>;
 }
 
-const paletteFields: Array<{ key: keyof ThemePalette; label: string; group: string }> = [
-  { key: 'primary', label: 'Primary', group: 'Brand' },
-  { key: 'primaryPressed', label: 'Primary active', group: 'Brand' },
-  { key: 'primaryDark', label: 'Primary dark', group: 'Brand' },
-  { key: 'onPrimary', label: 'Text on primary', group: 'Brand' },
-  { key: 'primaryFixed', label: 'Primary fixed', group: 'Brand' },
-  { key: 'primaryFixedDim', label: 'Primary fixed dim', group: 'Brand' },
-  { key: 'secondary', label: 'Secondary', group: 'Brand' },
-  { key: 'secondaryContainer', label: 'Secondary container', group: 'Brand' },
-  { key: 'accent', label: 'Accent', group: 'Brand' },
-  { key: 'accentContainer', label: 'Accent container', group: 'Brand' },
-  { key: 'onAccent', label: 'Text on accent', group: 'Brand' },
-  { key: 'surface', label: 'Page background', group: 'Surfaces' },
-  { key: 'surfaceDim', label: 'Dim surface', group: 'Surfaces' },
-  { key: 'surfaceContainer', label: 'Section background', group: 'Surfaces' },
-  { key: 'surfaceContainerLow', label: 'Low surface', group: 'Surfaces' },
-  { key: 'surfaceContainerHigh', label: 'High surface', group: 'Surfaces' },
-  { key: 'surfaceContainerHighest', label: 'Highest surface', group: 'Surfaces' },
-  { key: 'surfaceContainerLowest', label: 'Card background', group: 'Surfaces' },
-  { key: 'onSurface', label: 'Text', group: 'Surfaces' },
-  { key: 'onSurfaceVariant', label: 'Muted text', group: 'Surfaces' },
-  { key: 'outline', label: 'Borders', group: 'Surfaces' },
-  { key: 'outlineVariant', label: 'Dividers', group: 'Surfaces' },
-  { key: 'success', label: 'Success', group: 'Feedback' },
-  { key: 'successDark', label: 'Success dark', group: 'Feedback' },
-  { key: 'successForeground', label: 'Success text', group: 'Feedback' },
-  { key: 'successContainer', label: 'Success background', group: 'Feedback' },
-  { key: 'onSuccess', label: 'Text on success', group: 'Feedback' },
-  { key: 'onSuccessContainer', label: 'Text on success background', group: 'Feedback' },
-  { key: 'warning', label: 'Warning', group: 'Feedback' },
-  { key: 'warningDark', label: 'Warning dark', group: 'Feedback' },
-  { key: 'warningContainer', label: 'Warning background', group: 'Feedback' },
-  { key: 'onWarningContainer', label: 'Text on warning background', group: 'Feedback' },
-  { key: 'info', label: 'Information', group: 'Feedback' },
-  { key: 'infoDark', label: 'Information dark', group: 'Feedback' },
-  { key: 'infoContainer', label: 'Information background', group: 'Feedback' },
-  { key: 'onInfoContainer', label: 'Text on information background', group: 'Feedback' },
-  { key: 'error', label: 'Error', group: 'Feedback' },
-  { key: 'errorDark', label: 'Error dark', group: 'Feedback' },
-  { key: 'errorContainer', label: 'Error background', group: 'Feedback' },
-  { key: 'onErrorContainer', label: 'Text on error background', group: 'Feedback' },
+const paletteFields: Array<{ key: keyof ThemePalette; label: TranslationKey; group: TranslationKey }> = [
+  { key: 'primary', label: 'settings.palettePrimary', group: 'settings.paletteBrand' },
+  { key: 'primaryPressed', label: 'settings.palettePrimaryActive', group: 'settings.paletteBrand' },
+  { key: 'primaryDark', label: 'settings.palettePrimaryDark', group: 'settings.paletteBrand' },
+  { key: 'onPrimary', label: 'settings.paletteOnPrimary', group: 'settings.paletteBrand' },
+  { key: 'primaryFixed', label: 'settings.palettePrimaryFixed', group: 'settings.paletteBrand' },
+  { key: 'primaryFixedDim', label: 'settings.palettePrimaryFixedDim', group: 'settings.paletteBrand' },
+  { key: 'secondary', label: 'settings.paletteSecondary', group: 'settings.paletteBrand' },
+  { key: 'secondaryContainer', label: 'settings.paletteSecondaryContainer', group: 'settings.paletteBrand' },
+  { key: 'accent', label: 'settings.paletteAccent', group: 'settings.paletteBrand' },
+  { key: 'accentContainer', label: 'settings.paletteAccentContainer', group: 'settings.paletteBrand' },
+  { key: 'onAccent', label: 'settings.paletteOnAccent', group: 'settings.paletteBrand' },
+  { key: 'surface', label: 'settings.palettePageBackground', group: 'settings.paletteSurfaces' },
+  { key: 'surfaceDim', label: 'settings.paletteDimSurface', group: 'settings.paletteSurfaces' },
+  { key: 'surfaceContainer', label: 'settings.paletteSectionBackground', group: 'settings.paletteSurfaces' },
+  { key: 'surfaceContainerLow', label: 'settings.paletteLowSurface', group: 'settings.paletteSurfaces' },
+  { key: 'surfaceContainerHigh', label: 'settings.paletteHighSurface', group: 'settings.paletteSurfaces' },
+  { key: 'surfaceContainerHighest', label: 'settings.paletteHighestSurface', group: 'settings.paletteSurfaces' },
+  { key: 'surfaceContainerLowest', label: 'settings.paletteCardBackground', group: 'settings.paletteSurfaces' },
+  { key: 'onSurface', label: 'settings.paletteText', group: 'settings.paletteSurfaces' },
+  { key: 'onSurfaceVariant', label: 'settings.paletteMutedText', group: 'settings.paletteSurfaces' },
+  { key: 'outline', label: 'settings.paletteBorders', group: 'settings.paletteSurfaces' },
+  { key: 'outlineVariant', label: 'settings.paletteDividers', group: 'settings.paletteSurfaces' },
+  { key: 'success', label: 'settings.paletteSuccess', group: 'settings.paletteFeedback' },
+  { key: 'successDark', label: 'settings.paletteSuccessDark', group: 'settings.paletteFeedback' },
+  { key: 'successForeground', label: 'settings.paletteSuccessText', group: 'settings.paletteFeedback' },
+  { key: 'successContainer', label: 'settings.paletteSuccessBackground', group: 'settings.paletteFeedback' },
+  { key: 'onSuccess', label: 'settings.paletteOnSuccess', group: 'settings.paletteFeedback' },
+  { key: 'onSuccessContainer', label: 'settings.paletteOnSuccessBackground', group: 'settings.paletteFeedback' },
+  { key: 'warning', label: 'settings.paletteWarning', group: 'settings.paletteFeedback' },
+  { key: 'warningDark', label: 'settings.paletteWarningDark', group: 'settings.paletteFeedback' },
+  { key: 'warningContainer', label: 'settings.paletteWarningBackground', group: 'settings.paletteFeedback' },
+  { key: 'onWarningContainer', label: 'settings.paletteOnWarningBackground', group: 'settings.paletteFeedback' },
+  { key: 'info', label: 'settings.paletteInformation', group: 'settings.paletteFeedback' },
+  { key: 'infoDark', label: 'settings.paletteInformationDark', group: 'settings.paletteFeedback' },
+  { key: 'infoContainer', label: 'settings.paletteInformationContainer', group: 'settings.paletteFeedback' },
+  { key: 'onInfoContainer', label: 'settings.paletteOnInformation', group: 'settings.paletteFeedback' },
+  { key: 'error', label: 'settings.paletteError', group: 'settings.paletteFeedback' },
+  { key: 'errorDark', label: 'settings.paletteErrorDark', group: 'settings.paletteFeedback' },
+  { key: 'errorContainer', label: 'settings.paletteErrorBackground', group: 'settings.paletteFeedback' },
+  { key: 'onErrorContainer', label: 'settings.paletteOnError', group: 'settings.paletteFeedback' },
 ];
 
-const dimensionFields: Array<{ key: keyof DesignTokens['dimensions']; label: string }> = [
-  { key: 'buttonHeightSmall', label: 'Small button height' },
-  { key: 'buttonHeightMedium', label: 'Medium button height' },
-  { key: 'buttonHeightLarge', label: 'Large button height' },
-  { key: 'buttonRadius', label: 'Button radius' },
-  { key: 'buttonPaddingSmall', label: 'Small button padding' },
-  { key: 'buttonPaddingMedium', label: 'Medium button padding' },
-  { key: 'buttonPaddingLarge', label: 'Large button padding' },
-  { key: 'inputHeight', label: 'Input height' },
-  { key: 'inputRadius', label: 'Input radius' },
-  { key: 'cardRadius', label: 'Card radius' },
-  { key: 'cardPadding', label: 'Card padding' },
-  { key: 'tableHeaderHeight', label: 'Table header height' },
-  { key: 'tableRowHeight', label: 'Table row height' },
-  { key: 'tableCellPaddingX', label: 'Table horizontal padding' },
-  { key: 'tableCellPaddingY', label: 'Table vertical padding' },
-  { key: 'pageMaxWidth', label: 'Page maximum width' },
-  { key: 'pageGutterMobile', label: 'Mobile page gutter' },
-  { key: 'pageGutterTablet', label: 'Tablet page gutter' },
-  { key: 'pageGutterDesktop', label: 'Desktop page gutter' },
-  { key: 'sectionGap', label: 'Section spacing' },
-  { key: 'cardGap', label: 'Card spacing' },
-  { key: 'iconSmall', label: 'Small icon size' },
-  { key: 'iconMedium', label: 'Medium icon size' },
+const dimensionFields: Array<{ key: keyof DesignTokens['dimensions']; label: TranslationKey }> = [
+  { key: 'buttonHeightSmall', label: 'settings.dimensionSmallButtonHeight' },
+  { key: 'buttonHeightMedium', label: 'settings.dimensionMediumButtonHeight' },
+  { key: 'buttonHeightLarge', label: 'settings.dimensionLargeButtonHeight' },
+  { key: 'buttonRadius', label: 'settings.dimensionButtonRadius' },
+  { key: 'buttonPaddingSmall', label: 'settings.dimensionSmallButtonPadding' },
+  { key: 'buttonPaddingMedium', label: 'settings.dimensionMediumButtonPadding' },
+  { key: 'buttonPaddingLarge', label: 'settings.dimensionLargeButtonPadding' },
+  { key: 'inputHeight', label: 'settings.dimensionInputHeight' },
+  { key: 'inputRadius', label: 'settings.dimensionInputRadius' },
+  { key: 'cardRadius', label: 'settings.dimensionCardRadius' },
+  { key: 'cardPadding', label: 'settings.dimensionCardPadding' },
+  { key: 'tableHeaderHeight', label: 'settings.dimensionTableHeaderHeight' },
+  { key: 'tableRowHeight', label: 'settings.dimensionTableRowHeight' },
+  { key: 'tableCellPaddingX', label: 'settings.dimensionTableHorizontalPadding' },
+  { key: 'tableCellPaddingY', label: 'settings.dimensionTableVerticalPadding' },
+  { key: 'pageMaxWidth', label: 'settings.dimensionPageMaxWidth' },
+  { key: 'pageGutterMobile', label: 'settings.dimensionMobileGutter' },
+  { key: 'pageGutterTablet', label: 'settings.dimensionTabletGutter' },
+  { key: 'pageGutterDesktop', label: 'settings.dimensionDesktopGutter' },
+  { key: 'sectionGap', label: 'settings.dimensionSectionGap' },
+  { key: 'cardGap', label: 'settings.dimensionCardGap' },
+  { key: 'iconSmall', label: 'settings.dimensionSmallIcon' },
+  { key: 'iconMedium', label: 'settings.dimensionMediumIcon' },
 ];
 
-const radiusFields: Array<{ key: keyof DesignTokens['radius']; label: string }> = [
-  { key: 'small', label: 'Small radius' },
-  { key: 'medium', label: 'Medium radius' },
-  { key: 'large', label: 'Large radius' },
-  { key: 'pill', label: 'Pill radius' },
+const radiusFields: Array<{ key: keyof DesignTokens['radius']; label: TranslationKey }> = [
+  { key: 'small', label: 'settings.radiusSmall' },
+  { key: 'medium', label: 'settings.radiusMedium' },
+  { key: 'large', label: 'settings.radiusLarge' },
+  { key: 'pill', label: 'settings.radiusPill' },
 ];
 
-const textStyles: Array<{ key: keyof DesignTokens['typography']['sizes']; label: string }> = [
-  { key: 'headlineXl', label: 'Headline XL' },
-  { key: 'headlineLg', label: 'Headline large' },
-  { key: 'headlineMd', label: 'Headline medium' },
-  { key: 'headlineSm', label: 'Headline small' },
-  { key: 'titleMd', label: 'Title medium' },
-  { key: 'bodyLg', label: 'Body large' },
-  { key: 'bodyMd', label: 'Body medium' },
-  { key: 'bodySm', label: 'Body small' },
-  { key: 'labelLg', label: 'Label large' },
-  { key: 'labelMd', label: 'Label medium' },
-  { key: 'labelSm', label: 'Label small' },
-  { key: 'currencyDisplay', label: 'Currency display' },
+const textStyles: Array<{ key: keyof DesignTokens['typography']['sizes']; label: TranslationKey }> = [
+  { key: 'headlineXl', label: 'settings.textHeadlineXl' },
+  { key: 'headlineLg', label: 'settings.textHeadlineLg' },
+  { key: 'headlineMd', label: 'settings.textHeadlineMd' },
+  { key: 'headlineSm', label: 'settings.textHeadlineSm' },
+  { key: 'titleMd', label: 'settings.textTitleMd' },
+  { key: 'bodyLg', label: 'settings.textBodyLg' },
+  { key: 'bodyMd', label: 'settings.textBodyMd' },
+  { key: 'bodySm', label: 'settings.textBodySm' },
+  { key: 'labelLg', label: 'settings.textLabelLg' },
+  { key: 'labelMd', label: 'settings.textLabelMd' },
+  { key: 'labelSm', label: 'settings.textLabelSm' },
+  { key: 'currencyDisplay', label: 'settings.textCurrency' },
 ];
 
 const fontOptions = ['Inter, sans-serif', 'Plus Jakarta Sans, sans-serif', 'Arial, sans-serif', 'system-ui, sans-serif'];
@@ -126,7 +128,7 @@ function updateTokens(
   return { ...appearance, [mode]: update(appearance[mode]) };
 }
 
-function validateAppearance(appearance: StoreAppearance): string | null {
+function validateAppearance(appearance: StoreAppearance): TranslationKey | null {
   for (const mode of ['light', 'dark'] as const) {
     const tokens = appearance[mode];
     const lengths = [
@@ -136,24 +138,24 @@ function validateAppearance(appearance: StoreAppearance): string | null {
       ...Object.values(tokens.typography.sizes),
       ...Object.values(tokens.typography.lineHeights),
     ];
-    if (lengths.some((value) => !lengthPattern.test(value))) return 'Design measurements must use px, rem, em, or percent units.';
+    if (lengths.some((value) => !lengthPattern.test(value))) return 'settings.validationMeasurements';
     if (Object.values(tokens.typography.weights).some((value) => !Number.isInteger(value) || value < 100 || value > 900)) {
-      return 'Font weights must be whole numbers from 100 to 900.';
+      return 'settings.validationWeights';
     }
     if (tokens.glass.surfaceAlpha < 0 || tokens.glass.surfaceAlpha > 1
       || tokens.glass.highSurfaceAlpha < 0 || tokens.glass.highSurfaceAlpha > 1
       || tokens.glass.blurPx < 0 || tokens.glass.blurPx > 64
       || tokens.glass.saturation < 0 || tokens.glass.saturation > 3) {
-      return 'Surface transparency, blur, and saturation are outside the allowed range.';
+      return 'settings.validationGlass';
     }
     if (Object.values(tokens.shadows).some((value) =>
       value.length === 0 || value.length > 240 || !safeCssPattern.test(value) || /(?:url|var|expression)\s*\(/i.test(value))) {
-      return 'Shadow values may contain only safe CSS color and measurement values.';
+      return 'settings.validationShadows';
     }
     if (tokens.gradients.page !== 'none' && (tokens.gradients.page.length > 240
       || !safeCssPattern.test(tokens.gradients.page) || !gradientPattern.test(tokens.gradients.page))
       || /(?:url|var|expression)\s*\(/i.test(tokens.gradients.page)) {
-      return 'The page background gradient is invalid.';
+      return 'settings.validationGradient';
     }
   }
   return null;
@@ -186,60 +188,69 @@ export function AppearanceSettings({ appearance, canEdit, onSave }: AppearanceSe
     setNotice('');
   }
 
-  async function save() {
+  async function save(appearanceToSave: StoreAppearance = draft) {
     if (!canEdit || saving) return;
     setError('');
     setNotice('');
-    const validationError = validateAppearance(draft);
+    const validationError = validateAppearance(appearanceToSave);
     if (validationError) {
-      setError(validationError);
+      setError(t(validationError));
       return;
     }
     setSaving(true);
     try {
-      const saved = await onSave(resolveStoreAppearance(draft));
+      const saved = await onSave(resolveStoreAppearance(appearanceToSave));
       setDraft(resolveStoreAppearance(saved));
       applyStoreAppearance(saved);
-      setNotice('The store theme has been saved and applied to this device.');
+      setNotice(t('settings.themeSaved'));
     } catch (saveError) {
       console.error('Unable to save the store theme.', saveError);
-      setError(saveError instanceof Error ? saveError.message : 'Unable to save the store theme. Please try again.');
+      if (appearanceToSave.mode !== appearance.mode) {
+        setDraft((current) => ({ ...current, mode: appearance.mode }));
+      }
+      setError(localizeErrorMessage(saveError, t('settings.unableSaveTheme')));
     } finally {
       setSaving(false);
     }
   }
 
+  async function changeMode(mode: ColorMode) {
+    if (!canEdit || saving || mode === draft.mode) return;
+    const nextAppearance = { ...draft, mode };
+    setDraft(nextAppearance);
+    await save(nextAppearance);
+  }
+
   return (
     <div className="flex flex-col gap-[var(--section-gap)]">
       <SettingsGlassSection
-        heading="Theme settings"
-        description="Hanouti Crystal Glass is the single official theme. Owners control the shared appearance for this store."
+        heading={t('settings.themeTitle')}
+        description={t('settings.themeDescription')}
         icon="palette"
         headingId="store-theme-settings-heading"
       >
         <p className="rounded-xl bg-surface-container-low p-3 font-body text-body-sm text-on-surface-variant">
-          Active theme: <strong className="text-on-surface">Hanouti Crystal Glass</strong>
-          {!canEdit && ' — only the store owner can change shared appearance settings.'}
+          {t('settings.activeTheme')} <strong className="text-on-surface">{t('settings.themeName')}</strong>
+          {!canEdit && t('settings.ownerOnlyAppearance')}
         </p>
 
-        <label htmlFor="store-theme-mode" className="font-body text-label-md text-on-surface">Color mode</label>
+        <label htmlFor="store-theme-mode" className="font-body text-label-md text-on-surface">{t('settings.colorMode')}</label>
         <select
           id="store-theme-mode"
           value={draft.mode}
-          disabled={!canEdit}
+          disabled={!canEdit || saving}
           onChange={(event) => {
             const mode = event.currentTarget.value as ColorMode;
-            setDraft((current) => ({ ...current, mode }));
-            setNotice('');
+            void changeMode(mode);
           }}
           className="w-full bg-surface-container-low px-3 font-body text-body-md text-on-surface outline-none focus:ring-2 focus:ring-primary disabled:opacity-60"
         >
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
-          <option value="system">System</option>
+          <option value="light">{t('settings.light')}</option>
+          <option value="dark">{t('settings.dark')}</option>
+          <option value="system">{t('settings.system')}</option>
         </select>
 
-        <div className="flex flex-wrap gap-2" aria-label="Choose which palette to edit">
+        <div className="flex flex-wrap gap-2" aria-label={t('settings.choosePalette')}>
           {(['light', 'dark'] as const).map((mode) => (
             <button
               key={mode}
@@ -249,21 +260,21 @@ export function AppearanceSettings({ appearance, canEdit, onSave }: AppearanceSe
               onClick={() => setEditingMode(mode)}
               className={`min-h-10 rounded-lg px-3 font-body text-label-md ${editingMode === mode ? 'bg-primary text-on-primary' : 'bg-surface-container-high text-on-surface'} disabled:opacity-60`}
             >
-              Edit {mode} palette
+              {t('settings.editPalette', { mode: t(mode === 'light' ? 'settings.light' : 'settings.dark') })}
             </button>
           ))}
         </div>
 
-        {(['Brand', 'Surfaces', 'Feedback'] as const).map((group) => (
+        {(['settings.paletteBrand', 'settings.paletteSurfaces', 'settings.paletteFeedback'] as const).map((group) => (
           <fieldset key={group} className="min-w-0 rounded-xl border border-outline-variant p-3">
-            <legend className="px-1 font-body text-label-md text-on-surface">{group} colors</legend>
+            <legend className="px-1 font-body text-label-md text-on-surface">{t(group)}{t('settings.colorsSuffix')}</legend>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {paletteFields.filter((field) => field.group === group).map(({ key, label }) => (
                 <label key={key} className="flex min-w-0 items-center justify-between gap-3 font-body text-body-sm text-on-surface">
-                  <span>{label}</span>
+                  <span>{t(label)}</span>
                   <input
                     type="color"
-                    aria-label={`${editingMode} ${label} color`}
+                    aria-label={t('settings.colorAria', { mode: t(editingMode === 'light' ? 'settings.light' : 'settings.dark'), label: t(label) })}
                     disabled={!canEdit}
                     value={colorToHex(draft[editingMode].palette[key])}
                     onChange={(event) => updatePalette(key, event.currentTarget.value)}
@@ -276,11 +287,11 @@ export function AppearanceSettings({ appearance, canEdit, onSave }: AppearanceSe
         ))}
 
         <fieldset className="min-w-0 rounded-xl border border-outline-variant p-3">
-          <legend className="px-1 font-body text-label-md text-on-surface">Typography</legend>
+          <legend className="px-1 font-body text-label-md text-on-surface">{t('settings.typography')}</legend>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {(['fontDisplay', 'fontBody'] as const).map((key) => (
               <label key={key} className="flex flex-col gap-1 font-body text-body-sm text-on-surface">
-                {key === 'fontDisplay' ? 'Display font' : 'Body font'}
+                {key === 'fontDisplay' ? t('settings.displayFont') : t('settings.bodyFont')}
                 <select
                   disabled={!canEdit}
                   value={draft[editingMode].typography[key]}
@@ -300,7 +311,7 @@ export function AppearanceSettings({ appearance, canEdit, onSave }: AppearanceSe
             ))}
             {textStyles.map(({ key, label }) => (
               <label key={key} className="flex flex-col gap-1 font-body text-body-sm text-on-surface">
-                {label} size (px)
+                {t('settings.sizePx', { label: t(label) })}
                 <input
                   type="number"
                   min="8"
@@ -322,7 +333,7 @@ export function AppearanceSettings({ appearance, canEdit, onSave }: AppearanceSe
             ))}
             {textStyles.map(({ key, label }) => (
               <label key={`line-${key}`} className="flex flex-col gap-1 font-body text-body-sm text-on-surface">
-                {label} line height (px)
+                {t('settings.lineHeightPx', { label: t(label) })}
                 <input
                   type="number"
                   min="8"
@@ -344,7 +355,7 @@ export function AppearanceSettings({ appearance, canEdit, onSave }: AppearanceSe
             ))}
             {(Object.keys(draft[editingMode].typography.weights) as Array<keyof DesignTokens['typography']['weights']>).map((key) => (
               <label key={key} className="flex flex-col gap-1 font-body text-body-sm text-on-surface">
-                {key} weight
+                {t('settings.weight', { name: t(`settings.weight${key[0].toUpperCase()}${key.slice(1)}` as TranslationKey) })}
                 <input
                   type="number"
                   min="100"
@@ -368,19 +379,19 @@ export function AppearanceSettings({ appearance, canEdit, onSave }: AppearanceSe
         </fieldset>
 
         <details className="rounded-xl border border-outline-variant p-3">
-          <summary className="cursor-pointer font-body text-label-md text-on-surface">Buttons, cards, tables, spacing, and advanced styling</summary>
+          <summary className="cursor-pointer font-body text-label-md text-on-surface">{t('settings.advancedStyling')}</summary>
           <div className="mt-3 flex flex-col gap-4">
             <div>
-              <h3 className="mb-2 font-body text-label-md text-on-surface">Glass surface values</h3>
+              <h3 className="mb-2 font-body text-label-md text-on-surface">{t('settings.glassValues')}</h3>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {([
-                  { key: 'surfaceAlpha', label: 'Surface opacity', min: 0, max: 1, step: 0.01 },
-                  { key: 'highSurfaceAlpha', label: 'High surface opacity', min: 0, max: 1, step: 0.01 },
-                  { key: 'blurPx', label: 'Blur (px)', min: 0, max: 64, step: 1 },
-                  { key: 'saturation', label: 'Saturation', min: 0, max: 3, step: 0.05 },
+                  { key: 'surfaceAlpha', label: 'settings.surfaceOpacity', min: 0, max: 1, step: 0.01 },
+                  { key: 'highSurfaceAlpha', label: 'settings.highSurfaceOpacity', min: 0, max: 1, step: 0.01 },
+                  { key: 'blurPx', label: 'settings.blur', min: 0, max: 64, step: 1 },
+                  { key: 'saturation', label: 'settings.saturation', min: 0, max: 3, step: 0.05 },
                 ] as const).map(({ key, label, min, max, step }) => (
                   <label key={key} className="flex flex-col gap-1 font-body text-body-sm text-on-surface">
-                    {label}
+                    {t(label)}
                     <input
                       type="number"
                       min={min}
@@ -404,11 +415,11 @@ export function AppearanceSettings({ appearance, canEdit, onSave }: AppearanceSe
             </div>
 
             <div>
-              <h3 className="mb-2 font-body text-label-md text-on-surface">Component dimensions (px)</h3>
+              <h3 className="mb-2 font-body text-label-md text-on-surface">{t('settings.componentDimensions')}</h3>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {dimensionFields.map(({ key, label }) => (
                   <label key={key} className="flex flex-col gap-1 font-body text-body-sm text-on-surface">
-                    {label}
+                    {t(label)}
                     <input
                       type="number"
                       min="0"
@@ -423,7 +434,7 @@ export function AppearanceSettings({ appearance, canEdit, onSave }: AppearanceSe
                 ))}
                 {radiusFields.map(({ key, label }) => (
                   <label key={key} className="flex flex-col gap-1 font-body text-body-sm text-on-surface">
-                    {label} (px)
+                    {t('settings.sizePx', { label: t(label) })}
                     <input
                       type="number"
                       min="0"
@@ -447,11 +458,11 @@ export function AppearanceSettings({ appearance, canEdit, onSave }: AppearanceSe
             </div>
 
             <div>
-              <h3 className="mb-2 font-body text-label-md text-on-surface">Shadows and page background</h3>
+              <h3 className="mb-2 font-body text-label-md text-on-surface">{t('settings.shadowsBackground')}</h3>
               <div className="grid grid-cols-1 gap-3">
                 {(Object.keys(draft[editingMode].shadows) as Array<keyof DesignTokens['shadows']>).map((key) => (
                   <label key={key} className="flex flex-col gap-1 font-body text-body-sm text-on-surface">
-                    {key} shadow
+                    {t('settings.shadow', { name: t(`settings.shadow${key[0].toUpperCase()}${key.slice(1)}` as TranslationKey) })}
                     <input
                       type="text"
                       disabled={!canEdit}
@@ -469,7 +480,7 @@ export function AppearanceSettings({ appearance, canEdit, onSave }: AppearanceSe
                   </label>
                 ))}
                 <label className="flex flex-col gap-1 font-body text-body-sm text-on-surface">
-                  Page background gradient
+                  {t('settings.pageGradient')}
                   <textarea
                     rows={3}
                     disabled={!canEdit}
@@ -489,11 +500,11 @@ export function AppearanceSettings({ appearance, canEdit, onSave }: AppearanceSe
             </div>
 
             <div>
-              <h3 className="mb-2 font-body text-label-md text-on-surface">Spacing scale (px)</h3>
+              <h3 className="mb-2 font-body text-label-md text-on-surface">{t('settings.spacingScale')}</h3>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
                 {(Object.keys(draft[editingMode].spacing) as Array<keyof DesignTokens['spacing']>).map((key) => (
                   <label key={key} className="flex flex-col gap-1 font-body text-body-sm text-on-surface">
-                    {key}
+                    {t(`settings.spacing${key.toUpperCase()}` as TranslationKey)}
                     <input
                       type="number"
                       min="0"
@@ -527,9 +538,9 @@ export function AppearanceSettings({ appearance, canEdit, onSave }: AppearanceSe
             className="h-5 w-5 accent-primary"
           />
           <span>
-            <span className="block">Large POS controls</span>
+            <span className="block">{t('settings.largePosControls')}</span>
             <span className="mt-1 block font-body text-body-sm text-on-surface-variant">
-              Share larger product cards and quantity controls across this store.
+              {t('settings.largePosControlsHelp')}
             </span>
           </span>
         </label>
@@ -543,9 +554,9 @@ export function AppearanceSettings({ appearance, canEdit, onSave }: AppearanceSe
             className="h-5 w-5 accent-primary"
           />
           <span>
-            <span className="block">Compact density</span>
+            <span className="block">{t('settings.compactDensity')}</span>
             <span className="mt-1 block font-body text-body-sm text-on-surface-variant">
-              Reduce desktop spacing throughout the store workspace.
+              {t('settings.compactDensityHelp')}
             </span>
           </span>
         </label>
@@ -560,7 +571,7 @@ export function AppearanceSettings({ appearance, canEdit, onSave }: AppearanceSe
             className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-primary px-4 font-body text-label-lg text-on-primary shadow-card disabled:cursor-wait disabled:opacity-60"
           >
             <MaterialIcon name={saving ? 'hourglass_empty' : 'save'} />
-            {saving ? 'Saving shared theme…' : 'Save shared theme'}
+            {saving ? t('settings.savingTheme') : t('settings.saveTheme')}
           </button>
         )}
       </SettingsGlassSection>

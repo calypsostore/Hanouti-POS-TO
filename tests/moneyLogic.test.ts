@@ -827,6 +827,34 @@ describe('local money logic', () => {
     })).rejects.toThrow('Force-close or close every shift before creating a Z report.');
   });
 
+  it('allows an optional Z note and defaults unused payment counts to zero', async () => {
+    prepareReportData([makeClosedShift('shift-z-no-card')]);
+
+    const report = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
+      countedCashMillimes: 1_000,
+    });
+
+    expect(report.countedCardMillimes).toBe(0);
+    expect(report.expectedCardMillimes).toBe(0);
+    expect(report.countedOtherMillimes).toBe(0);
+    expect(report.cashDifferenceNote).toBeUndefined();
+  });
+
+  it('allows a card-count difference without requiring a Z note', async () => {
+    const shiftId = 'shift-z-card-note';
+    prepareReportData([makeClosedShift(shiftId)]);
+    setLocalData('orders', [makeOrder('card-z-sale', shiftId, 'done', 'card', 5_000)]);
+
+    const report = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
+      countedCashMillimes: 0,
+      countedCardMillimes: 4_000,
+    });
+
+    expect(report.cardDifferenceMillimes).toBe(-1_000);
+    expect(report.cashDifferenceNote).toBeUndefined();
+    expect(report.nonCashDifferenceNote).toBeUndefined();
+  });
+
   it('starts the next report period at the first new shift and allows another Z the same day', async () => {
     prepareReportData([makeClosedShift('shift-first-day')]);
     const firstZ = await reportService.closeDayWithZReport(storeId, 'owner-lamarsa', '1234', {
@@ -1092,5 +1120,36 @@ describe('local money logic', () => {
     }]);
 
     await expect(userService.getEffectivePermissions(staffId)).resolves.toEqual(['view_all_orders']);
+  });
+
+  it('requires the add-order-note permission before creating an order note', async () => {
+    const staff = seedUsers.find((user) => user.id === staffId)!;
+    setLocalData('users', [{ ...staff, positionId: 'position-test' }]);
+    setLocalData('positions', [{
+      id: 'position-test',
+      storeId,
+      name: 'Test position',
+      permissionIds: ['take_orders'],
+    }]);
+
+    await expect(orderService.createOrder({
+      storeId,
+      staffId,
+      items: [],
+      note: 'No sugar',
+    })).rejects.toThrow('Your position does not allow order notes.');
+
+    setLocalData('positions', [{
+      id: 'position-test',
+      storeId,
+      name: 'Test position',
+      permissionIds: ['take_orders', 'add_order_note'],
+    }]);
+    await expect(orderService.createOrder({
+      storeId,
+      staffId,
+      items: [],
+      note: 'No sugar',
+    })).rejects.toThrow('Add at least one item before completing an order.');
   });
 });

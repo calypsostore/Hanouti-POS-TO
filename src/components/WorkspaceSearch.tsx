@@ -14,6 +14,7 @@ import { userService } from '../services/userService';
 import { findMatches, normalizeSearchText } from '../lib/workspaceSearch';
 import type { GlobalSearchResult } from '../types/workspaceSearch';
 import { MaterialIcon } from './MaterialIcon';
+import { localizeErrorMessage } from '../i18n';
 
 function pageSearchResults(): GlobalSearchResult[] {
   return ownerWorkspaceLinks.map((link) => ({
@@ -196,7 +197,7 @@ export function WorkspaceSearch({ storeId }: WorkspaceSearchProps) {
       .then(setStoreResults)
       .catch((error: unknown) => {
         console.error('Unable to search store records.', error);
-        setLoadError(error instanceof Error ? error.message : t('common.loadFailed'));
+        setLoadError(localizeErrorMessage(error, t('common.loadFailed')));
       })
       .finally(() => setIsLoading(false));
   }, [storeId]);

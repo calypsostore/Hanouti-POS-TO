@@ -104,6 +104,14 @@ async function ensureChannels(): Promise<void> {
             sound: sound.fileName,
           }),
         )),
+        ...channels.map((channel) => LocalNotifications.createChannel({
+          ...channel,
+          id: getNotificationSoundChannelId(channel.id, 'silent'),
+          name: `${channel.name} - Silent`,
+          description: `${channel.description}. No sound or vibration.`,
+          importance: 2,
+          vibration: false,
+        })),
       ]);
       await LocalNotifications.deleteChannel({ id: '7anouti-general' }).catch(() => undefined);
     })();
@@ -175,22 +183,23 @@ export const permissionService = {
     const status = await this.getStatus();
     if (status !== 'granted') return false;
 
+    const type = notification?.type ?? 'app_update';
+    const activeUser = useAuthStore.getState().user;
+    let soundPreferences = DEFAULT_NOTIFICATION_SOUND_PREFERENCES;
+    if (activeUser) {
+      try {
+        soundPreferences = await getNotificationSoundPreferences(activeUser.id);
+      } catch (error) {
+        console.error('[notifications] Could not load the selected sound; using the default.', error);
+      }
+    }
+    const soundChoice = getNotificationSoundForType(type, soundPreferences);
+
     if (this.isNative()) {
       await ensureChannels();
-      const type = notification?.type ?? 'app_update';
-      const activeUser = useAuthStore.getState().user;
-      let soundPreferences = DEFAULT_NOTIFICATION_SOUND_PREFERENCES;
-      if (activeUser) {
-        try {
-          soundPreferences = await getNotificationSoundPreferences(activeUser.id);
-        } catch (error) {
-          console.error('[notifications] Could not load the selected sound; using the default.', error);
-        }
-      }
       const baseChannelId = NOTIFICATION_CHANNELS[NOTIFICATION_CHANNEL_BY_TYPE[type]];
-      const soundId = getNotificationSoundForType(type, soundPreferences);
       const channelId = Capacitor.getPlatform() === 'android'
-        ? getNotificationSoundChannelId(baseChannelId, soundId)
+        ? getNotificationSoundChannelId(baseChannelId, soundChoice)
         : baseChannelId;
       const numericId = notification
         ? stableNotificationId(notification.id)
@@ -201,7 +210,9 @@ export const permissionService = {
           title,
           body,
           channelId,
+          sound: soundChoice === 'silent' ? '' : undefined,
           smallIcon: 'ic_stat_notification',
+          ...(Capacitor.getPlatform() === 'android' ? { largeIcon: 'ic_notification_large' } : {}),
           extra: notification ? {
             notificationId: notification.id,
             route: activeUser ? notificationPath(notification, activeUser.role) : '/notifications',
@@ -212,7 +223,7 @@ export const permissionService = {
     }
 
     if (typeof Notification === 'undefined') return false;
-    new Notification(title, { body });
+    new Notification(title, { body, silent: soundChoice === 'silent' });
     return true;
   },
 };

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { classifyActionFeedback, type ActionFeedbackKind } from '../lib/actionFeedback';
+import { t } from '../i18n/translations';
 import { MaterialIcon } from './MaterialIcon';
 import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
 
@@ -138,7 +139,7 @@ export function ActionFeedbackToast() {
     <>
       <MaterialIcon name={isError ? 'error' : 'check_circle'} className="!text-white" />
       <span className={`action-feedback-toast-message ${toast.expanded ? 'action-feedback-toast-message--expanded' : ''}`}>{toast.message}</span>
-      {toast.pinned && <span className="action-feedback-toast-pinned">Kept</span>}
+      {toast.pinned && <span className="action-feedback-toast-pinned">{t('feedback.kept')}</span>}
     </>
   );
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -196,8 +197,8 @@ export function ActionFeedbackToast() {
                 }
                 pinToastRef.current(true);
               }}
-              aria-label={`Keep and view error details: ${toast.message}`}
-              title="Tap to keep this message and view the full error"
+              aria-label={t('feedback.keepAndViewError', { message: toast.message })}
+              title={t('feedback.tapToKeep')}
               className="action-feedback-toast-error-details"
             >
               {messageContent}
@@ -207,7 +208,7 @@ export function ActionFeedbackToast() {
           )}
           <button
             type="button"
-            aria-label="Dismiss message"
+            aria-label={t('feedback.dismissMessage')}
             onClick={() => dismissToastRef.current()}
             className="action-feedback-toast-dismiss flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
           >

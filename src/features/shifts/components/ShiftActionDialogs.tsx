@@ -5,21 +5,22 @@ import { Chip } from '../../../components/Chip';
 import { DinarInput } from '../../../components/DinarInput';
 import { Keypad } from '../../../components/Keypad';
 import { MaterialIcon } from '../../../components/MaterialIcon';
-import { resolveStoreSettings, type CashMovementReason } from '../../../types/domain';
+import type { CashMovementReason } from '../../../types/domain';
 import { t } from '../../../i18n/translations';
+import { getLanguage } from '../../../i18n';
 import { CashMovementList } from './CashMovementList';
 import { ShiftCloseForm } from './ShiftCloseComponents';
 import type { ShiftDialogsProps } from './ShiftDialogs';
 
-const cashMovementReasons: { reason: CashMovementReason; label: string }[] = [
-  { reason: 'supplier', label: 'Bought milk' },
-  { reason: 'change', label: 'Change float' },
-  { reason: 'expense', label: 'Expense' },
-  { reason: 'other', label: 'Other' },
+const cashMovementReasons: { reason: CashMovementReason; labelKey: 'shift.reasonBoughtMilk' | 'shift.reasonChangeFloat' | 'shift.reasonExpense' | 'shift.reasonOther' }[] = [
+  { reason: 'supplier', labelKey: 'shift.reasonBoughtMilk' },
+  { reason: 'change', labelKey: 'shift.reasonChangeFloat' },
+  { reason: 'expense', labelKey: 'shift.reasonExpense' },
+  { reason: 'other', labelKey: 'shift.reasonOther' },
 ];
 export function ShiftActionDialogs({
-    ownerMode,
-    store,
+    blind,
+    blindStaffId,
     error,
     closeShiftSheetOpen,
     ownOpenShift,
@@ -57,7 +58,7 @@ export function ShiftActionDialogs({
     cashMovementHistoryClosing,
     closeCashMovementHistory,
     closeCashMovementHistoryAndViewAll,
-}: Pick<ShiftDialogsProps, 'ownerMode' | 'store' | 'error' | 'closeShiftSheetOpen' | 'ownOpenShift' | 'closeCountedCashSheet' | 'ownBreakdown' | 'pendingVoidOrders' | 'cashMovements' | 'countedCash' | 'differenceNote' | 'setCountedCash' | 'setDifferenceNote' | 'closeShift' | 'forceCloseShiftTarget' | 'setForceCloseShiftTarget' | 'staffNames' | 'forceShiftConfirmed' | 'setForceShiftConfirmed' | 'forceShiftPin' | 'setForceShiftPin' | 'forceCloseShift' | 'movementSheetOpen' | 'setMovementSheetOpen' | 'movementKind' | 'movementAmount' | 'setMovementAmount' | 'movementReason' | 'setMovementReason' | 'movementNote' | 'setMovementNote' | 'movementBusy' | 'movementShiftId' | 'enteredMovementMillimes' | 'submitCashMovement' | 'cashMovementHistoryShift' | 'cashMovementHistoryClosing' | 'closeCashMovementHistory' | 'closeCashMovementHistoryAndViewAll'>) {
+}: Pick<ShiftDialogsProps, 'blind' | 'blindStaffId' | 'error' | 'closeShiftSheetOpen' | 'ownOpenShift' | 'closeCountedCashSheet' | 'ownBreakdown' | 'pendingVoidOrders' | 'cashMovements' | 'countedCash' | 'differenceNote' | 'setCountedCash' | 'setDifferenceNote' | 'closeShift' | 'forceCloseShiftTarget' | 'setForceCloseShiftTarget' | 'staffNames' | 'forceShiftConfirmed' | 'setForceShiftConfirmed' | 'forceShiftPin' | 'setForceShiftPin' | 'forceCloseShift' | 'movementSheetOpen' | 'setMovementSheetOpen' | 'movementKind' | 'movementAmount' | 'setMovementAmount' | 'movementReason' | 'setMovementReason' | 'movementNote' | 'setMovementNote' | 'movementBusy' | 'movementShiftId' | 'enteredMovementMillimes' | 'submitCashMovement' | 'cashMovementHistoryShift' | 'cashMovementHistoryClosing' | 'closeCashMovementHistory' | 'closeCashMovementHistoryAndViewAll'>) {
   const cashMovementHistoryEntries = cashMovementHistoryShift
     ? cashMovements.filter((movement) => movement.shiftId === cashMovementHistoryShift.id)
     : [];
@@ -82,32 +83,32 @@ export function ShiftActionDialogs({
           onSubmit={(event) => { void closeShift(event); }}
           submitLabel={t('shift.closeShift')}
           pendingVoidOrders={pendingVoidOrders.filter((order) => order.shiftId === ownOpenShift.id)}
-          blind={resolveStoreSettings(store?.settings).blindShiftClosing && !ownerMode}
+          blind={blind}
         />}
       </BottomSheet>
 <BottomSheet
         open={forceCloseShiftTarget !== null}
         onClose={() => { setForceCloseShiftTarget(null); setForceShiftPin(''); setForceShiftConfirmed(false); }}
-        title="Force close shift"
+        title={t('shift.forceCloseTitle')}
       >
         {forceCloseShiftTarget && (
           <form onSubmit={(event) => { void forceCloseShift(event, forceCloseShiftTarget); }} className="flex flex-col gap-3">
             <p className="font-body text-body-sm text-on-surface-variant">
-              Close {staffNames[forceCloseShiftTarget.staffId] ?? 'Staff'}'s shift at zero difference. Pending voids on this shift will be approved.
+              {t('shift.forceCloseDescription', { staff: staffNames[forceCloseShiftTarget.staffId] ?? t('shift.staff') })}
             </p>
             <label className="flex items-start gap-2 font-body text-body-sm text-on-surface">
               <input type="checkbox" checked={forceShiftConfirmed} onChange={(event) => setForceShiftConfirmed(event.target.checked)} />
-              Confirm force close at zero difference.
+              {t('shift.forceCloseConfirm')}
             </label>
-            <label className="font-body text-label-md">Owner PIN
+            <label className="font-body text-label-md">{t('shift.ownerPin')}
               <input readOnly type="password" value={forceShiftPin} placeholder="••••" className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 tracking-[0.5em]" />
             </label>
             <Keypad onPress={(digit) => setForceShiftPin((current) => current.length < 4 ? `${current}${digit}` : current)} onClear={() => setForceShiftPin('')} onBackspace={() => setForceShiftPin((current) => current.slice(0, -1))} />
             {error && <p role="alert" className="rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
             <div className="sheet-action-bar grid grid-cols-2 gap-2">
-              <Button type="button" variant="ghost" onClick={() => setForceCloseShiftTarget(null)}>Cancel</Button>
+              <Button type="button" variant="ghost" onClick={() => setForceCloseShiftTarget(null)}>{t('common.cancel')}</Button>
               <Button type="submit" variant="danger" disabled={!forceShiftConfirmed || forceShiftPin.length !== 4}>
-                Force close
+                {t('shift.forceCloseAction')}
               </Button>
             </div>
           </form>
@@ -116,12 +117,12 @@ export function ShiftActionDialogs({
 <BottomSheet
         open={movementSheetOpen}
         onClose={() => setMovementSheetOpen(false)}
-        title={movementKind === 'in' ? 'Cash in' : 'Cash out'}
-        subtitle={movementKind === 'in' ? 'Add cash to the shift' : 'Withdraw cash from the shift'}
+        title={t(movementKind === 'in' ? 'shift.cashIn' : 'shift.cashOut')}
+        subtitle={t(movementKind === 'in' ? 'shift.addCash' : 'shift.withdrawCash')}
         icon="account_balance_wallet"
       >
         <form onSubmit={(event) => { void submitCashMovement(event); }} className="flex flex-col gap-3">
-          <label htmlFor="cash-movement-amount" className="font-body text-label-md text-on-surface">Amount (TND)</label>
+          <label htmlFor="cash-movement-amount" className="font-body text-label-md text-on-surface">{t('shift.amount')}</label>
           <DinarInput
             id="cash-movement-amount"
             required
@@ -130,20 +131,20 @@ export function ShiftActionDialogs({
             className="h-12 w-full rounded-lg bg-surface-container-low px-3 font-display text-title-md tabular-nums"
           />
           <div>
-            <p className="mb-2 font-body text-label-md text-on-surface">Reason</p>
+            <p className="mb-2 font-body text-label-md text-on-surface">{t('shift.reason')}</p>
             <div className="flex flex-wrap gap-2">
-              {cashMovementReasons.map(({ reason, label }) => (
-                <Chip key={reason} selected={movementReason === reason} onClick={() => setMovementReason(reason)}>{label}</Chip>
+              {cashMovementReasons.map(({ reason, labelKey }) => (
+                <Chip key={reason} selected={movementReason === reason} onClick={() => setMovementReason(reason)}>{t(labelKey)}</Chip>
               ))}
             </div>
           </div>
-          <label className="font-body text-label-md text-on-surface">Note (optional)
+          <label className="font-body text-label-md text-on-surface">{t('shift.noteOptional')}
             <textarea maxLength={500} rows={2} value={movementNote} onChange={(event) => setMovementNote(event.target.value)} className="mt-1.5 w-full rounded-lg bg-surface-container-low p-3" />
           </label>
           <div className="sheet-action-bar grid grid-cols-2 gap-2">
-            <Button type="button" variant="ghost" onClick={() => setMovementSheetOpen(false)}>Cancel</Button>
+            <Button type="button" variant="ghost" onClick={() => setMovementSheetOpen(false)}>{t('common.cancel')}</Button>
             <Button type="submit" disabled={movementBusy || !movementShiftId || enteredMovementMillimes === undefined || enteredMovementMillimes <= 0}>
-              <MaterialIcon name={movementKind === 'in' ? 'add' : 'remove'} />Record {movementKind === 'in' ? 'cash in' : 'cash out'}
+              <MaterialIcon name={movementKind === 'in' ? 'add' : 'remove'} />{t(movementKind === 'in' ? 'shift.recordCashIn' : 'shift.recordCashOut')}
             </Button>
           </div>
         </form>
@@ -151,9 +152,9 @@ export function ShiftActionDialogs({
 <BottomSheet
         open={cashMovementHistoryShift !== null}
         onClose={closeCashMovementHistory}
-        title="Cash Movements"
+        title={t('shift.cashMovements')}
         subtitle={cashMovementHistoryShift
-          ? `${staffNames[cashMovementHistoryShift.staffId] ?? 'Staff'} · ${new Date(cashMovementHistoryShift.openedAt).toLocaleString()}`
+          ? `${staffNames[cashMovementHistoryShift.staffId] ?? t('shift.staff')} · ${new Date(cashMovementHistoryShift.openedAt).toLocaleString(getLanguage())}`
           : undefined}
         icon="account_balance_wallet"
         panelClassName={`cash-movement-history-modal${cashMovementHistoryClosing ? ' is-closing' : ''}`}
@@ -165,16 +166,17 @@ export function ShiftActionDialogs({
               movements={cashMovementHistoryEntries}
               staffNames={staffNames}
               presentation="modal"
+              blind={Boolean(blindStaffId && cashMovementHistoryShift.staffId === blindStaffId)}
             />
             <footer className="cash-movement-history-footer">
               <div className="cash-movement-history-count">
                 <MaterialIcon name="info" />
-                <span>Total Transactions:</span>
+                <span>{t('shift.totalTransactions')}</span>
                 <strong>{cashMovementHistoryEntries.length}</strong>
               </div>
               <button type="button" className="cash-movement-history-link" onClick={closeCashMovementHistoryAndViewAll}>
                 <MaterialIcon name="description" />
-                View Full History
+                {t('shift.viewFullHistory')}
               </button>
             </footer>
           </div>

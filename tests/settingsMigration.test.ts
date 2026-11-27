@@ -11,6 +11,7 @@ const settingsStyles = [
 const logoPicker = readFileSync('src/components/LogoPicker.tsx', 'utf8');
 const settingsSection = readFileSync('src/components/settings/SettingsGlassSection.tsx', 'utf8');
 const appearanceSettings = readFileSync('src/components/AppearanceSettings.tsx', 'utf8');
+const englishSettingsCatalog = readFileSync('src/i18n/locales/en/settings.ts', 'utf8');
 
 describe('Settings legacy layout', () => {
   it('renders the historical category overview and opens one section at a time', () => {
@@ -55,9 +56,10 @@ describe('Settings legacy layout', () => {
     expect(settingsStyles).toContain('.settings-dashboard-card');
     expect(settingsStyles).not.toContain('.settings-overview-card');
     expect(settingsStyles).toContain('.settings-section-content [hidden]');
-    expect(appearanceSettings).toContain('Hanouti Crystal Glass');
+    expect(appearanceSettings).toContain("t('settings.themeName')");
+    expect(englishSettingsCatalog).toContain("'settings.themeName': 'Hanouti Crystal Glass'");
     expect(appearanceSettings).toContain('type="color"');
-    expect(appearanceSettings).toContain('Save shared theme');
+    expect(appearanceSettings).toContain("t('settings.saveTheme')");
     expect(appearanceSettings).toContain('disabled={!canEdit}');
     expect(settingsScreen).toContain('userService.updateStoreSettings(store.id, user.id, { appearance })');
     expect(settingsScreen).not.toContain('updateDisplaySettings');

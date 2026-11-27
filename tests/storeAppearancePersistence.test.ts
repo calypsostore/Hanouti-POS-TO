@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { applyStoreAppearance } from '../src/lib/storeAppearance';
 import { userService } from '../src/services/userService';
 import { DEFAULT_STORE_APPEARANCE } from '../src/theme/themeRegistry';
 
@@ -38,5 +39,37 @@ describe('shared store appearance persistence', () => {
     await expect(userService.updateStoreSettings(storeId, 'staff-sarah', {
       appearance: DEFAULT_STORE_APPEARANCE,
     })).rejects.toThrow('Only this store owner can change store settings.');
+  });
+
+  it('applies explicit light and dark modes instead of deferring to the system preference', () => {
+    const previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+    const classes = new Set<string>();
+    const root = {
+      classList: {
+        add: (value: string) => classes.add(value),
+        toggle: (value: string, enabled: boolean) => {
+          if (enabled) classes.add(value);
+          else classes.delete(value);
+        },
+      },
+      style: { setProperty: vi.fn() },
+    };
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: { documentElement: root, querySelector: () => null },
+    });
+
+    try {
+      applyStoreAppearance({ ...DEFAULT_STORE_APPEARANCE, mode: 'dark' });
+      expect(classes.has('dark')).toBe(true);
+      expect(classes.has('light')).toBe(false);
+
+      applyStoreAppearance({ ...DEFAULT_STORE_APPEARANCE, mode: 'light' });
+      expect(classes.has('light')).toBe(true);
+      expect(classes.has('dark')).toBe(false);
+    } finally {
+      if (previousDocument) Object.defineProperty(globalThis, 'document', previousDocument);
+      else Reflect.deleteProperty(globalThis, 'document');
+    }
   });
 });

@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { CircleAlert } from 'lucide-react';
+import { t } from '../i18n/translations';
 
 interface ContextualHelpProps {
   title: string;
@@ -80,7 +81,7 @@ export function ContextualHelp({ title, description }: ContextualHelpProps) {
       <button
         ref={buttonRef}
         type="button"
-        aria-label={`Help: ${title}`}
+        aria-label={t('common.helpLabel', { title })}
         aria-expanded={open}
         aria-controls={popoverId}
         aria-describedby={open ? popoverId : undefined}

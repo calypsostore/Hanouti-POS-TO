@@ -9,6 +9,7 @@ import { useFocusRefreshKey } from '../lib/useFocusRefreshKey';
 import { adminWorkspaceLinks } from '../app/navigation';
 import { formatTnd } from '../lib/format';
 import { t } from '../i18n/translations';
+import { getLanguage } from '../i18n';
 import { activityService } from '../services/activityService';
 import { catalogService } from '../services/catalogService';
 import { orderService } from '../services/orderService';
@@ -19,10 +20,10 @@ import { isSubscriptionExpired, type ActivityRecord, type CatalogItemRecord, typ
 type StoreTab = 'sales' | 'staff' | 'shifts' | 'activity';
 
 const tabs: { id: StoreTab; label: string; icon: string }[] = [
-  { id: 'sales', label: 'Sales', icon: 'point_of_sale' },
-  { id: 'staff', label: 'Staff', icon: 'groups' },
-  { id: 'shifts', label: 'Shifts', icon: 'payments' },
-  { id: 'activity', label: 'Activity', icon: 'history' },
+  { id: 'sales', label: 'admin.sales', icon: 'point_of_sale' },
+  { id: 'staff', label: 'admin.staff', icon: 'groups' },
+  { id: 'shifts', label: 'admin.shifts', icon: 'payments' },
+  { id: 'activity', label: 'admin.activity', icon: 'history' },
 ];
 
 function localDateKey(date: Date): string {
@@ -55,7 +56,7 @@ export function StoreReadOnlyScreen() {
         if (!nextStore) {
           if (active) {
             setStore(undefined);
-            setError('Store could not be found.');
+            setError(t('admin.storeNotFound'));
             setLoading(false);
           }
           return;
@@ -77,7 +78,7 @@ export function StoreReadOnlyScreen() {
         setError('');
       } catch (loadError) {
         console.error('Unable to load the store view.', loadError);
-        if (active) setError('Unable to load this store. Please try again.');
+        if (active) setError(t('admin.storeLoadError'));
       } finally {
         if (active) setLoading(false);
       }
@@ -100,13 +101,13 @@ export function StoreReadOnlyScreen() {
   }).sort((left, right) => right.sales - left.sales), [orders, shifts, staff]);
 
   if (loading) {
-    return <main className="mx-auto min-h-screen w-full max-w-3xl bg-surface p-4 pt-8"><ListSkeleton rows={5} label="Loading store view" /></main>;
+    return <main className="mx-auto min-h-screen w-full max-w-3xl bg-surface p-4 pt-8"><ListSkeleton rows={5} label={t('admin.loadingStoreView')} /></main>;
   }
   if (!store) {
     return (
       <main className="min-h-screen bg-surface p-6">
-        <Link to="/admin/stores" className="font-body text-primary underline">Back to stores</Link>
-        <p role="alert" className="mt-4 font-body text-body-md text-error-dark">{error || 'Store could not be found.'}</p>
+        <Link to="/admin/stores" className="font-body text-primary underline">{t('admin.backToStores')}</Link>
+        <p role="alert" className="mt-4 font-body text-body-md text-error-dark">{error || t('admin.storeNotFound')}</p>
       </main>
     );
   }
@@ -116,19 +117,19 @@ export function StoreReadOnlyScreen() {
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="font-display text-headline-lg text-on-surface">{store.name}</h1>
-          <p className="mt-1 break-all font-body text-body-sm text-outline">{store.code.toUpperCase()} · {store.subscription?.plan ?? 'Trial'} plan</p>
+          <p className="mt-1 break-all font-body text-body-sm text-outline">{store.code.toUpperCase()} · {t('admin.plan', { plan: store.subscription?.plan ? t(`admin.${store.subscription.plan}` as 'admin.trial' | 'admin.monthly' | 'admin.yearly') : t('admin.trial') })}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <StatusTag status={effectiveStoreActive(store) ? 'open' : 'suspended'}>{effectiveStoreActive(store) ? 'Active' : store.archivedAt ? 'Archived' : 'Suspended'}</StatusTag>
-          {isSubscriptionExpired(store) && <StatusTag status="suspended">Subscription expired</StatusTag>}
+          <StatusTag status={effectiveStoreActive(store) ? 'open' : 'suspended'}>{effectiveStoreActive(store) ? t('common.active') : store.archivedAt ? t('admin.archived') : t('common.suspended')}</StatusTag>
+          {isSubscriptionExpired(store) && <StatusTag status="suspended">{t('admin.subscriptionExpired')}</StatusTag>}
         </div>
       </div>
       {error && <p role="alert" className="mb-4 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
 
-      <nav aria-label="Store support tabs" className="scrollbar-hidden mb-4 flex gap-2 overflow-x-auto rounded-xl bg-surface-container-high p-1">
+      <nav aria-label={t('admin.storeSupportTabs')} className="scrollbar-hidden mb-4 flex gap-2 overflow-x-auto rounded-xl bg-surface-container-high p-1">
         {tabs.map((tab) => (
           <button key={tab.id} type="button" aria-pressed={activeTab === tab.id} onClick={() => setActiveTab(tab.id)} className={`flex min-h-11 shrink-0 items-center gap-2 rounded-lg px-4 font-body text-label-md ${activeTab === tab.id ? 'bg-primary text-on-primary shadow-card' : 'text-on-surface-variant'}`}>
-            <MaterialIcon name={tab.icon} className="text-lg" />{tab.label}
+            <MaterialIcon name={tab.icon} className="text-lg" />{t(tab.label as 'admin.sales' | 'admin.staff' | 'admin.shifts' | 'admin.activity')}
           </button>
         ))}
       </nav>
@@ -136,22 +137,22 @@ export function StoreReadOnlyScreen() {
       {activeTab === 'sales' && (
         <section>
           <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <InfoCard label="Today's sales" value={`${formatTnd(todaySales / 1000)} DT`} />
-            <InfoCard label="Today's orders" value={todayOrders.length.toLocaleString()} />
-            <InfoCard label="Completed orders" value={completedOrders.length.toLocaleString()} />
+            <InfoCard label={t('admin.todaySales')} value={`${formatTnd(todaySales / 1000)} DT`} />
+            <InfoCard label={t('admin.todayOrders')} value={todayOrders.length.toLocaleString(getLanguage())} />
+            <InfoCard label={t('admin.completedOrders')} value={completedOrders.length.toLocaleString(getLanguage())} />
           </div>
-          <ReadOnlyCard title="Today's orders">
+          <ReadOnlyCard title={t('admin.todayOrders')}>
             <div className="flex flex-col gap-2">
               {todayOrders.map((order) => (
                 <article key={order.id} className="flex items-center justify-between gap-3 rounded-lg bg-surface-container-low p-3">
                   <div className="min-w-0">
-                    <p className="font-body text-label-md text-on-surface">#{order.number} · {order.staffName ?? 'Staff'}</p>
-                    <p className="mt-1 font-body text-body-sm text-outline">{new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {order.status}</p>
+                    <p className="font-body text-label-md text-on-surface">#{order.number} · {order.staffName ?? t('common.staff')}</p>
+                    <p className="mt-1 font-body text-body-sm text-outline">{new Date(order.createdAt).toLocaleTimeString(getLanguage(), { hour: '2-digit', minute: '2-digit' })} · {t(order.status === 'done' ? 'common.done' : order.status === 'pending_void' ? 'orders.pendingVoid' : 'orders.voided')}</p>
                   </div>
                   <strong className="shrink-0 font-body text-label-md tabular-nums text-on-surface">{formatTnd(order.totalMillimes / 1000)} DT</strong>
                 </article>
               ))}
-              {todayOrders.length === 0 && <p className="rounded-lg bg-surface-container-low p-4 font-body text-body-sm text-outline">No orders today.</p>}
+              {todayOrders.length === 0 && <p className="rounded-lg bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('admin.noOrdersToday')}</p>}
             </div>
           </ReadOnlyCard>
           <ReadOnlyCard title={t('catalog.title')}>
@@ -172,53 +173,53 @@ export function StoreReadOnlyScreen() {
       )}
 
       {activeTab === 'staff' && (
-        <ReadOnlyCard title="Staff performance">
+        <ReadOnlyCard title={t('admin.staffPerformance')}>
           <div className="flex flex-col gap-2">
             {staffSales.map(({ member, orderCount, sales, openShift }) => (
               <article key={member.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-surface-container-low p-3">
                 <div className="min-w-0">
                   <p className="truncate font-body text-label-md text-on-surface">{member.name}</p>
-                  <p className="mt-1 font-body text-body-sm text-outline">{orderCount} completed orders</p>
+                  <p className="mt-1 font-body text-body-sm text-outline">{t('admin.completedOrdersCount', { count: orderCount })}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <strong className="font-body text-label-md tabular-nums text-primary">{formatTnd(sales / 1000)} DT</strong>
-                  <StatusTag status={openShift ? 'open' : 'closed'}>{openShift ? 'On shift' : 'Off shift'}</StatusTag>
+                  <StatusTag status={openShift ? 'open' : 'closed'}>{openShift ? t('admin.onShift') : t('admin.offShift')}</StatusTag>
                 </div>
               </article>
             ))}
-            {staffSales.length === 0 && <p className="rounded-lg bg-surface-container-low p-4 font-body text-body-sm text-outline">No staff accounts found.</p>}
+            {staffSales.length === 0 && <p className="rounded-lg bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('admin.noStaffAccounts')}</p>}
           </div>
         </ReadOnlyCard>
       )}
 
       {activeTab === 'shifts' && (
-        <ReadOnlyCard title="Shifts">
+        <ReadOnlyCard title={t('admin.shifts')}>
           <div className="flex flex-col gap-2">
             {shifts.map((shift) => (
               <article key={shift.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-surface-container-low p-3">
                 <div>
-                  <p className="font-body text-label-md text-on-surface">{staff.find((member) => member.id === shift.staffId)?.name ?? 'Unknown staff'}</p>
-                  <p className="mt-1 font-body text-body-sm text-outline">Opened {new Date(shift.openedAt).toLocaleString()}{shift.closedAt ? ` · Closed ${new Date(shift.closedAt).toLocaleString()}` : ''}</p>
-                  {shift.differenceMillimes !== undefined && <p className="mt-1 font-body text-body-sm text-on-surface-variant">Cash difference: {formatTnd(shift.differenceMillimes / 1000)} DT</p>}
+                  <p className="font-body text-label-md text-on-surface">{staff.find((member) => member.id === shift.staffId)?.name ?? t('admin.unknownStaff')}</p>
+                  <p className="mt-1 font-body text-body-sm text-outline">{t('admin.openedAt', { date: new Date(shift.openedAt).toLocaleString(getLanguage()) })}{shift.closedAt ? ` · ${t('admin.closedAt', { date: new Date(shift.closedAt).toLocaleString(getLanguage())})}` : ''}</p>
+                  {shift.differenceMillimes !== undefined && <p className="mt-1 font-body text-body-sm text-on-surface-variant">{t('admin.cashDifference', { amount: formatTnd(shift.differenceMillimes / 1000) })}</p>}
                 </div>
-                <StatusTag status={shift.status === 'open' ? 'open' : 'closed'}>{shift.status === 'open' ? 'Open' : 'Closed'}</StatusTag>
+                <StatusTag status={shift.status === 'open' ? 'open' : 'closed'}>{shift.status === 'open' ? t('admin.open') : t('admin.closed')}</StatusTag>
               </article>
             ))}
-            {shifts.length === 0 && <p className="rounded-lg bg-surface-container-low p-4 font-body text-body-sm text-outline">No shifts found.</p>}
+            {shifts.length === 0 && <p className="rounded-lg bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('admin.noShifts')}</p>}
           </div>
         </ReadOnlyCard>
       )}
 
       {activeTab === 'activity' && (
-        <ReadOnlyCard title="Recent activity">
+        <ReadOnlyCard title={t('admin.recentActivity')}>
           <div className="flex flex-col gap-2">
             {activity.map((entry) => (
               <article key={entry.id} className="rounded-lg bg-surface-container-low p-3">
                 <p className="font-body text-label-md text-on-surface">{entry.summary}</p>
-                <p className="mt-1 font-body text-body-sm text-outline">{entry.actorName} · {new Date(entry.createdAt).toLocaleString()}</p>
+                <p className="mt-1 font-body text-body-sm text-outline">{entry.actorName} · {new Date(entry.createdAt).toLocaleString(getLanguage())}</p>
               </article>
             ))}
-            {activity.length === 0 && <p className="rounded-lg bg-surface-container-low p-4 font-body text-body-sm text-outline">No activity recorded.</p>}
+            {activity.length === 0 && <p className="rounded-lg bg-surface-container-low p-4 font-body text-body-sm text-outline">{t('admin.noActivity')}</p>}
           </div>
         </ReadOnlyCard>
       )}
@@ -231,5 +232,5 @@ function InfoCard({ label, value }: { label: string; value: string }) {
 }
 
 function ReadOnlyCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card"><h2 className="mb-3 font-display text-headline-md text-on-surface">{title} · read only</h2>{children}</section>;
+  return <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card"><h2 className="mb-3 font-display text-headline-md text-on-surface">{title} · {t('admin.readOnlySuffix')}</h2>{children}</section>;
 }

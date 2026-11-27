@@ -108,11 +108,7 @@ export async function createReport(
       (!Number.isSafeInteger(closeDetails.countedOtherMillimes) || closeDetails.countedOtherMillimes < 0)))) {
     throw new Error('Card and other counts must be non-negative whole numbers of millimes.');
   }
-  if ((cashDifference !== undefined && cashDifference !== 0 ||
-      cardDifferenceMillimes !== undefined && cardDifferenceMillimes !== 0 ||
-      otherDifferenceMillimes !== undefined && otherDifferenceMillimes !== 0) && !closeDetails?.note?.trim()) {
-    throw new Error('A note is required for every Z count difference.');
-  }
+  const differenceNote = closeDetails?.note?.trim() || undefined;
   const storeSettings = resolveStoreSettings(store.settings);
   const firstShiftAt = summary.shifts.map((shift) => shift.openedAt).sort()[0];
   const businessDate = firstShiftAt
@@ -199,14 +195,14 @@ export async function createReport(
     countedCashMillimes: closeDetails?.countedCashMillimes,
     countedCashIncludesFloat: false,
     cashDifference,
-    cashDifferenceNote: closeDetails?.note,
+    cashDifferenceNote: differenceNote,
     countedCardMillimes: closeDetails ? closeDetails.countedCardMillimes ?? 0 : undefined,
     expectedCardMillimes: type === 'Z' ? expectedCardMillimes : undefined,
     cardDifferenceMillimes,
     countedOtherMillimes: closeDetails ? closeDetails.countedOtherMillimes ?? 0 : undefined,
     expectedOtherMillimes: type === 'Z' ? expectedOtherMillimes : undefined,
     otherDifferenceMillimes,
-    nonCashDifferenceNote: cardDifferenceMillimes || otherDifferenceMillimes ? closeDetails?.note : undefined,
+    nonCashDifferenceNote: cardDifferenceMillimes || otherDifferenceMillimes ? differenceNote : undefined,
     pinVerified: type === 'Z',
   };
   const savedReport = isSupabaseDriver()
@@ -257,14 +253,16 @@ export async function closeDayWithZReport(
       note?: string;
     },
   ): Promise<ReportRecord> {
-    if (!ownerPin || !/^\d{4}$/.test(ownerPin)) throw new Error('Owner PIN is required for every Z report.');
+    if (!ownerPin || !/^\d{4}$/.test(ownerPin)) {
+      throw new Error('Owner PIN is required for every Z report unless an authorized staff PIN is provided.');
+    }
     const store = await userService.getStore(storeId);
     if (!store) throw new Error('The store could not be found.');
     if (!isSupabaseDriver()) {
       if ((await orderService.listAll(storeId)).some((order) => order.status === 'pending_void')) {
         throw new Error('Resolve every void request before creating a Z report.');
       }
-      if (!await userService.verifyStorePin(storeId, ownerPin, 'z_report')) throw new Error('The owner PIN is incorrect.');
+      if (!await userService.verifyStorePin(storeId, ownerPin, 'z_report')) throw new Error('The PIN is incorrect.');
     }
     const report = await createReport(storeId, 'Z', generatedBy, getDayStatus, ownerPin, closeDetails);
     if (!isSupabaseDriver()) {

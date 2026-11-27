@@ -9,6 +9,7 @@ import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { useFocusRefreshKey } from '../lib/useFocusRefreshKey';
 import { adminWorkspaceLinks } from '../app/navigation';
 import { t } from '../i18n/translations';
+import { getLanguage, localizeErrorMessage } from '../i18n';
 import { useAuthStore } from '../stores/authStore';
 import { isSubscriptionExpired, type StoreRecord, type StoreSubscription, type UserSummary } from '../types/domain';
 import { userService } from '../services/userService';
@@ -40,10 +41,10 @@ function subscriptionFor(store: StoreRecord): StoreSubscription {
 
 function ExpiryTag({ store }: { store: StoreRecord }) {
   const paidUntil = store.subscription?.paidUntil;
-  if (!paidUntil) return <StatusTag status="closed">No expiry set</StatusTag>;
+  if (!paidUntil) return <StatusTag status="closed">{t('admin.noExpirySet')}</StatusTag>;
   const days = subscriptionDaysRemaining(paidUntil);
-  if (days < 0) return <StatusTag status="suspended">{`Expired ${Math.abs(days)} ${Math.abs(days) === 1 ? 'day' : 'days'} ago`}</StatusTag>;
-  return <StatusTag status={days <= 7 ? 'pending' : 'open'}>{`Expires in ${days} ${days === 1 ? 'day' : 'days'}`}</StatusTag>;
+  if (days < 0) return <StatusTag status="suspended">{t('admin.expiredAgo', { days: Math.abs(days) })}</StatusTag>;
+  return <StatusTag status={days <= 7 ? 'pending' : 'open'}>{t('admin.expiresIn', { days })}</StatusTag>;
 }
 
 export function SuperAdminOverviewScreen() {
@@ -72,7 +73,7 @@ export function SuperAdminOverviewScreen() {
         setError('');
       } catch (loadError) {
         console.error('Unable to load platform overview.', loadError);
-        if (active) setError('Unable to load the platform overview. Please try again.');
+        if (active) setError(t('admin.platformLoadError'));
       } finally {
         if (active) setLoading(false);
       }
@@ -91,44 +92,44 @@ export function SuperAdminOverviewScreen() {
     : 0;
 
   return (
-    <WorkspaceLayout title="Platform overview" links={adminWorkspaceLinks}>
+    <WorkspaceLayout title={t('admin.platformOverview')} links={adminWorkspaceLinks}>
       <div className="role-dashboard super-admin-dashboard">
       <header className="dashboard-welcome mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="font-display text-headline-lg text-on-surface">Platform overview</h1>
-          <p className="mt-1 font-body text-body-md text-on-surface-variant">All-store activity for {today}.</p>
+          <h1 className="font-display text-headline-lg text-on-surface">{t('admin.platformOverview')}</h1>
+          <p className="mt-1 font-body text-body-md text-on-surface-variant">{t('admin.allStoreActivity', { date: today })}</p>
         </div>
         <Link to="/admin/stores" className="dashboard-primary-action inline-flex min-h-11 items-center gap-2 rounded-xl px-4 font-body text-label-md">
-          <MaterialIcon name="storefront" />Manage stores
+          <MaterialIcon name="storefront" />{t('admin.manageStores')}
         </Link>
       </header>
       {error && <p role="alert" className="mb-4 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       <section className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <OverviewMetric icon="storefront" tone="blue" label="Total stores" value={nonArchivedStores.length.toLocaleString()} />
-        <OverviewMetric icon="check_circle" tone="green" label="Active" value={activeStores.length.toLocaleString()} />
-        <OverviewMetric icon="pause_circle" tone="rose" label="Suspended" value={suspendedStores.length.toLocaleString()} />
-        <OverviewMetric icon="receipt_long" tone="amber" label="Orders today" value={stats.totalOrders.toLocaleString()} />
-        <OverviewMetric icon="payments" tone="purple" label="Sales today" value={`${formatTnd(stats.totalSales / 1000)} DT`} />
+        <OverviewMetric icon="storefront" tone="blue" label={t('admin.totalStores')} value={nonArchivedStores.length.toLocaleString(getLanguage())} />
+        <OverviewMetric icon="check_circle" tone="green" label={t('common.active')} value={activeStores.length.toLocaleString(getLanguage())} />
+        <OverviewMetric icon="pause_circle" tone="rose" label={t('common.suspended')} value={suspendedStores.length.toLocaleString(getLanguage())} />
+        <OverviewMetric icon="receipt_long" tone="amber" label={t('admin.ordersToday')} value={stats.totalOrders.toLocaleString(getLanguage())} />
+        <OverviewMetric icon="payments" tone="purple" label={t('admin.salesToday')} value={`${formatTnd(stats.totalSales / 1000)} DT`} />
       </section>
       <section className="super-admin-shift-card mb-5 rounded-2xl p-4 shadow-card">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <p className="font-body text-label-sm uppercase tracking-wide">Live operations</p>
-            <h2 className="mt-1 font-display text-headline-md">Stores with an open shift</h2>
+            <p className="font-body text-label-sm uppercase tracking-wide">{t('admin.liveOperations')}</p>
+            <h2 className="mt-1 font-display text-headline-md">{t('admin.storesOpenShift')}</h2>
             <p className="mt-2 font-display text-headline-lg tabular-nums">
               {storesWithOpenShifts}
-              <span className="ml-2 font-body text-body-sm">of {nonArchivedStores.length} stores</span>
+              <span className="ml-2 font-body text-body-sm">{t('admin.ofStores', { count: nonArchivedStores.length })}</span>
             </p>
           </div>
           <div className="super-admin-shift-summary">
             <span className="font-display text-title-lg tabular-nums">{stats.noOpenShifts}</span>
-            <span className="font-body text-body-sm">without an open shift</span>
+            <span className="font-body text-body-sm">{t('admin.withoutOpenShift')}</span>
           </div>
         </div>
         <div
           className="super-admin-shift-track mt-4"
           role="progressbar"
-          aria-label="Stores with an open shift"
+          aria-label={t('admin.storesOpenShift')}
           aria-valuemin={0}
           aria-valuemax={nonArchivedStores.length}
           aria-valuenow={storesWithOpenShifts}
@@ -138,18 +139,18 @@ export function SuperAdminOverviewScreen() {
       </section>
       <section className="dashboard-glass rounded-2xl p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="font-display text-headline-md text-on-surface">Newest stores</h2>
-          <Link to="/admin/stores" className="font-body text-label-md text-primary underline">View all</Link>
+          <h2 className="font-display text-headline-md text-on-surface">{t('admin.newestStores')}</h2>
+          <Link to="/admin/stores" className="font-body text-label-md text-primary underline">{t('admin.viewAll')}</Link>
         </div>
         <div className="flex flex-col gap-2">
-          {loading ? <ListSkeleton rows={2} label="Loading newest stores" /> : newestStores.map((store) => (
+          {loading ? <ListSkeleton rows={2} label={t('admin.loadingNewestStores')} /> : newestStores.map((store) => (
             <Link key={store.id} to={`/admin/stores/${store.id}`} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-surface-container-low p-3">
               <span className="min-w-0">
                 <span className="block truncate font-body text-label-md text-on-surface">{store.name}</span>
-                <span className="font-body text-body-sm text-outline">{store.code.toUpperCase()} · {new Date(store.createdAt).toLocaleDateString()}</span>
+                <span className="font-body text-body-sm text-outline">{store.code.toUpperCase()} · {new Date(store.createdAt).toLocaleDateString(getLanguage())}</span>
               </span>
               <span className="flex flex-wrap gap-2">
-                <StatusTag status={storeIsSuspended(store) ? 'suspended' : 'open'}>{storeIsSuspended(store) ? 'Suspended' : 'Active'}</StatusTag>
+                <StatusTag status={storeIsSuspended(store) ? 'suspended' : 'open'}>{t(storeIsSuspended(store) ? 'common.suspended' : 'common.active')}</StatusTag>
                 <ExpiryTag store={store} />
               </span>
             </Link>
@@ -232,7 +233,7 @@ function SuperAdminStoresContent() {
       setCredentials({
         email: result.owner.email ?? email,
         password: result.temporaryPassword,
-        title: 'New owner credentials',
+        title: t('admin.newOwnerCredentials'),
         storeCode: result.store.code,
       });
       setName('');
@@ -241,7 +242,7 @@ function SuperAdminStoresContent() {
       setCreateOpen(false);
       await refresh();
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : 'Unable to create the owner account.');
+      setError(localizeErrorMessage(createError, t('admin.createOwnerError')));
     }
   }
 
@@ -251,9 +252,9 @@ function SuperAdminStoresContent() {
     try {
       await userService.suspendStore(store.id, !store.isActive);
       await refresh();
-      setNotice(`${store.name} ${store.isActive ? 'suspended' : 'activated'}.`);
+      setNotice(t(store.isActive ? 'admin.storeSuspendedNotice' : 'admin.storeActivatedNotice', { name: store.name }));
     } catch (toggleError) {
-      setError(toggleError instanceof Error ? toggleError.message : 'Unable to update the store.');
+      setError(localizeErrorMessage(toggleError, t('admin.updateStoreError')));
     }
   }
 
@@ -264,9 +265,9 @@ function SuperAdminStoresContent() {
     try {
       await userService.suspendOwner(ownerId, !owner.isActive);
       await refresh();
-      setNotice(`${owner.name} ${owner.isActive ? 'suspended' : 'activated'}.`);
+      setNotice(t(owner.isActive ? 'admin.ownerSuspendedNotice' : 'admin.ownerActivatedNotice', { name: owner.name }));
     } catch (toggleError) {
-      setError(toggleError instanceof Error ? toggleError.message : 'Unable to update the owner.');
+      setError(localizeErrorMessage(toggleError, t('admin.updateOwnerError')));
     }
   }
 
@@ -274,18 +275,18 @@ function SuperAdminStoresContent() {
     if (!resetTarget || !admin) return;
     const owner = owners[resetTarget.ownerId];
     if (!owner) {
-      setError('Owner account could not be found.');
+      setError(t('admin.ownerNotFound'));
       return;
     }
     setError('');
     try {
       const password = await userService.resetOwnerPassword(owner.id, admin.id);
       setResetTarget(null);
-      setCredentials({ email: owner.email ?? '', password, title: `Temporary password for ${owner.name}`, storeCode: resetTarget.code });
-      setNotice('Owner password reset. The owner must sign in with the temporary password and change it at next login.');
+      setCredentials({ email: owner.email ?? '', password, title: t('admin.temporaryPasswordFor', { name: owner.name }), storeCode: resetTarget.code });
+      setNotice(t('admin.passwordResetNotice'));
       await refresh();
     } catch (resetError) {
-      setError(resetError instanceof Error ? resetError.message : 'Unable to reset the owner password.');
+      setError(localizeErrorMessage(resetError, t('admin.resetPasswordError')));
     }
   }
 
@@ -295,11 +296,11 @@ function SuperAdminStoresContent() {
     setError('');
     try {
       await userService.updateStoreNameAsAdmin(nameTarget.id, admin.id, nameDraft);
-      setNotice('Store name updated.');
+      setNotice(t('admin.storeNameUpdated'));
       setNameTarget(null);
       await refresh();
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : 'Unable to update the store name.');
+      setError(localizeErrorMessage(updateError, t('admin.updateStoreNameError')));
     }
   }
 
@@ -309,11 +310,11 @@ function SuperAdminStoresContent() {
     setError('');
     try {
       await userService.updateStoreSubscription(subscriptionTarget.id, admin.id, subscriptionDraft);
-      setNotice(`${subscriptionTarget.name} subscription saved.`);
+      setNotice(t('admin.subscriptionSaved', { name: subscriptionTarget.name }));
       setSubscriptionTarget(null);
       await refresh();
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : 'Unable to update the subscription.');
+      setError(localizeErrorMessage(updateError, t('admin.updateSubscriptionError')));
     }
   }
 
@@ -322,47 +323,47 @@ function SuperAdminStoresContent() {
     setError('');
     try {
       await userService.archiveStore(archiveTarget.id, admin.id);
-      setNotice(`${archiveTarget.name} archived.`);
+      setNotice(t('admin.storeArchived', { name: archiveTarget.name }));
       setArchiveTarget(null);
       await refresh();
     } catch (archiveError) {
-      setError(archiveError instanceof Error ? archiveError.message : 'Unable to archive the store.');
+      setError(localizeErrorMessage(archiveError, t('admin.archiveStoreError')));
     }
   }
 
   async function copyCredentials() {
     if (!credentials) return;
     try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable.');
-      await navigator.clipboard.writeText(`${credentials.storeCode ? `Store ID: ${credentials.storeCode.toUpperCase()}\n` : ''}Email: ${credentials.email}\nTemporary password: ${credentials.password}`);
-      setNotice('Credentials copied.');
+      if (!navigator.clipboard?.writeText) throw new Error(t('admin.clipboardUnavailable'));
+      await navigator.clipboard.writeText(`${credentials.storeCode ? `${t('admin.storeId')}: ${credentials.storeCode.toUpperCase()}\n` : ''}${t('admin.email')}: ${credentials.email}\n${t('admin.temporaryPassword')}: ${credentials.password}`);
+      setNotice(t('admin.credentialsCopied'));
       setError('');
     } catch (copyError) {
-      setError(copyError instanceof Error ? copyError.message : 'Unable to copy credentials.');
+      setError(localizeErrorMessage(copyError, t('admin.copyCredentialsError')));
     }
   }
 
   async function copyCredentialValue(label: string, value: string) {
     try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable.');
+      if (!navigator.clipboard?.writeText) throw new Error(t('admin.clipboardUnavailable'));
       await navigator.clipboard.writeText(value);
-      setNotice(`${label} copied.`);
+      setNotice(t('admin.copied', { label }));
       setError('');
     } catch (copyError) {
-      setError(copyError instanceof Error ? copyError.message : `Unable to copy ${label.toLocaleLowerCase()}.`);
+      setError(localizeErrorMessage(copyError, t('admin.copyValueError', { label })));
     }
   }
 
   async function shareCredentials() {
     if (!credentials) return;
-    const text = `${credentials.storeCode ? `Store ID: ${credentials.storeCode.toUpperCase()}\n` : ''}Email: ${credentials.email}\nTemporary password: ${credentials.password}`;
+    const text = `${credentials.storeCode ? `${t('admin.storeId')}: ${credentials.storeCode.toUpperCase()}\n` : ''}${t('admin.email')}: ${credentials.email}\n${t('admin.temporaryPassword')}: ${credentials.password}`;
     try {
       await shareTextAsPdf(text, `owner-credentials-${credentials.email}`, credentials.title);
-      setNotice('Credentials PDF shared or downloaded.');
+      setNotice(t('admin.credentialsPdfShared'));
       setError('');
     } catch (shareError) {
       if (shareError instanceof DOMException && shareError.name === 'AbortError') return;
-      setError(shareError instanceof Error ? shareError.message : 'Unable to share credentials.');
+      setError(localizeErrorMessage(shareError, t('admin.shareCredentialsError')));
     }
   }
 
@@ -385,30 +386,30 @@ function SuperAdminStoresContent() {
     <WorkspaceLayout title={t('admin.storeList')} links={adminWorkspaceLinks}>
       <header className="mb-4">
         <h1 className="font-display text-headline-lg text-on-surface">{t('admin.storeList')}</h1>
-        <p className="mt-1 font-body text-body-md text-on-surface-variant">Manage stores, subscriptions, and owner accounts.</p>
+        <p className="mt-1 font-body text-body-md text-on-surface-variant">{t('admin.manageDescription')}</p>
       </header>
 
       <Button className="mb-5 w-full sm:w-auto" onClick={() => setCreateOpen(true)}><MaterialIcon name="add" />{t('admin.createOwner')}</Button>
 
-      <section aria-label="Store filters" className="mb-4 flex flex-col gap-3">
+      <section aria-label={t('admin.storeFilters')} className="mb-4 flex flex-col gap-3">
         <label className="relative block">
           <MaterialIcon name="search" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xl text-outline" />
-          <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search stores or owners" aria-label="Search stores" className="h-12 w-full rounded-xl bg-surface-container-lowest pl-11 pr-4 font-body outline-none ring-1 ring-outline-variant focus:ring-2 focus:ring-primary" />
+          <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('admin.searchStoresPlaceholder')} aria-label={t('admin.searchStoresLabel')} className="h-12 w-full rounded-xl bg-surface-container-lowest pl-11 pr-4 font-body outline-none ring-1 ring-outline-variant focus:ring-2 focus:ring-primary" />
         </label>
         <div className="scrollbar-hidden flex gap-2 overflow-x-auto py-1">
           {(['all', 'active', 'suspended', 'archived'] as StoreFilter[]).map((filter) => (
             <button key={filter} type="button" aria-pressed={statusFilter === filter} onClick={() => setStatusFilter(filter)} className={`min-h-11 shrink-0 rounded-full px-4 font-body text-label-md ${statusFilter === filter ? 'bg-primary text-on-primary' : 'bg-surface-container-high text-on-surface-variant'}`}>
-              {filter === 'all' ? 'All stores' : filter[0].toLocaleUpperCase() + filter.slice(1)}
+              {filter === 'all' ? t('admin.allStores') : filter === 'active' ? t('common.active') : filter === 'suspended' ? t('common.suspended') : t('admin.archived')}
             </button>
           ))}
-          <span className="ml-auto self-center whitespace-nowrap font-body text-body-sm text-outline">{visibleStores.length} stores</span>
+          <span className="ml-auto self-center whitespace-nowrap font-body text-body-sm text-outline">{t('admin.storeCount', { count: visibleStores.length })}</span>
         </div>
       </section>
 
       {(error || notice) && <p role={error ? 'alert' : 'status'} className={`mb-3 rounded-lg p-3 font-body text-body-sm ${error ? 'bg-error-container text-on-error-container' : 'bg-success-container text-success-dark'}`}>{error || notice}</p>}
 
       <section className="flex flex-col gap-3">
-        {loading ? <ListSkeleton label="Loading stores" /> : visibleStores.map((store) => {
+        {loading ? <ListSkeleton label={t('admin.loadingStores')} /> : visibleStores.map((store) => {
           const owner = owners[store.ownerId];
           const suspended = storeIsSuspended(store);
           return (
@@ -416,30 +417,30 @@ function SuperAdminStoresContent() {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h2 className="truncate font-body text-label-lg text-on-surface">{store.name}</h2>
-                  <p className="mt-1 break-all font-body text-body-sm text-outline">{store.code.toUpperCase()} · {owner?.email ?? 'Owner account unavailable'}</p>
+                  <p className="mt-1 break-all font-body text-body-sm text-outline">{store.code.toUpperCase()} · {owner?.email ?? t('admin.ownerUnavailable')}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
-                    <StatusTag status={store.archivedAt ? 'suspended' : suspended ? 'suspended' : 'open'}>{store.archivedAt ? 'Archived' : suspended ? 'Suspended' : 'Active'}</StatusTag>
-                    {owner && <StatusTag status={owner.isActive ? 'open' : 'suspended'}>{`Owner ${owner.isActive ? 'active' : 'suspended'}`}</StatusTag>}
-                    <StatusTag status="closed">{`${subscriptionFor(store).plan} plan`}</StatusTag>
+                    <StatusTag status={store.archivedAt ? 'suspended' : suspended ? 'suspended' : 'open'}>{store.archivedAt ? t('admin.archived') : suspended ? t('common.suspended') : t('common.active')}</StatusTag>
+                    {owner && <StatusTag status={owner.isActive ? 'open' : 'suspended'}>{t('admin.ownerStatus', { status: owner.isActive ? t('admin.ownerActive') : t('admin.ownerSuspended') })}</StatusTag>}
+                    <StatusTag status="closed">{t('admin.plan', { plan: t(`admin.${subscriptionFor(store).plan}` as 'admin.trial' | 'admin.monthly' | 'admin.yearly') })}</StatusTag>
                     <ExpiryTag store={store} />
                   </div>
-                  {isSubscriptionExpired(store) && <p className="mt-2 font-body text-body-sm text-error-dark">Subscription expired. Owner access is suspended until the subscription is renewed.</p>}
+                  {isSubscriptionExpired(store) && <p className="mt-2 font-body text-body-sm text-error-dark">{t('admin.subscriptionExpiredWarning')}</p>}
                 </div>
                 <Link to={`/admin/stores/${store.id}`} className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-lg bg-surface-container-high px-3 font-body text-label-md text-primary"><MaterialIcon name="visibility" className="text-lg" />{t('admin.readOnly')}</Link>
               </div>
               {store.subscription?.notes && <p className="mt-3 whitespace-pre-wrap rounded-lg bg-surface-container-low p-3 font-body text-body-sm text-on-surface-variant">{store.subscription.notes}</p>}
               <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 <Button type="button" variant="secondary" className="min-h-11 w-full" onClick={() => { setSubscriptionTarget(store); setSubscriptionDraft(subscriptionFor(store)); }}>
-                  <MaterialIcon name="credit_card" />Subscription
+                  <MaterialIcon name="credit_card" />{t('admin.subscription')}
                 </Button>
                 <Button type="button" variant="secondary" className="min-h-11 w-full" onClick={() => { setNameTarget(store); setNameDraft(store.name); }}>
-                  <MaterialIcon name="edit" />Edit store name
+                  <MaterialIcon name="edit" />{t('admin.editStoreName')}
                 </Button>
                 {owner && <Button type="button" variant="secondary" className="min-h-11 w-full" onClick={() => { setResetTarget(store); }}>
-                  <MaterialIcon name="lock_reset" />Reset owner password
+                  <MaterialIcon name="lock_reset" />{t('admin.resetOwnerPassword')}
                 </Button>}
                 {owner && <Button type="button" variant="secondary" className="min-h-11 w-full" onClick={() => { void toggleOwner(owner.id, owner); }}>
-                  <MaterialIcon name={owner.isActive ? 'person_off' : 'person'} />{owner.isActive ? 'Suspend owner' : 'Activate owner'}
+                  <MaterialIcon name={owner.isActive ? 'person_off' : 'person'} />{owner.isActive ? t('admin.suspendOwner') : t('admin.activateOwner')}
                 </Button>}
                 {!store.archivedAt && <Button type="button" variant={store.isActive && !isSubscriptionExpired(store) ? 'danger' : 'secondary'} className="min-h-11 w-full" onClick={() => {
                   if (isSubscriptionExpired(store)) {
@@ -450,82 +451,82 @@ function SuperAdminStoresContent() {
                   }
                 }}>
                   <MaterialIcon name={isSubscriptionExpired(store) ? 'credit_card' : store.isActive ? 'block' : 'check_circle'} />
-                  {isSubscriptionExpired(store) ? 'Renew subscription' : store.isActive ? 'Suspend store' : 'Activate store'}
+                  {isSubscriptionExpired(store) ? t('admin.renewSubscription') : store.isActive ? t('admin.suspendStore') : t('admin.activateStore')}
                 </Button>}
                 {!store.archivedAt && <Button type="button" variant="danger" className="min-h-11 w-full" onClick={() => setArchiveTarget(store)}>
-                  <MaterialIcon name="archive" />Archive store
+                  <MaterialIcon name="archive" />{t('admin.archiveStore')}
                 </Button>}
               </div>
             </article>
           );
         })}
-        {!loading && !error && visibleStores.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">{stores.length === 0 ? t('common.noData') : 'No stores match these filters.'}</p>}
+        {!loading && !error && visibleStores.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">{stores.length === 0 ? t('common.noData') : t('admin.noFilterMatches')}</p>}
       </section>
 
       <BottomSheet open={Boolean(credentials)} onClose={() => setCredentials(null)} title={credentials?.title}>
         {credentials && (
           <div className="flex flex-col gap-4">
-            <p className="font-body text-body-md text-on-surface-variant">Share these temporary credentials securely. The owner must set a new password at next login. The store ID is used in staff usernames.</p>
-            {credentials.storeCode && <CredentialField label="Store ID" value={credentials.storeCode.toUpperCase()} onCopy={() => { void copyCredentialValue('Store ID', credentials.storeCode?.toUpperCase() ?? ''); }} />}
-            <CredentialField label="Email" value={credentials.email} onCopy={() => { void copyCredentialValue('Email', credentials.email); }} />
-            <CredentialField label="Temporary password" value={credentials.password} onCopy={() => { void copyCredentialValue('Password', credentials.password); }} />
+            <p className="font-body text-body-md text-on-surface-variant">{t('admin.credentialsDescription')}</p>
+            {credentials.storeCode && <CredentialField label={t('admin.storeId')} value={credentials.storeCode.toUpperCase()} onCopy={() => { void copyCredentialValue(t('admin.storeId'), credentials.storeCode?.toUpperCase() ?? ''); }} />}
+            <CredentialField label={t('admin.email')} value={credentials.email} onCopy={() => { void copyCredentialValue(t('admin.email'), credentials.email); }} />
+            <CredentialField label={t('admin.temporaryPassword')} value={credentials.password} onCopy={() => { void copyCredentialValue(t('admin.password'), credentials.password); }} />
             {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
             {notice && <p role="status" className="font-body text-body-sm text-success-dark">{notice}</p>}
             <div className="grid grid-cols-2 gap-2">
-              <Button type="button" variant="secondary" className="min-h-12" onClick={() => { void copyCredentials(); }}><MaterialIcon name="content_copy" />Copy all</Button>
-              <Button type="button" className="min-h-12" onClick={() => { void shareCredentials(); }}><MaterialIcon name="share" />Share</Button>
+              <Button type="button" variant="secondary" className="min-h-12" onClick={() => { void copyCredentials(); }}><MaterialIcon name="content_copy" />{t('admin.copyAll')}</Button>
+              <Button type="button" className="min-h-12" onClick={() => { void shareCredentials(); }}><MaterialIcon name="share" />{t('admin.share')}</Button>
             </div>
           </div>
         )}
       </BottomSheet>
 
-      <BottomSheet open={Boolean(resetTarget)} onClose={() => setResetTarget(null)} title="Reset owner password?">
+      <BottomSheet open={Boolean(resetTarget)} onClose={() => setResetTarget(null)} title={t('admin.resetPasswordTitle')}>
         <div className="flex flex-col gap-4">
-          <p className="font-body text-body-md text-on-surface-variant">Issue a new temporary password for {owners[resetTarget?.ownerId ?? '']?.name ?? 'this owner'}? Existing owner sessions will be signed out, and the owner must sign in and change the password.</p>
+          <p className="font-body text-body-md text-on-surface-variant">{t('admin.resetPasswordDescription', { name: owners[resetTarget?.ownerId ?? '']?.name ?? t('common.owner') })}</p>
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
           <div className="grid grid-cols-2 gap-2">
-            <Button type="button" variant="secondary" className="min-h-12" onClick={() => setResetTarget(null)}>Cancel</Button>
-            <Button type="button" className="min-h-12" onClick={() => { void resetOwnerPassword(); }}>Reset password</Button>
+            <Button type="button" variant="secondary" className="min-h-12" onClick={() => setResetTarget(null)}>{t('common.cancel')}</Button>
+            <Button type="button" className="min-h-12" onClick={() => { void resetOwnerPassword(); }}>{t('admin.resetPasswordButton')}</Button>
           </div>
         </div>
       </BottomSheet>
 
-      <BottomSheet open={Boolean(nameTarget)} onClose={() => setNameTarget(null)} title="Edit store name">
+      <BottomSheet open={Boolean(nameTarget)} onClose={() => setNameTarget(null)} title={t('admin.editStoreName')}>
         <form onSubmit={(event) => { void saveStoreName(event); }} className="flex flex-col gap-4">
-          <label className="font-body text-label-md text-on-surface">Store name
+          <label className="font-body text-label-md text-on-surface">{t('admin.storeNameLabel')}
             <input required autoFocus value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" />
           </label>
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
-          <Button type="submit" className="min-h-12">Save name</Button>
+          <Button type="submit" className="min-h-12">{t('admin.saveName')}</Button>
         </form>
       </BottomSheet>
 
-      <BottomSheet open={Boolean(subscriptionTarget)} onClose={() => setSubscriptionTarget(null)} title={`${subscriptionTarget?.name ?? ''} subscription`}>
+      <BottomSheet open={Boolean(subscriptionTarget)} onClose={() => setSubscriptionTarget(null)} title={`${subscriptionTarget?.name ?? ''} ${t('admin.subscription').toLocaleLowerCase()}`}>
         <form onSubmit={(event) => { void saveSubscription(event); }} className="flex flex-col gap-4">
-          <label className="font-body text-label-md text-on-surface">Plan
+          <label className="font-body text-label-md text-on-surface">{t('admin.planLabel')}
             <select value={subscriptionDraft.plan} onChange={(event) => setSubscriptionDraft((current) => ({ ...current, plan: event.target.value as StoreSubscription['plan'] }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary">
-              <option value="trial">Trial</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option>
+              <option value="trial">{t('admin.trial')}</option><option value="monthly">{t('admin.monthly')}</option><option value="yearly">{t('admin.yearly')}</option>
             </select>
           </label>
-          <label className="font-body text-label-md text-on-surface">Paid until
+          <label className="font-body text-label-md text-on-surface">{t('admin.paidUntil')}
             <input type="date" value={subscriptionDraft.paidUntil ?? ''} onChange={(event) => setSubscriptionDraft((current) => ({ ...current, paidUntil: event.target.value || null }))} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" />
           </label>
-          <p className="-mt-2 font-body text-body-sm text-outline">Leave blank for no expiry. Owners cannot sign in after this date has passed.</p>
-          <label className="font-body text-label-md text-on-surface">Notes
+          <p className="-mt-2 font-body text-body-sm text-outline">{t('admin.paidUntilHelp')}</p>
+          <label className="font-body text-label-md text-on-surface">{t('admin.notes')}
             <textarea maxLength={1000} rows={4} value={subscriptionDraft.notes} onChange={(event) => setSubscriptionDraft((current) => ({ ...current, notes: event.target.value }))} className="mt-1 w-full rounded-lg bg-surface-container-low px-3 py-3 outline-none focus:ring-2 focus:ring-primary" />
           </label>
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
-          <Button type="submit" className="min-h-12">Save subscription</Button>
+          <Button type="submit" className="min-h-12">{t('admin.saveSubscription')}</Button>
         </form>
       </BottomSheet>
 
-      <BottomSheet open={Boolean(archiveTarget)} onClose={() => setArchiveTarget(null)} title="Archive store?">
+      <BottomSheet open={Boolean(archiveTarget)} onClose={() => setArchiveTarget(null)} title={t('admin.archiveTitle')}>
         <div className="flex flex-col gap-4">
-          <p className="font-body text-body-md text-on-surface-variant">Archive {archiveTarget?.name}? This suspends owner access and keeps the store in the archived filter.</p>
+          <p className="font-body text-body-md text-on-surface-variant">{t('admin.archiveDescription', { name: archiveTarget?.name ?? '' })}</p>
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
           <div className="grid grid-cols-2 gap-2">
-            <Button type="button" variant="secondary" className="min-h-12" onClick={() => setArchiveTarget(null)}>Cancel</Button>
-            <Button type="button" variant="danger" className="min-h-12" onClick={() => { void archiveStore(); }}>Archive store</Button>
+            <Button type="button" variant="secondary" className="min-h-12" onClick={() => setArchiveTarget(null)}>{t('common.cancel')}</Button>
+            <Button type="button" variant="danger" className="min-h-12" onClick={() => { void archiveStore(); }}>{t('admin.archiveStore')}</Button>
           </div>
         </div>
       </BottomSheet>
@@ -534,8 +535,8 @@ function SuperAdminStoresContent() {
           <label className="font-body text-label-md">{t('common.name')}<input required value={name} onChange={(event) => setName(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
           <label className="font-body text-label-md">{t('admin.ownerEmail')}<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
           <label className="font-body text-label-md">{t('admin.storeName')}<input required value={storeName} onChange={(event) => setStoreName(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
-          <label className="font-body text-label-md">{t('admin.storeCode')}<input readOnly value={storeCodePreview.toUpperCase()} placeholder="Enter a store name to generate its ID" className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 font-mono outline-none" /></label>
-          <p className="-mt-2 font-body text-body-sm text-on-surface-variant">The store ID is generated from the store name and is kept unique automatically.</p>
+          <label className="font-body text-label-md">{t('admin.storeCode')}<input readOnly value={storeCodePreview.toUpperCase()} placeholder={t('admin.storeCodePlaceholder')} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 font-mono outline-none" /></label>
+          <p className="-mt-2 font-body text-body-sm text-on-surface-variant">{t('admin.storeCodeHelp')}</p>
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
           <div className="sheet-action-bar grid grid-cols-2 gap-2">
             <Button type="button" variant="ghost" onClick={() => setCreateOpen(false)}>{t('common.cancel')}</Button>
@@ -552,7 +553,7 @@ function CredentialField({ label, value, onCopy }: { label: string; value: strin
     <label className="font-body text-label-md text-on-surface">{label}
       <span className="mt-1 grid grid-cols-[minmax(0,1fr)_auto] gap-2">
         <input readOnly value={value} className="h-12 min-w-0 rounded-lg bg-surface-container-low px-3 font-mono text-body-sm" />
-        <Button type="button" variant="secondary" className="min-h-12 px-3" onClick={onCopy}>Copy</Button>
+        <Button type="button" variant="secondary" className="min-h-12 px-3" onClick={onCopy}>{t('admin.copy')}</Button>
       </span>
     </label>
   );

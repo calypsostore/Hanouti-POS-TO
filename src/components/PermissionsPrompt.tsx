@@ -7,6 +7,8 @@ import { useAuthStore } from '../stores/authStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
 import { requiresCredentialSetup } from '../services/credentialSetup';
+import { t } from '../i18n/translations';
+import { localizeErrorMessage } from '../i18n';
 
 export function PermissionsPrompt() {
   const user = useAuthStore((state) => state.user);
@@ -74,12 +76,12 @@ export function PermissionsPrompt() {
       if (nextStatus === 'granted' || nextStatus === 'unsupported') {
         setVisible(false);
       } else if (nextStatus === 'denied') {
-        setError('Notifications are still blocked. You can enable them in your browser or device settings.');
+        setError(t('permissions.deniedNotice'));
         setShowInstructions(true);
       }
     } catch (permissionError) {
       console.error('[permissions] Could not request notification permission.', permissionError);
-      setError(permissionError instanceof Error ? permissionError.message : 'Could not request notification permission.');
+      setError(localizeErrorMessage(permissionError, t('permissions.requestFailed')));
     } finally {
       setRequesting(false);
     }
@@ -92,7 +94,7 @@ export function PermissionsPrompt() {
       setVisible(false);
     } catch (permissionError) {
       console.error('[permissions] Could not save the permission choice.', permissionError);
-      setError(permissionError instanceof Error ? permissionError.message : 'Could not save your choice.');
+      setError(localizeErrorMessage(permissionError, t('permissions.saveChoiceFailed')));
     }
   }
 
@@ -108,8 +110,8 @@ export function PermissionsPrompt() {
   });
 
   const instructions = permissionService.isNative()
-    ? 'Android Settings > Apps > 7anouti-POS > Notifications'
-    : 'Open this app’s browser site settings and allow notifications.';
+    ? t('permissions.androidInstructions')
+    : t('permissions.browserInstructions');
 
   return (
     <>
@@ -132,7 +134,7 @@ export function PermissionsPrompt() {
           >
             <button
               type="button"
-              aria-label="Close notification prompt"
+              aria-label={t('permissions.closePrompt')}
               onClick={() => { void notNow(); }}
               className="permissions-prompt__close absolute right-2 top-2 grid size-8 place-items-center rounded-full text-on-surface-variant transition"
             >
@@ -148,16 +150,16 @@ export function PermissionsPrompt() {
               </div>
               <div className="min-w-0">
                 <p className="permissions-prompt__eyebrow font-body text-label-sm font-semibold text-primary">
-                  Notifications are off
+                  {t('permissions.notificationsOff')}
                 </p>
                 <h1 id="permissions-title" className="permissions-prompt__title mt-0.5 font-display text-headline-sm text-on-surface">
-                  Enable app alerts
+                  {t('permissions.enableAlerts')}
                 </h1>
               </div>
             </div>
 
             <p id="permissions-description" className="permissions-prompt__description mt-3 font-body text-body-sm text-on-surface-variant">
-              Get important alerts for stock, void requests, tabs and end-of-day updates.
+              {t('permissions.alertDescription')}
             </p>
 
             {error && status === 'denied' ? (
@@ -167,7 +169,7 @@ export function PermissionsPrompt() {
                 onClick={() => setShowInstructions((current) => !current)}
               >
                 <span className="flex items-center justify-between gap-2 font-body text-label-sm text-on-surface">
-                  <span>{showInstructions ? 'Hide instructions' : 'How to enable'}</span>
+                  <span>{showInstructions ? t('permissions.hideInstructions') : t('permissions.howToEnable')}</span>
                   <MaterialIcon name={showInstructions ? 'expand_less' : 'expand_more'} className="text-lg" />
                 </span>
                 {showInstructions && <p className="mt-2 font-body text-body-sm text-on-surface-variant">{instructions}</p>}
@@ -183,10 +185,10 @@ export function PermissionsPrompt() {
                 disabled={requesting}
                 className="permissions-prompt__later min-h-11 flex-1 rounded-lg bg-surface-container text-on-surface-variant font-body text-label-md transition hover:bg-surface-container-high"
               >
-                Maybe later
+                {t('permissions.maybeLater')}
               </button>
               <Button onClick={() => { void allowNotifications(); }} disabled={requesting} className="permissions-prompt__action min-h-11 flex-[1.35]">
-                {requesting ? 'Requesting…' : 'Enable notifications'}
+                {requesting ? t('permissions.requesting') : t('permissions.enableNotifications')}
               </Button>
             </div>
           </section>

@@ -9,6 +9,7 @@ import type { NotificationRecord } from '../types/domain';
 import { MaterialIcon } from './MaterialIcon';
 import { NotificationTypeIcon } from './NotificationTypeIcon';
 import { t } from '../i18n/translations';
+import { getLanguage } from '../i18n';
 import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
 
 interface NotificationsPopoverButtonProps {
@@ -78,7 +79,7 @@ export function NotificationsPopoverButton({
       navigate(notificationPath(notification, user.role));
     } catch (openError) {
       console.error('Unable to open this notification.', openError);
-      setError('Unable to open this notification. Please try again.');
+      setError(t('notifications.openFailed'));
     } finally {
       setActiveNotificationId('');
     }
@@ -91,7 +92,7 @@ export function NotificationsPopoverButton({
       await markRead(user, notificationId);
     } catch (markError) {
       console.error('Unable to mark this notification as read.', markError);
-      setError('Unable to mark this notification as read. Please try again.');
+      setError(t('notifications.markReadFailed'));
     } finally {
       setActiveNotificationId('');
     }
@@ -104,7 +105,7 @@ export function NotificationsPopoverButton({
       await markAllRead(user);
     } catch (markError) {
       console.error('Unable to mark notifications as read.', markError);
-      setError('Unable to mark notifications as read. Please try again.');
+      setError(t('notifications.markAllReadFailed'));
     } finally {
       setPendingBulkAction(null);
     }
@@ -123,7 +124,7 @@ export function NotificationsPopoverButton({
       <button
         type="button"
         className={buttonClassName}
-        aria-label={unreadCount ? `Notifications, ${unreadCount} unread` : 'Notifications'}
+        aria-label={unreadCount ? t('notifications.unreadCount', { count: unreadCount }) : t('notifications.label')}
         aria-haspopup="dialog"
         aria-controls={id}
         aria-expanded={isOpen}
@@ -162,7 +163,7 @@ export function NotificationsPopoverButton({
                     onClick={() => { void markAllNotificationsRead(); }}
                     className="notification-center-header-link"
                   >
-                    Read all
+                    {t('notifications.readAll')}
                   </button>
                 )}
                 <Link
@@ -170,7 +171,7 @@ export function NotificationsPopoverButton({
                   onClick={() => setPanelOpen(false)}
                   className="notification-center-header-link"
                 >
-                  See all
+                  {t('notifications.seeAll')}
                 </Link>
                 <button
                   type="button"
@@ -187,7 +188,7 @@ export function NotificationsPopoverButton({
 
             <div className="notification-center-list">
               {loading ? (
-                <p role="status" className="notification-center-empty">Loading notifications…</p>
+                <p role="status" className="notification-center-empty">{t('notifications.loading')}</p>
               ) : visibleNotifications.length > 0 ? visibleNotifications.map((notification) => {
                 const appearance = getNotificationAppearance(notification.type);
                 const busy = activeNotificationId === notification.id || pendingBulkAction !== null;
@@ -197,19 +198,19 @@ export function NotificationsPopoverButton({
                       type="button"
                       disabled={busy}
                       onClick={() => { void openNotification(notification); }}
-                      aria-label={`Open notification: ${notification.title}`}
+                      aria-label={t('notifications.openItem', { title: notification.title })}
                       className="notification-center-open"
                     >
                       <NotificationTypeIcon type={notification.type} />
                       <span className="notification-center-copy">
                         <span className="notification-center-title-row">
                           <span className="notification-center-item-title">{notification.title}</span>
-                          {!notification.readAt && <span className="notification-center-unread" aria-label="Unread" />}
+                          {!notification.readAt && <span className="notification-center-unread" aria-label={t('notifications.unread')} />}
                         </span>
                         <span className="notification-center-body">{notification.body}</span>
                         <span className="notification-center-time">
                           <MaterialIcon name="schedule" />
-                          {new Date(notification.createdAt).toLocaleString()}
+                          {new Date(notification.createdAt).toLocaleString(getLanguage())}
                         </span>
                       </span>
                       <MaterialIcon name="chevron_right" className="notification-center-chevron" />
@@ -219,17 +220,17 @@ export function NotificationsPopoverButton({
                         type="button"
                         disabled={busy}
                         onClick={() => { void markNotificationRead(notification.id); }}
-                        aria-label={`Mark notification as read: ${notification.title}`}
+                        aria-label={t('notifications.markRead', { title: notification.title })}
                         className="notification-center-read"
                       >
                         <MaterialIcon name="done" />
-                        <span>Mark as read</span>
+                        <span>{t('notifications.markAsRead')}</span>
                       </button>
                     )}
                   </article>
                 );
               }) : (
-                <p role="status" className="notification-center-empty">You’re all caught up.</p>
+                <p role="status" className="notification-center-empty">{t('notifications.caughtUp')}</p>
               )}
             </div>
 
@@ -238,18 +239,18 @@ export function NotificationsPopoverButton({
                 type="button"
                 disabled={visibleNotifications.length === 0 || pendingBulkAction !== null}
                 onClick={() => { void clearVisibleNotifications(); }}
-                aria-label="Clear all notifications from this panel"
+                aria-label={t('notifications.clearAllFromPanel')}
                 className="notification-center-footer-action"
               >
                 <MaterialIcon name="delete_outline" />
-                <span>Clear all</span>
+                <span>{t('notifications.clearAll')}</span>
               </button>
               <Link
                 to="/notifications"
                 onClick={() => setPanelOpen(false)}
                 className="notification-center-footer-action notification-center-view-all"
               >
-                <span>View all notifications</span>
+                <span>{t('notifications.viewAll')}</span>
                 <MaterialIcon name="chevron_right" />
               </Link>
             </footer>

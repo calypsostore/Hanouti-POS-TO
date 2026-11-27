@@ -108,10 +108,49 @@
   transition: background-color 160ms ease;
 }
 
+.owner-subscription-warning {
+  border: 1px solid #b91c1c;
+  background: #fee2e2;
+  color: #7f1d1d;
+  animation: owner-subscription-warning-pulse 1.8s ease-in-out infinite;
+}
+
+.owner-subscription-warning-icon {
+  transform-origin: center;
+  animation: owner-subscription-warning-wave 1.1s ease-in-out infinite;
+}
+
+@keyframes owner-subscription-warning-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgb(185 28 28 / 8%);
+  }
+  50% {
+    box-shadow: 0 0 0 7px rgb(185 28 28 / 16%);
+  }
+}
+
+@keyframes owner-subscription-warning-wave {
+  0%, 100% {
+    transform: rotate(0);
+  }
+  25% {
+    transform: rotate(-12deg);
+  }
+  50% {
+    transform: rotate(12deg);
+  }
+  75% {
+    transform: rotate(-5deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .owner-dashboard-notification,
-  .owner-dashboard-notification-dismiss {
+  .owner-dashboard-notification-dismiss,
+  .owner-subscription-warning,
+  .owner-subscription-warning-icon {
     transition-duration: 1ms;
+    animation: none;
   }
 }
 

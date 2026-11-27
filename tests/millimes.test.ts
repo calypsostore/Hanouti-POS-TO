@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { formatMillimesAmountsInText } from '../src/lib/format';
+import { getLanguage, setLanguage } from '../src/i18n';
+import { formatMillimesAmountsInText, formatTnd } from '../src/lib/format';
 import {
   formatDinarInput,
   formatMillimes,
@@ -35,6 +36,18 @@ describe('Dinar millimes parsing', () => {
     expect(formatMillimes(25500)).toBe('25.500');
     expect(formatMillimes(250)).toBe('0.250');
     expect(formatMillimesWithThousands(1250000)).toBe('1,250.000');
+  });
+
+  it('formats displayed Dinars using the selected language conventions', () => {
+    const previousLanguage = getLanguage();
+    try {
+      setLanguage('fr');
+      expect(formatMillimesWithThousands(1250000)).toBe('1\u202f250,000');
+      expect(formatMillimesWithThousands(-250)).toBe('-0,250');
+      expect(formatTnd(1250)).toBe('1\u202f250,000');
+    } finally {
+      setLanguage(previousLanguage);
+    }
   });
 
   it('formats legacy millime amounts in display text as DT', () => {

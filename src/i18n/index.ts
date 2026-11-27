@@ -58,4 +58,10 @@ export function t(key: TranslationKey, values: TranslationValues = {}): string {
   return template.replace(/\{(\w+)\}/g, (_match, name: string) => String(values[name] ?? `{${name}}`));
 }
 
+export function localizeErrorMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof Error) || !error.message.trim()) return fallback;
+  if (activeLanguage === 'en' || !/[A-Za-z]/.test(error.message)) return error.message;
+  return fallback;
+}
+
 export const translations = catalogs;

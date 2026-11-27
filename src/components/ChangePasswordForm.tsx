@@ -4,6 +4,7 @@ import { authService } from '../services/authService';
 import { useAuthStore } from '../stores/authStore';
 import { t } from '../i18n/translations';
 import { SettingsGlassSection } from './settings/SettingsGlassSection';
+import { localizeErrorMessage } from '../i18n';
 
 interface ChangePasswordFormProps {
   onError: (message: string) => void;
@@ -21,7 +22,7 @@ export function ChangePasswordForm({ onError, onNotice }: ChangePasswordFormProp
     onError('');
     onNotice('');
     if (newPassword !== confirmation) {
-      onError('New passwords do not match.');
+      onError(t('password.newMismatch'));
       return;
     }
     if (!user) return;
@@ -32,12 +33,12 @@ export function ChangePasswordForm({ onError, onNotice }: ChangePasswordFormProp
       setConfirmation('');
       onNotice(t('settings.passwordChanged'));
     } catch (passwordError) {
-      onError(passwordError instanceof Error ? passwordError.message : 'Unable to change password.');
+      onError(localizeErrorMessage(passwordError, t('password.changeUnable')));
     }
   }
 
   return (
-    <SettingsGlassSection heading={t('settings.password')} description="Update the password used to access your account." icon="lock_reset">
+    <SettingsGlassSection heading={t('settings.password')} description={t('password.changeDescription')} icon="lock_reset">
       <form onSubmit={(event) => { void changePassword(event); }} className="settings-glass-form flex flex-col gap-3">
       <label className="font-body text-label-md">{t('settings.currentPassword')}<input required type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
       <label className="font-body text-label-md">{t('settings.newPassword')}<input required minLength={6} type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} className="mt-1.5 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>

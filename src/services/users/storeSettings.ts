@@ -1,5 +1,6 @@
 import { resolveStoreSettings, type StoreRecord, type StoreSettings } from '../../types/domain';
 import { hashSecret, verifySecret } from '../secretService';
+import { readData } from '../storage';
 import { activityService } from '../activityService';
 import { getLogoDefinition } from '../../data/logoCatalog';
 import { getSupabaseClient } from '../../data/supabaseClient';
@@ -7,7 +8,8 @@ import { isSupabaseDriver } from '../../data/driver';
 import { invalidateQueryCache } from '../../lib/queryCache';
 import { getStore as getRemoteStore } from '../../data/repositories/storeRepository';
 import { mergeStoreAppearance } from '../../theme/themeRegistry';
-import { getStores, getUsers, saveStores, logUserMutation, notifyStoreSettingsChanged } from './userHelpers';
+import { getStores, getUsers, getPositions, saveStores, saveUsers, logUserMutation, notifyStoreSettingsChanged } from './userHelpers';
+import { resolveEffectivePermissionIds } from './userValidation';
 
 export const storeSettingsMethods = {
   async updateStoreSettings(
@@ -179,6 +181,32 @@ export const storeSettingsMethods = {
         throw new Error(`Could not verify the Admin PIN: ${error.message}`, { cause: error });
       }
       return data === true;
+    }
+    const session = readData<{ userId: string } | null>('auth-session', null);
+    const users = getUsers();
+    const activeUser = session?.userId
+      ? users.find((candidate) => candidate.id === session.userId && candidate.storeId === storeId && candidate.isActive)
+      : undefined;
+    const position = activeUser?.positionId
+      ? getPositions().find((candidate) => candidate.id === activeUser.positionId && candidate.storeId === storeId)
+      : undefined;
+    const permissions = new Set(resolveEffectivePermissionIds(
+      position?.permissionIds ?? [],
+      activeUser?.permissionOverrides?.granted,
+      activeUser?.permissionOverrides?.revoked,
+    ));
+    const usesStaffPin = (purpose === 'z_report' && permissions.has('manage_shifts')) ||
+      (purpose === 'void' && permissions.has('resolve_voids'));
+    if (usesStaffPin && activeUser?.role === 'staff') {
+      if (!activeUser.pinHash) return false;
+      const result = await verifySecret(activeUser.pinHash, pin);
+      if (result.valid && result.needsRehash) {
+        const pinHash = await hashSecret(pin);
+        saveUsers(users.map((candidate) => candidate.id === activeUser.id
+          ? { ...candidate, pinHash }
+          : candidate));
+      }
+      return result.valid;
     }
     const stores = getStores();
     const store = stores.find((candidate) => candidate.id === storeId);

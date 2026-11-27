@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import type { Dispatch, SetStateAction } from 'react';
 import { MaterialIcon } from '../../../components/MaterialIcon';
 import { formatTnd } from '../../../lib/format';
+import { t } from '../../../i18n/translations';
 import {
   getShiftOverviewChange,
   getShiftOverviewSeries,
@@ -67,45 +68,45 @@ export function ShiftOverview(props: ShiftOverviewProps) {
   }[] = [
     {
       key: 'sales',
-      label: 'Total Sales',
+      label: t('shift.totalSales'),
       icon: 'shopping_cart',
       tone: 'cyan',
-      explanation: 'Completed order totals in the selected period. Cancelled and pending-void orders are excluded.',
+      explanation: t('shift.totalSalesExplanation'),
     },
     {
       key: 'transactions',
-      label: 'Transactions',
+      label: t('shift.transactions'),
       icon: 'receipt_long',
       tone: 'blue',
-      explanation: 'Count of completed orders, not individual payment records.',
+      explanation: t('shift.transactionsExplanation'),
     },
     {
       key: 'cash',
-      label: 'Cash',
+      label: t('shift.cash'),
       icon: 'payments',
       tone: 'green',
-      explanation: 'Cash order payments plus net cash customer-tab settlements and reversals.',
+      explanation: t('shift.cashExplanation'),
     },
     {
       key: 'cards',
-      label: 'Cards',
+      label: t('shift.cards'),
       icon: 'credit_card',
       tone: 'purple',
-      explanation: 'Card order payments plus net card customer-tab settlements and reversals.',
+      explanation: t('shift.cardsExplanation'),
     },
     {
       key: 'expenses',
-      label: 'Expenses',
+      label: t('shift.expenses'),
       icon: 'work',
       tone: 'orange',
-      explanation: 'Recorded expenses dated within the selected period.',
+      explanation: t('shift.expensesExplanation'),
     },
     {
       key: 'netSales',
-      label: 'Net Sales',
+      label: t('shift.netSales'),
       icon: 'trending_up',
       tone: 'cyan',
-      explanation: 'Net collections: cash, card, and other payments after valid reversals, minus expenses. Unsettled tabs are excluded.',
+      explanation: t('shift.netSalesExplanation'),
     },
   ];
   const summaryMetrics = overviewMetrics.map((metric) => {
@@ -116,9 +117,9 @@ export function ShiftOverview(props: ShiftOverviewProps) {
       : getShiftOverviewChange(currentValue, previousValue, overviewAnalytics.comparisonAvailable);
     const series = overviewAnalytics ? getShiftOverviewSeries(overviewAnalytics, metric.key) : [];
     const changeLabel = change.direction === 'unavailable'
-      ? 'Insufficient historical data'
+      ? t('shift.insufficientHistory')
       : change.direction === 'new'
-        ? 'New'
+        ? t('shift.new')
         : `${change.percent && change.percent > 0 ? '+' : ''}${Math.round(change.percent ?? 0)}%`;
     const reportParams = new URLSearchParams({
       insightRange: 'custom',
@@ -135,36 +136,40 @@ export function ShiftOverview(props: ShiftOverviewProps) {
     return {
       ...metric,
       value: currentValue === undefined
-        ? overviewLoading ? 'Loading' : '—'
+        ? overviewLoading ? t('shift.loading') : '—'
         : metric.key === 'transactions' ? String(currentValue) : metricAmount(currentValue),
       change,
       changeLabel,
       series,
       to,
-      tooltip: `${metric.explanation} Compared with ${overviewRange?.previousFrom ?? 'previous period'} through ${overviewRange?.previousTo ?? 'previous period'}.`,
+      tooltip: t('shift.comparedWithPeriod', {
+        explanation: metric.explanation,
+        from: overviewRange?.previousFrom ?? t('shift.previousPeriod'),
+        to: overviewRange?.previousTo ?? t('shift.previousPeriod'),
+      }),
     };
   });
   const shiftOverviewMetrics = ownerMode ? summaryMetrics : [
-    { label: 'Open shifts', value: String(openCount), icon: 'schedule', tone: 'primary' },
-    { label: 'Transactions', value: String(liveShiftTotals.transactions), icon: 'receipt_long', tone: 'cyan' },
-    { label: 'Cash sales', value: metricAmount(liveShiftTotals.cash), icon: 'payments', tone: 'green' },
-    { label: 'Card sales', value: metricAmount(liveShiftTotals.cards), icon: 'credit_card', tone: 'blue' },
-    { label: 'Pending voids', value: String(pendingVoidOrders.length), icon: 'pending_actions', tone: 'orange' },
+    { label: t('shift.openShifts'), value: String(openCount), icon: 'schedule', tone: 'primary' },
+    { label: t('shift.transactions'), value: String(liveShiftTotals.transactions), icon: 'receipt_long', tone: 'cyan' },
+    { label: t('shift.cashSales'), value: metricAmount(liveShiftTotals.cash), icon: 'payments', tone: 'green' },
+    { label: t('shift.cardSales'), value: metricAmount(liveShiftTotals.cards), icon: 'credit_card', tone: 'blue' },
+    { label: t('shift.pendingVoids'), value: String(pendingVoidOrders.length), icon: 'pending_actions', tone: 'orange' },
   ];
 
   return (
     <>
 {ownerMode && (
-        <div className="shift-overview-toolbar" aria-label="KPI reporting filters">
-          <div className="shift-overview-periods" role="group" aria-label="KPI date range">
+        <div className="shift-overview-toolbar" aria-label={t('shift.overviewKpiAria')}>
+          <div className="shift-overview-periods" role="group" aria-label={t('shift.overviewRangeAria')}>
             {([
-              ['today', 'Today'],
-              ['yesterday', 'Yesterday'],
-              ['last7', 'Last 7 days'],
-              ['last30', 'Last 30 days'],
-              ['month', 'This month'],
-              ['custom', 'Custom'],
-            ] as [ShiftOverviewFilter, string][]).map(([filter, label]) => (
+              ['today', 'shift.today'],
+              ['yesterday', 'shift.yesterday'],
+              ['last7', 'shift.last7'],
+              ['last30', 'shift.last30'],
+              ['month', 'shift.thisMonth'],
+              ['custom', 'shift.custom'],
+            ] as const).map(([filter, labelKey]) => (
               <button
                 key={filter}
                 type="button"
@@ -172,14 +177,14 @@ export function ShiftOverview(props: ShiftOverviewProps) {
                 onClick={() => setOverviewFilter(filter)}
                 className={`shift-overview-period${overviewFilter === filter ? ' is-active' : ''}`}
               >
-                {label}
+                {t(labelKey)}
               </button>
             ))}
           </div>
           {overviewFilter === 'custom' && (
             <div className="shift-overview-custom-range">
               <label>
-                From
+                {t('shift.from')}
                 <input
                   type="date"
                   value={customOverviewFrom}
@@ -188,7 +193,7 @@ export function ShiftOverview(props: ShiftOverviewProps) {
                 />
               </label>
               <label>
-                To
+                {t('shift.to')}
                 <input
                   type="date"
                   value={customOverviewTo}
@@ -203,10 +208,10 @@ export function ShiftOverview(props: ShiftOverviewProps) {
 {ownerMode && overviewError && (
         <div className="shift-overview-error" role="alert">
           <span>{overviewError}</span>
-          <button type="button" onClick={() => setOverviewRetry((retry) => retry + 1)}>Retry</button>
+          <button type="button" onClick={() => setOverviewRetry((retry) => retry + 1)}>{t('shift.retry')}</button>
         </div>
       )}
-<section className="shift-overview-grid mb-4" aria-label="Shift overview" aria-busy={ownerMode && overviewLoading}>
+<section className="shift-overview-grid mb-4" aria-label={t('shift.overviewAria')} aria-busy={ownerMode && overviewLoading}>
         {shiftOverviewMetrics.map((card) => {
           if (!('key' in card)) {
             return (
@@ -240,7 +245,7 @@ export function ShiftOverview(props: ShiftOverviewProps) {
               key={card.key}
               type="button"
               title={card.tooltip}
-              aria-label={`${card.label}: ${card.value}. ${card.changeLabel}. ${card.explanation} Open details.`}
+              aria-label={t('shift.metricDetailsAria', { label: card.label, value: card.value, change: card.changeLabel, explanation: card.explanation, action: t('shift.openDetails') })}
               className={`shift-overview-card shift-overview-card--${card.tone} shift-overview-card--interactive`}
               onClick={() => navigate(card.to)}
             >
@@ -251,13 +256,13 @@ export function ShiftOverview(props: ShiftOverviewProps) {
                 <p className="font-body text-label-sm text-on-surface-variant">{card.label}</p>
                 <strong className="mt-1 block truncate font-display text-title-md tabular-nums text-on-surface">
                   {overviewLoading && ownerMode
-                    ? <span className="shift-overview-skeleton" aria-label="Loading KPI value" />
+                    ? <span className="shift-overview-skeleton" aria-label={t('shift.loadingKpi')} />
                     : card.value}
                 </strong>
                 <div className="shift-overview-trend">
                   <span className={`shift-overview-trend-value ${changeTone}`}>
                     {overviewLoading && ownerMode ? (
-                    <span className="shift-overview-skeleton" aria-label="Loading KPI comparison" />
+                    <span className="shift-overview-skeleton" aria-label={t('shift.loadingComparison')} />
                     ) : card.change.direction === 'unavailable' ? (
                       '----'
                     ) : (
@@ -293,9 +298,12 @@ export function ShiftOverview(props: ShiftOverviewProps) {
       </section>
 {ownerMode && overviewAnalytics && !overviewLoading && !overviewError && (
         <p className="shift-overview-reconciliation">
-          Collected payments: Cash {metricAmount(overviewAnalytics.current.cash)} + Cards {metricAmount(overviewAnalytics.current.cards)} + Other {metricAmount(overviewAnalytics.current.other)} = {metricAmount(
-            overviewAnalytics.current.cash + overviewAnalytics.current.cards + overviewAnalytics.current.other,
-          )}
+          {t('shift.collectedPayments', {
+            cash: metricAmount(overviewAnalytics.current.cash),
+            cards: metricAmount(overviewAnalytics.current.cards),
+            other: metricAmount(overviewAnalytics.current.other),
+            total: metricAmount(overviewAnalytics.current.cash + overviewAnalytics.current.cards + overviewAnalytics.current.other),
+          })}
         </p>
       )}
     </>

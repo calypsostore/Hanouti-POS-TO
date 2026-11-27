@@ -83,7 +83,7 @@ function LoadingScreen({ message, cachedUserName }: { message: string; cachedUse
           </div>
           <h1 className="login-title">7anouti<span>-POS</span></h1>
           <p className="login-tagline" role="status" aria-live="polite">{message}</p>
-          {cachedUserName && <p className="login-tagline">Welcome back, {cachedUserName}</p>}
+          {cachedUserName && <p className="login-tagline">{t('app.welcomeBack', { name: cachedUserName })}</p>}
         </header>
       </div>
     </main>
@@ -188,8 +188,8 @@ function AccessDenied() {
     <main className="flex min-h-screen items-center justify-center bg-surface p-6 text-center">
       <div className="max-w-sm rounded-2xl bg-surface-container-lowest p-6 shadow-card">
         <MaterialIcon name="lock" className="text-4xl text-error-dark" />
-        <h1 className="mt-2 font-display text-headline-md text-on-surface">Access not available</h1>
-        <p className="mt-2 font-body text-body-md text-on-surface-variant">Your assigned position does not allow this action.</p>
+        <h1 className="mt-2 font-display text-headline-md text-on-surface">{t('app.accessUnavailable')}</h1>
+        <p className="mt-2 font-body text-body-md text-on-surface-variant">{t('app.positionPermissionDenied')}</p>
       </div>
     </main>
   );
@@ -203,10 +203,10 @@ function RolePlaceholder({ title }: { title: string }) {
       <div className="rounded-2xl bg-surface-container-lowest p-8 shadow-card">
         <MaterialIcon name="construction" className="text-5xl text-primary" />
         <h1 className="mt-3 font-display text-headline-lg text-on-surface">{title}</h1>
-        <p className="mt-2 font-body text-body-md text-on-surface-variant">Signed in as {user?.name}. This workspace is being prepared.</p>
+        <p className="mt-2 font-body text-body-md text-on-surface-variant">{t('app.signedInWorkspacePreparing', { name: user?.name ?? '' })}</p>
         <Button onClick={logout} className="mt-5">
           <MaterialIcon name="logout" className="text-lg" />
-          Log out
+          {t('app.logOut')}
         </Button>
       </div>
     </main>
@@ -270,7 +270,7 @@ export default function App() {
         setStoreAppearanceError(null);
       }).catch((error: unknown) => {
         if (!active) return;
-        const normalizedError = error instanceof Error ? error : new Error('Unable to load the store theme.', { cause: error });
+        const normalizedError = error instanceof Error ? error : new Error(t('app.unableLoadStoreTheme'), { cause: error });
         console.error('[theme] Could not load the store appearance.', normalizedError);
         setStoreAppearanceError(normalizedError);
       });
@@ -461,7 +461,7 @@ export default function App() {
       const { updateService } = await loadUpdateService();
       await updateService.applyUpdate();
     } catch (error) {
-      setUpdateReloadError(error instanceof Error ? error.message : 'Unable to reload the update.');
+      setUpdateReloadError(error instanceof Error ? error.message : t('app.unableReloadUpdate'));
     }
   }
 
@@ -474,7 +474,7 @@ export default function App() {
       <ActionFeedbackToast />
       {storeAppearanceError && (
         <div role="alert" className="fixed inset-x-3 top-3 z-critical rounded-xl bg-error-container px-4 py-3 text-on-error-container shadow-overlay tablet:inset-x-auto tablet:right-4 tablet:max-w-lg">
-          Could not load this store&apos;s theme settings. The default Hanouti Crystal Glass theme is active. {storeAppearanceError.message}
+          {t('app.storeThemeLoadFailed', { error: storeAppearanceError.message })}
         </div>
       )}
       {updateReloadError && createPortal(
@@ -482,7 +482,7 @@ export default function App() {
           <div>
             <p role="alert" className="font-body text-label-md">{updateReloadError}</p>
           </div>
-          <Button variant="secondary" className="shrink-0" onClick={() => { void reloadWithAvailableUpdate(); }}>Retry update</Button>
+          <Button variant="secondary" className="shrink-0" onClick={() => { void reloadWithAvailableUpdate(); }}>{t('app.retryUpdate')}</Button>
         </div>,
         portalTarget,
       )}
@@ -501,38 +501,38 @@ export default function App() {
           <Route path="/dashboard" element={<ProtectedRoute roles={['staff']}><StaffDashboardScreen /></ProtectedRoute>} />
           <Route path="/profile" element={<ProtectedRoute roles={['staff']}><StaffProfileScreen /></ProtectedRoute>} />
           <Route path="/pos" element={<ProtectedRoute roles={['staff', 'owner']} permission="take_orders"><PosScreen /></ProtectedRoute>} />
-          <Route path="/orders" element={<ProtectedRoute roles={['staff', 'owner']} permission="view_order_history"><OrdersScreen /></ProtectedRoute>} />
-          <Route path="/customers" element={<ProtectedRoute roles={['staff', 'owner']} permission={['customers_view', 'use_tabs', 'settle_tabs']}><CustomersScreen /></ProtectedRoute>} />
-          <Route path="/customers/:id" element={<ProtectedRoute roles={['staff', 'owner']} permission={['customers_view', 'use_tabs', 'settle_tabs']}><CustomersScreen /></ProtectedRoute>} />
-          <Route path="/shift" element={<ProtectedRoute roles={['staff']} permission={['open_close_shift', 'print_x_report']}><ShiftScreen /></ProtectedRoute>} />
+          <Route path="/orders" element={<ProtectedRoute roles={['staff', 'owner']} permission={['view_order_history', 'view_all_orders', 'request_void']}><OrdersScreen /></ProtectedRoute>} />
+          <Route path="/customers" element={<ProtectedRoute roles={['staff', 'owner']} permission={['customers_view', 'customers_create', 'customers_edit', 'use_tabs', 'settle_tabs']}><CustomersScreen /></ProtectedRoute>} />
+          <Route path="/customers/:id" element={<ProtectedRoute roles={['staff', 'owner']} permission={['customers_view', 'customers_edit', 'use_tabs', 'settle_tabs']}><CustomersScreen /></ProtectedRoute>} />
+          <Route path="/shift" element={<ProtectedRoute roles={['staff']} permission={['open_close_shift', 'print_x_report', 'cash_in_out']}><ShiftScreen /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute roles={['staff', 'owner', 'super_admin']}><SettingsScreen /></ProtectedRoute>} />
           <Route path="/notifications" element={<ProtectedRoute roles={['staff', 'owner', 'super_admin']}><NotificationsScreen /></ProtectedRoute>} />
           <Route path="/owner" element={<Navigate to="/owner/dashboard" replace />} />
-          <Route path="/owner/dashboard" element={<ProtectedRoute roles={['owner']}><OwnerDashboardScreen /></ProtectedRoute>} />
-          <Route path="/owner/catalog" element={<ProtectedRoute roles={['owner']}><OwnerCatalogScreen /></ProtectedRoute>} />
+          <Route path="/owner/dashboard" element={<ProtectedRoute roles={['owner', 'staff']} permission="view_dashboard"><OwnerDashboardScreen /></ProtectedRoute>} />
+          <Route path="/owner/catalog" element={<ProtectedRoute roles={['owner', 'staff']} permission="manage_catalog"><OwnerCatalogScreen /></ProtectedRoute>} />
           <Route path="/owner/staff/:id" element={<ProtectedRoute roles={['owner']}><OwnerStaffProfileScreen /></ProtectedRoute>} />
           <Route path="/owner/staff" element={<ProtectedRoute roles={['owner']}><OwnerStaffScreen /></ProtectedRoute>} />
           <Route path="/owner/devices" element={<ProtectedRoute roles={['owner']}><OwnerDevicesScreen /></ProtectedRoute>} />
-          <Route path="/owner/schedule" element={<ProtectedRoute roles={['owner']}><OwnerScheduleScreen /></ProtectedRoute>} />
-          <Route path="/owner/voids" element={<ProtectedRoute roles={['owner']}><OwnerVoidRequestsScreen /></ProtectedRoute>} />
-          <Route path="/owner/shifts" element={<ProtectedRoute roles={['owner']}><ShiftScreen ownerMode /></ProtectedRoute>} />
-          <Route path="/owner/reports" element={<ProtectedRoute roles={['owner']}><OwnerReportsScreen /></ProtectedRoute>} />
-          <Route path="/owner/fiscal-reports" element={<ProtectedRoute roles={['owner']}><OwnerFiscalReportsScreen /></ProtectedRoute>} />
-          <Route path="/owner/fiscal" element={<ProtectedRoute roles={['owner']}><OwnerFiscalScreen /></ProtectedRoute>} />
-          <Route path="/owner/inventory" element={<ProtectedRoute roles={['owner']}><OwnerInventoryScreen /></ProtectedRoute>} />
-          <Route path="/owner/waste" element={<ProtectedRoute roles={['owner']}><OwnerWasteScreen /></ProtectedRoute>} />
-          <Route path="/owner/expenses" element={<ProtectedRoute roles={['owner']}><OwnerExpensesScreen /></ProtectedRoute>} />
-          <Route path="/owner/suppliers" element={<ProtectedRoute roles={['owner']}><OwnerSuppliersScreen /></ProtectedRoute>} />
-          <Route path="/owner/activity" element={<ProtectedRoute roles={['owner']}><OwnerActivityLogScreen /></ProtectedRoute>} />
+          <Route path="/owner/schedule" element={<ProtectedRoute roles={['owner', 'staff']} permission="manage_schedule"><OwnerScheduleScreen /></ProtectedRoute>} />
+          <Route path="/owner/voids" element={<ProtectedRoute roles={['owner', 'staff']} permission="resolve_voids"><OwnerVoidRequestsScreen /></ProtectedRoute>} />
+          <Route path="/owner/shifts" element={<ProtectedRoute roles={['owner', 'staff']} permission="manage_shifts"><ShiftScreen ownerMode /></ProtectedRoute>} />
+          <Route path="/owner/reports" element={<ProtectedRoute roles={['owner', 'staff']} permission="view_reports"><OwnerReportsScreen /></ProtectedRoute>} />
+          <Route path="/owner/fiscal-reports" element={<ProtectedRoute roles={['owner', 'staff']} permission="view_fiscal_reports"><OwnerFiscalReportsScreen /></ProtectedRoute>} />
+          <Route path="/owner/fiscal" element={<ProtectedRoute roles={['owner', 'staff']} permission="manage_fiscal"><OwnerFiscalScreen /></ProtectedRoute>} />
+          <Route path="/owner/inventory" element={<ProtectedRoute roles={['owner', 'staff']} permission="manage_inventory"><OwnerInventoryScreen /></ProtectedRoute>} />
+          <Route path="/owner/waste" element={<ProtectedRoute roles={['owner', 'staff']} permission="manage_waste"><OwnerWasteScreen /></ProtectedRoute>} />
+          <Route path="/owner/expenses" element={<ProtectedRoute roles={['owner', 'staff']} permission="manage_expenses"><OwnerExpensesScreen /></ProtectedRoute>} />
+          <Route path="/owner/suppliers" element={<ProtectedRoute roles={['owner', 'staff']} permission="manage_suppliers"><OwnerSuppliersScreen /></ProtectedRoute>} />
+          <Route path="/owner/activity" element={<ProtectedRoute roles={['owner', 'staff']} permission="view_activity_log"><OwnerActivityLogScreen /></ProtectedRoute>} />
           <Route path="/owner/notifications" element={<Navigate to="/notifications" replace />} />
           <Route path="/owner/settings" element={<ProtectedRoute roles={['owner']}><SettingsScreen /></ProtectedRoute>} />
-          <Route path="/owner/*" element={<ProtectedRoute roles={['owner']}><RolePlaceholder title="Owner workspace" /></ProtectedRoute>} />
+          <Route path="/owner/*" element={<ProtectedRoute roles={['owner']}><RolePlaceholder title={t('app.ownerWorkspace')} /></ProtectedRoute>} />
           <Route path="/admin" element={<Navigate to="/admin/overview" replace />} />
           <Route path="/admin/overview" element={<ProtectedRoute roles={['super_admin']}><SuperAdminOverviewScreen /></ProtectedRoute>} />
           <Route path="/admin/stores" element={<ProtectedRoute roles={['super_admin']}><SuperAdminStoresScreen /></ProtectedRoute>} />
           <Route path="/admin/stores/:storeId" element={<ProtectedRoute roles={['super_admin']}><StoreReadOnlyScreen /></ProtectedRoute>} />
           <Route path="/admin/settings" element={<ProtectedRoute roles={['super_admin']}><SettingsScreen /></ProtectedRoute>} />
-          <Route path="/admin/*" element={<ProtectedRoute roles={['super_admin']}><RolePlaceholder title="Super Admin workspace" /></ProtectedRoute>} />
+          <Route path="/admin/*" element={<ProtectedRoute roles={['super_admin']}><RolePlaceholder title={t('app.superAdminWorkspace')} /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>

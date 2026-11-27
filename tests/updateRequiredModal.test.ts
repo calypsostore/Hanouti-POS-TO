@@ -78,8 +78,8 @@ describe('required update modal logic', () => {
   it('asks for confirmation before reloading with unsaved work', () => {
     const confirm = vi.fn().mockReturnValue(false);
 
-    expect(confirmUpdateIfUnsaved(true, confirm)).toBe(false);
+    expect(confirmUpdateIfUnsaved(true, confirm, 'Localized unsaved confirmation')).toBe(false);
     expect(confirm).toHaveBeenCalledOnce();
-    expect(confirm.mock.calls[0][0]).toContain('unsaved work');
+    expect(confirm.mock.calls[0][0]).toBe('Localized unsaved confirmation');
   });
 });

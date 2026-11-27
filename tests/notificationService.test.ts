@@ -3,10 +3,13 @@ import type { CustomerRecord, NotificationRecord, UserRecord } from '../src/type
 import {
   keepUnresolvedItem86Notifications,
   mapNotificationRow,
+  notificationRecipientFilter,
   notificationService,
+  selectOwnerDashboardNotifications,
   shouldRegisterPushNotifications,
 } from '../src/services/notificationService';
 import { customerService } from '../src/services/customerService';
+import { userService } from '../src/services/userService';
 
 const owner: Pick<UserRecord, 'id' | 'role' | 'storeId'> = {
   id: 'owner-1',
@@ -79,6 +82,82 @@ describe('notification service', () => {
     }).body).toBe("Staff's shift closed with a cash difference of -1.223 DT.");
   });
 
+  it('paginates notifications with the same creation timestamp without skipping entries', async () => {
+    const timestamp = '2026-11-26T22:00:00Z';
+    const notifications = ['a', 'b', 'c'].map((id) => ({
+      ...notification(id),
+      createdAt: timestamp,
+    }));
+    localStorage.setItem('7anouti-pos:notifications', JSON.stringify(notifications));
+
+    const firstPage = await notificationService.listFor(owner);
+    const secondPage = await notificationService.listFor(owner, firstPage[1]);
+
+    expect(firstPage.map(({ id }) => id)).toEqual(['c', 'b', 'a']);
+    expect(secondPage.map(({ id }) => id)).toEqual(['a']);
+  });
+
+  it('keeps the owner dashboard to its five newest important alerts and persists dismissal', async () => {
+    const notifications = Array.from({ length: 6 }, (_, index) => ({
+      ...notification(`important-${index}`),
+      type: index === 0 ? 'app_update' as const : 'customer_overdue' as const,
+      createdAt: `2026-11-27T00:0${index}:00Z`,
+    }));
+    localStorage.setItem('7anouti-pos:notifications', JSON.stringify(notifications));
+
+    const latest = await notificationService.listImportantForDashboard(owner);
+    expect(latest.map(({ id }) => id)).toEqual([
+      'important-5',
+      'important-4',
+      'important-3',
+      'important-2',
+      'important-1',
+    ]);
+
+    await notificationService.markRead(owner, 'important-5');
+    const refreshed = await notificationService.listImportantForDashboard(owner);
+    expect(selectOwnerDashboardNotifications(refreshed, []).map(({ id }) => id)).toEqual([
+      'important-4',
+      'important-3',
+      'important-2',
+      'important-1',
+    ]);
+
+    const withNewAlert = [...refreshed, {
+      ...notification('important-new'),
+      type: 'customer_overdue' as const,
+      createdAt: '2026-11-27T00:10:00Z',
+    }];
+    expect(selectOwnerDashboardNotifications(withNewAlert, []).map(({ id }) => id)).toEqual([
+      'important-new',
+      'important-4',
+      'important-3',
+      'important-2',
+    ]);
+  });
+
+  it('builds a stable keyset filter for notifications sharing a timestamp', () => {
+    const filter = notificationRecipientFilter(owner, {
+      createdAt: '2026-11-26T22:00:00Z',
+      id: 'notification-b',
+    });
+
+    expect(filter).toContain('created_at.lt.2026-11-26T22:00:00Z');
+    expect(filter).toContain('created_at.eq.2026-11-26T22:00:00Z,id.lt.notification-b');
+    expect(filter).toContain('target_role.eq.owner,created_at.lt.2026-11-26T22:00:00Z');
+  });
+
+  it('coalesces overlapping subscription reminder checks', async () => {
+    const getStore = vi.spyOn(userService, 'getStore').mockResolvedValue(null);
+
+    await Promise.all([
+      notificationService.checkSubscriptionExpiring(owner.storeId!),
+      notificationService.checkSubscriptionExpiring(owner.storeId!),
+    ]);
+
+    expect(getStore).toHaveBeenCalledOnce();
+  });
+
   it('hides an 86 alert from the dashboard after its catalog item is available again', () => {
     const marked86: NotificationRecord = {
       ...notification('item-86'),
@@ -120,8 +199,8 @@ describe('notification service', () => {
     })).resolves.toEqual([{
       customerId: 'customer-1',
       customerName: 'Customer One',
+      kind: 'nearLimit',
       severity: 'warning',
-      message: 'Customer is near their credit limit.',
     }]);
     expect(getCreditStatuses).not.toHaveBeenCalled();
     expect(getDueInfos).not.toHaveBeenCalled();

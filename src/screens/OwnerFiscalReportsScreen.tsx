@@ -3,14 +3,13 @@ import { ownerWorkspaceLinks } from '../app/navigation';
 import { MaterialIcon } from '../components/MaterialIcon';
 import { PageHeader } from '../components/layout';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
+import { localizeErrorMessage, t } from '../i18n';
 import { formatMetricWithUnit, formatMillimesWithThousands } from '../lib/millimes';
 import {
   fiscalPeriodForPreset,
   formatFiscalTimestamp,
   getFiscalReportCounts,
-  getFiscalReconciliationStatus,
   getFiscalSnapshotAmount,
-  getFiscalSnapshotNotice,
   getFiscalReport,
   hasSnapshotBackedFiscalAmounts,
   listFiscalReportHistory,
@@ -32,30 +31,30 @@ import { userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
 
 const presetOptions: Array<{ value: FiscalPreset; label: string }> = [
-  { value: 'today', label: 'Today' },
-  { value: 'yesterday', label: 'Yesterday' },
-  { value: 'this_week', label: 'This week' },
-  { value: 'this_month', label: 'This month' },
-  { value: 'previous_month', label: 'Previous month' },
-  { value: 'this_year', label: 'This year' },
-  { value: 'previous_year', label: 'Previous year' },
-  { value: 'custom', label: 'Custom range' },
+  { value: 'today', label: t('fiscalReports.preset.today') },
+  { value: 'yesterday', label: t('fiscalReports.preset.yesterday') },
+  { value: 'this_week', label: t('fiscalReports.preset.thisWeek') },
+  { value: 'this_month', label: t('fiscalReports.preset.thisMonth') },
+  { value: 'previous_month', label: t('fiscalReports.preset.previousMonth') },
+  { value: 'this_year', label: t('fiscalReports.preset.thisYear') },
+  { value: 'previous_year', label: t('fiscalReports.preset.previousYear') },
+  { value: 'custom', label: t('fiscalReports.preset.custom') },
 ];
 
 function formatSnapshotAmount(transaction: FiscalTransaction, key: 'netAmountMillimes' | 'totalTaxMillimes' | 'totalAmountMillimes'): string {
   const amount = getFiscalSnapshotAmount(transaction, key);
-  return amount === undefined ? 'Unavailable' : formatMillimesWithThousands(amount);
+  return amount === undefined ? t('fiscal.common.unavailable') : formatMillimesWithThousands(amount);
 }
 
 function formatOptionalMillimes(value: unknown): string {
   return typeof value === 'number' && Number.isSafeInteger(value)
     ? formatMillimesWithThousands(value)
-    : 'Unavailable';
+    : t('fiscal.common.unavailable');
 }
 
 function snapshotRates(transaction: FiscalTransaction): string {
   const rawLines = transaction.snapshot?.lines;
-  if (!Array.isArray(rawLines)) return 'Unavailable';
+  if (!Array.isArray(rawLines)) return t('fiscal.common.unavailable');
   const rates = new Set<string>();
   for (const rawLine of rawLines) {
     if (!rawLine || typeof rawLine !== 'object') continue;
@@ -71,14 +70,44 @@ function snapshotRates(transaction: FiscalTransaction): string {
       }
     }
   }
-  return [...rates].join(', ') || 'Unavailable';
+  return [...rates].join(', ') || t('fiscal.common.unavailable');
 }
 
 function vatRate(line: FiscalVatLine): string {
   if (line.ratePpm !== undefined) {
     return `${(line.ratePpm / 10000).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}%`;
   }
-  return line.treatment === 'exempt' ? 'Exempt' : line.treatment.replaceAll('_', ' ');
+  if (line.treatment === 'exempt') return t('fiscal.treatment.exempt');
+  const treatmentKey: Record<string, string> = {
+    taxable: 'fiscal.treatment.taxable',
+    outside_scope: 'fiscal.treatment.outsideScope',
+    suspended: 'fiscal.treatment.suspended',
+    special: 'fiscal.treatment.special',
+  };
+  return treatmentKey[line.treatment] ? t(treatmentKey[line.treatment] as never) : line.treatment.replaceAll('_', ' ');
+}
+
+function fiscalSnapshotNotice(report: FiscalReport): string {
+  const missingCount = report.summary.missingSnapshotCount;
+  return missingCount === 0
+    ? t('fiscalReports.snapshotNoticeNone')
+    : t('fiscalReports.snapshotNoticeMissing', { count: missingCount });
+}
+
+function reconciliationStatus(report: FiscalReport): string {
+  const snapshotOnly = report.summary.missingSnapshotCount > 0;
+  if (snapshotOnly && !hasSnapshotBackedFiscalAmounts(report)) return t('fiscalReports.reconciliationNotVerifiable');
+  const result = t(report.summary.reconciliationValid ? 'fiscalReports.reconciliationPass' : 'fiscalReports.reconciliationFail');
+  return snapshotOnly ? t('fiscalReports.reconciliationSnapshotOnly', { result }) : result;
+}
+
+function transactionCountLabel(count: number, page: number, pageCount: number): string {
+  return t('fiscalReports.pagination', { count, page, pageCount });
+}
+
+function fiscalTimestamp(value: string, timezone: string): string {
+  const formatted = formatFiscalTimestamp(value, timezone);
+  return formatted === 'Unavailable' ? t('fiscal.common.unavailable') : formatted;
 }
 
 function snapshotLinesForItems(transaction: FiscalTransaction) {
@@ -126,13 +155,13 @@ export function OwnerFiscalReportsScreen() {
     void userService.getStore(storeId).then((store) => {
       if (!active) return;
       if (!store) {
-        setError('Could not load store information.');
+        setError(t('fiscalReports.error.storeInformation'));
         return;
       }
       setStoreName(store.name);
       setTimezone(store.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'Africa/Tunis');
     }).catch((loadError) => {
-      if (active) setError(loadError instanceof Error ? loadError.message : 'Could not load store information.');
+      if (active) setError(localizeErrorMessage(loadError, t('fiscalReports.error.storeInformation')));
     });
     return () => { active = false; };
   }, [storeId]);
@@ -151,7 +180,7 @@ export function OwnerFiscalReportsScreen() {
     }).catch((loadError) => {
       if (active) {
         setHistory([]);
-        setHistoryError(loadError instanceof Error ? loadError.message : 'Could not load saved report history.');
+        setHistoryError(localizeErrorMessage(loadError, t('fiscalReports.error.loadHistory')));
       }
     });
     return () => { active = false; };
@@ -163,7 +192,7 @@ export function OwnerFiscalReportsScreen() {
     if (!period) {
       setReport(null);
       setSelectedTransaction(null);
-      setError('Choose a valid custom start and end date.');
+      setError(t('fiscalReports.error.invalidDateRange'));
       setLoading(false);
       return;
     }
@@ -180,7 +209,7 @@ export function OwnerFiscalReportsScreen() {
     void getFiscalReport(storeId, period.start, period.endExclusive, timezone).then((next) => {
       if (active) setReport(next);
     }).catch((loadError) => {
-      if (active) setError(loadError instanceof Error ? loadError.message : 'Could not load fiscal report.');
+      if (active) setError(localizeErrorMessage(loadError, t('fiscalReports.error.loadReport')));
     }).finally(() => {
       if (active) setLoading(false);
     });
@@ -215,15 +244,15 @@ export function OwnerFiscalReportsScreen() {
     try {
       await saveFiscalReportHistory(storeId, report);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Could not save report history.');
+      setError(localizeErrorMessage(saveError, t('fiscalReports.error.saveHistory')));
       return;
     }
-    setNotice('Fiscal report snapshot saved to history.');
+    setNotice(t('fiscalReports.notice.savedHistory'));
     try {
       setHistory(await listFiscalReportHistory(storeId));
       setHistoryError('');
     } catch (loadError) {
-      setHistoryError(loadError instanceof Error ? loadError.message : 'Could not refresh saved report history.');
+      setHistoryError(localizeErrorMessage(loadError, t('fiscalReports.error.refreshHistory')));
     }
   };
 
@@ -240,7 +269,7 @@ export function OwnerFiscalReportsScreen() {
     try {
       setPreviewUrl(await previewFiscalPdf(report));
     } catch (previewError) {
-      setError(previewError instanceof Error ? previewError.message : 'Could not preview PDF.');
+      setError(localizeErrorMessage(previewError, t('fiscalReports.error.previewPdf')));
     }
   };
 
@@ -250,14 +279,14 @@ export function OwnerFiscalReportsScreen() {
     setNotice('');
     try {
       await action(report);
-      setNotice(`${label} export prepared. Check your browser downloads.`);
+      setNotice(t('fiscalReports.notice.exportReady', { label }));
     } catch (exportError) {
-      setError(exportError instanceof Error ? exportError.message : `Could not prepare the ${label} export.`);
+      setError(localizeErrorMessage(exportError, t('fiscalReports.error.prepareExport', { label })));
     }
   };
 
   const periodLabel = report
-    ? `${report.period.startDate} to ${report.period.endDateExclusive} (end exclusive)`
+    ? t('fiscalReports.periodRange', { start: report.period.startDate, end: report.period.endDateExclusive })
     : '';
   const reportCounts = report ? getFiscalReportCounts(report) : null;
   const selectedLineSnapshots = useMemo(
@@ -268,17 +297,17 @@ export function OwnerFiscalReportsScreen() {
     && report.summary.missingSnapshotCount > 0
     && !hasSnapshotBackedFiscalAmounts(report);
   const summaryAmount = (value: number) => fiscalTotalsUnavailable
-    ? 'Unavailable'
+    ? t('fiscal.common.unavailable')
     : formatMetricWithUnit(formatMillimesWithThousands(value), 'DT');
   const summaryLabel = (label: string) => report?.summary.missingSnapshotCount
-    ? `Snapshot-backed ${label}`
+    ? t('fiscalReports.snapshotBacked', { label })
     : label;
 
   return (
-    <WorkspaceLayout title="Fiscal reports" storeName={storeName} links={ownerWorkspaceLinks}>
+    <WorkspaceLayout title={t('fiscalReports.title')} storeName={storeName} links={ownerWorkspaceLinks}>
       <PageHeader
-        title="Fiscal Reports & Tax Tracking"
-        subtitle="Internal accounting support with immutable transaction snapshots. Not an official Tunisian tax declaration."
+        title={t('fiscalReports.title')}
+        subtitle={t('fiscalReports.subtitle')}
       />
 
       {error && <p role="alert" className="mb-4 rounded-lg bg-error-container p-3 text-on-error-container">{error}</p>}
@@ -286,40 +315,40 @@ export function OwnerFiscalReportsScreen() {
 
       <section className="mb-4 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
         <div className="flex flex-wrap items-end gap-3">
-          <label className="text-label-md">Period
+          <label className="text-label-md">{t('fiscalReports.period')}
             <select className="mt-1 h-12 rounded-lg bg-surface-container-low px-3" value={preset} onChange={(event) => setPreset(event.target.value as FiscalPreset)}>
               {presetOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
           {preset === 'custom' && (
             <>
-              <label className="text-label-md">Start date<input type="date" className="mt-1 h-12 rounded-lg bg-surface-container-low px-3" value={customStart} onChange={(event) => setCustomStart(event.target.value)} /></label>
-              <label className="text-label-md">End date<input type="date" className="mt-1 h-12 rounded-lg bg-surface-container-low px-3" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} /></label>
+              <label className="text-label-md">{t('fiscalReports.startDate')}<input type="date" className="mt-1 h-12 rounded-lg bg-surface-container-low px-3" value={customStart} onChange={(event) => setCustomStart(event.target.value)} /></label>
+              <label className="text-label-md">{t('fiscalReports.endDate')}<input type="date" className="mt-1 h-12 rounded-lg bg-surface-container-low px-3" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} /></label>
             </>
           )}
           <div className="ml-auto flex flex-wrap gap-2">
-            <button type="button" className="h-11 rounded-lg bg-primary px-3 text-on-primary" onClick={openPreview} disabled={!report}><MaterialIcon name="picture_as_pdf" /> Preview PDF</button>
-            <button type="button" className="h-11 rounded-lg border border-outline px-3" onClick={() => void runExport('PDF', downloadFiscalPdf)} disabled={!report}>PDF</button>
-            <button type="button" className="h-11 rounded-lg border border-outline px-3" onClick={() => void runExport('Excel', exportFiscalXlsx)} disabled={!report}>Excel</button>
-            <button type="button" className="h-11 rounded-lg border border-outline px-3" onClick={() => void runExport('Transactions CSV', (currentReport) => exportFiscalCsv(currentReport, 'transactions'))} disabled={!report}>CSV transactions</button>
-            <button type="button" className="h-11 rounded-lg border border-outline px-3" onClick={() => void runExport('VAT CSV', (currentReport) => exportFiscalCsv(currentReport, 'vat'))} disabled={!report}>CSV VAT</button>
-            <button type="button" className="h-11 rounded-lg border border-outline px-3" onClick={() => void runExport('Print', printFiscalPdf)} disabled={!report}>Print</button>
-            <button type="button" className="h-11 rounded-lg border border-outline px-3" onClick={saveHistory} disabled={!report}>Save snapshot</button>
+            <button type="button" aria-label={t('fiscalReports.previewPdf')} className="h-11 rounded-lg bg-primary px-3 text-on-primary" onClick={openPreview} disabled={!report}><MaterialIcon name="picture_as_pdf" /> {t('fiscalReports.previewPdf')}</button>
+            <button type="button" className="h-11 rounded-lg border border-outline px-3" onClick={() => void runExport(t('fiscalReports.export.pdf'), downloadFiscalPdf)} disabled={!report}>{t('fiscalReports.export.pdf')}</button>
+            <button type="button" className="h-11 rounded-lg border border-outline px-3" onClick={() => void runExport(t('fiscalReports.export.xlsx'), exportFiscalXlsx)} disabled={!report}>{t('fiscalReports.export.xlsx')}</button>
+            <button type="button" className="h-11 rounded-lg border border-outline px-3" onClick={() => void runExport(t('fiscalReports.export.transactionsCsv'), (currentReport) => exportFiscalCsv(currentReport, 'transactions'))} disabled={!report}>{t('fiscalReports.export.transactionsCsv')}</button>
+            <button type="button" className="h-11 rounded-lg border border-outline px-3" onClick={() => void runExport(t('fiscalReports.export.vatCsv'), (currentReport) => exportFiscalCsv(currentReport, 'vat'))} disabled={!report}>{t('fiscalReports.export.vatCsv')}</button>
+            <button type="button" className="h-11 rounded-lg border border-outline px-3" onClick={() => void runExport(t('fiscalReports.export.print'), printFiscalPdf)} disabled={!report}>{t('fiscalReports.export.print')}</button>
+            <button type="button" className="h-11 rounded-lg border border-outline px-3" onClick={saveHistory} disabled={!report}>{t('fiscalReports.saveSnapshot')}</button>
           </div>
         </div>
-        {report && <p className="mt-3 text-body-sm text-on-surface-variant">{periodLabel} · {report.period.timezone} · Currency TND</p>}
+        {report && <p className="mt-3 text-body-sm text-on-surface-variant">{periodLabel} · {report.period.timezone} · {t('fiscalReports.currency')}: TND</p>}
       </section>
 
       {loading ? (
-        <p role="status" className="rounded-xl bg-surface-container-lowest p-6">Loading fiscal report…</p>
+        <p role="status" className="rounded-xl bg-surface-container-lowest p-6">{t('fiscalReports.loading')}</p>
       ) : report && (
         <>
-          <section aria-label="Transaction counts" className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <section aria-label={t('fiscalReports.transactionCounts')} className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {[
-              { label: 'Completed transactions', value: reportCounts?.completed ?? 0 },
-              { label: 'Voided transactions', value: reportCounts?.voided ?? 0 },
-              { label: 'Pending void transactions', value: reportCounts?.pendingVoid ?? 0 },
-              { label: 'Missing fiscal snapshots', value: reportCounts?.missingSnapshots ?? 0 },
+              { label: t('fiscalReports.completedTransactions'), value: reportCounts?.completed ?? 0 },
+              { label: t('fiscalReports.voidedTransactions'), value: reportCounts?.voided ?? 0 },
+              { label: t('fiscalReports.pendingVoidTransactions'), value: reportCounts?.pendingVoid ?? 0 },
+              { label: t('fiscalReports.missingSnapshots'), value: reportCounts?.missingSnapshots ?? 0 },
             ].map(({ label, value }) => (
               <div key={label} className="rounded-xl bg-surface-container-lowest p-4 shadow-card">
                 <p className="text-label-md text-on-surface-variant">{label}</p>
@@ -328,12 +357,12 @@ export function OwnerFiscalReportsScreen() {
             ))}
           </section>
 
-          <section aria-label="Fiscal totals" className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <section aria-label={t('fiscalReports.fiscalTotals')} className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {[
-              { label: summaryLabel('Gross TTC'), value: summaryAmount(report.summary.grossAmountMillimes) },
-              { label: summaryLabel('Net HT'), value: summaryAmount(report.summary.netAmountMillimes) },
-              { label: summaryLabel('VAT collected'), value: summaryAmount(report.summary.vatAmountMillimes) },
-              { label: summaryLabel('Final payable'), value: summaryAmount(report.summary.payableAmountMillimes) },
+              { label: summaryLabel(t('fiscalReports.grossTtc')), value: summaryAmount(report.summary.grossAmountMillimes) },
+              { label: summaryLabel(t('fiscalReports.netHt')), value: summaryAmount(report.summary.netAmountMillimes) },
+              { label: summaryLabel(t('fiscalReports.vatCollected')), value: summaryAmount(report.summary.vatAmountMillimes) },
+              { label: summaryLabel(t('fiscalReports.finalPayable')), value: summaryAmount(report.summary.payableAmountMillimes) },
             ].map(({ label, value }) => (
               <div key={label} className="rounded-xl bg-surface-container-lowest p-4 shadow-card">
                 <p className="text-label-md text-on-surface-variant">{label}</p>
@@ -344,17 +373,17 @@ export function OwnerFiscalReportsScreen() {
 
           {report.summary.missingSnapshotCount > 0 && (
             <p role="status" className="mb-4 rounded-lg bg-tertiary-container p-3 text-on-tertiary-container">
-              {getFiscalSnapshotNotice(report)} Missing transactions are excluded from fiscal totals.
+              {fiscalSnapshotNotice(report)} {t('fiscalReports.missingExcluded')}
             </p>
           )}
 
           <section className="mb-4 grid gap-4 xl:grid-cols-2">
             <div className="overflow-x-auto rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-              <h2 className="mb-3 font-display text-title-lg">VAT breakdown</h2>
+              <h2 className="mb-3 font-display text-title-lg">{t('fiscalReports.vatBreakdown')}</h2>
               <table className="w-full min-w-[680px] text-left text-body-sm">
-                <thead><tr className="border-b border-outline-variant"><th className="p-2">Rate</th><th>Taxable HT</th><th>VAT</th><th>TTC</th><th>Transactions</th></tr></thead>
+                <thead><tr className="border-b border-outline-variant"><th className="p-2">{t('fiscalReports.rate')}</th><th>{t('fiscalReports.taxableHt')}</th><th>{t('fiscalReports.vat')}</th><th>{t('fiscalReports.grossTtc')}</th><th>{t('fiscalReports.transactions')}</th></tr></thead>
                 <tbody>{report.vatBreakdown.length === 0 ? (
-                  <tr><td colSpan={5} className="p-3 text-center text-on-surface-variant">No snapshot-backed VAT breakdown is available for this period.</td></tr>
+                  <tr><td colSpan={5} className="p-3 text-center text-on-surface-variant">{t('fiscalReports.noVatBreakdown')}</td></tr>
                 ) : report.vatBreakdown.map((line) => (
                   <tr key={`${line.taxType}-${line.treatment}-${line.ruleId}-${line.ruleVersion}`} className="border-b border-outline-variant last:border-0">
                     <td className="p-2"><button type="button" className="font-medium text-primary underline" onClick={() => openVatFilter(line)}>{vatRate(line)} · {line.treatment}</button></td>
@@ -367,48 +396,48 @@ export function OwnerFiscalReportsScreen() {
               </table>
             </div>
             <div className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-              <h2 className="mb-3 font-display text-title-lg">Payments</h2>
+              <h2 className="mb-3 font-display text-title-lg">{t('fiscalReports.payments')}</h2>
               <div className="grid grid-cols-3 gap-2 text-body-sm">
-                <strong>Method</strong><strong>Sales</strong><strong>Collected</strong>
+                <strong>{t('fiscalReports.method')}</strong><strong>{t('fiscalReports.sales')}</strong><strong>{t('fiscalReports.collected')}</strong>
                 {(['cash', 'card', 'other', 'tab'] as const).map((method) => (
                   <div className="contents" key={method}>
-                    <span className="capitalize">{method}</span>
+                    <span className="capitalize">{t(`fiscalReports.payment.${method}` as never)}</span>
                     <span>{formatMillimesWithThousands(report.payments.sales[method])} DT</span>
                     <span>{formatMillimesWithThousands(report.payments.collected[method])} DT</span>
                   </div>
                 ))}
               </div>
               <div className="mt-4 grid gap-2 text-body-sm sm:grid-cols-2">
-                <p>Voided transactions: <strong>{reportCounts?.voided ?? 0}</strong></p>
-                <p>Pending void transactions: <strong>{reportCounts?.pendingVoid ?? 0}</strong></p>
-                <p>Voided gross: <strong>{formatMillimesWithThousands(report.adjustments.voidedGrossMillimes)} DT</strong></p>
-                <p>Cash movements: <strong>{formatMillimesWithThousands(report.adjustments.cashMovementsNetMillimes)} DT</strong></p>
-                <p>Snapshot reconciliation: <strong>{getFiscalReconciliationStatus(report)}</strong></p>
+                <p>{t('fiscalReports.voidedTransactions')}: <strong>{reportCounts?.voided ?? 0}</strong></p>
+                <p>{t('fiscalReports.pendingVoidTransactions')}: <strong>{reportCounts?.pendingVoid ?? 0}</strong></p>
+                <p>{t('fiscalReports.voidedGross')}: <strong>{formatMillimesWithThousands(report.adjustments.voidedGrossMillimes)} DT</strong></p>
+                <p>{t('fiscalReports.cashMovements')}: <strong>{formatMillimesWithThousands(report.adjustments.cashMovementsNetMillimes)} DT</strong></p>
+                <p>{t('fiscalReports.snapshotReconciliation')}: <strong>{reconciliationStatus(report)}</strong></p>
               </div>
-              <p className="mt-3 text-body-sm text-on-surface-variant">Refunds and credit notes are unavailable in the existing order data model and are not included.</p>
-              <p className="mt-2 text-body-sm text-on-surface-variant">Sales totals and reconciliation include completed orders only. Voided orders are listed separately and excluded.</p>
+              <p className="mt-3 text-body-sm text-on-surface-variant">{t('fiscalReports.refundsUnavailable')}</p>
+              <p className="mt-2 text-body-sm text-on-surface-variant">{t('fiscalReports.voidedExcluded')}</p>
             </div>
           </section>
 
           <section className="mb-4 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
             <div className="mb-3 flex flex-wrap items-center gap-3">
-              <h2 className="font-display text-title-lg">Transaction details</h2>
-              {vatFilter.length > 0 && <button type="button" className="rounded-full bg-primary-container px-3 py-2 text-label-md" onClick={() => setVatFilter([])}>Clear VAT filter</button>}
-              <input type="search" aria-label="Filter transactions" className="h-11 min-w-48 rounded-lg bg-surface-container-low px-3" placeholder="Filter transactions" value={transactionFilter} onChange={(event) => { setTransactionFilter(event.target.value); setPage(0); }} />
+              <h2 className="font-display text-title-lg">{t('fiscalReports.transactionDetails')}</h2>
+              {vatFilter.length > 0 && <button type="button" className="rounded-full bg-primary-container px-3 py-2 text-label-md" onClick={() => setVatFilter([])}>{t('fiscalReports.clearVatFilter')}</button>}
+              <input type="search" aria-label={t('fiscalReports.filterTransactions')} className="h-11 min-w-48 rounded-lg bg-surface-container-low px-3" placeholder={t('fiscalReports.filterTransactions')} value={transactionFilter} onChange={(event) => { setTransactionFilter(event.target.value); setPage(0); }} />
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1000px] text-left text-body-sm">
-                <thead><tr className="border-b border-outline-variant"><th className="p-2">Order</th><th>Date / time ({timezone})</th><th>Customer</th><th>Staff</th><th>HT (TND)</th><th>VAT rate</th><th>VAT (TND)</th><th>TTC (TND)</th><th>Payment</th><th>Status</th></tr></thead>
+                <thead><tr className="border-b border-outline-variant"><th className="p-2">{t('fiscalReports.order')}</th><th>{t('fiscalReports.dateTime')} ({timezone})</th><th>{t('fiscalReports.customer')}</th><th>{t('fiscalReports.staff')}</th><th>{t('fiscalReports.netHtTnd')}</th><th>{t('fiscalReports.vatRate')}</th><th>{t('fiscalReports.vatTnd')}</th><th>{t('fiscalReports.grossTtcTnd')}</th><th>{t('fiscalReports.payment')}</th><th>{t('fiscalReports.status')}</th></tr></thead>
                 <tbody>{visibleTransactions.length === 0 ? (
                   <tr><td colSpan={10} className="p-4 text-center text-on-surface-variant">
-                    {report.transactions.length === 0 ? 'No transactions in this reporting period.' : 'No transactions match the current filters.'}
+                    {report.transactions.length === 0 ? t('fiscalReports.noTransactionsPeriod') : t('fiscalReports.noTransactionsMatch')}
                   </td></tr>
                 ) : visibleTransactions.map((transaction) => (
                   <tr key={transaction.id} className="border-b border-outline-variant last:border-0">
                     <td className="p-2"><button type="button" className="font-medium text-primary underline" onClick={() => setSelectedTransaction(transaction)}>#{transaction.number}</button><div className="max-w-64 truncate text-on-surface-variant">{transaction.items.map((item) => `${item.name} ×${item.quantity}`).join(', ')}</div></td>
-                    <td>{transaction.businessDate}<div className="text-on-surface-variant">{formatFiscalTimestamp(transaction.createdAt, timezone)}</div></td>
-                    <td>{transaction.customer ?? 'Walk-in'}</td>
-                    <td>{transaction.staff ?? 'Unknown'}</td>
+                    <td>{transaction.businessDate}<div className="text-on-surface-variant">{fiscalTimestamp(transaction.createdAt, timezone)}</div></td>
+                    <td>{transaction.customer ?? t('fiscal.common.walkIn')}</td>
+                    <td>{transaction.staff ?? t('fiscal.common.unknown')}</td>
                     <td>{formatSnapshotAmount(transaction, 'netAmountMillimes')}</td>
                     <td>{snapshotRates(transaction)}</td>
                     <td>{formatSnapshotAmount(transaction, 'totalTaxMillimes')}</td>
@@ -420,22 +449,22 @@ export function OwnerFiscalReportsScreen() {
               </table>
             </div>
             <div className="mt-3 flex items-center justify-between text-body-sm">
-              <span aria-live="polite">{filteredTransactions.length} transactions · page {page + 1} of {pageCount}</span>
+              <span aria-live="polite">{transactionCountLabel(filteredTransactions.length, page + 1, pageCount)}</span>
               <div className="flex gap-2">
-                <button type="button" className="rounded-lg border border-outline px-3 py-2" disabled={page === 0} onClick={() => setPage((value) => value - 1)}>Previous</button>
-                <button type="button" className="rounded-lg border border-outline px-3 py-2" disabled={page + 1 >= pageCount} onClick={() => setPage((value) => value + 1)}>Next</button>
+                <button type="button" className="rounded-lg border border-outline px-3 py-2" disabled={page === 0} onClick={() => setPage((value) => value - 1)}>{t('fiscalReports.previous')}</button>
+                <button type="button" className="rounded-lg border border-outline px-3 py-2" disabled={page + 1 >= pageCount} onClick={() => setPage((value) => value + 1)}>{t('fiscalReports.next')}</button>
               </div>
             </div>
           </section>
 
           <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
-            <h2 className="mb-3 font-display text-title-lg">Saved report snapshots</h2>
-            {historyError ? <p role="alert" className="text-body-sm text-error">{historyError}</p> : history.length === 0 ? <p className="text-body-sm text-on-surface-variant">No saved reports yet.</p> : (
+            <h2 className="mb-3 font-display text-title-lg">{t('fiscalReports.savedSnapshots')}</h2>
+            {historyError ? <p role="alert" className="text-body-sm text-error">{historyError}</p> : history.length === 0 ? <p className="text-body-sm text-on-surface-variant">{t('fiscalReports.noSavedReports')}</p> : (
               <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
                 {history.map((item) => (
                   <button type="button" key={item.id} className="rounded-xl border border-outline-variant p-3 text-left" onClick={() => setReport(item.snapshot)}>
-                    <strong>{item.periodStart} to {item.periodEndExclusive}</strong>
-                    <div className="text-body-sm text-on-surface-variant">Generated {formatFiscalTimestamp(item.generatedAt, timezone)} ({timezone})</div>
+                    <strong>{t('fiscalReports.periodRangeExclusiveShort', { start: item.periodStart, end: item.periodEndExclusive })}</strong>
+                    <div className="text-body-sm text-on-surface-variant">{t('fiscalReports.generated')} {fiscalTimestamp(item.generatedAt, timezone)} ({timezone})</div>
                   </button>
                 ))}
               </div>
@@ -445,35 +474,35 @@ export function OwnerFiscalReportsScreen() {
       )}
 
       {previewUrl && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Fiscal report PDF preview">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label={t('fiscalReports.pdfPreview')}>
           <div className="flex h-[90vh] w-full max-w-5xl flex-col rounded-2xl bg-surface-container-lowest">
-            <div className="flex items-center justify-between p-3"><h2 className="font-display text-title-lg">PDF preview</h2><button type="button" className="rounded-lg border border-outline px-3 py-2" onClick={() => setPreviewUrl('')}>Close</button></div>
-            <iframe title="Fiscal report PDF preview" src={previewUrl} className="min-h-0 flex-1 rounded-b-2xl" />
+            <div className="flex items-center justify-between p-3"><h2 className="font-display text-title-lg">{t('fiscalReports.pdfPreview')}</h2><button type="button" className="rounded-lg border border-outline px-3 py-2" onClick={() => setPreviewUrl('')}>{t('fiscal.action.close')}</button></div>
+            <iframe title={t('fiscalReports.pdfPreview')} src={previewUrl} className="min-h-0 flex-1 rounded-b-2xl" />
           </div>
         </div>
       )}
       {selectedTransaction && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label={`Transaction ${selectedTransaction.number} details`}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label={t('fiscalReports.transactionDialogLabel', { number: selectedTransaction.number })}>
           <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-surface-container-lowest p-5">
             <div className="flex items-center justify-between gap-3">
-              <h2 className="font-display text-title-lg">Transaction #{selectedTransaction.number}</h2>
-              <button type="button" className="rounded-lg border border-outline px-3 py-2" onClick={() => setSelectedTransaction(null)}>Close</button>
+              <h2 className="font-display text-title-lg">{t('fiscalReports.transactionNumber', { number: selectedTransaction.number })}</h2>
+              <button type="button" className="rounded-lg border border-outline px-3 py-2" onClick={() => setSelectedTransaction(null)}>{t('fiscal.action.close')}</button>
             </div>
-            <p className="mt-2 text-body-sm text-on-surface-variant">{selectedTransaction.businessDate} · {formatFiscalTimestamp(selectedTransaction.createdAt, timezone)} ({timezone}) · {selectedTransaction.status}{selectedTransaction.voidedAt ? ` · voided ${formatFiscalTimestamp(selectedTransaction.voidedAt, timezone)} (${timezone})` : ''}</p>
-            <p className="mt-1 text-body-sm">{selectedTransaction.customer ?? 'Walk-in'} · {selectedTransaction.staff ?? 'Unknown'} · {selectedTransaction.paymentMethod} ({selectedTransaction.paymentStatus})</p>
-            {selectedTransaction.voidReason && <p className="mt-2 text-body-sm">Void reason: {selectedTransaction.voidReason}</p>}
+            <p className="mt-2 text-body-sm text-on-surface-variant">{selectedTransaction.businessDate} · {fiscalTimestamp(selectedTransaction.createdAt, timezone)} ({timezone}) · {selectedTransaction.status}{selectedTransaction.voidedAt ? ` · ${t('fiscalReports.voidedAt')} ${fiscalTimestamp(selectedTransaction.voidedAt, timezone)} (${timezone})` : ''}</p>
+            <p className="mt-1 text-body-sm">{selectedTransaction.customer ?? t('fiscal.common.walkIn')} · {selectedTransaction.staff ?? t('fiscal.common.unknown')} · {selectedTransaction.paymentMethod} ({selectedTransaction.paymentStatus})</p>
+            {selectedTransaction.voidReason && <p className="mt-2 text-body-sm">{t('fiscalReports.voidReason')}: {selectedTransaction.voidReason}</p>}
             <div className="mt-4 overflow-x-auto">
               <table className="w-full min-w-[500px] text-left text-body-sm">
-                <thead><tr className="border-b border-outline-variant"><th className="p-2">Product</th><th>Qty</th><th>HT (TND)</th><th>VAT rate(s)</th><th>VAT (TND)</th><th>TTC (TND)</th></tr></thead>
+                <thead><tr className="border-b border-outline-variant"><th className="p-2">{t('fiscalReports.product')}</th><th>{t('fiscalReports.quantity')}</th><th>{t('fiscalReports.netHtTnd')}</th><th>{t('fiscalReports.vatRates')}</th><th>{t('fiscalReports.vatTnd')}</th><th>{t('fiscalReports.grossTtcTnd')}</th></tr></thead>
                 <tbody>{selectedTransaction.items.map((item, index) => {
                   const lineSnapshot = selectedLineSnapshots[index];
                   const rates = new Set((lineSnapshot?.taxes ?? []).map((tax) =>
-                    tax.ratePpm === undefined ? tax.treatment ?? 'Unknown' : `${(tax.ratePpm / 10000).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}%`));
+                    tax.ratePpm === undefined ? tax.treatment ?? t('fiscal.common.unknown') : `${(tax.ratePpm / 10000).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}%`));
                   return (
                     <tr key={`${item.name}-${index}`} className="border-b border-outline-variant last:border-0">
                       <td className="p-2">{item.name}</td><td>{item.quantity}</td>
                       <td>{formatOptionalMillimes(lineSnapshot?.netAmountMillimes)}</td>
-                      <td>{[...rates].join(', ') || 'Unavailable'}</td>
+                      <td>{[...rates].join(', ') || t('fiscal.common.unavailable')}</td>
                       <td>{formatOptionalMillimes(lineSnapshot?.totalTaxMillimes)}</td>
                       <td>{formatOptionalMillimes(lineSnapshot?.totalAmountMillimes)}</td>
                     </tr>
@@ -482,9 +511,9 @@ export function OwnerFiscalReportsScreen() {
               </table>
             </div>
             <div className="mt-4 text-body-sm">
-              <p>HT (TND): <strong>{formatSnapshotAmount(selectedTransaction, 'netAmountMillimes')}</strong></p>
-              <p>VAT (TND): <strong>{formatSnapshotAmount(selectedTransaction, 'totalTaxMillimes')}</strong></p>
-              <p>TTC (TND): <strong>{formatSnapshotAmount(selectedTransaction, 'totalAmountMillimes')}</strong></p>
+              <p>{t('fiscalReports.netHtTnd')}: <strong>{formatSnapshotAmount(selectedTransaction, 'netAmountMillimes')}</strong></p>
+              <p>{t('fiscalReports.vatTnd')}: <strong>{formatSnapshotAmount(selectedTransaction, 'totalTaxMillimes')}</strong></p>
+              <p>{t('fiscalReports.grossTtcTnd')}: <strong>{formatSnapshotAmount(selectedTransaction, 'totalAmountMillimes')}</strong></p>
             </div>
           </div>
         </div>

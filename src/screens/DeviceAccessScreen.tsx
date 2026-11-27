@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { Keypad } from '../components/Keypad';
@@ -7,6 +7,7 @@ import { useAuthStore } from '../stores/authStore';
 import { requiresCredentialSetup } from '../services/credentialSetup';
 import { t } from '../i18n/translations';
 import type { UserSummary } from '../types/domain';
+import { localizeErrorMessage } from '../i18n';
 
 function destinationForUser(user: UserSummary): string {
   if (requiresCredentialSetup(user)) return '/set-password';
@@ -19,9 +20,8 @@ export function DeviceLoginScreen() {
   const user = useAuthStore((state) => state.user);
   const device = useAuthStore((state) => state.device);
   const loginDevice = useAuthStore((state) => state.loginDevice);
-  const loginStaffWithDevicePin = useAuthStore((state) => state.loginStaffWithDevicePin);
+  const loginWithDevicePin = useAuthStore((state) => state.loginWithDevicePin);
   const changeDevicePassword = useAuthStore((state) => state.changeDevicePassword);
-  const logoutDevice = useAuthStore((state) => state.logoutDevice);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -29,14 +29,6 @@ export function DeviceLoginScreen() {
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    const state: unknown = location.state;
-    if (typeof state === 'object' && state !== null &&
-      'deviceLogoutError' in state && typeof state.deviceLogoutError === 'string') {
-      setError(state.deviceLogoutError);
-    }
-  }, [location.state]);
 
   if (user) {
     return <Navigate to={destinationForUser(user)} replace />;
@@ -57,7 +49,7 @@ export function DeviceLoginScreen() {
       await loginDevice(username.trim(), password);
       navigate('/device-pin', { replace: true });
     } catch (loginError) {
-      setError(loginError instanceof Error ? loginError.message : t('devices.loginFailed'));
+      setError(localizeErrorMessage(loginError, t('devices.loginFailed')));
     } finally {
       setPassword('');
       setBusy(false);
@@ -82,41 +74,22 @@ export function DeviceLoginScreen() {
       setNewPassword('');
       setConfirmation('');
     } catch (passwordError) {
-      setError(passwordError instanceof Error ? passwordError.message : t('devices.passwordChangeFailed'));
+      setError(localizeErrorMessage(passwordError, t('devices.passwordChangeFailed')));
     } finally {
       setBusy(false);
     }
   }
 
-  async function submitStaffPin() {
+  async function submitPin() {
     if (busy || pin.length !== 4) return;
     setBusy(true);
     setError('');
     try {
-      const staff = await loginStaffWithDevicePin(pin);
-      navigate(destinationForUser(staff), { replace: true });
+      const account = await loginWithDevicePin(pin);
+      navigate(destinationForUser(account), { replace: true });
     } catch (pinError) {
       setPin('');
-      setError(pinError instanceof Error ? pinError.message : t('devices.pinFailed'));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleDeviceLogout() {
-    if (busy) return;
-    setBusy(true);
-    setError('');
-    try {
-      await logoutDevice();
-      navigate('/', { replace: true });
-    } catch (logoutError) {
-      const message = logoutError instanceof Error ? logoutError.message : t('devices.logoutFailed');
-      if (!useAuthStore.getState().device) {
-        navigate('/device-login', { replace: true, state: { deviceLogoutError: message } });
-      } else {
-        setError(message);
-      }
+      setError(localizeErrorMessage(pinError, t('devices.pinFailed')));
     } finally {
       setBusy(false);
     }
@@ -208,7 +181,7 @@ export function DeviceLoginScreen() {
         ) : (
           <div className="mt-6 flex flex-col gap-3">
             <p className="text-center font-body text-label-md text-on-surface-variant">{t('devices.staffPinLabel')}</p>
-            <div className="flex h-8 items-center justify-center gap-3" aria-label={`${pin.length} of 4 PIN digits entered`}>
+            <div className="flex h-8 items-center justify-center gap-3" aria-label={t('devices.pinDigitsEntered', { entered: String(pin.length), total: '4' })}>
               {[0, 1, 2, 3].map((index) => (
                 <span key={index} className={`h-3 w-3 rounded-full ${index < pin.length ? 'bg-primary' : 'bg-outline-variant'}`} />
               ))}
@@ -219,7 +192,7 @@ export function DeviceLoginScreen() {
               onClear={() => setPin('')}
               onBackspace={() => setPin((current) => current.slice(0, -1))}
             />
-            <Button type="button" disabled={busy || pin.length !== 4} onClick={() => { void submitStaffPin(); }} className="min-h-12 w-full">
+            <Button type="button" disabled={busy || pin.length !== 4} onClick={() => { void submitPin(); }} className="min-h-12 w-full">
               <MaterialIcon name={busy ? 'sync' : 'login'} className={busy ? 'animate-spin' : ''} />
               {busy ? t('login.verifying') : t('devices.signInStaff')}
             </Button>
@@ -227,10 +200,15 @@ export function DeviceLoginScreen() {
         )}
 
         {device && (
-          <Button type="button" variant="ghost" disabled={busy} onClick={() => { void handleDeviceLogout(); }} className="mt-4 w-full border border-outline-variant">
-            <MaterialIcon name="logout" />
-            {t('devices.deviceLogout')}
-          </Button>
+          <div className="mt-4">
+            <Button type="button" variant="ghost" disabled className="w-full border border-outline-variant">
+              <MaterialIcon name="logout" />
+              {t('devices.deviceLogout')}
+            </Button>
+            <p role="note" className="mt-2 text-center font-body text-body-sm text-on-surface-variant">
+              {t('devices.deviceLogoutDisabled')}
+            </p>
+          </div>
         )}
         {error && <p role="alert" className="mt-4 rounded-xl bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       </section>

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Banknote, Ban, Calculator, CreditCard, Ellipsis, HandCoins, ReceiptText, Scale, UsersRound, WalletCards, type LucideIcon } from 'lucide-react';
 import { Button } from '../../../components/Button';
 import { DinarInput } from '../../../components/DinarInput';
@@ -7,6 +7,7 @@ import { formatTnd } from '../../../lib/format';
 import { parseNonNegativeMillimes } from '../../../lib/millimes';
 import { t } from '../../../i18n/translations';
 import type { CashMovementRecord, OrderRecord, ShiftRecord } from '../../../types/domain';
+import { shouldRequireShiftReview } from '../../../lib/shiftClosePolicy';
 import { getCashMovementTotals, getExpectedCash, type ShiftCloseBreakdown } from '../utils/shiftCalculations';
 
 export function ShiftCloseForm({
@@ -39,22 +40,29 @@ export function ShiftCloseForm({
   const expectedCash = getExpectedCash(shift, breakdown, movements);
   const countedCashMillimes = parseNonNegativeMillimes(countedCash);
   const difference = countedCashMillimes === undefined ? undefined : countedCashMillimes - expectedCash;
+  useEffect(() => {
+    setReviewed(false);
+  }, [countedCash, shift.id]);
   const summaryRows: Array<{ label: string; amount: number; icon: LucideIcon; tone: string }> = [
-    { label: 'Starting cash (float)', amount: shift.startingCashMillimes, icon: Banknote, tone: 'float' },
-    { label: 'Cash sales', amount: breakdown.cashSalesMillimes, icon: ReceiptText, tone: 'cash-sales' },
-    { label: 'Card sales', amount: breakdown.cardSalesMillimes, icon: CreditCard, tone: 'card-sales' },
-    { label: 'Other sales', amount: breakdown.otherSalesMillimes, icon: Ellipsis, tone: 'other-sales' },
-    { label: 'Tab sales (charged to customers, excluded from expected cash)', amount: breakdown.tabSalesMillimes, icon: UsersRound, tone: 'tab-sales' },
-    { label: 'Tab payments received in cash', amount: breakdown.tabPaymentsMillimes, icon: WalletCards, tone: 'tab-payments' },
-    { label: 'Cash in', amount: movementTotals.cashInMillimes, icon: HandCoins, tone: 'cash-in' },
-    { label: 'Cash out', amount: movementTotals.cashOutMillimes, icon: HandCoins, tone: 'cash-out' },
-    { label: 'Comps value', amount: breakdown.compsMillimes, icon: Scale, tone: 'comps' },
-    { label: 'Voids', amount: breakdown.voidsMillimes, icon: Ban, tone: 'voids' },
+    { label: t('shift.startingFloat'), amount: shift.startingCashMillimes, icon: Banknote, tone: 'float' },
+    { label: t('shift.cashSales'), amount: breakdown.cashSalesMillimes, icon: ReceiptText, tone: 'cash-sales' },
+    { label: t('shift.cardSales'), amount: breakdown.cardSalesMillimes, icon: CreditCard, tone: 'card-sales' },
+    { label: t('shift.otherSales'), amount: breakdown.otherSalesMillimes, icon: Ellipsis, tone: 'other-sales' },
+    { label: t('shift.tabSalesHelp'), amount: breakdown.tabSalesMillimes, icon: UsersRound, tone: 'tab-sales' },
+    { label: t('shift.tabPaymentsCash'), amount: breakdown.tabPaymentsMillimes, icon: WalletCards, tone: 'tab-payments' },
+    { label: t('shift.cashIn'), amount: movementTotals.cashInMillimes, icon: HandCoins, tone: 'cash-in' },
+    { label: t('shift.cashOut'), amount: movementTotals.cashOutMillimes, icon: HandCoins, tone: 'cash-out' },
+    { label: t('shift.compsValue'), amount: breakdown.compsMillimes, icon: Scale, tone: 'comps' },
+    { label: t('shift.voids'), amount: breakdown.voidsMillimes, icon: Ban, tone: 'voids' },
   ];
   const countExampleId = `counted-cash-example-${shift.id}`;
 
   function submitOrReview(event: FormEvent<HTMLFormElement>) {
-    if (!reviewed) {
+    if (blind) {
+      onSubmit(event);
+      return;
+    }
+    if (shouldRequireShiftReview(blind, reviewed)) {
       event.preventDefault();
       setReviewed(true);
       return;
@@ -66,17 +74,17 @@ export function ShiftCloseForm({
     <form onSubmit={submitOrReview} className="close-shift-form">
       {breakdown.pendingVoidCount > 0 && (
         <section className="close-shift-pending-voids space-y-2 rounded-lg bg-warning-container p-3 text-on-warning-container">
-          <h3 className="font-body text-label-md">Pending voids are treated as voided for sales and cash until rejected. Stock is held until approval.</h3>
+          <h3 className="font-body text-label-md">{t('shift.pendingVoidHelp')}</h3>
           {pendingVoidOrders.map((order) => (
             <p key={order.id} className="font-body text-body-sm">
-              #{order.number} · {formatTnd(order.totalMillimes / 1000)} DT · {order.voidReason || 'Reason not recorded'}
+              #{order.number} · {blind ? '*****' : `${formatTnd(order.totalMillimes / 1000)} DT`} · {order.voidReason || t('shift.reasonNotRecorded')}
             </p>
           ))}
         </section>
       )}
       <section className="close-shift-summary" aria-labelledby={`close-shift-summary-${shift.id}`}>
         <h2 id={`close-shift-summary-${shift.id}`} className="close-shift-summary__heading">
-          Close shift summary
+          {t('shift.closeSummary')}
         </h2>
         <div className="close-shift-summary__rows">
           {summaryRows.map(({ label, amount, icon: Icon, tone }) => (
@@ -85,18 +93,20 @@ export function ShiftCloseForm({
                 <Icon size={22} strokeWidth={2.2} />
               </span>
               <span className="close-shift-summary__label">{label}</span>
-              <span className="close-shift-summary__amount">{formatTnd(Math.abs(amount) / 1000)} DT</span>
+              <span className="close-shift-summary__amount" aria-label={blind ? t('shift.hidden') : undefined}>
+                {blind ? '*****' : `${formatTnd(Math.abs(amount) / 1000)} DT`}
+              </span>
             </div>
           ))}
         </div>
         {!blind && reviewed && countedCashMillimes !== undefined && (
           <div className="close-shift-summary__review" aria-live="polite">
             <div className="close-shift-summary__review-row">
-              <span>Counted cash</span>
+              <span>{t('shift.countedCash')}</span>
               <strong>{formatTnd(countedCashMillimes / 1000)} DT</strong>
             </div>
             <div className="close-shift-summary__review-row close-shift-summary__review-row--expected">
-              <span>Expected cash in drawer</span>
+              <span>{t('shift.expectedCashDrawer')}</span>
               <strong>{formatTnd(expectedCash / 1000)} DT</strong>
             </div>
           </div>
@@ -116,14 +126,14 @@ export function ShiftCloseForm({
               required
               value={countedCash}
               onChange={(event) => onCountChange(event.target.value)}
-              placeholder="e.g. 140.000"
+              placeholder={t('shift.enterCashPlaceholder')}
               aria-describedby={countExampleId}
               className="close-shift-count__input"
             />
             <span className="close-shift-count__unit">DT</span>
           </div>
           <p id={countExampleId} className="close-shift-count__hint">
-            Enter the cash counted in the drawer, for example 140.000.
+            {t('shift.enterCashHint')}
           </p>
         </div>
       </section>
@@ -136,8 +146,8 @@ export function ShiftCloseForm({
           }`}
         >
           {difference === 0
-            ? 'Balanced'
-            : `${difference < 0 ? 'Short' : 'Over'} ${formatTnd(Math.abs(difference) / 1000)} DT`}
+            ? t('shift.balanced')
+            : t(difference < 0 ? 'shift.short' : 'shift.over', { amount: `${formatTnd(Math.abs(difference) / 1000)} DT` })}
         </p>
       )}
       {!blind && reviewed && difference !== undefined && difference !== 0 && (
@@ -147,7 +157,7 @@ export function ShiftCloseForm({
           </span>
           <div className="close-shift-count__content">
             <label htmlFor={`difference-note-${shift.id}`} className="close-shift-count__label">
-              Short note (required)
+              {t('shift.shortNoteRequired')}
             </label>
             <div className="close-shift-count__input-wrap close-shift-note-wrap">
               <textarea
@@ -164,8 +174,8 @@ export function ShiftCloseForm({
         </section>
       )}
       <div className="sheet-action-bar close-shift-actions">
-        <Button type="submit" variant="primary" className="close-shift-submit w-full" disabled={countedCashMillimes === undefined || (reviewed && difference !== 0 && !differenceNote.trim())}>
-          <Calculator size={22} strokeWidth={2.2} aria-hidden="true" />{reviewed ? submitLabel : 'Review count'}
+        <Button type="submit" variant="primary" className="close-shift-submit w-full" disabled={countedCashMillimes === undefined || (!blind && reviewed && difference !== 0 && !differenceNote.trim())}>
+          <Calculator size={22} strokeWidth={2.2} aria-hidden="true" />{blind || reviewed ? submitLabel : t('shift.reviewCount')}
         </Button>
       </div>
     </form>
@@ -194,37 +204,43 @@ export function ClosedShiftSummary({
           <MaterialIcon name="task_alt" />
         </span>
         <div>
-          <h2 className="font-display text-headline-md text-on-surface">Shift closed</h2>
+          <h2 className="font-display text-headline-md text-on-surface">{t('shift.closedTitle')}</h2>
           <p className="font-body text-body-sm text-on-surface-variant">
-            {durationMinutes >= 60 ? `${Math.floor(durationMinutes / 60)}h ` : ''}{durationMinutes % 60}m duration
+            {t('shift.durationLabel', { duration: durationMinutes >= 60
+              ? t('shift.durationHoursMinutes', { hours: Math.floor(durationMinutes / 60), minutes: durationMinutes % 60 })
+              : t('shift.durationMinutes', { minutes: durationMinutes }) })}
           </p>
         </div>
       </div>
       <div className="closed-shift-summary__metrics">
-        <SummaryValue icon="receipt_long" label="Orders" value={String(breakdown.orderCount)} />
+        <SummaryValue icon="receipt_long" label={t('shift.orders')} value={String(breakdown.orderCount)} />
         <SummaryValue
           icon="payments"
-          label="Cash"
+          label={t('shift.cash')}
           value={blind
-            ? 'Hidden'
+            ? t('shift.hidden')
             : shift.countedCashMillimes === undefined
-              ? 'Not recorded'
+              ? t('shift.notRecorded')
               : `${formatTnd(shift.countedCashMillimes / 1000)} DT`}
           detail={blind
-            ? 'Reconciliation available to the owner'
+            ? t('shift.reconciliationOwner')
             : shift.expectedCashMillimes === undefined
-              ? 'Expected cash not recorded'
-              : `Expected ${formatTnd(shift.expectedCashMillimes / 1000)} DT`}
+              ? t('shift.expectedNotRecorded')
+              : t('shift.expected', { amount: `${formatTnd(shift.expectedCashMillimes / 1000)} DT` })}
         />
-        <SummaryValue icon="account_balance" label="Tabs" value={`${formatTnd(breakdown.tabSalesMillimes / 1000)} DT`} />
+        <SummaryValue icon="account_balance" label={t('shift.tabs')} value={blind ? '*****' : `${formatTnd(breakdown.tabSalesMillimes / 1000)} DT`} />
         <SummaryValue
           icon="balance"
-          label="Difference"
-          value={blind ? 'Hidden' : `${difference < 0 ? 'Short ' : difference > 0 ? 'Over ' : ''}${formatTnd(Math.abs(difference) / 1000)} DT`}
+          label={t('shift.difference')}
+          value={blind ? t('shift.hidden') : difference < 0
+            ? t('shift.short', { amount: `${formatTnd(Math.abs(difference) / 1000)} DT` })
+            : difference > 0
+              ? t('shift.over', { amount: `${formatTnd(Math.abs(difference) / 1000)} DT` })
+              : `${formatTnd(Math.abs(difference) / 1000)} DT`}
           valueClass={blind ? 'text-on-surface-variant' : difference === 0 ? 'text-success-dark' : difference < 0 ? 'text-error-dark' : 'text-warning'}
         />
       </div>
-      <Button type="button" className="closed-shift-summary__done" onClick={onDone}>Done</Button>
+      <Button type="button" className="closed-shift-summary__done" onClick={onDone}>{t('shift.done')}</Button>
     </section>
   );
 }

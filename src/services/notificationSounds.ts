@@ -42,11 +42,12 @@ export const NOTIFICATION_SOUNDS = [
 ] as const;
 
 export type NotificationSoundId = (typeof NOTIFICATION_SOUNDS)[number]['id'];
+export type NotificationSoundChoice = NotificationSoundId | 'silent';
 export type NotificationSoundPurpose = 'general' | 'void';
 
 export interface NotificationSoundPreferences {
-  general: NotificationSoundId;
-  void: NotificationSoundId;
+  general: NotificationSoundChoice;
+  void: NotificationSoundChoice;
 }
 
 export const DEFAULT_NOTIFICATION_SOUND_PREFERENCES: NotificationSoundPreferences = {
@@ -71,14 +72,18 @@ export function isNotificationSoundId(value: unknown): value is NotificationSoun
   return NOTIFICATION_SOUNDS.some((sound) => sound.id === value);
 }
 
+export function isNotificationSoundChoice(value: unknown): value is NotificationSoundChoice {
+  return value === 'silent' || isNotificationSoundId(value);
+}
+
 function resolvePreferences(value: unknown): NotificationSoundPreferences {
   if (typeof value !== 'object' || value === null) {
     return { ...DEFAULT_NOTIFICATION_SOUND_PREFERENCES };
   }
   const record = value as Record<string, unknown>;
   return {
-    general: isNotificationSoundId(record.general) ? record.general : DEFAULT_NOTIFICATION_SOUND_PREFERENCES.general,
-    void: isNotificationSoundId(record.void) ? record.void : DEFAULT_NOTIFICATION_SOUND_PREFERENCES.void,
+    general: isNotificationSoundChoice(record.general) ? record.general : DEFAULT_NOTIFICATION_SOUND_PREFERENCES.general,
+    void: isNotificationSoundChoice(record.void) ? record.void : DEFAULT_NOTIFICATION_SOUND_PREFERENCES.void,
   };
 }
 
@@ -97,8 +102,8 @@ function readLocalPreferences(userId: string): NotificationSoundPreferences {
 }
 
 function assertPreferences(value: NotificationSoundPreferences): void {
-  if (!isNotificationSoundId(value.general) || !isNotificationSoundId(value.void)) {
-    throw new Error('Choose a valid notification sound for both notification categories.');
+  if (!isNotificationSoundChoice(value.general) || !isNotificationSoundChoice(value.void)) {
+    throw new Error('Choose a valid notification sound or silent mode for both notification categories.');
   }
 }
 
@@ -153,12 +158,12 @@ export async function saveNotificationSoundPreferences(
 export function getNotificationSoundForType(
   type: NotificationType,
   preferences: NotificationSoundPreferences,
-): NotificationSoundId {
+): NotificationSoundChoice {
   return type.startsWith('void_') ? preferences.void : preferences.general;
 }
 
-export function getNotificationSoundChannelId(baseChannelId: string, soundId: NotificationSoundId): string {
-  return `${baseChannelId}_${soundId}`;
+export function getNotificationSoundChannelId(baseChannelId: string, sound: NotificationSoundChoice): string {
+  return `${baseChannelId}_${sound}`;
 }
 
 export function stopNotificationSound(): void {
@@ -192,5 +197,7 @@ export async function playNotificationSound(
 
 export async function playNotificationSoundForEvent(userId: string, type: NotificationType): Promise<void> {
   const preferences = await getNotificationSoundPreferences(userId);
-  await playNotificationSound(getNotificationSoundForType(type, preferences));
+  const sound = getNotificationSoundForType(type, preferences);
+  if (sound === 'silent') return;
+  await playNotificationSound(sound);
 }

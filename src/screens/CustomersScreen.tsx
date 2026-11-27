@@ -14,7 +14,6 @@ import { OverdueCustomerRow } from '../components/OverdueCustomerRow';
 import { TabStatementView } from '../components/TabStatementView';
 import { TopBar } from '../components/TopBar';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
-import { formatTnd } from '../lib/format';
 import { getCustomerCreditTone } from '../lib/customerCredit';
 import { formatMillimes, parseNonNegativeMillimes } from '../lib/millimes';
 import { customerService } from '../services/customerService';
@@ -25,6 +24,7 @@ import type { CustomerCreditAlert } from '../services/notificationService';
 import { notificationService } from '../services/notificationService';
 import { PERMISSIONS_CHANGED_EVENT, userService } from '../services/userService';
 import { useAuthStore } from '../stores/authStore';
+import { getLanguage, t, type TranslationKey } from '../i18n';
 import type { CustomerRecord, PaymentMethod } from '../types/domain';
 import type { CustomerBalanceReconciliation, CustomerCreditStatus, CustomerDueInfo, CustomerLedgerEntry, CustomerStatementData } from '../services/customerService';
 import type { NotificationRecord, OrderRecord, StoreRecord, TabRecord } from '../types/domain';
@@ -49,32 +49,82 @@ const EMPTY_DRAFT: CustomerDraft = {
   notes: '',
 };
 
-const filterOptions: { id: CustomerFilter; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'owes', label: 'Owes' },
-  { id: 'near', label: 'Near limit' },
-  { id: 'over', label: 'Over limit' },
-  { id: 'overdue', label: 'Overdue' },
-  { id: 'settled', label: 'Settled' },
+const filterOptions: { id: CustomerFilter; labelKey: TranslationKey }[] = [
+  { id: 'all', labelKey: 'customers.filter.all' },
+  { id: 'owes', labelKey: 'customers.filter.owing' },
+  { id: 'near', labelKey: 'customers.filter.nearLimit' },
+  { id: 'over', labelKey: 'customers.filter.overLimit' },
+  { id: 'overdue', labelKey: 'customers.filter.overdue' },
+  { id: 'settled', labelKey: 'customers.filter.settled' },
 ];
+
+const customerErrorKeys: Readonly<Record<string, TranslationKey>> = {
+  'Customer name is required.': 'customers.errors.nameRequired',
+  'Select valid customer settlement terms.': 'customers.errors.invalidTerms',
+  'Credit limit must be a non-negative amount in millimes.': 'customers.errors.invalidCreditLimit',
+  'Enter a payment greater than zero.': 'customers.errors.paymentRequired',
+  'Customer could not be found.': 'customers.errors.customerNotFound',
+  'Customer could not be found in this store.': 'customers.errors.customerNotFound',
+  'Only this store owner can archive customers.': 'customers.errors.permission',
+  'Your position does not allow creating customers.': 'customers.errors.permission',
+  'Your position does not allow editing customers.': 'customers.errors.permission',
+  'Your position does not allow settling customer tabs.': 'customers.errors.permission',
+  'This customer cannot be archived while their tab balance is not zero.': 'customers.errors.cannotArchiveBalance',
+  'The business day is closed. Open a new shift to continue.': 'customers.errors.shiftClosed',
+  'This payment exceeds the balance. Ask the owner to enable customer credit balances in Store settings.': 'customers.errors.paymentTooLarge',
+  'A reason is required to reverse a payment.': 'customers.errors.reasonRequired',
+  'Set your admin PIN in Settings before reversing payments.': 'customers.errors.pinSetup',
+  'Incorrect Admin PIN.': 'customers.errors.pinIncorrect',
+  'PIN pad locked for 60 seconds after 3 incorrect PINs.': 'customers.errors.pinLockedLong',
+  'This customer payment could not be found.': 'customers.errors.paymentNotFound',
+  'This payment has already been reversed.': 'customers.errors.alreadyReversed',
+};
+
+function customerErrorMessage(error: unknown, fallbackKey: TranslationKey): string {
+  if (error instanceof Error) {
+    if (error.message === t('customers.errors.invalidPayment') || error.message === t('customers.errors.invalidCreditLimit')) {
+      return error.message;
+    }
+    const lockMatch = error.message.match(/^PIN pad locked\. Try again in (\d+) seconds\.$/);
+    if (lockMatch) return t('customers.errors.pinLocked', { seconds: lockMatch[1] });
+    const key = customerErrorKeys[error.message];
+    if (key) return t(key);
+  }
+  return t(fallbackKey);
+}
+
+function settlementTermsLabel(terms: CustomerRecord['settlementTerms']): string {
+  if (terms === 'weekly') return t('customers.form.weekly');
+  if (terms === 'monthly') return t('customers.form.monthly');
+  return t('customers.form.anytime');
+}
 
 function localDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 function money(millimes: number): string {
-  return `${formatTnd(Math.abs(millimes) / 1000)} DT`;
+  return `${formatCustomerTnd(Math.abs(millimes) / 1000)} DT`;
 }
 
 function balanceMoney(millimes: number): string {
-  return millimes < 0 ? `Credit ${money(millimes)}` : money(millimes);
+  return millimes < 0 ? t('customers.credit.credit', { amount: money(millimes) }) : money(millimes);
+}
+
+function formatCustomerTnd(amount: number): string {
+  if (!Number.isFinite(amount)) return '—';
+  return new Intl.NumberFormat(getLanguage(), {
+    useGrouping: true,
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  }).format(amount);
 }
 
 function parseMillimes(value: string, required: boolean): number | undefined {
   if (!value.trim() && !required) return undefined;
   const millimes = parseNonNegativeMillimes(value);
   if (millimes === undefined || (required && millimes === 0)) {
-    throw new Error(required ? 'Enter a payment greater than 0.000 TND.' : 'Enter a valid non-negative Dinar amount with up to three decimal places.');
+    throw new Error(required ? t('customers.errors.invalidPayment') : t('customers.errors.invalidCreditLimit'));
   }
   return millimes;
 }
@@ -84,9 +134,9 @@ function initials(name: string): string {
 }
 
 function dateLabel(value?: string): string {
-  if (!value) return 'No payments yet';
+  if (!value) return t('customers.dates.noPayments');
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'No payments yet' : date.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+  return Number.isNaN(date.getTime()) ? t('customers.dates.noPayments') : date.toLocaleDateString(getLanguage(), { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 export function CustomersScreen() {
@@ -135,7 +185,7 @@ export function CustomersScreen() {
   const paymentIdempotencyKeyRef = useRef<string | undefined>(undefined);
   const [paymentReconciliation, setPaymentReconciliation] = useState<CustomerBalanceReconciliation>();
   const [paymentShiftOpen, setPaymentShiftOpen] = useState<boolean | null>(null);
-  const [paymentToast, setPaymentToast] = useState('');
+  const [paymentToast, setPaymentToast] = useState<'recorded' | 'reversed' | ''>('');
   const [paymentReceipt, setPaymentReceipt] = useState<{
     amountMillimes: number;
     balanceBefore: number;
@@ -252,7 +302,7 @@ export function CustomersScreen() {
       .catch((loadError: unknown) => {
         console.error('Unable to load customers.', loadError);
         if (active) {
-          setError('Unable to load customers. Please try again.');
+          setError(t('customers.errors.load'));
           if (customerId) setLoadedCustomerId(customerId);
         }
       })
@@ -263,7 +313,7 @@ export function CustomersScreen() {
       void refresh().catch((loadError: unknown) => {
         console.error('Unable to refresh customers.', loadError);
         if (active) {
-          setError('Unable to load customers. Please try again.');
+          setError(t('customers.errors.load'));
           if (customerId) setLoadedCustomerId(customerId);
         }
       });
@@ -321,7 +371,7 @@ export function CustomersScreen() {
       setOverdueStatement(await customerService.getStatementData(customer.id, storeId));
     } catch (statementError) {
       console.error('Unable to load the customer statement.', statementError);
-      setOverdueActionError('Unable to load the customer statement. Please try again.');
+      setOverdueActionError(t('customers.errors.statementLoad'));
     } finally {
       setOverdueAction(null);
     }
@@ -335,7 +385,7 @@ export function CustomersScreen() {
       await shareCustomerStatement(statement);
     } catch (shareError) {
       if (!(shareError instanceof Error && shareError.name === 'AbortError')) {
-        setOverdueActionError(shareError instanceof Error ? shareError.message : 'Unable to share the customer statement.');
+        setOverdueActionError(customerErrorMessage(shareError, 'customers.errors.statementShare'));
       }
     } finally {
       setOverdueAction(null);
@@ -379,9 +429,9 @@ export function CustomersScreen() {
       setAddOpen(false);
       await refresh();
       navigate(`/customers/${created.id}`);
-      setNotice('Customer added.');
+      setNotice(t('customers.notice.added'));
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : 'Unable to add customer.');
+      setError(customerErrorMessage(createError, 'customers.errors.add'));
     }
   }
 
@@ -419,9 +469,9 @@ export function CustomersScreen() {
       }, user.id);
       setEditOpen(false);
       await refresh();
-      setNotice('Customer updated.');
+      setNotice(t('customers.notice.updated'));
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : 'Unable to update customer.');
+      setError(customerErrorMessage(updateError, 'customers.errors.update'));
     }
   }
 
@@ -436,7 +486,7 @@ export function CustomersScreen() {
       setPaymentShiftOpen(Boolean(await shiftService.getOpenShiftForUser(storeId, user.id)));
     } catch (shiftError) {
       setPaymentOpen(false);
-      setError(shiftError instanceof Error ? shiftError.message : 'Unable to check your shift.');
+      setError(customerErrorMessage(shiftError, 'customers.errors.checkShift'));
     }
   }
 
@@ -446,18 +496,18 @@ export function CustomersScreen() {
     try {
       const text = [
         store?.name ?? '',
-        'Customer payment receipt',
+        t('customers.receipt.paymentTitle'),
         selected.name,
-        new Date(paymentReceipt.occurredAt).toLocaleString(),
-        `Payment: ${money(paymentReceipt.amountMillimes)}`,
-        `Balance before: ${money(paymentReceipt.balanceBefore)}`,
-        `Balance after payment: ${money(paymentReceipt.balanceAfter)}`,
-        ...(paymentReceipt.note ? [`Note: ${paymentReceipt.note}`] : []),
+        new Date(paymentReceipt.occurredAt).toLocaleString(getLanguage()),
+        t('customers.receipt.payment', { amount: money(paymentReceipt.amountMillimes) }),
+        t('customers.receipt.balanceBefore', { amount: money(paymentReceipt.balanceBefore) }),
+        t('customers.receipt.balanceAfter', { amount: money(paymentReceipt.balanceAfter) }),
+        ...(paymentReceipt.note ? [t('customers.receipt.note', { note: paymentReceipt.note })] : []),
       ].filter(Boolean).join('\n');
-      await shareTextAsPdf(text, `payment-receipt-${selected.name}`, `Payment receipt — ${selected.name}`);
+      await shareTextAsPdf(text, `payment-receipt-${selected.name}`, t('customers.receipt.title', { name: selected.name }));
     } catch (shareError) {
       if (shareError instanceof Error && shareError.name === 'AbortError') return;
-      setReceiptShareError(shareError instanceof Error ? shareError.message : 'Unable to share this payment receipt.');
+      setReceiptShareError(customerErrorMessage(shareError, 'customers.errors.shareReceipt'));
     }
   }
 
@@ -487,8 +537,8 @@ export function CustomersScreen() {
       try {
         await refresh();
         balanceAfter = await customerService.getBalance(selected.id);
-      } catch (refreshError) {
-        setError(`Payment recorded, but the final server balance could not be refreshed: ${refreshError instanceof Error ? refreshError.message : 'Please reload the page.'}`);
+      } catch {
+        setError(t('customers.errors.refreshBalance'));
       }
       setPaymentReceipt({
         amountMillimes: record.amountMillimes,
@@ -497,10 +547,10 @@ export function CustomersScreen() {
         note: record.note,
         occurredAt: record.createdAt,
       });
-      setPaymentToast('Payment recorded.');
+      setPaymentToast('recorded');
       paymentIdempotencyKeyRef.current = undefined;
     } catch (paymentError) {
-      setError(paymentError instanceof Error ? paymentError.message : 'Unable to record this payment.');
+      setError(customerErrorMessage(paymentError, 'customers.errors.recordPayment'));
       if (paymentError instanceof Error && paymentError.message.includes('Open your shift')) setPaymentShiftOpen(false);
     } finally {
       paymentSubmissionRef.current = false;
@@ -532,14 +582,14 @@ export function CustomersScreen() {
       setReverseTarget(null);
       setReversePin('');
       setReverseReason('');
-      setPaymentToast('Payment reversed.');
+      setPaymentToast('reversed');
       try {
         await refresh();
-      } catch (refreshError) {
-        setError(`Payment reversed, but customer details could not be refreshed: ${refreshError instanceof Error ? refreshError.message : 'Please reload the page.'}`);
+      } catch {
+        setError(t('customers.errors.refreshCustomer'));
       }
     } catch (reverseErrorValue) {
-      setReverseError(reverseErrorValue instanceof Error ? reverseErrorValue.message : 'Unable to reverse this payment.');
+      setReverseError(customerErrorMessage(reverseErrorValue, 'customers.errors.reversePayment'));
     } finally {
       reverseSubmissionRef.current = false;
     }
@@ -554,36 +604,65 @@ export function CustomersScreen() {
       setArchiveOpen(false);
       navigate('/customers', { replace: true });
       await refresh();
-      setNotice('Customer archived.');
+      setNotice(t('customers.notice.archived'));
     } catch (archiveError) {
-      setError(archiveError instanceof Error ? archiveError.message : 'Unable to archive customer.');
+      setError(customerErrorMessage(archiveError, 'customers.errors.archive'));
     }
+  }
+
+  function localizedCreditNotification(notification: NotificationRecord) {
+    const customer = customers.find((entry) => entry.id === notification.customerId);
+    const name = customer?.name ?? '';
+    const amount = money(creditStatuses[notification.customerId ?? '']?.balance ?? 0);
+    if (notification.type === 'customer_overdue') {
+        return {
+          title: t('customers.notifications.overdueTitle'),
+          body: t('customers.notifications.overdueBody', { name, amount }),
+        };
+    }
+    if (notification.type === 'customer_credit_limit') {
+        return {
+          title: t('customers.notifications.limitTitle'),
+          body: t('customers.notifications.limitBody', { name }),
+        };
+    }
+    return {
+        title: t('customers.notifications.warningTitle'),
+        body: t('customers.notifications.warningBody', { name }),
+    };
   }
 
   const listContent = (
     <div className="pb-24">
-      <PageHeader title="Customers & tabs" subtitle="Accounts, balances, and recent payments" />
+        <PageHeader title={t('customers.title')} subtitle={t('customers.subtitle')} />
 
-      <section aria-label="Accounts summary" className="customer-summary mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-        <SummaryCard className="col-span-2 sm:col-span-1" icon="account_balance_wallet" label="Total outstanding" value={`${formatTnd(summary.totalOutstandingMillimes / 1000)} DT`} tone="primary" />
-        <SummaryCard icon="groups" label="Customers owing" value={String(summary.customersOwing)} tone="success" />
-        <SummaryCard icon="event_busy" label="Overdue" value={String(summary.overdueCount)} tone="error" />
+        <section aria-label={t('customers.summary.label')} className="customer-summary mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <SummaryCard className="col-span-2 sm:col-span-1" icon="account_balance_wallet" label={t('customers.summary.totalOutstanding')} value={`${formatCustomerTnd(summary.totalOutstandingMillimes / 1000)} DT`} tone="primary" />
+          <SummaryCard icon="groups" label={t('customers.summary.owing')} value={String(summary.customersOwing)} tone="success" />
+          <SummaryCard icon="event_busy" label={t('customers.summary.overdue')} value={String(summary.overdueCount)} tone="error" />
       </section>
 
       {creditAlerts.length > 0 && (
-        <section aria-label="Credit notifications" className="mb-4 flex flex-col gap-2">
+          <section aria-label={t('customers.notifications.credit')} className="mb-4 flex flex-col gap-2">
           {creditAlerts.map((alert) => (
             <p key={alert.customerId} className={`rounded-xl p-3 font-body text-body-sm ${alert.severity === 'error' ? 'bg-error-container text-on-error-container' : 'bg-warning-container text-on-warning-container'}`}>
-              <strong>{alert.customerName}:</strong> {alert.message}
+                <strong>{alert.customerName}:</strong> {alert.kind === 'overdue'
+                  ? t('customers.alert.overdue')
+                  : alert.kind === 'limit'
+                    ? t('customers.alert.limit')
+                    : t('customers.alert.nearLimit')}
             </p>
           ))}
         </section>
       )}
       {creditNotifications.length > 0 && (
-        <section aria-label="Recent customer credit notifications" className="mb-4 flex flex-col gap-2">
+          <section aria-label={t('customers.notifications.recent')} className="mb-4 flex flex-col gap-2">
           {creditNotifications.slice(0, 3).map((notification) => (
             <p key={notification.id} role="status" className={`rounded-xl p-3 font-body text-body-sm ${notification.type === 'customer_credit_limit' || notification.type === 'customer_overdue' ? 'bg-error-container text-on-error-container' : 'bg-warning-container text-on-warning-container'}`}>
-              <strong>{notification.title}:</strong> {notification.body}
+                {(() => {
+                  const copy = localizedCreditNotification(notification);
+                  return <><strong>{copy.title}:</strong> {copy.body}</>;
+                })()}
             </p>
           ))}
         </section>
@@ -595,13 +674,13 @@ export function CustomersScreen() {
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search customers"
-            aria-label="Search customers"
+            placeholder={t('customers.search.placeholder')}
+            aria-label={t('customers.search.label')}
             className="h-11 w-full rounded-xl bg-surface-container-lowest pl-10 pr-3 font-body text-body-md shadow-card outline-none focus:ring-2 focus:ring-primary"
           />
         </label>
 
-        <div className="scrollbar-hidden customer-filter-row flex gap-1.5 overflow-x-auto" role="group" aria-label="Filter customers">
+        <div className="scrollbar-hidden customer-filter-row flex gap-1.5 overflow-x-auto" role="group" aria-label={t('customers.filter.label')}>
           {filterOptions.map((option) => (
             <button
               key={option.id}
@@ -610,18 +689,18 @@ export function CustomersScreen() {
               onClick={() => setFilter(option.id)}
               className={`min-h-10 shrink-0 rounded-full px-3 font-body text-label-md ${filter === option.id ? 'bg-primary text-on-primary' : 'bg-surface-container-lowest text-on-surface-variant'}`}
             >
-              {option.label}
+              {t(option.labelKey)}
             </button>
           ))}
         </div>
 
         {filter !== 'overdue' && (
           <label className="customer-sort flex items-center gap-2 font-body text-label-sm text-on-surface-variant">
-            <span>Sort</span>
+            <span>{t('customers.sort.label')}</span>
             <select value={sort} onChange={(event) => setSort(event.target.value as CustomerSort)} className="h-11 min-w-44 rounded-lg bg-surface-container-lowest px-3 text-on-surface">
-              <option value="balance">Balance high to low</option>
-              <option value="name">Name</option>
-              <option value="lastPayment">Last payment</option>
+              <option value="balance">{t('customers.sort.balance')}</option>
+              <option value="name">{t('customers.sort.name')}</option>
+              <option value="lastPayment">{t('customers.sort.lastPayment')}</option>
             </select>
           </label>
         )}
@@ -631,7 +710,7 @@ export function CustomersScreen() {
       {overdueActionError && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{overdueActionError}</p>}
       {notice && <p role="status" className="mb-3 rounded-lg bg-success-container p-3 font-body text-body-sm text-on-success-container">{notice}</p>}
       {loading ? (
-        <ListSkeleton label="Loading customers" />
+        <ListSkeleton label={t('customers.loading.list')} />
       ) : filteredCustomers.length > 0 ? (
         <CardGrid className="mobile-card-list customer-card-list">
           <LazyBatch
@@ -666,7 +745,7 @@ export function CustomersScreen() {
         </CardGrid>
       ) : (
         <p className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">
-          {customers.length ? 'No customers match these filters.' : 'No customers yet.'}
+          {customers.length ? t('customers.empty.filtered') : t('customers.empty.list')}
         </p>
       )}
 
@@ -675,7 +754,7 @@ export function CustomersScreen() {
           onClick={() => { setError(''); setAddOpen(true); }}
           className={`customer-add-button fixed right-4 z-30 min-h-12 rounded-full px-4 shadow-overlay ${isOwner ? 'bottom-6' : 'bottom-24'}`}
         >
-          <MaterialIcon name="person_add" />Add customer
+          <MaterialIcon name="person_add" />{t('customers.action.add')}
         </Button>
       )}
     </div>
@@ -685,78 +764,78 @@ export function CustomersScreen() {
     <div className="customer-detail-content pb-6">
       <div className="customer-detail-toolbar">
         <Button variant="ghost" onClick={() => navigate('/customers')} className="customer-detail-back min-h-9 px-2">
-        <MaterialIcon name="arrow_back" />Customers
+        <MaterialIcon name="arrow_back" />{t('customers.action.back')}
         </Button>
       </div>
       {error && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       {notice && <p role="status" className="mb-3 rounded-lg bg-success-container p-3 font-body text-body-sm text-on-success-container">{notice}</p>}
       {loading || (isDetail && loadedCustomerId !== customerId) ? (
-        <p role="status" className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">Loading customer…</p>
+        <p role="status" className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">{t('customers.loading.detail')}</p>
       ) : !selected ? (
-        error ? null : <p role="alert" className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">Customer not found.</p>
+        error ? null : <p role="alert" className="rounded-xl bg-surface-container-lowest p-4 font-body text-body-sm text-outline">{t('customers.notFound')}</p>
       ) : (
         <>
           <header className="mb-4 flex items-center gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
             <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-primary-fixed font-display text-headline-sm text-primary">{initials(selected.name)}</span>
             <div className="min-w-0 flex-1">
               <h1 className="truncate font-display text-headline-lg text-on-surface">{selected.name}</h1>
-              <p className="truncate font-body text-body-sm text-on-surface-variant">{[selected.phone, selected.email].filter(Boolean).join(' · ') || 'No contact details'}</p>
-              <p className="font-body text-body-sm text-outline">Terms: {selected.settlementTerms} · Last payment: {dateLabel(selected.lastPaymentAt)}</p>
+              <p className="truncate font-body text-body-sm text-on-surface-variant">{[selected.phone, selected.email].filter(Boolean).join(' · ') || t('customers.contact.none')}</p>
+              <p className="font-body text-body-sm text-outline">{t('customers.terms', { terms: settlementTermsLabel(selected.settlementTerms), date: dateLabel(selected.lastPaymentAt) })}</p>
               {selected.notes?.trim() && (
                 <p className="mt-1 line-clamp-2 font-body text-body-sm text-on-surface-variant">
-                  <span className="font-semibold text-on-surface">Note:</span> {selected.notes.trim()}
+                  <span className="font-semibold text-on-surface">{t('customers.note.label')}</span> {selected.notes.trim()}
                 </p>
               )}
             </div>
-            {selectedDue?.overdue && <span className="rounded-full bg-error-container px-3 py-1 font-body text-label-sm text-on-error-container">Overdue</span>}
+            {selectedDue?.overdue && <span className="rounded-full bg-error-container px-3 py-1 font-body text-label-sm text-on-error-container">{t('customers.status.overdue')}</span>}
           </header>
 
           <section className="mb-4 flex flex-col items-center gap-3 rounded-2xl bg-surface-container-lowest p-5 shadow-card sm:flex-row sm:justify-center sm:gap-8">
             <CreditRing status={selectedStatus} />
             <div className="text-center sm:text-left">
-              <p className="font-body text-label-sm uppercase text-outline">Remaining credit</p>
-              <p className="mt-1 font-display text-headline-lg text-on-surface">{selectedStatus?.remaining === undefined ? 'No limit' : `${formatTnd(selectedStatus.remaining / 1000)} DT`}</p>
+              <p className="font-body text-label-sm uppercase text-outline">{t('customers.credit.remaining')}</p>
+              <p className="mt-1 font-display text-headline-lg text-on-surface">{selectedStatus?.remaining === undefined ? t('customers.credit.noLimit') : `${formatCustomerTnd(selectedStatus.remaining / 1000)} DT`}</p>
               <p className="mt-1 font-body text-body-sm text-on-surface-variant">
                 {selectedStatus?.limit === undefined
-                  ? `Current balance: ${money(selectedStatus?.balance ?? 0)}`
-                  : `${formatTnd(Math.max(0, selectedStatus.balance) / 1000)} DT of ${formatTnd(selectedStatus.limit / 1000)} DT used`}
+                  ? t('customers.credit.currentBalance', { amount: money(selectedStatus?.balance ?? 0) })
+                  : t('customers.credit.usedOf', { used: formatCustomerTnd(Math.max(0, selectedStatus.balance) / 1000), limit: formatCustomerTnd(selectedStatus.limit / 1000) })}
               </p>
-              {selectedDue?.nextDueAt && <p className={`mt-1 font-body text-body-sm ${selectedDue.overdue ? 'text-error-dark' : 'text-on-surface-variant'}`}>{selectedDue.overdue ? 'Overdue since' : 'Next due'} {dateLabel(selectedDue.nextDueAt)}</p>}
+              {selectedDue?.nextDueAt && <p className={`mt-1 font-body text-body-sm ${selectedDue.overdue ? 'text-error-dark' : 'text-on-surface-variant'}`}>{selectedDue.overdue ? t('customers.due.overdueSince', { date: dateLabel(selectedDue.nextDueAt) }) : t('customers.due.next', { date: dateLabel(selectedDue.nextDueAt) })}</p>}
             </div>
           </section>
 
-          <section aria-label="Customer actions" className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <section aria-label={t('customers.actions.label')} className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
             {canTakeOrders && selected.isActive && (
-              <ActionButton icon="point_of_sale" label="Add order" onClick={() => navigate('/pos', { state: { customerId: selected.id } })} />
+              <ActionButton icon="point_of_sale" label={t('customers.action.addOrder')} onClick={() => navigate('/pos', { state: { customerId: selected.id } })} />
             )}
             {canSettle && selected.isActive && (selectedStatus?.balance ?? 0) > 0 && (
-              <ActionButton icon="payments" label="Take payment" onClick={() => { void beginTakePayment(); }} />
+              <ActionButton icon="payments" label={t('customers.action.takePayment')} onClick={() => { void beginTakePayment(); }} />
             )}
-            {canEdit && <ActionButton icon="edit" label="Edit" onClick={beginEdit} />}
-            <ActionButton icon="receipt_long" label="Statement" onClick={() => setStatementMode('view')} />
-            <ActionButton icon="share" label="Share statement" onClick={() => setStatementMode('share')} />
+            {canEdit && <ActionButton icon="edit" label={t('customers.action.edit')} onClick={beginEdit} />}
+            <ActionButton icon="receipt_long" label={t('customers.action.statement')} onClick={() => setStatementMode('view')} />
+            <ActionButton icon="share" label={t('customers.action.shareStatement')} onClick={() => setStatementMode('share')} />
             {isOwner && (
               <ActionButton
                 icon="archive"
-                label="Archive"
+                label={t('customers.action.archive')}
                 disabled={(selectedStatus?.balance ?? 0) !== 0}
                 onClick={() => setArchiveOpen(true)}
               />
             )}
           </section>
-          {isOwner && (selectedStatus?.balance ?? 0) !== 0 && <p className="mb-4 font-body text-body-sm text-outline">Archive is available when the tab balance is zero.</p>}
+          {isOwner && (selectedStatus?.balance ?? 0) !== 0 && <p className="mb-4 font-body text-body-sm text-outline">{t('customers.archive.disabledHelp')}</p>}
 
           <section className="rounded-2xl bg-surface-container-lowest p-4 shadow-card">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div>
-                <h2 className="font-display text-headline-md text-on-surface">Account ledger</h2>
-                <p className="font-body text-body-sm text-on-surface-variant">Charges and payments, oldest first</p>
+                <h2 className="font-display text-headline-md text-on-surface">{t('customers.ledger.title')}</h2>
+                <p className="font-body text-body-sm text-on-surface-variant">{t('customers.ledger.subtitle')}</p>
               </div>
-              <button type="button" onClick={() => { setLedgerFrom(''); setLedgerTo(''); }} className="min-h-10 px-2 font-body text-label-md text-primary">Clear dates</button>
+              <button type="button" onClick={() => { setLedgerFrom(''); setLedgerTo(''); }} className="min-h-10 px-2 font-body text-label-md text-primary">{t('customers.date.clear')}</button>
             </div>
             <div className="mb-3 grid gap-2 sm:grid-cols-2">
-              <label className="font-body text-label-sm text-on-surface-variant">From<input type="date" value={ledgerFrom} onChange={(event) => setLedgerFrom(event.target.value)} className="mt-1 h-11 w-full rounded-lg bg-surface-container-low px-3 text-on-surface" /></label>
-              <label className="font-body text-label-sm text-on-surface-variant">To<input type="date" value={ledgerTo} onChange={(event) => setLedgerTo(event.target.value)} className="mt-1 h-11 w-full rounded-lg bg-surface-container-low px-3 text-on-surface" /></label>
+              <label className="font-body text-label-sm text-on-surface-variant">{t('customers.date.from')}<input type="date" value={ledgerFrom} onChange={(event) => setLedgerFrom(event.target.value)} className="mt-1 h-11 w-full rounded-lg bg-surface-container-low px-3 text-on-surface" /></label>
+              <label className="font-body text-label-sm text-on-surface-variant">{t('customers.date.to')}<input type="date" value={ledgerTo} onChange={(event) => setLedgerTo(event.target.value)} className="mt-1 h-11 w-full rounded-lg bg-surface-container-low px-3 text-on-surface" /></label>
             </div>
             {visibleLedger.length > 0 ? (
               <ol className="flex flex-col">
@@ -773,27 +852,27 @@ export function CustomersScreen() {
                         className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-left ${entry.kind === 'payment' ? 'text-success-dark' : 'text-secondary'}`}
                       >
                         <span className="min-w-0">
-                          <span className="block truncate font-body text-label-md">{entry.description}</span>
-                          <span className="mt-0.5 block font-body text-body-sm text-on-surface-variant">{new Date(entry.occurredAt).toLocaleString()}</span>
+                          <span className="block truncate font-body text-label-md">{entry.kind === 'issued' ? t('customers.statement.ticket', { number: order?.number ?? entry.orderNumber ?? '—' }) : entry.kind === 'payment' ? t('customers.statement.cashPayment') : t('customers.statement.paymentReversed')}</span>
+                          <span className="mt-0.5 block font-body text-body-sm text-on-surface-variant">{new Date(entry.occurredAt).toLocaleString(getLanguage())}</span>
                         </span>
                         <span className="text-right">
                           <strong className="block font-body text-label-md">{entry.amountMillimes < 0 ? '−' : '+'}{money(entry.amountMillimes)}</strong>
-                          <span className="mt-0.5 block font-body text-body-sm text-on-surface-variant">Balance {balanceMoney(entry.balanceMillimes)}</span>
+                          <span className="mt-0.5 block font-body text-body-sm text-on-surface-variant">{t('customers.balance.label', { amount: balanceMoney(entry.balanceMillimes) })}</span>
                         </span>
                       </button>
-                      {entry.note && <p className="mt-1 font-body text-body-sm text-on-surface-variant">Note: {entry.note}</p>}
+                      {entry.note && <p className="mt-1 font-body text-body-sm text-on-surface-variant">{t('customers.ledger.note', { note: entry.note })}</p>}
                       {isOwner && entry.kind === 'payment' && !entry.reversed && (
                         <Button type="button" variant="ghost" onClick={() => beginReversePayment(entry)} className="mt-1 min-h-9 px-2 text-label-sm text-error-dark">
-                          <MaterialIcon name="undo" className="text-base" />Reverse payment
+                          <MaterialIcon name="undo" className="text-base" />{t('customers.action.reversePayment')}
                         </Button>
                       )}
                       {expanded && order && (
                         <div className="mt-2 rounded-lg bg-surface-container-low p-3">
-                          <p className="mb-2 font-body text-label-md text-on-surface">Ticket #{order.number} items</p>
+                          <p className="mb-2 font-body text-label-md text-on-surface">{t('customers.ledger.ticketItems', { number: order.number })}</p>
                           {order.items.map((item, index) => (
                             <p key={`${item.itemId}-${index}`} className="flex justify-between gap-2 py-1 font-body text-body-sm text-on-surface-variant">
                               <span>{item.quantity} × {item.name}{item.modifiers.length ? ` (${item.modifiers.join(', ')})` : ''}</span>
-                              <span>{formatTnd(item.lineTotalMillimes / 1000)} DT</span>
+                              <span>{formatCustomerTnd(item.lineTotalMillimes / 1000)} DT</span>
                             </p>
                           ))}
                         </div>
@@ -803,7 +882,7 @@ export function CustomersScreen() {
                 })}
               </ol>
             ) : (
-              <p className="rounded-lg bg-surface-container-low p-3 font-body text-body-sm text-outline">No ledger activity for this date range.</p>
+              <p className="rounded-lg bg-surface-container-low p-3 font-body text-body-sm text-outline">{t('customers.ledger.empty')}</p>
             )}
           </section>
         </>
@@ -815,7 +894,7 @@ export function CustomersScreen() {
   return (
     <>
       {isOwner ? (
-        <WorkspaceLayout title="Customers" storeName={store?.name} links={ownerWorkspaceLinks}>
+        <WorkspaceLayout title={t('customers.heading')} storeName={store?.name} links={ownerWorkspaceLinks}>
           {isDetail ? (
             <div className="customer-split-view">
               <SplitView list={<div className="customer-split-list">{listContent}</div>} detail={detailContent} />
@@ -824,23 +903,23 @@ export function CustomersScreen() {
         </WorkspaceLayout>
       ) : (
         <div className="min-h-screen bg-surface">
-          <TopBar title="Customers & tabs" storeName={store?.name} />
+          <TopBar title={t('customers.title')} storeName={store?.name} />
           <main className="mx-auto w-full p-0"><PageContainer>{page}</PageContainer></main>
           <BottomNav />
         </div>
       )}
 
-      <BottomSheet open={addOpen} onClose={() => setAddOpen(false)} title="Add customer">
+      <BottomSheet open={addOpen} onClose={() => setAddOpen(false)} title={t('customers.form.addTitle')}>
         {error && <FormError message={error} />}
-        <CustomerForm draft={draft} setDraft={setDraft} onSubmit={addCustomer} submitLabel="Add customer" />
+        <CustomerForm draft={draft} setDraft={setDraft} onSubmit={addCustomer} submitLabel={t('customers.action.add')} />
       </BottomSheet>
-      <BottomSheet open={editOpen} onClose={() => setEditOpen(false)} title="Edit customer">
+      <BottomSheet open={editOpen} onClose={() => setEditOpen(false)} title={t('customers.form.editTitle')}>
         {error && <FormError message={error} />}
         <CustomerForm
           draft={editDraft}
           setDraft={setEditDraft}
           onSubmit={saveCustomer}
-          submitLabel="Save changes"
+          submitLabel={t('customers.form.save')}
           isEditing
           hasExistingCreditLimit={selected?.creditLimitMillimes !== undefined}
           clearCreditLimit={clearCreditLimit}
@@ -851,43 +930,43 @@ export function CustomersScreen() {
           onCreditLimitChange={() => setClearCreditLimit(false)}
         />
       </BottomSheet>
-      <BottomSheet open={paymentOpen} onClose={() => setPaymentOpen(false)} title="Take payment">
+      <BottomSheet open={paymentOpen} onClose={() => setPaymentOpen(false)} title={t('customers.payment.title')}>
         {error && <FormError message={error} />}
         <div className="flex flex-col gap-4">
           <section className="rounded-xl bg-primary-fixed p-4">
-            <p className="font-body text-label-sm text-primary">{selected?.name} · Current balance</p>
+            <p className="font-body text-label-sm text-primary">{t('customers.payment.currentBalance', { name: selected?.name ?? '' })}</p>
             <p className="mt-1 font-display text-headline-lg text-on-surface">{balanceMoney(paymentBalance)}</p>
           </section>
           {paymentReconciliation && paymentReconciliation.unresolvedReversalMillimes > 0 && (
             <section className="rounded-xl bg-warning-container p-4 text-on-warning-container" role="status">
               <p className="font-body text-label-md">
-                {paymentReconciliation.unresolvedReversals.length} ambiguous reversal(s) excluded from the verified balance
+                {t('customers.payment.ambiguousReversals', { count: paymentReconciliation.unresolvedReversals.length })}
               </p>
               <p className="mt-1 font-body text-body-sm">
-                Unresolved amount: {money(paymentReconciliation.unresolvedReversalMillimes)}
+                {t('customers.payment.unresolvedAmount', { amount: money(paymentReconciliation.unresolvedReversalMillimes) })}
               </p>
             </section>
           )}
           {paymentShiftOpen === false && (
             <section className="rounded-xl bg-warning-container p-4" role="status">
-              <p className="font-body text-label-md text-on-warning-container">Open your shift before accepting a customer payment.</p>
+              <p className="font-body text-label-md text-on-warning-container">{t('customers.payment.openShiftRequired')}</p>
               <Button type="button" variant="secondary" onClick={() => navigate(isOwner ? '/owner/shifts' : '/shift')} className="mt-3 w-full">
-                <MaterialIcon name="open_in_new" />Open shift screen
+                <MaterialIcon name="open_in_new" />{t('customers.payment.openShift')}
               </Button>
             </section>
           )}
-          {paymentShiftOpen === null && <p role="status" className="font-body text-body-sm text-outline">Checking for an open shift…</p>}
+          {paymentShiftOpen === null && <p role="status" className="font-body text-body-sm text-outline">{t('customers.payment.checkingShift')}</p>}
           <div className="flex flex-col gap-3">
-            <p className="font-body text-label-md text-on-surface">Quick amount</p>
+            <p className="font-body text-label-md text-on-surface">{t('customers.payment.quickAmount')}</p>
             <div className="grid grid-cols-2 gap-2">
               <Button type="button" variant="secondary" disabled={paymentShiftOpen !== true || paymentBalance <= 0} onClick={() => setPaymentAmount(formatMillimes(paymentBalance))}>
-                Full balance
+                {t('customers.payment.fullBalance')}
               </Button>
               <Button type="button" variant="secondary" disabled={paymentShiftOpen !== true || paymentBalance <= 0} onClick={() => setPaymentAmount(formatMillimes(Math.round(paymentBalance / 2)))}>
-                Half
+                {t('customers.payment.half')}
               </Button>
             </div>
-            <label htmlFor="customer-payment-amount" className="font-body text-label-md text-on-surface">Custom amount (TND)</label>
+            <label htmlFor="customer-payment-amount" className="font-body text-label-md text-on-surface">{t('customers.payment.customAmount')}</label>
             <DinarInput
               id="customer-payment-amount"
               disabled={paymentShiftOpen !== true}
@@ -895,22 +974,22 @@ export function CustomersScreen() {
               onChange={(event) => setPaymentAmount(event.target.value)}
               className="h-12 w-full rounded-lg bg-surface-container-low px-3 font-display text-title-md tabular-nums"
             />
-            <p className="font-body text-label-md text-on-surface">Balance after payment</p>
+            <p className="font-body text-label-md text-on-surface">{t('customers.payment.balanceAfter')}</p>
             <p className={`rounded-lg bg-surface-container-low p-3 font-display text-title-md tabular-nums ${paymentBalance - paymentAmountMillimes < 0 ? 'text-error-dark' : 'text-on-surface'}`}>
               {balanceMoney(paymentBalance - paymentAmountMillimes)}
             </p>
             {paymentExceedsBalance && !store?.allowCustomerCreditBalance && (
               <p role="alert" className="rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">
-                This payment is more than the current balance. Ask the owner to enable “Allow customer credit balance” in Store settings.
+                {t('customers.payment.exceedsBalance')}
               </p>
             )}
             {paymentExceedsBalance && store?.allowCustomerCreditBalance && (
               <p className="rounded-lg bg-primary-fixed p-3 font-body text-body-sm text-primary">
-                The extra {money(paymentAmountMillimes - paymentBalance)} will remain as customer credit.
+                {t('customers.payment.extraCredit', { amount: money(paymentAmountMillimes - paymentBalance) })}
               </p>
             )}
             <div>
-              <p className="mb-2 font-body text-label-md text-on-surface">Payment method</p>
+              <p className="mb-2 font-body text-label-md text-on-surface">{t('customers.payment.method')}</p>
               <div className="flex flex-wrap gap-2">
                 {(['cash', 'card', 'other'] as Exclude<PaymentMethod, 'tab'>[])
                   .filter((method) => method === 'cash' || (method === 'card' ? store?.allowCardPayments : store?.allowOtherPayments))
@@ -921,59 +1000,59 @@ export function CustomersScreen() {
                       variant={paymentMethod === method ? 'primary' : 'secondary'}
                       onClick={() => setPaymentMethod(method)}
                     >
-                      {method === 'cash' ? 'Cash' : method === 'card' ? 'Card' : 'Other'}
+                      {method === 'cash' ? t('customers.payment.cash') : method === 'card' ? t('customers.payment.card') : t('customers.payment.other')}
                     </Button>
                   ))}
               </div>
             </div>
-            <label className="font-body text-label-md text-on-surface">Note (optional)
+            <label className="font-body text-label-md text-on-surface">{t('customers.payment.noteOptional')}
               <textarea rows={2} value={paymentNote} disabled={paymentShiftOpen !== true} onChange={(event) => setPaymentNote(event.target.value)} className="mt-1.5 w-full rounded-lg bg-surface-container-low p-3" />
             </label>
             <form onSubmit={(event) => { void settle(event); }}>
               <Button type="submit" className="w-full" disabled={paymentShiftOpen !== true || paymentAmountMillimes <= 0 || (paymentExceedsBalance && !store?.allowCustomerCreditBalance)}>
-                <MaterialIcon name="payments" />Record payment
+                <MaterialIcon name="payments" />{t('customers.payment.record')}
               </Button>
             </form>
           </div>
         </div>
       </BottomSheet>
-      <BottomSheet open={Boolean(paymentReceipt)} onClose={() => setPaymentReceipt(null)} title="Payment recorded">
+      <BottomSheet open={Boolean(paymentReceipt)} onClose={() => setPaymentReceipt(null)} title={t('customers.payment.receiptTitle')}>
         {paymentReceipt && selected && (
           <div className="flex flex-col gap-3">
             <article className="thermal-receipt">
               <header className="receipt-center">
                 <strong>{store?.name}</strong>
-                <strong>CUSTOMER PAYMENT</strong>
+                <strong>{t('customers.payment.receiptHeading')}</strong>
                 <div>{selected.name}</div>
-                <div>{new Date(paymentReceipt.occurredAt).toLocaleString()}</div>
+                <div>{new Date(paymentReceipt.occurredAt).toLocaleString(getLanguage())}</div>
               </header>
               <div className="receipt-rule" />
-              <div className="receipt-row"><span>Payment</span><strong>{money(paymentReceipt.amountMillimes)}</strong></div>
-              <div className="receipt-row"><span>Balance before</span><span>{balanceMoney(paymentReceipt.balanceBefore)}</span></div>
-              <div className="receipt-row"><span>Balance after payment</span><strong>{balanceMoney(paymentReceipt.balanceAfter)}</strong></div>
-              {paymentReceipt.note && <div className="receipt-item">Note: {paymentReceipt.note}</div>}
+              <div className="receipt-row"><span>{t('customers.payment.receiptPayment')}</span><strong>{money(paymentReceipt.amountMillimes)}</strong></div>
+              <div className="receipt-row"><span>{t('customers.payment.balanceBefore')}</span><span>{balanceMoney(paymentReceipt.balanceBefore)}</span></div>
+              <div className="receipt-row"><span>{t('customers.payment.balanceAfterReceipt')}</span><strong>{balanceMoney(paymentReceipt.balanceAfter)}</strong></div>
+              {paymentReceipt.note && <div className="receipt-item">{t('customers.receipt.note', { note: paymentReceipt.note })}</div>}
               <div className="receipt-rule" />
-              <footer className="receipt-center">Thank you</footer>
+              <footer className="receipt-center">{t('customers.payment.thankYou')}</footer>
             </article>
             {receiptShareError && <FormError message={receiptShareError} />}
             <Button type="button" variant="secondary" onClick={() => { void sharePaymentReceipt(); }}>
-              <MaterialIcon name="share" />Share PDF
+              <MaterialIcon name="share" />{t('customers.payment.sharePdf')}
             </Button>
-            <Button type="button" variant="ghost" onClick={() => setPaymentReceipt(null)}>Done</Button>
+            <Button type="button" variant="ghost" onClick={() => setPaymentReceipt(null)}>{t('customers.payment.done')}</Button>
           </div>
         )}
       </BottomSheet>
-      <BottomSheet open={Boolean(reverseTarget)} onClose={() => setReverseTarget(null)} title="Reverse payment">
+      <BottomSheet open={Boolean(reverseTarget)} onClose={() => setReverseTarget(null)} title={t('customers.reverse.title')}>
         {reverseTarget && (
           <form onSubmit={(event) => { void reversePayment(event); }} className="flex flex-col gap-3">
             <p className="font-body text-body-sm text-on-surface-variant">
-              Reverse {money(Math.abs(reverseTarget.amountMillimes))} for {selected?.name}. This will restore the amount due and adjust the original shift cash.
+              {t('customers.reverse.explanation', { amount: money(Math.abs(reverseTarget.amountMillimes)), name: selected?.name ?? '' })}
             </p>
-            <label className="font-body text-label-md text-on-surface">Reason
+            <label className="font-body text-label-md text-on-surface">{t('customers.reverse.reason')}
               <textarea required value={reverseReason} onChange={(event) => setReverseReason(event.target.value)} rows={3} className="mt-1.5 w-full rounded-lg bg-surface-container-low p-3" />
             </label>
-            <label className="font-body text-label-md text-on-surface">Admin PIN</label>
-            <div className="flex justify-center gap-3" aria-label={`${reversePin.length} of 4 PIN digits entered`}>
+            <label className="font-body text-label-md text-on-surface">{t('customers.reverse.pin')}</label>
+            <div className="flex justify-center gap-3" aria-label={t('customers.reverse.pinProgress', { entered: reversePin.length })}>
               {[0, 1, 2, 3].map((index) => <span key={index} className={`h-4 w-4 rounded-full ${index < reversePin.length ? 'bg-primary' : 'bg-surface-container-highest'}`} />)}
             </div>
             <Keypad
@@ -983,17 +1062,17 @@ export function CustomersScreen() {
             />
             {reverseError && <FormError message={reverseError} />}
             <Button type="submit" variant="danger" disabled={reversePin.length !== 4 || !reverseReason.trim()}>
-              <MaterialIcon name="undo" />Confirm reversal
+              <MaterialIcon name="undo" />{t('customers.reverse.confirm')}
             </Button>
           </form>
         )}
       </BottomSheet>
-      <BottomSheet open={archiveOpen} onClose={() => setArchiveOpen(false)} title="Archive customer">
+      <BottomSheet open={archiveOpen} onClose={() => setArchiveOpen(false)} title={t('customers.archive.title')}>
         {error && <FormError message={error} />}
-        <p className="mb-4 font-body text-body-md text-on-surface-variant">Archive {selected?.name}? Their record will be hidden from the active customer list.</p>
+        <p className="mb-4 font-body text-body-md text-on-surface-variant">{t('customers.archive.confirmation', { name: selected?.name ?? '' })}</p>
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setArchiveOpen(false)}>Cancel</Button>
-          <Button variant="danger" onClick={() => { void archiveSelected(); }}>Archive customer</Button>
+          <Button variant="ghost" onClick={() => setArchiveOpen(false)}>{t('customers.archive.cancel')}</Button>
+          <Button variant="danger" onClick={() => { void archiveSelected(); }}>{t('customers.archive.confirm')}</Button>
         </div>
       </BottomSheet>
       {statementMode && selected && (
@@ -1017,7 +1096,7 @@ export function CustomersScreen() {
           onClose={() => setOverdueStatement(null)}
         />
       )}
-      {paymentToast && <div role="status" className="fixed left-1/2 top-20 z-[60] -translate-x-1/2 rounded-full bg-primary-dark px-4 py-2.5 font-body text-label-md text-white shadow-overlay">{paymentToast}</div>}
+      {paymentToast && <div role="status" className="fixed left-1/2 top-20 z-[60] -translate-x-1/2 rounded-full bg-primary-dark px-4 py-2.5 font-body text-label-md text-white shadow-overlay">{paymentToast === 'reversed' ? t('customers.reverse.paymentReversed') : t('customers.payment.recorded')}</div>}
     </>
   );
 }
@@ -1039,10 +1118,10 @@ function CustomerForm({ draft, setDraft, onSubmit, submitLabel, isEditing = fals
 
   return (
     <form onSubmit={(event) => { onSubmit(event); }} className="flex flex-col gap-3">
-      <label className="font-body text-label-md text-on-surface">Name<input required value={draft.name} onChange={(event) => update('name', event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
-      <label className="font-body text-label-md text-on-surface">Phone<input value={draft.phone} onChange={(event) => update('phone', event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
-      <label className="font-body text-label-md text-on-surface">Email (optional)<input type="email" value={draft.email} onChange={(event) => update('email', event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
-      <label className="font-body text-label-md text-on-surface">Monthly credit limit (TND)<DinarInput value={draft.creditLimit} onChange={(event) => { update('creditLimit', event.target.value); onCreditLimitChange?.(); }} placeholder={isEditing && hasExistingCreditLimit ? 'Blank keeps saved limit' : 'No limit'} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
+      <label className="font-body text-label-md text-on-surface">{t('customers.form.name')}<input required value={draft.name} onChange={(event) => update('name', event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
+      <label className="font-body text-label-md text-on-surface">{t('customers.form.phone')}<input value={draft.phone} onChange={(event) => update('phone', event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
+      <label className="font-body text-label-md text-on-surface">{t('customers.form.emailOptional')}<input type="email" value={draft.email} onChange={(event) => update('email', event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
+      <label className="font-body text-label-md text-on-surface">{t('customers.form.creditLimit')}<DinarInput value={draft.creditLimit} onChange={(event) => { update('creditLimit', event.target.value); onCreditLimitChange?.(); }} placeholder={isEditing && hasExistingCreditLimit ? t('customers.form.savedLimitPlaceholder') : t('customers.form.noLimitPlaceholder')} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" /></label>
       {isEditing && hasExistingCreditLimit && (
         <button
           type="button"
@@ -1055,15 +1134,15 @@ function CustomerForm({ draft, setDraft, onSubmit, submitLabel, isEditing = fals
           }}
           className="self-start font-body text-label-md text-primary"
         >
-          {clearCreditLimit ? 'Keep saved limit' : 'Remove saved limit'}
+          {clearCreditLimit ? t('customers.form.keepLimit') : t('customers.form.removeLimit')}
         </button>
       )}
-      <label className="font-body text-label-md text-on-surface">Settlement terms
+      <label className="font-body text-label-md text-on-surface">{t('customers.form.settlementTerms')}
         <select value={draft.settlementTerms} onChange={(event) => update('settlementTerms', event.target.value as CustomerRecord['settlementTerms'])} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3">
-          <option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="anytime">Anytime</option>
+          <option value="weekly">{t('customers.form.weekly')}</option><option value="monthly">{t('customers.form.monthly')}</option><option value="anytime">{t('customers.form.anytime')}</option>
         </select>
       </label>
-      <label className="font-body text-label-md text-on-surface">Notes<textarea rows={3} value={draft.notes} onChange={(event) => update('notes', event.target.value)} className="mt-1 w-full rounded-lg bg-surface-container-low p-3" /></label>
+      <label className="font-body text-label-md text-on-surface">{t('customers.form.notes')}<textarea rows={3} value={draft.notes} onChange={(event) => update('notes', event.target.value)} className="mt-1 w-full rounded-lg bg-surface-container-low p-3" /></label>
       <Button type="submit">{submitLabel}</Button>
     </form>
   );
@@ -1114,34 +1193,34 @@ function CustomerCard({ customer, status, overdue, onClick }: {
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             <strong className="truncate font-display text-title-md text-on-surface">{customer.name}</strong>
-            {overdue && <span className="shrink-0 rounded-full bg-error-container px-2 py-0.5 font-body text-label-sm text-on-error-container">Overdue</span>}
+            {overdue && <span className="shrink-0 rounded-full bg-error-container px-2 py-0.5 font-body text-label-sm text-on-error-container">{t('customers.status.overdue')}</span>}
           </span>
-          <span className="mt-0.5 block truncate font-body text-body-sm text-on-surface-variant">{customer.phone || 'No phone'}</span>
+          <span className="mt-0.5 block truncate font-body text-body-sm text-on-surface-variant">{customer.phone || t('customers.cards.noPhone')}</span>
         </span>
         <span className="shrink-0 text-right">
-          <span className="block font-body text-body-sm text-on-surface-variant">Balance</span>
-          <strong className={`font-display text-title-md tabular-nums ${balance > 0 ? 'text-on-surface' : 'text-success-dark'}`}>{balance < 0 ? `Credit ${money(balance)}` : money(balance)}</strong>
+          <span className="block font-body text-body-sm text-on-surface-variant">{t('customers.cards.balance')}</span>
+          <strong className={`font-display text-title-md tabular-nums ${balance > 0 ? 'text-on-surface' : 'text-success-dark'}`}>{balanceMoney(balance)}</strong>
         </span>
       </div>
       {status?.limit !== undefined ? (
         <span className="mt-3 block">
           <span className="mb-1 flex items-center justify-between font-body text-label-sm">
-            <span className="text-on-surface-variant">Credit used</span>
+            <span className="text-on-surface-variant">{t('customers.cards.creditUsed')}</span>
             <strong className="tabular-nums text-on-surface">{Math.round(progress)}%</strong>
           </span>
-          <span className="customer-credit-progress-track relative block h-2.5 overflow-hidden rounded-full" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label={`${Math.round(progress)} percent of credit limit used`}>
+          <span className="customer-credit-progress-track relative block h-2.5 overflow-hidden rounded-full" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label={t('customers.cards.percentUsed', { percent: Math.round(progress) })}>
             <span aria-hidden="true" className={`customer-credit-progress-fill ${progressTone}`} style={{ width: `${progress}%` }} />
           </span>
           <span className="mt-1.5 flex items-center justify-between gap-2 font-body text-label-sm text-on-surface-variant">
-            <span>{formatTnd(used / 1000)} DT / {formatTnd(status.limit / 1000)} DT</span>
-            <span>{formatTnd((status.remaining ?? 0) / 1000)} DT left</span>
+            <span>{formatCustomerTnd(used / 1000)} DT / {formatCustomerTnd(status.limit / 1000)} DT</span>
+            <span>{t('customers.cards.amountLeft', { amount: formatCustomerTnd((status.remaining ?? 0) / 1000) })}</span>
           </span>
         </span>
       ) : (
-        <span className="mt-3 block font-body text-body-sm text-on-surface-variant">No credit limit</span>
+        <span className="mt-3 block font-body text-body-sm text-on-surface-variant">{t('customers.cards.noCreditLimit')}</span>
       )}
       <span className="mt-2 flex items-center justify-between gap-2 font-body text-body-sm text-outline">
-        <span>Last payment: {dateLabel(customer.lastPaymentAt)}</span>
+        <span>{t('customers.cards.lastPayment', { date: dateLabel(customer.lastPaymentAt) })}</span>
         <MaterialIcon name="chevron_right" className="text-lg" />
       </span>
     </button>
@@ -1154,7 +1233,7 @@ function CreditRing({ status }: { status?: CustomerCreditStatus }) {
   const orangeEnd = Math.min(percent, 55);
   return (
     <div
-      aria-label={status?.limit === undefined ? 'No credit limit' : `${Math.round(percent)} percent of credit limit used`}
+      aria-label={status?.limit === undefined ? t('customers.cards.noCreditLimit') : t('customers.cards.percentUsed', { percent: Math.round(percent) })}
       className="customer-credit-ring flex h-28 w-28 shrink-0 items-center justify-center rounded-full"
       style={{
         background: status?.limit === undefined
@@ -1164,7 +1243,7 @@ function CreditRing({ status }: { status?: CustomerCreditStatus }) {
     >
       <div className="customer-credit-ring__inner flex h-20 w-20 flex-col items-center justify-center rounded-full bg-surface-container-lowest">
         <span className="font-display text-headline-md tabular-nums text-on-surface">{status?.limit === undefined ? '—' : `${Math.round(percent)}%`}</span>
-        <span className="font-body text-body-sm text-outline">used</span>
+        <span className="font-body text-body-sm text-outline">{t('customers.cards.used')}</span>
       </div>
     </div>
   );

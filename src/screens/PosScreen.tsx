@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { createLatestRequestGuard } from '../lib/requestGuard';
 import { BottomSheet } from '../components/BottomSheet';
@@ -18,7 +18,7 @@ import { formatTnd } from '../lib/format';
 import { getCustomerCreditTone, loadCustomerCreditStatuses } from '../lib/customerCredit';
 import { useStoreAppearance } from '../lib/storeAppearance';
 import { useQueryCacheRefresh } from '../lib/useQueryCacheRefresh';
-import { t } from '../i18n/translations';
+import { getLanguage, localizeErrorMessage, t } from '../i18n';
 import { catalogService } from '../services/catalogService';
 import { compService, type StaffDrinkAllowance } from '../services/compService';
 import { OrderNotificationError, OrderServiceError, orderService } from '../services/orderService';
@@ -65,9 +65,9 @@ function customerIdFromState(state: unknown): string {
 }
 
 function formatOutOfStockTime(timestamp?: string): string {
-  if (!timestamp) return 'unknown time';
+  if (!timestamp) return t('pos.unknownTime');
   const date = new Date(timestamp);
-  return Number.isNaN(date.getTime()) ? 'unknown time' : date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return Number.isNaN(date.getTime()) ? t('pos.unknownTime') : date.toLocaleTimeString(getLanguage(), { hour: 'numeric', minute: '2-digit' });
 }
 
 function OrderElapsedTime({ startedAt }: { startedAt: number | null }) {
@@ -109,6 +109,8 @@ export function PosScreen() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const permissions = useAuthStore((state) => state.permissions);
+  const canAddOrderNote = user?.role === 'owner' || permissions.includes('add_order_note');
+  const canEditStockCount = user?.role === 'owner' || permissions.includes('edit_stock_counts');
   const { largeButtons } = useStoreAppearance();
   const lock = useAuthStore((state) => state.lock);
   const storeId = user?.storeId ?? '';
@@ -153,6 +155,10 @@ export function PosScreen() {
   const [needsAttentionOrders, setNeedsAttentionOrders] = useState<Array<{ order: OrderRecord; message: string }>>([]);
   const [selectedItem, setSelectedItem] = useState<ProductView | null>(null);
   const [markedOutOfStockItem, setMarkedOutOfStockItem] = useState<ProductView | null>(null);
+  const [stockEditTarget, setStockEditTarget] = useState<ProductView | null>(null);
+  const [stockEditCount, setStockEditCount] = useState('');
+  const [stockEditError, setStockEditError] = useState('');
+  const [stockEditBusy, setStockEditBusy] = useState(false);
   const [selectedModifiers, setSelectedModifiers] = useState<string[]>([]);
   const [can86Items, setCan86Items] = useState(false);
   const [canUseTabs, setCanUseTabs] = useState(false);
@@ -219,7 +225,7 @@ export function PosScreen() {
       await lock();
       navigate('/lock', { replace: true, state: { from: location.pathname } });
     } catch (lockError) {
-      setToast(lockError instanceof Error ? lockError.message : 'Unable to lock the terminal.');
+      setToast(localizeErrorMessage(lockError, t('pos.unableToLockTerminal')));
     }
   }
 
@@ -366,7 +372,7 @@ export function PosScreen() {
               setCanUseTabs(snapshot.permissions.canUseTabs);
               setCanOverrideCreditLimit(snapshot.permissions.canOverrideCreditLimit);
               setNeedsAttentionOrders(attentionOrders);
-              setCatalogError('Offline mode: using the last saved POS data.');
+              setCatalogError(t('pos.offlineUsingSavedData'));
               setCachedAt(snapshot.cachedAt);
               setPendingSyncCount(queuedOrders.length);
               setIsOnline(false);
@@ -439,7 +445,7 @@ export function PosScreen() {
       if (active) setStaffDrinkAllowance(allowance);
     }).catch((error: unknown) => {
       console.error('Unable to load the staff drink allowance.', error);
-      if (active) setCompError('Unable to load the staff drink allowance. Please try again.');
+      if (active) setCompError(t('pos.staffAllowanceLoadFailed'));
     });
     return () => { active = false; };
   }, [compItemId, compOpen, compReason, openShift, storeId, user?.id]);
@@ -505,15 +511,16 @@ export function PosScreen() {
   const fiscalPreview = useMemo((): {
     snapshot?: ReturnType<typeof calculateFiscalCheckoutSnapshot>;
     error?: string;
+    incomplete?: boolean;
   } => {
     if (!cart.length) return {};
     try {
       if ((fiscalProfile?.requiredTaxTypes?.length ?? 0) > 0 && !businessDate) {
-        throw new Error('No current business date is available for fiscal calculation. Reconnect before checkout.');
+        throw new Error(t('pos.noBusinessDateForFiscal'));
       }
       const lines: OrderLineRecord[] = cart.map((line) => {
         const catalogItem = catalogRecords.find((item) => item.id === line.itemId);
-        if (!catalogItem) throw new Error(`${line.name} is missing from the current catalog.`);
+        if (!catalogItem) throw new Error(t('pos.itemMissingCatalog', { item: line.name }));
         return {
           itemId: line.itemId,
           categoryId: catalogItem.categoryId,
@@ -524,18 +531,18 @@ export function PosScreen() {
           modifiers: line.modifiers ?? [],
         };
       });
-      return {
-        snapshot: calculateFiscalCheckoutSnapshot({
+      const snapshot = calculateFiscalCheckoutSnapshot({
           storeId,
           transactionDate: businessDate,
           lines,
           profile: fiscalProfile,
           rules: fiscalRules,
           assignments: fiscalAssignments,
-        }),
-      };
+        });
+      if (snapshot) return { snapshot };
+      return (fiscalProfile?.requiredTaxTypes?.length ?? 0) > 0 ? { incomplete: true } : {};
     } catch (previewError) {
-      return { error: previewError instanceof Error ? previewError.message : 'Fiscal calculation could not be completed.' };
+      return { error: localizeErrorMessage(previewError, t('pos.fiscalCalculationFailed')) };
     }
   }, [businessDate, cart, catalogRecords, fiscalAssignments, fiscalProfile, fiscalRules, storeId]);
   const totalMillimes = fiscalPreview.snapshot?.totalAmountMillimes ?? baseTotalMillimes;
@@ -559,10 +566,10 @@ export function PosScreen() {
   ), [customerSearchIndex, customers, normalizedCustomerSearch]);
   const selectedCustomerStatus = creditStatusCustomerId === selectedCustomerId ? creditStatus : null;
   const selectedCustomerRemaining = !selectedCustomerStatus
-    ? 'Checking...'
+    ? t('pos.customerCheckingShort')
     : selectedCustomerStatus.limit === undefined
-      ? 'No limit'
-      : `${formatTnd((selectedCustomerStatus.remaining ?? 0) / 1000)} DT left`;
+      ? t('pos.noLimit')
+      : t('pos.creditAmountLeft', { amount: formatTnd((selectedCustomerStatus.remaining ?? 0) / 1000) });
 
   useEffect(() => {
     setCreditStatus(null);
@@ -575,7 +582,7 @@ export function PosScreen() {
       setCreditStatusCustomerId(selectedCustomerId);
     }).catch((error: unknown) => {
       console.error('Unable to load customer credit status.', error);
-      if (active) setToast('Unable to load customer credit status. Please try again.');
+      if (active) setToast(t('pos.unableToLoadCustomerCredit'));
     });
     return () => { active = false; };
   }, [paymentMethod, selectedCustomerId, totalMillimes]);
@@ -647,7 +654,7 @@ export function PosScreen() {
 
   async function toggleStock(item: ProductView) {
     if (!user) {
-      setToast('Your account could not be loaded.');
+      setToast(t('pos.accountCouldNotBeLoaded'));
       return false;
     }
     try {
@@ -655,28 +662,61 @@ export function PosScreen() {
       setCatalogRecords(await catalogService.listItems(storeId));
       return true;
     } catch (error) {
-      setToast(error instanceof Error ? error.message : t('common.updateFailed'));
+      setToast(localizeErrorMessage(error, t('common.updateFailed')));
       return false;
+    }
+  }
+
+  function openStockCountEditor(item: ProductView) {
+    setStockEditTarget(item);
+    setStockEditCount(item.stockCount === null ? '' : String(item.stockCount));
+    setStockEditError('');
+  }
+
+  async function saveStockCount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!stockEditTarget || !user) return;
+    const stockCount = Number(stockEditCount);
+    if (!Number.isSafeInteger(stockCount) || stockCount < 0) {
+      setStockEditError(t('pos.stockCountNonNegativeWhole'));
+      return;
+    }
+    if (user.role === 'staff' && !permissions.includes('edit_stock_counts')) {
+      setStockEditError(t('pos.positionNoStockChanges'));
+      return;
+    }
+    setStockEditBusy(true);
+    setStockEditError('');
+    try {
+      const updated = await catalogService.setStockCount(stockEditTarget.id, stockCount, { id: user.id, name: user.name });
+      setCatalogRecords((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setStockEditTarget(null);
+      setToast(t('pos.stockCountUpdated'));
+      window.setTimeout(() => setToast(''), 2500);
+    } catch (error) {
+      setStockEditError(localizeErrorMessage(error, t('pos.unableToUpdateStock')));
+    } finally {
+      setStockEditBusy(false);
     }
   }
 
   async function submitComp() {
     if (!user?.storeId || !openShift || !compItemId) {
-      setCompError('Select an item and open your shift before recording a comp.');
+      setCompError(t('pos.selectItemAndOpenShiftForComp'));
       return;
     }
     const quantity = Number(compQuantity);
     if (!Number.isInteger(quantity) || quantity < 1) {
-      setCompError('Quantity must be a positive whole number.');
+      setCompError(t('pos.quantityPositiveWhole'));
       return;
     }
     if (compReason === 'staff_drink') {
       if (user.role !== 'staff' || !staffDrinkAllowance?.allowed) {
-        setCompError('This item is not allowed for staff drinks in your position.');
+        setCompError(t('pos.staffDrinkNotAllowedForComp'));
         return;
       }
       if (quantity > staffDrinkAllowance.remainingQuantity) {
-        setCompError(`Allowed today: ${staffDrinkAllowance.usedQuantity} of ${staffDrinkAllowance.maxQuantity} used.`);
+        setCompError(t('pos.allowedTodaySentence', { used: staffDrinkAllowance.usedQuantity, maximum: staffDrinkAllowance.maxQuantity }));
         return;
       }
     }
@@ -693,7 +733,7 @@ export function PosScreen() {
         note: compNote,
       });
     } catch (error) {
-      setCompError(error instanceof Error ? error.message : 'Unable to record this comp.');
+      setCompError(localizeErrorMessage(error, t('pos.unableToRecordComp')));
       setCompSubmitting(false);
       return;
     }
@@ -703,9 +743,9 @@ export function PosScreen() {
     setCompSubmitting(false);
     try {
       setCatalogRecords(await catalogService.listItems(storeId));
-      setToast('Comp recorded. No sale was created.');
+      setToast(t('pos.compRecordedNoSale'));
     } catch (refreshError) {
-      setToast(`Comp recorded, but the catalog could not refresh: ${refreshError instanceof Error ? refreshError.message : 'Please reload the page.'}`);
+      setToast(t('pos.compRefreshFailed', { reason: localizeErrorMessage(refreshError, t('pos.reloadPage')) }));
     }
   }
 
@@ -746,7 +786,7 @@ export function PosScreen() {
     undoTimeoutRef.current = undefined;
     restoreOrder(undoSnapshot);
     setUndoSnapshot(null);
-    setToast('Order restored.');
+    setToast(t('pos.orderRestored'));
     window.setTimeout(() => setToast(''), 2500);
   }
 
@@ -777,28 +817,28 @@ export function PosScreen() {
         fiscalSnapshot: fiscalPreview.snapshot ?? null,
         paymentMethod,
         customerId: paymentMethod === 'tab' ? selectedCustomerId : undefined,
-        note,
+        note: canAddOrderNote ? note : undefined,
         adminPin,
         idempotencyKey,
       });
     } catch (error) {
       if (error instanceof OrderNotificationError) {
         order = error.order;
-        orderNotice = error.message;
+        orderNotice = t('pos.orderNotificationFailed', { reason: localizeErrorMessage(error, t('pos.reloadPage')) });
       } else {
         if (error instanceof OrderServiceError && error.code === 'CREDIT_LIMIT') {
           orderIdempotencyKeyRef.current = undefined;
           pendingOrderSubmissionsRef.current.delete(idempotencyKey);
           if (canOverrideCreditLimit) {
-            setCreditOverrideError('Limit reached. Tell the customer. Enter the Admin PIN to override.');
+            setCreditOverrideError(t('pos.creditOverrideRequiresPin'));
             setCreditOverrideOpen(true);
           } else {
-            setToast('Limit reached. Tell the customer.');
+            setToast(t('pos.creditLimitReached'));
             window.setTimeout(() => setToast(''), 3000);
           }
           return;
         }
-        const message = error instanceof Error ? error.message : t('pos.cannotSaveOrder');
+        const message = localizeErrorMessage(error, t('pos.cannotSaveOrder'));
         orderIdempotencyKeyRef.current = undefined;
         pendingOrderSubmissionsRef.current.delete(idempotencyKey);
         if (creditOverrideOpen) setCreditOverrideError(message);
@@ -823,8 +863,8 @@ export function PosScreen() {
     if (order.syncStatus === 'queued') {
       setOrders((current) => [...current.filter((candidate) => candidate.id !== order.id), order]);
       orderNotice = paymentMethod === 'tab'
-        ? 'Queued for sync. Customer credit will be verified when the connection returns.'
-        : 'Queued for sync. The server will assign the final order number when the connection returns.';
+        ? t('pos.queuedTabCreditCheck')
+        : t('pos.queuedFinalOrderNumber');
     } else {
       try {
         setCatalogRecords(await catalogService.listItems(storeId));
@@ -837,7 +877,7 @@ export function PosScreen() {
         setCustomerCreditStatuses(creditStatusResult.statuses);
         setCustomerCreditUnavailable(creditStatusResult.unavailable);
       } catch (refreshError) {
-        orderNotice ||= `Order created, but the POS could not refresh: ${refreshError instanceof Error ? refreshError.message : 'Please reload the page.'}`;
+        orderNotice ||= t('pos.orderCreatedRefreshFailed', { reason: localizeErrorMessage(refreshError, t('pos.reloadPage')) });
       }
     }
     const syncedOrder = syncedOrdersRef.current.get(idempotencyKey);
@@ -862,7 +902,7 @@ export function PosScreen() {
           <h2 className="font-display text-headline-md text-on-surface">{t('pos.orderTicket')}</h2>
         </div>
         <div className="flex items-center gap-1">
-          <span className="rounded-full bg-surface-container-high px-2 py-1 font-body text-label-sm tabular-nums text-on-surface-variant" aria-label="Order elapsed time"><OrderElapsedTime startedAt={firstItemAddedAt} /></span>
+          <span className="rounded-full bg-surface-container-high px-2 py-1 font-body text-label-sm tabular-nums text-on-surface-variant" aria-label={t('pos.elapsedTime')}><OrderElapsedTime startedAt={firstItemAddedAt} /></span>
           <span className="rounded-full bg-secondary-container px-2 py-1 font-body text-label-sm text-on-surface">
             {count} {t(count === 1 ? 'common.item' : 'common.items')}
           </span>
@@ -876,7 +916,7 @@ export function PosScreen() {
           disabled={cart.length === 0 && !note.trim()}
           onClick={() => setClearConfirmationOpen(true)}
         >
-          Clear order
+          {t('pos.clearOrder')}
         </Button>
       </div>
       <div className={`pos-ticket-lines min-h-0 flex-1 overflow-y-auto ${compact ? 'max-h-[45vh]' : ''}`}>
@@ -896,36 +936,43 @@ export function PosScreen() {
           />
         ))}
       </div>
-      <label className="mt-2 block font-body text-label-sm text-on-surface-variant">
-        Order note (optional)
-        <input
-          id="pos-product-search"
-          value={note}
-          onChange={(event) => setOrderNote(event.target.value)}
-          maxLength={200}
-          placeholder="e.g. no sugar, extra hot"
-          className="mt-1 h-11 w-full rounded-lg bg-surface-container-low px-3 font-body text-body-md text-on-surface outline-none focus:ring-2 focus:ring-primary"
-        />
-      </label>
+      {canAddOrderNote && (
+        <label className="mt-2 block font-body text-label-sm text-on-surface-variant">
+          {t('pos.orderNoteOptional')}
+          <input
+            id="pos-product-search"
+            value={note}
+            onChange={(event) => setOrderNote(event.target.value)}
+            maxLength={200}
+            placeholder={t('pos.orderNotePlaceholder')}
+            className="mt-1 h-11 w-full rounded-lg bg-surface-container-low px-3 font-body text-body-md text-on-surface outline-none focus:ring-2 focus:ring-primary"
+          />
+        </label>
+      )}
       <div className="mt-3 border-t border-outline-variant pt-3">
         <div className="mb-3 flex items-baseline justify-between">
-          <span className="font-body text-label-md text-on-surface-variant">Total</span>
+          <span className="font-body text-label-md text-on-surface-variant">{t('pos.total')}</span>
           <span className="font-display text-currency-display-mobile text-on-surface">{formatTnd(totalMillimes / 1000)} <small className="font-body text-label-md">DT</small></span>
         </div>
         {fiscalPreview.error && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{fiscalPreview.error}</p>}
+        {fiscalPreview.incomplete && (
+          <p role="status" className="mb-3 rounded-lg bg-warning-container p-3 font-body text-body-sm text-on-warning-container">
+            {t('pos.fiscalTaxIncomplete')}
+          </p>
+        )}
         {fiscalPreview.snapshot && (
           <div className="mb-3 flex justify-between font-body text-body-sm text-on-surface-variant">
-            <span>Included tax</span><span>{formatTnd(fiscalPreview.snapshot.totalTaxMillimes / 1000)} DT</span>
+            <span>{t('pos.includedTax')}</span><span>{formatTnd(fiscalPreview.snapshot.totalTaxMillimes / 1000)} DT</span>
           </div>
         )}
         <div className="mb-3">
-          <p className="mb-1 font-body text-label-sm text-on-surface-variant">Payment method</p>
-          <div role="group" aria-label="Payment method" className="flex rounded-xl bg-surface-container-low p-1">
+          <p className="mb-1 font-body text-label-sm text-on-surface-variant">{t('pos.paymentMethod')}</p>
+          <div role="group" aria-label={t('pos.paymentMethod')} className="flex rounded-xl bg-surface-container-low p-1">
             {([
-              { value: 'cash', label: 'Cash' },
-              ...(canUseTabs ? [{ value: 'tab', label: 'Customer tab' }] : []),
-              ...(store?.allowCardPayments ? [{ value: 'card', label: 'Card' }] : []),
-              ...(store?.allowOtherPayments ? [{ value: 'other', label: 'Other' }] : []),
+              { value: 'cash', label: t('pos.cash') },
+              ...(canUseTabs ? [{ value: 'tab', label: t('pos.customerTab') }] : []),
+              ...(store?.allowCardPayments ? [{ value: 'card', label: t('pos.card') }] : []),
+              ...(store?.allowOtherPayments ? [{ value: 'other', label: t('pos.otherPayment') }] : []),
             ] as { value: PaymentMethod; label: string }[]).map((method) => (
               <button
                 key={method.value}
@@ -948,33 +995,33 @@ export function PosScreen() {
         {paymentMethod === 'tab' && (
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <span className={`inline-flex max-w-full items-center rounded-full px-3 py-1.5 font-body text-label-sm ${selectedCustomer ? 'bg-secondary-container text-on-surface' : 'bg-surface-container-low text-outline'}`}>
-              {selectedCustomer ? `${selectedCustomer.name} • ${selectedCustomerRemaining}` : 'Choose a customer'}
+              {selectedCustomer ? `${selectedCustomer.name} • ${selectedCustomerRemaining}` : t('pos.chooseCustomer')}
             </span>
             <button
               type="button"
               onClick={() => { setCustomerSearch(''); setCustomerPickerOpen(true); }}
               className="min-h-10 rounded-lg px-3 font-body text-label-sm text-primary underline underline-offset-2"
             >
-              {selectedCustomer ? 'Change' : 'Choose customer'}
+              {selectedCustomer ? t('pos.changeCustomer') : t('pos.chooseCustomer')}
             </button>
           </div>
         )}
         {paymentMethod === 'tab' && selectedCustomerId && creditStatusCustomerId === selectedCustomerId && creditStatus && (
           <section className={`mb-3 rounded-lg p-3 font-body text-body-sm ${creditLimitExceeded ? 'bg-error-container text-on-error-container' : creditStatus.state === 'near' ? 'bg-warning-container text-on-warning-container' : 'bg-surface-container-low text-on-surface-variant'}`}>
-            <p className="font-body text-label-md">Balance after this order: {formatTnd(Math.abs(creditStatus.balance) / 1000)} DT{creditStatus.balance < 0 ? ' credit' : ''}</p>
+            <p className="font-body text-label-md">{t('pos.balanceAfterOrder', { balance: formatTnd(Math.abs(creditStatus.balance) / 1000), credit: creditStatus.balance < 0 ? t('pos.creditSuffix') : '' })}</p>
             {creditStatus.limit === undefined ? (
-              <p className="mt-1">No credit limit set.</p>
+              <p className="mt-1">{t('pos.noCreditLimit')}</p>
             ) : (
               <>
-                <div className="customer-credit-progress-track relative mt-2 h-2 overflow-hidden rounded-full" role="progressbar" aria-valuenow={Math.min(100, Math.max(0, creditStatus.percentUsed ?? 0))} aria-valuemin={0} aria-valuemax={100} aria-label={`${Math.round(creditStatus.percentUsed ?? 0)} percent of credit limit used`}>
+                <div className="customer-credit-progress-track relative mt-2 h-2 overflow-hidden rounded-full" role="progressbar" aria-valuenow={Math.min(100, Math.max(0, creditStatus.percentUsed ?? 0))} aria-valuemin={0} aria-valuemax={100} aria-label={t('pos.creditLimitPercentUsed', { percent: Math.round(creditStatus.percentUsed ?? 0) })}>
                   <span aria-hidden="true" className={`customer-credit-progress-fill ${getCustomerCreditTone(creditStatus.state, creditStatus.percentUsed).barClass}`} style={{ width: `${Math.min(100, Math.max(0, creditStatus.percentUsed ?? 0))}%` }} />
                 </div>
-                <p className="mt-1">{Math.round(creditStatus.percentUsed ?? 0)}% used · {formatTnd((creditStatus.remaining ?? 0) / 1000)} DT remaining</p>
+                <p className="mt-1">{t('pos.creditPercentUsed', { percent: Math.round(creditStatus.percentUsed ?? 0) })} · {t('pos.creditRemaining', { amount: formatTnd((creditStatus.remaining ?? 0) / 1000) })}</p>
               </>
             )}
             {creditLimitExceeded && (
               <div role="alert" className="mt-2">
-                <p className="font-body text-label-md">Limit reached. Tell the customer.</p>
+                <p className="font-body text-label-md">{t('pos.creditLimitReached')}</p>
                 {canOverrideCreditLimit && (
                   <Button
                     type="button"
@@ -982,17 +1029,17 @@ export function PosScreen() {
                     onClick={() => { setCreditOverrideError(''); setCreditOverridePin(''); setCreditOverrideOpen(true); }}
                     className="mt-2 w-full"
                   >
-                    <MaterialIcon name="verified_user" />Override with Admin PIN
+                    <MaterialIcon name="verified_user" />{t('pos.overrideWithAdminPin')}
                   </Button>
                 )}
               </div>
             )}
           </section>
         )}
-        {creditStatusPending && <p role="status" className="mb-3 font-body text-body-sm text-outline">Checking customer credit…</p>}
+        {creditStatusPending && <p role="status" className="mb-3 font-body text-body-sm text-outline">{t('pos.checkingCustomerCredit')}</p>}
         <Button onClick={() => { void finishOrder(); }} disabled={!cart.length || tabCheckoutBlocked || Boolean(fiscalPreview.error)} className="min-h-[54px] w-full rounded-xl text-body-lg">
           <MaterialIcon name="check_circle" className="text-xl text-white" />
-          {paymentMethod === 'tab' && selectedCustomer ? `Charge to ${selectedCustomer.name}` : t('common.done')}
+          {paymentMethod === 'tab' && selectedCustomer ? t('pos.chargeToCustomer', { customer: selectedCustomer.name }) : t('common.done')}
           <span className="ml-auto font-display tabular-nums">{formatTnd(totalMillimes / 1000)} DT</span>
         </Button>
         <p className="mt-1 text-center font-body text-body-sm text-on-surface-variant">{t('pos.paidOutsideApp')}</p>
@@ -1024,35 +1071,35 @@ export function PosScreen() {
         >
           <span className="font-body text-label-md">
             {!isOnline
-              ? 'Offline - Working with saved data'
+              ? t('pos.offlineWorking')
               : pendingSyncCount > 0
-                ? `Synchronizing - ${pendingSyncCount} operation${pendingSyncCount === 1 ? '' : 's'} pending`
+                ? t(pendingSyncCount === 1 ? 'pos.synchronizingOne' : 'pos.synchronizingMany', { count: pendingSyncCount })
                 : needsAttentionOrders.length > 0
-                  ? 'Sync issue - Some operations need attention'
-                  : 'Online - Connected'}
+                  ? t('pos.syncIssue')
+                  : t('pos.onlineConnected')}
           </span>
           {cachedAt && (
             <span className="text-label-sm">
-              Saved {new Date(cachedAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+              {t('pos.savedAt', { time: new Date(cachedAt).toLocaleString(getLanguage(), { dateStyle: 'short', timeStyle: 'short' }) })}
             </span>
           )}
         </section>
         {!openShift && dayStatus.dayIsClosed && (
           <section role="status" className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-warning-container p-3 text-on-warning-container">
-            <p className="font-body text-body-sm">Day closed. Open a shift to start a new day.</p>
+            <p className="font-body text-body-sm">{t('pos.dayClosedMessage')}</p>
             <Button type="button" onClick={() => navigate(user?.role === 'owner' ? '/owner/shifts' : '/shift')}>
-              <MaterialIcon name="lock_open" />Open shift
+              <MaterialIcon name="lock_open" />{t('pos.openShift')}
             </Button>
           </section>
         )}
         <FirstRunHint id={`pos-${user?.id ?? 'guest'}`} title={t('hint.title')} message={t('hint.pos')} />
         {user?.role === 'owner' && needsAttentionOrders.length > 0 && (
-          <section aria-label="Needs attention" className="mx-3 mt-3 rounded-xl border border-error/30 bg-error-container p-3 text-on-error-container">
-            <h2 className="font-display text-headline-sm">Needs attention ({needsAttentionOrders.length})</h2>
+          <section aria-label={t('pos.needsAttention')} className="mx-3 mt-3 rounded-xl border border-error/30 bg-error-container p-3 text-on-error-container">
+            <h2 className="font-display text-headline-sm">{t('pos.needsAttention')} ({needsAttentionOrders.length})</h2>
             <ul className="mt-2 flex flex-col gap-2">
               {needsAttentionOrders.map(({ order, message }) => (
                 <li key={order.idempotencyKey ?? order.id} className="rounded-lg bg-surface-container-lowest/70 p-3">
-                  <p className="font-body text-label-md">Local order {Math.abs(order.number)} · {formatTnd(order.totalMillimes / 1000)} DT</p>
+                  <p className="font-body text-label-md">{t('pos.localOrder', { number: Math.abs(order.number) })} · {formatTnd(order.totalMillimes / 1000)} DT</p>
                   <p className="mt-1 font-body text-body-sm">{message}</p>
                 </li>
               ))}
@@ -1085,7 +1132,7 @@ export function PosScreen() {
               {openShift ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-success px-2 py-0.5 font-body text-label-sm text-on-success">
                   <span className="h-1.5 w-1.5 rounded-full bg-success-dark" />
-                  {t('pos.shiftOpenSince', { time: new Date(openShift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })}
+                  {t('pos.shiftOpenSince', { time: new Date(openShift.openedAt).toLocaleTimeString(getLanguage(), { hour: '2-digit', minute: '2-digit' }) })}
                 </span>
               ) : (
                 <button type="button" onClick={() => navigate(user?.role === 'owner' ? '/owner/shifts' : '/shift')} className="inline-flex items-center gap-1 rounded-full bg-error-container px-2 py-0.5 font-body text-label-sm text-on-error-container">
@@ -1120,7 +1167,7 @@ export function PosScreen() {
                   {t('pos.quickPicks')}
                 </h2>
                 <span className="font-body text-label-sm text-outline">
-                  {resolveStoreSettings(store?.settings).quickPickMode === 'manual' ? 'Admin selected' : t('pos.highVelocity')}
+                  {resolveStoreSettings(store?.settings).quickPickMode === 'manual' ? t('pos.adminSelected') : t('pos.highVelocity')}
                 </span>
               </div>
               <div className="scrollbar-hidden flex gap-2.5 overflow-x-auto px-3 pb-1">
@@ -1165,12 +1212,12 @@ export function PosScreen() {
               {catalogError && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{catalogError}</p>}
               {customerCreditUnavailable && (
                 <p role="status" className="mb-3 rounded-lg bg-warning-container px-3 py-2 font-body text-label-sm text-on-warning-container">
-                  Customer credit balances are unavailable; customer selection is still available.
+                  {t('pos.customerCreditUnavailable')}
                 </p>
               )}
-              {catalogLoading ? <ListSkeleton rows={4} label="Loading products" /> : filteredItems.length === 0 ? (
+              {catalogLoading ? <ListSkeleton rows={4} label={t('pos.loadingProducts')} /> : filteredItems.length === 0 ? (
                 <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">
-                  {search ? 'No products match your search.' : 'No products are available yet.'}
+                  {search ? t('pos.noProductsMatchSearch') : t('pos.noProductsAvailable')}
                 </p>
               ) : <div className={`pos-catalog-grid grid grid-cols-2 gap-3 xl:grid-cols-3${catalogViewMode === 'list' ? ' pos-catalog-grid--list' : ''}`}>
                 <LazyBatch
@@ -1185,6 +1232,8 @@ export function PosScreen() {
                       onRemove={() => changeProductQuantity(item.id, -1)}
                       canToggleStock={user?.role === 'owner' || can86Items}
                       onToggleStock={() => { void toggleStock(item); }}
+                      canEditStockCount={canEditStockCount}
+                      onEditStockCount={() => openStockCountEditor(item)}
                       onOpenOutOfStock={() => setMarkedOutOfStockItem(item)}
                       largeButtons={largeButtons}
                       viewMode={catalogViewMode}
@@ -1220,7 +1269,7 @@ export function PosScreen() {
             <Button
               variant="danger"
               onClick={cancelTabOrder}
-              aria-label="Cancel customer order"
+              aria-label={t('pos.cancelCustomerOrder')}
               className="!bg-red-600 !text-white hover:!bg-red-700 active:!bg-red-800 !h-[52px] !min-h-[52px] !w-[52px] !min-w-[52px] !p-0 rounded-full"
             >
               <MaterialIcon name="close" className="text-3xl !text-white" />
@@ -1232,7 +1281,7 @@ export function PosScreen() {
               className="min-h-[52px] rounded-2xl px-3 text-label-sm"
             >
               <MaterialIcon name="person_add" className="text-lg" />
-              Add to tab
+              {t('pos.addToTab')}
             </Button>
           ))}
           <Button variant="success" onClick={() => { void finishOrder(); }} disabled={!cart.length || tabCheckoutBlocked || Boolean(fiscalPreview.error)} className="min-h-[52px] rounded-2xl px-3 text-label-sm">
@@ -1246,16 +1295,16 @@ export function PosScreen() {
       <BottomSheet open={drawerOpen} onClose={() => setDrawerOpen(false)} title={t('pos.currentOrder')}>
         {renderTicketContent(true)}
       </BottomSheet>
-      <BottomSheet open={clearConfirmationOpen} onClose={() => setClearConfirmationOpen(false)} title="Clear order">
+      <BottomSheet open={clearConfirmationOpen} onClose={() => setClearConfirmationOpen(false)} title={t('pos.clearOrder')}>
         <p className="mb-4 font-body text-body-md text-on-surface-variant">
-          Clear {count} {count === 1 ? 'item' : 'items'}?
+          {t('pos.clearItemsConfirmation', { count, itemLabel: t(count === 1 ? 'pos.itemSingular' : 'pos.itemPlural') })}
         </p>
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setClearConfirmationOpen(false)}>Cancel</Button>
-          <Button variant="danger" onClick={clearCurrentOrder}>Clear</Button>
+          <Button variant="ghost" onClick={() => setClearConfirmationOpen(false)}>{t('pos.cancel')}</Button>
+          <Button variant="danger" onClick={clearCurrentOrder}>{t('pos.clear')}</Button>
         </div>
       </BottomSheet>
-      <BottomSheet open={completedOrder !== null} onClose={() => setCompletedOrder(null)} title="Order complete">
+      <BottomSheet open={completedOrder !== null} onClose={() => setCompletedOrder(null)} title={t('pos.orderComplete')}>
         {completedOrder && (
           <div className="flex flex-col gap-3">
             <div className={`flex items-center gap-3 rounded-xl p-4 ${
@@ -1266,14 +1315,14 @@ export function PosScreen() {
               <MaterialIcon name={completedOrder.syncStatus ? 'sync' : 'check_circle'} className="text-3xl" />
               <div>
                 <p className="font-display text-headline-sm">
-                  {completedOrder.syncStatus ? `Local order ${Math.abs(completedOrder.number)}` : `Order #${completedOrder.number}`}
+                  {completedOrder.syncStatus ? t('pos.localOrder', { number: Math.abs(completedOrder.number) }) : t('pos.orderNumber', { number: completedOrder.number })}
                 </p>
-                <p className="font-body text-body-md">Total: {formatTnd(completedOrder.totalMillimes / 1000)} DT</p>
+                <p className="font-body text-body-md">{t('pos.totalWithColon', { total: formatTnd(completedOrder.totalMillimes / 1000) })}</p>
               </div>
-              {completedOrder.syncStatus === 'queued' && <span className="rounded-full bg-warning px-2 py-1 font-body text-label-sm text-on-warning">Queued - not synced</span>}
-              {completedOrder.syncStatus === 'syncing' && <span className="rounded-full bg-warning px-2 py-1 font-body text-label-sm text-on-warning">Syncing - not confirmed</span>}
-              {completedOrder.syncStatus === 'needs_attention' && <span className="rounded-full bg-error px-2 py-1 font-body text-label-sm text-white">Needs attention - not synced</span>}
-              {completedOrder.verificationStatus === 'to_verify' && <span className="rounded-full bg-warning-container px-2 py-1 font-body text-label-sm text-on-warning-container">To verify</span>}
+              {completedOrder.syncStatus === 'queued' && <span className="rounded-full bg-warning px-2 py-1 font-body text-label-sm text-on-warning">{t('pos.queuedNotSynced')}</span>}
+              {completedOrder.syncStatus === 'syncing' && <span className="rounded-full bg-warning px-2 py-1 font-body text-label-sm text-on-warning">{t('pos.syncingNotConfirmed')}</span>}
+              {completedOrder.syncStatus === 'needs_attention' && <span className="rounded-full bg-error px-2 py-1 font-body text-label-sm text-white">{t('pos.needsAttentionNotSynced')}</span>}
+              {completedOrder.verificationStatus === 'to_verify' && <span className="rounded-full bg-warning-container px-2 py-1 font-body text-label-sm text-on-warning-container">{t('pos.toVerify')}</span>}
             </div>
             {completedOrderNotice && <p role="alert" className="rounded-lg bg-warning-container p-3 font-body text-body-sm text-on-warning-container">{completedOrderNotice}</p>}
             <Button
@@ -1283,15 +1332,15 @@ export function PosScreen() {
                 setCompletedOrder(null);
               }}
             >
-              <MaterialIcon name="receipt" />View receipt
+              <MaterialIcon name="receipt" />{t('pos.viewReceipt')}
             </Button>
             <Button onClick={() => { setCompletedOrder(null); setCompletedOrderNotice(''); }}>
-              <MaterialIcon name="add" />New order
+              <MaterialIcon name="add" />{t('pos.newOrder')}
             </Button>
           </div>
         )}
       </BottomSheet>
-      <BottomSheet open={customerPickerOpen} onClose={() => setCustomerPickerOpen(false)} title="Choose customer" panelClassName="h-[60dvh]">
+      <BottomSheet open={customerPickerOpen} onClose={() => setCustomerPickerOpen(false)} title={t('pos.chooseCustomer')}>
         <div className="flex flex-col gap-2 px-2 pt-2">
           <label className="relative block">
             <MaterialIcon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-lg text-outline" />
@@ -1299,7 +1348,7 @@ export function PosScreen() {
               autoFocus
               value={customerSearch}
               onChange={(event) => setCustomerSearch(event.target.value)}
-              placeholder="Search customers..."
+              placeholder={t('pos.searchCustomers')}
               className="h-11 w-full rounded-lg bg-surface-container-low pl-10 pr-3 font-body text-body-md text-on-surface outline-none focus:ring-2 focus:ring-primary"
             />
           </label>
@@ -1321,18 +1370,18 @@ export function PosScreen() {
           ))}
           {filteredCustomers.length === 0 && (
             <p className="rounded-lg bg-surface-container-low p-3 font-body text-body-sm text-outline">
-              {customers.length === 0 ? 'No active customers.' : 'No customers match your search.'}
+              {customers.length === 0 ? t('pos.noActiveCustomers') : t('pos.noCustomersMatchSearch')}
             </p>
           )}
         </div>
       </BottomSheet>
-      <BottomSheet open={creditOverrideOpen} onClose={() => setCreditOverrideOpen(false)} title="Override credit limit">
+      <BottomSheet open={creditOverrideOpen} onClose={() => setCreditOverrideOpen(false)} title={t('pos.overrideCreditLimit')}>
         <div className="flex flex-col gap-3">
           <p className="font-body text-body-sm text-on-surface-variant">
-            Limit reached. Tell the customer. Enter the Admin PIN to charge {selectedCustomer?.name ?? 'this customer'} {formatTnd(totalMillimes / 1000)} DT to their tab.
+            {t('pos.overrideCreditLimitPrompt', { customer: selectedCustomer?.name ?? t('pos.thisCustomer'), total: formatTnd(totalMillimes / 1000) })}
           </p>
-          <p className="text-center font-body text-label-sm text-outline" aria-label={`${creditOverridePin.length} of 4 PIN digits entered`}>
-            {creditOverridePin.length} of 4 PIN digits entered
+          <p className="text-center font-body text-label-sm text-outline" aria-label={t('orders.pinDigitsEntered', { count: creditOverridePin.length })}>
+            {t('orders.pinDigitsEntered', { count: creditOverridePin.length })}
           </p>
           <Keypad
             onPress={(digit) => setCreditOverridePin((value) => value.length < 4 ? `${value}${digit}` : value)}
@@ -1341,7 +1390,7 @@ export function PosScreen() {
           />
           {creditOverrideError && <p role="alert" className="rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{creditOverrideError}</p>}
           <Button type="button" disabled={creditOverridePin.length !== 4} onClick={() => { void finishOrder(creditOverridePin); }} className="w-full">
-            Override and complete order
+            {t('pos.overrideAndCompleteOrder')}
           </Button>
         </div>
       </BottomSheet>
@@ -1351,7 +1400,7 @@ export function PosScreen() {
             <div>
               <p className="font-body text-label-lg text-on-surface">{selectedItem.modifierGroupName || t('catalog.modifiers')}</p>
               <p className="mt-1 font-body text-body-sm text-on-surface-variant">
-                {selectedItem.modifiersRequired ? selectedItem.modifierSelectionMode === 'single' ? 'Choose one option to continue.' : 'Select at least one option to continue.' : selectedItem.modifierSelectionMode === 'single' ? 'Choose one option, if wanted.' : 'Choose any options you want.'}
+                {selectedItem.modifiersRequired ? selectedItem.modifierSelectionMode === 'single' ? t('pos.chooseOneRequired') : t('pos.selectOneRequired') : selectedItem.modifierSelectionMode === 'single' ? t('pos.chooseOneOptional') : t('pos.chooseAnyOptions')}
               </p>
             </div>
             {selectedItem.modifiers.map((modifier) => {
@@ -1368,42 +1417,42 @@ export function PosScreen() {
           </div>
         )}
       </BottomSheet>
-      <BottomSheet open={compOpen} onClose={() => setCompOpen(false)} title="Comp / waste">
+      <BottomSheet open={compOpen} onClose={() => setCompOpen(false)} title={t('pos.compWaste')}>
         <div className="flex flex-col gap-3">
-          {!openShift && <p role="alert" className="rounded-lg bg-warning-container p-3 font-body text-body-sm text-on-warning-container">Open your shift before recording a comp.</p>}
-          <label className="font-body text-label-md text-on-surface">Item
+          {!openShift && <p role="alert" className="rounded-lg bg-warning-container p-3 font-body text-body-sm text-on-warning-container">{t('pos.openShiftBeforeComp')}</p>}
+          <label className="font-body text-label-md text-on-surface">{t('pos.item')}
             <select value={compItemId} onChange={(event) => { setCompItemId(event.target.value); setCompError(''); }} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3">
-              <option value="">Select an item</option>
+              <option value="">{t('pos.selectItem')}</option>
               {catalogRecords.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select>
           </label>
-          <label className="font-body text-label-md text-on-surface">Quantity
+          <label className="font-body text-label-md text-on-surface">{t('pos.quantity')}
             <input type="number" min="1" step="1" required value={compQuantity} onChange={(event) => { setCompQuantity(event.target.value); setCompError(''); }} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3" />
           </label>
-          <label className="font-body text-label-md text-on-surface">Reason
+          <label className="font-body text-label-md text-on-surface">{t('pos.reason')}
             <select value={compReason} onChange={(event) => { setCompReason(event.target.value as CompReason); setCompError(''); }} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3">
-              <option value="dropped">Dropped</option>
-              <option value="staff_drink">Staff drink</option>
-              <option value="free_customer">Free customer</option>
-              <option value="remake">Remake</option>
-              <option value="other">Other</option>
+              <option value="dropped">{t('pos.reasonDropped')}</option>
+              <option value="staff_drink">{t('pos.reasonStaffDrink')}</option>
+              <option value="free_customer">{t('pos.reasonFreeCustomer')}</option>
+              <option value="remake">{t('pos.reasonRemake')}</option>
+              <option value="other">{t('pos.reasonOther')}</option>
             </select>
           </label>
           {compReason === 'staff_drink' && user?.role === 'staff' && (
             <div className="rounded-lg bg-primary-fixed/40 p-3 font-body text-body-sm text-on-surface">
               {staffDrinkAllowance
                 ? <>
-                    <p className="font-semibold">Allowed today: {staffDrinkAllowance.usedQuantity} of {staffDrinkAllowance.maxQuantity} used</p>
-                    {!staffDrinkAllowance.allowed && <p className="mt-1">This item is not allowed for staff drinks in your position.</p>}
-                    {staffDrinkAllowance.allowed && staffDrinkAllowance.remainingQuantity > 0 && <p className="mt-1">{staffDrinkAllowance.remainingQuantity} remaining this shift.</p>}
+                    <p className="font-semibold">{t('pos.allowedToday', { used: staffDrinkAllowance.usedQuantity, maximum: staffDrinkAllowance.maxQuantity })}</p>
+                    {!staffDrinkAllowance.allowed && <p className="mt-1">{t('pos.staffDrinkNotAllowed')}</p>}
+                    {staffDrinkAllowance.allowed && staffDrinkAllowance.remainingQuantity > 0 && <p className="mt-1">{t('pos.remainingThisShift', { count: staffDrinkAllowance.remainingQuantity })}</p>}
                   </>
-                : 'Checking staff drink allowance…'}
+                : t('pos.checkingStaffDrinkAllowance')}
             </div>
           )}
           {compReason === 'staff_drink' && user?.role !== 'staff' && (
-            <p className="rounded-lg bg-warning-container p-3 font-body text-body-sm text-on-warning-container">Staff drink allowances apply to staff positions only.</p>
+            <p className="rounded-lg bg-warning-container p-3 font-body text-body-sm text-on-warning-container">{t('pos.staffAllowancesOnly')}</p>
           )}
-          <label className="font-body text-label-md text-on-surface">Note (optional)
+          <label className="font-body text-label-md text-on-surface">{t('pos.noteOptional')}
             <textarea maxLength={500} rows={3} value={compNote} onChange={(event) => setCompNote(event.target.value)} className="mt-1 w-full resize-y rounded-lg bg-surface-container-low px-3 py-2 font-body text-body-md outline-none focus:ring-2 focus:ring-primary" />
           </label>
           {compError && <p role="alert" className="rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{compError}</p>}
@@ -1414,19 +1463,19 @@ export function PosScreen() {
             onClick={() => { void submitComp(); }}
           >
             <MaterialIcon name="delete_sweep" />
-            {compSubmitting ? 'Recording…' : 'Record comp'}
+            {compSubmitting ? t('pos.recording') : t('pos.recordComp')}
           </Button>
-          <p className="text-center font-body text-body-sm text-outline">Stock is reduced. This item will not be added to sales.</p>
+          <p className="text-center font-body text-body-sm text-outline">{t('pos.stockReducedNoSale')}</p>
         </div>
       </BottomSheet>
-      <BottomSheet open={markedOutOfStockItem !== null} onClose={() => setMarkedOutOfStockItem(null)} title="86 item">
+      <BottomSheet open={markedOutOfStockItem !== null} onClose={() => setMarkedOutOfStockItem(null)} title={t('pos.item86')}>
         {markedOutOfStockItem && (
           <div className="flex flex-col gap-3">
             <p className="font-body text-body-md text-on-surface">
-              Marked 86 by {markedOutOfStockItem.outOfStockBy ?? 'Unknown staff'} at {formatOutOfStockTime(markedOutOfStockItem.outOfStockAt)}.
+              {t('pos.marked86ByAt', { staff: markedOutOfStockItem.outOfStockBy ?? t('pos.unknownStaff'), time: formatOutOfStockTime(markedOutOfStockItem.outOfStockAt) })}
             </p>
             <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setMarkedOutOfStockItem(null)}>Close</Button>
+              <Button variant="ghost" onClick={() => setMarkedOutOfStockItem(null)}>{t('pos.close')}</Button>
               {(user?.role === 'owner' || can86Items) && (
                 <Button
                   variant="secondary"
@@ -1436,17 +1485,39 @@ export function PosScreen() {
                     });
                   }}
                 >
-                  <MaterialIcon name="check" />Mark available
+                  <MaterialIcon name="check" />{t('pos.markAvailable')}
                 </Button>
               )}
             </div>
           </div>
         )}
       </BottomSheet>
+      <BottomSheet open={stockEditTarget !== null} onClose={() => setStockEditTarget(null)} title={stockEditTarget ? `${t('pos.editStockCount')}: ${stockEditTarget.name}` : t('pos.editStockCount')}>
+        {stockEditTarget && (
+          <form onSubmit={saveStockCount} className="flex flex-col gap-3">
+            <label className="font-body text-label-md text-on-surface">{t('pos.availableQuantity')}
+              <input
+                type="number"
+                min="0"
+                step="1"
+                required
+                autoFocus
+                value={stockEditCount}
+                onChange={(event) => { setStockEditCount(event.target.value); setStockEditError(''); }}
+                className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary"
+              />
+            </label>
+            {stockEditError && <p role="alert" className="rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{stockEditError}</p>}
+            <Button type="submit" disabled={stockEditBusy || !stockEditCount.trim()}>
+              {stockEditBusy ? t('pos.saving') : t('pos.saveStockCount')}
+            </Button>
+          </form>
+        )}
+      </BottomSheet>
       {undoSnapshot ? (
         <div role="status" className="fixed bottom-24 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-4 rounded-full bg-primary-dark px-4 py-2.5 font-body text-label-md text-white shadow-overlay tablet:bottom-6">
-          <span>Order cleared.</span>
-          <button type="button" onClick={undoClearOrder} className="font-body text-label-lg underline underline-offset-2">Undo</button>
+          <span>{t('pos.orderCleared')}</span>
+          <button type="button" onClick={undoClearOrder} className="font-body text-label-lg underline underline-offset-2">{t('pos.undo')}</button>
         </div>
       ) : toast && <div role="status" className="fixed left-1/2 top-20 z-50 -translate-x-1/2 rounded-full bg-primary-dark px-4 py-2.5 font-body text-label-md text-white shadow-overlay">{toast}</div>}
     </div>
@@ -1476,20 +1547,20 @@ function CustomerCreditOption({ customer, status, selected, canOverrideCreditLim
           <strong className={`block truncate font-body text-label-md ${overLimit ? 'text-on-error-container' : 'text-on-surface'}`}>{customer.name}</strong>
           <span className={`mt-1 block font-body text-label-sm ${overLimit ? 'text-on-error-container' : 'text-on-surface-variant'}`}>
             {status
-              ? `Balance ${formatTnd(Math.abs(status.balance) / 1000)} DT${status.balance < 0 ? ' credit' : ''}`
-              : 'Checking balance…'}
+              ? t('pos.customerBalance', { balance: formatTnd(Math.abs(status.balance) / 1000), credit: status.balance < 0 ? t('pos.creditSuffix') : '' })
+              : t('pos.checkingBalance')}
           </span>
         </span>
         <span className={`shrink-0 text-right font-body text-label-sm ${overLimit ? 'text-error-dark' : 'text-on-surface-variant'}`}>
           {status?.limit === undefined
-            ? status ? 'No limit' : 'Checking…'
-            : `${formatTnd((status.remaining ?? 0) / 1000)} DT remaining`}
+            ? status ? t('pos.noLimit') : t('pos.checkingBalance')
+            : t('pos.creditRemaining', { amount: formatTnd((status.remaining ?? 0) / 1000) })}
         </span>
       </span>
-      <span className="customer-credit-progress-track relative mt-2 block h-1.5 overflow-hidden rounded-full" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label={`${customer.name} credit used`}>
+      <span className="customer-credit-progress-track relative mt-2 block h-1.5 overflow-hidden rounded-full" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label={t('pos.customerCreditUsed', { customer: customer.name })}>
         <span aria-hidden="true" className={`customer-credit-progress-fill ${progressTone}`} style={{ width: `${percent}%` }} />
       </span>
-      {overLimit && <span className="mt-1 block font-body text-label-sm text-error-dark">Over credit limit</span>}
+      {overLimit && <span className="mt-1 block font-body text-label-sm text-error-dark">{t('pos.overCreditLimit')}</span>}
     </button>
   );
 }

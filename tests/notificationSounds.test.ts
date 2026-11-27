@@ -62,6 +62,17 @@ describe('notification sound preferences', () => {
     );
   });
 
+  it('saves silent mode independently for general and Void notifications', async () => {
+    await saveNotificationSoundPreferences('silent-user', { general: 'silent', void: 'alert8' });
+
+    await expect(getNotificationSoundPreferences('silent-user')).resolves.toEqual({
+      general: 'silent',
+      void: 'alert8',
+    });
+    expect(getNotificationSoundForType('cash_difference', { general: 'silent', void: 'alert8' })).toBe('silent');
+    expect(getNotificationSoundForType('void_requested', { general: 'silent', void: 'alert8' })).toBe('alert8');
+  });
+
   it('loads persisted selections for a user after a fresh session', async () => {
     localStorage.setItem(
       '7anouti.notification-sounds.v1:sound-user-reload',
@@ -105,6 +116,14 @@ describe('notification sound preferences', () => {
     expect(audioInstances[0].play).toHaveBeenCalledOnce();
   });
 
+  it('does not play audio for events configured as silent', async () => {
+    await saveNotificationSoundPreferences('silent-event-user', { general: 'silent', void: 'silent' });
+
+    await playNotificationSoundForEvent('silent-event-user', 'void_rejected');
+
+    expect(audioInstances).toHaveLength(0);
+  });
+
   it('plays any selected sound from its bundled asset for previews', async () => {
     const soundId: NotificationSoundId = 'alert8';
 
@@ -133,6 +152,9 @@ describe('notification sound preferences', () => {
 
     expect(markup).toContain('Notification Sound');
     expect(markup).toContain('Void Sound');
+    expect(markup).toContain('Silent');
+    expect(markup).toContain('aria-label="Silent mode for Notification Sound"');
+    expect(markup).toContain('aria-label="Silent mode for Void Sound"');
     expect(markup.match(/aria-label="Play /g)).toHaveLength(12);
     for (const { label } of NOTIFICATION_SOUNDS) expect(markup).toContain(label);
     expect(markup).toContain('Soft Ping');

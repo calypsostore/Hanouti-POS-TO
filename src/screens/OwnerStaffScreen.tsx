@@ -11,7 +11,8 @@ import { ToggleSwitch } from '../components/ToggleSwitch';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
 import { CardGrid, PageHeader, StatGrid } from '../components/layout';
-import { t } from '../i18n/translations';
+import { getLanguage, localizeErrorMessage } from '../i18n';
+import { t, type TranslationKey } from '../i18n/translations';
 import { catalogService } from '../services/catalogService';
 import { shiftService } from '../services/shiftService';
 import { shareTextAsPdf } from '../services/receiptExport';
@@ -149,7 +150,7 @@ function OwnerStaffContent() {
         password: result.temporaryPassword,
       };
       setCredentialHistory((current) => ({ ...current, [createdCredentials.userId]: { username: createdCredentials.username, password: createdCredentials.password } }));
-      setActiveCredentials({ ...createdCredentials, title: 'Staff created' });
+      setActiveCredentials({ ...createdCredentials, title: 'staff.owner.credentials.createdTitle' });
       setName('');
       setPhone('');
       setNotes('');
@@ -157,10 +158,10 @@ function OwnerStaffContent() {
       try {
         await refresh();
       } catch (refreshError) {
-        setError(`Staff was created, but the staff list could not be refreshed: ${refreshError instanceof Error ? refreshError.message : t('common.loadFailed')}`);
+        setError(t('staff.owner.error.refreshCreated' as TranslationKey, { details: localizeErrorMessage(refreshError, t('common.loadFailed')) }));
       }
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : 'Unable to create staff.');
+      setError(localizeErrorMessage(createError, t('staff.owner.error.create' as TranslationKey)));
     } finally {
       setBusy(false);
     }
@@ -185,29 +186,29 @@ function OwnerStaffContent() {
     setError('');
     setNotice('');
     try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable.');
+      if (!navigator.clipboard?.writeText) throw new Error(t('staff.owner.error.clipboardUnavailable' as TranslationKey));
       await navigator.clipboard.writeText(value);
-      setNotice(`${label} copied.`);
+      setNotice(t('staff.owner.notice.credentialsCopied' as TranslationKey, { label }));
     } catch (copyError) {
-      setError(copyError instanceof Error ? copyError.message : `Unable to copy ${label.toLocaleLowerCase()}.`);
+      setError(localizeErrorMessage(copyError, t('staff.owner.error.copy' as TranslationKey, { label: label.toLocaleLowerCase() })));
     }
   }
 
   async function copyAllCredentials() {
     if (!activeCredentials) return;
-    await copyValue('Credentials', `Username: ${activeCredentials.username}\nTemporary password: ${activeCredentials.password}`);
+    await copyValue(t('staff.owner.credentials.title' as TranslationKey), `${t('staff.owner.credentials.usernameLine' as TranslationKey, { username: activeCredentials.username })}\n${t('staff.owner.credentials.passwordLine' as TranslationKey, { password: activeCredentials.password })}`);
   }
 
   async function shareCredentials() {
     if (!activeCredentials) return;
-    const text = `Username: ${activeCredentials.username}\nTemporary password: ${activeCredentials.password}`;
+    const text = `${t('staff.owner.credentials.usernameLine' as TranslationKey, { username: activeCredentials.username })}\n${t('staff.owner.credentials.passwordLine' as TranslationKey, { password: activeCredentials.password })}`;
     setError('');
     try {
-      await shareTextAsPdf(text, `staff-credentials-${activeCredentials.username}`, activeCredentials.title);
-      setNotice('Credentials PDF shared or downloaded.');
+      await shareTextAsPdf(text, `staff-credentials-${activeCredentials.username}`, t(activeCredentials.title as TranslationKey));
+      setNotice(t('staff.owner.notice.credentialsShared' as TranslationKey));
     } catch (shareError) {
       if (shareError instanceof DOMException && shareError.name === 'AbortError') return;
-      setError(shareError instanceof Error ? shareError.message : 'Unable to share credentials.');
+      setError(localizeErrorMessage(shareError, t('staff.owner.error.shareCredentials' as TranslationKey)));
     }
   }
 
@@ -223,7 +224,7 @@ function OwnerStaffContent() {
       userId: staffMember.id,
       staffName: staffMember.name,
       ...savedCredentials,
-      title: 'Credentials',
+      title: 'staff.owner.credentials.title',
     });
   }
 
@@ -241,14 +242,14 @@ function OwnerStaffContent() {
       };
       setCredentialHistory((current) => ({ ...current, [resetCredentials.userId]: { username: resetCredentials.username, password } }));
       setResetTarget(null);
-      setActiveCredentials({ ...resetCredentials, title: 'Password reset' });
+      setActiveCredentials({ ...resetCredentials, title: 'staff.owner.credentials.resetTitle' });
       try {
         await refresh();
       } catch (refreshError) {
-        setError(`Password was reset, but the staff list could not be refreshed: ${refreshError instanceof Error ? refreshError.message : t('common.loadFailed')}`);
+        setError(t('staff.owner.error.refreshPasswordReset' as TranslationKey, { details: localizeErrorMessage(refreshError, t('common.loadFailed')) }));
       }
     } catch (resetError) {
-      setError(resetError instanceof Error ? resetError.message : 'Unable to reset the staff password.');
+      setError(localizeErrorMessage(resetError, t('staff.owner.error.resetPassword' as TranslationKey)));
     } finally {
       setBusy(false);
     }
@@ -266,14 +267,14 @@ function OwnerStaffContent() {
       setSelfServiceCategoryIds([]);
       setMaxStaffDrinkQuantity('');
       setSheet(null);
-      setNotice('Position created.');
+      setNotice(t('staff.owner.notice.positionCreated' as TranslationKey));
       try {
         await refresh();
       } catch (refreshError) {
-        setError(`Position was created, but the list could not be refreshed: ${refreshError instanceof Error ? refreshError.message : t('common.loadFailed')}`);
+        setError(t('staff.owner.error.refreshPositionCreated' as TranslationKey, { details: localizeErrorMessage(refreshError, t('common.loadFailed')) }));
       }
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : 'Unable to create position.');
+      setError(localizeErrorMessage(createError, t('staff.owner.error.createPosition' as TranslationKey)));
     }
   }
 
@@ -282,7 +283,7 @@ function OwnerStaffContent() {
     setSelectedPermissions([]);
     setSelfServiceItemIds([]);
     setSelfServiceCategoryIds([]);
-    setMaxStaffDrinkQuantity('');
+    setMaxStaffDrinkQuantity('0');
     setError('');
     setNotice('');
     setSheet('new-position');
@@ -294,7 +295,7 @@ function OwnerStaffContent() {
     setSelectedPermissions([...position.permissionIds]);
     setSelfServiceItemIds([...(position.selfServiceItemIds ?? [])]);
     setSelfServiceCategoryIds([...(position.selfServiceCategoryIds ?? [])]);
-    setMaxStaffDrinkQuantity('');
+    setMaxStaffDrinkQuantity(String(position.maxStaffDrinkQuantityPerShift ?? 0));
     setError('');
     setNotice('');
     setSheet('edit-position');
@@ -309,14 +310,14 @@ function OwnerStaffContent() {
       await userService.updatePosition(editingPosition.id, { name, permissionIds: selectedPermissions, ...positionCompRules() });
       setSheet(null);
       setEditingPosition(null);
-      setNotice('Position updated.');
+      setNotice(t('staff.owner.notice.positionUpdated' as TranslationKey));
       try {
         await refresh();
       } catch (refreshError) {
-        setError(`Position was updated, but the list could not be refreshed: ${refreshError instanceof Error ? refreshError.message : t('common.loadFailed')}`);
+        setError(t('staff.owner.error.refreshPositionUpdated' as TranslationKey, { details: localizeErrorMessage(refreshError, t('common.loadFailed')) }));
       }
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Unable to update this position.');
+      setError(localizeErrorMessage(saveError, t('staff.owner.error.updatePosition' as TranslationKey)));
     }
   }
 
@@ -325,7 +326,7 @@ function OwnerStaffContent() {
     setError('');
     setNotice('');
     try {
-      const duplicateName = `${editingPosition.name} copy`;
+      const duplicateName = t('staff.owner.position.copyName' as TranslationKey, { name: editingPosition.name });
       await userService.createPosition(storeId, duplicateName, editingPosition.permissionIds, {
         selfServiceItemIds: editingPosition.selfServiceItemIds,
         selfServiceCategoryIds: editingPosition.selfServiceCategoryIds,
@@ -333,14 +334,14 @@ function OwnerStaffContent() {
       });
       setSheet(null);
       setEditingPosition(null);
-      setNotice('Position duplicated.');
+      setNotice(t('staff.owner.notice.positionDuplicated' as TranslationKey));
       try {
         await refresh();
       } catch (refreshError) {
-        setError(`Position was duplicated, but the list could not be refreshed: ${refreshError instanceof Error ? refreshError.message : t('common.loadFailed')}`);
+        setError(t('staff.owner.error.refreshPositionDuplicated' as TranslationKey, { details: localizeErrorMessage(refreshError, t('common.loadFailed')) }));
       }
     } catch (duplicateError) {
-      setError(duplicateError instanceof Error ? duplicateError.message : 'Unable to duplicate this position.');
+      setError(localizeErrorMessage(duplicateError, t('staff.owner.error.duplicatePosition' as TranslationKey)));
     }
   }
 
@@ -362,14 +363,14 @@ function OwnerStaffContent() {
     try {
       await userService.deletePosition(deleteTarget.id, assignedCount > 0 ? replacementPositionId : undefined);
       setDeleteTarget(null);
-      setNotice('Position deleted.');
+      setNotice(t('staff.owner.notice.positionDeleted' as TranslationKey));
       try {
         await refresh();
       } catch (refreshError) {
-        setError(`Position was deleted, but the list could not be refreshed: ${refreshError instanceof Error ? refreshError.message : t('common.loadFailed')}`);
+        setError(t('staff.owner.error.refreshPositionDeleted' as TranslationKey, { details: localizeErrorMessage(refreshError, t('common.loadFailed')) }));
       }
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : 'Unable to delete this position.');
+      setError(localizeErrorMessage(deleteError, t('staff.owner.error.deletePosition' as TranslationKey)));
     } finally {
       setBusy(false);
     }
@@ -391,7 +392,7 @@ function OwnerStaffContent() {
   function positionCompRules() {
     const maximum = Number(maxStaffDrinkQuantity);
     if (!maxStaffDrinkQuantity.trim() || !Number.isInteger(maximum) || maximum < 0) {
-      throw new Error('Staff drink limit must be a non-negative whole number.');
+      throw new Error(t('staff.owner.error.invalidDrinkLimit' as TranslationKey));
     }
     return {
       selfServiceItemIds,
@@ -417,9 +418,9 @@ function OwnerStaffContent() {
       await refresh();
       setSheet(null);
       setEditing(null);
-      setNotice('Staff profile updated.');
+      setNotice(t('staff.owner.notice.profileUpdated' as TranslationKey));
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : 'Unable to update staff.');
+      setError(localizeErrorMessage(updateError, t('staff.owner.error.updateStaff' as TranslationKey)));
     }
   }
 
@@ -437,12 +438,12 @@ function OwnerStaffContent() {
       await userService.updateStaff(staffMember.id, { isActive: !staffMember.isActive });
       await refresh();
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : 'Unable to update staff status.');
+      setError(localizeErrorMessage(updateError, t('staff.owner.error.updateStaffStatus' as TranslationKey)));
     }
   }
 
   function positionFor(staffMember: UserSummary) {
-    return positions.find((position) => position.id === staffMember.positionId)?.name ?? 'Unassigned';
+    return positions.find((position) => position.id === staffMember.positionId)?.name ?? t('staff.self.positionUnassigned' as TranslationKey);
   }
 
   function openShiftFor(staffMember: UserSummary) {
@@ -481,7 +482,7 @@ function OwnerStaffContent() {
 
   return (
     <WorkspaceLayout title={t('staff.title')} storeName={storeName} links={ownerWorkspaceLinks}>
-      <PageHeader title={t('staff.title')} subtitle="Manage staff accounts and permission-based positions." actions={
+      <PageHeader title={t('staff.title')} subtitle={t('staff.owner.subtitle' as TranslationKey)} actions={
         <>
           <Button variant="secondary" onClick={openNewPosition}><MaterialIcon name="badge" />{t('staff.newPosition')}</Button>
           <Button onClick={openNewStaff}><MaterialIcon name="person_add" />{t('staff.addStaff')}</Button>
@@ -500,32 +501,32 @@ function OwnerStaffContent() {
         ))}
       </CardGrid>
       <StatGrid className="mb-5">
-        <StaffSummaryCard label="Total staff" value={staff.length} />
-        <StaffSummaryCard label="Active" value={staff.filter((staffMember) => staffMember.isActive).length} />
-        <StaffSummaryCard label="Suspended" value={staff.filter((staffMember) => !staffMember.isActive).length} />
-        <StaffSummaryCard label="Currently on shift" value={onShiftCount} />
+        <StaffSummaryCard label={t('staff.owner.summary.total' as TranslationKey)} value={staff.length} />
+        <StaffSummaryCard label={t('staff.owner.summary.active' as TranslationKey)} value={staff.filter((staffMember) => staffMember.isActive).length} />
+        <StaffSummaryCard label={t('staff.owner.summary.suspended' as TranslationKey)} value={staff.filter((staffMember) => !staffMember.isActive).length} />
+        <StaffSummaryCard label={t('staff.owner.summary.onShift' as TranslationKey)} value={onShiftCount} />
       </StatGrid>
 
       <div className="sticky top-[7.5rem] z-10 -mx-4 bg-surface/95 px-4 py-2 backdrop-blur-xl">
         <label className="relative block">
-          <span className="sr-only">Search staff by name or username</span>
+          <span className="sr-only">{t('staff.owner.search.label' as TranslationKey)}</span>
           <MaterialIcon name="search" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
           <input
             type="search"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search name or username"
+            placeholder={t('staff.owner.search.placeholder' as TranslationKey)}
             className="h-12 w-full rounded-xl bg-surface-container-lowest pl-11 pr-3 font-body text-body-md text-on-surface shadow-card outline-none focus:ring-2 focus:ring-primary"
           />
         </label>
       </div>
 
       <div className="mb-4 flex flex-col gap-3">
-        <div className="scrollbar-hidden flex gap-2 overflow-x-auto py-1" aria-label="Filter staff list">
+        <div className="scrollbar-hidden flex gap-2 overflow-x-auto py-1" aria-label={t('staff.owner.filter.label' as TranslationKey)}>
           {([
-            ['all', 'All'],
-            ['active', 'Active'],
-            ['suspended', 'Suspended'],
+            ['all', t('staff.owner.filter.all' as TranslationKey)],
+            ['active', t('staff.owner.filter.active' as TranslationKey)],
+            ['suspended', t('staff.owner.filter.suspended' as TranslationKey)],
           ] as const).map(([filter, label]) => (
             <button
               key={filter}
@@ -553,7 +554,7 @@ function OwnerStaffContent() {
           ))}
         </div>
         <label className="flex min-h-12 items-center gap-3 font-body text-label-md text-on-surface-variant sm:ml-auto">
-          Sort
+          {t('staff.owner.sort.label' as TranslationKey)}
           <select
             value={sortBy}
             onChange={(event) => {
@@ -562,15 +563,15 @@ function OwnerStaffContent() {
             }}
             className="h-12 min-w-0 flex-1 rounded-lg bg-surface-container-lowest px-3 text-on-surface outline-none focus:ring-2 focus:ring-primary sm:flex-none"
           >
-            <option value="name">Name</option>
-            <option value="newest">Newest</option>
-            <option value="position">Position</option>
+            <option value="name">{t('staff.owner.sort.name' as TranslationKey)}</option>
+            <option value="newest">{t('staff.owner.sort.newest' as TranslationKey)}</option>
+            <option value="position">{t('staff.owner.sort.position' as TranslationKey)}</option>
           </select>
         </label>
       </div>
 
       <CardGrid className="mobile-card-list mobile-gap-3">
-        {loading ? <ListSkeleton label="Loading staff" /> : <LazyBatch items={visibleStaff} resetKey={`${statusFilter}-${positionFilter}-${sortBy}-${searchQuery}`} renderItem={(staffMember) => {
+        {loading ? <ListSkeleton label={t('staff.owner.loading' as TranslationKey)} /> : <LazyBatch items={visibleStaff} resetKey={`${statusFilter}-${positionFilter}-${sortBy}-${searchQuery}`} renderItem={(staffMember) => {
           const currentShift = openShiftFor(staffMember);
           const lastShift = lastShiftFor(staffMember);
           return (
@@ -589,24 +590,24 @@ function OwnerStaffContent() {
                     <span className="rounded-full bg-secondary-container px-2.5 py-1 font-body text-label-sm text-on-secondary-container">{positionFor(staffMember)}</span>
                     <StatusTag status={staffMember.isActive ? 'open' : 'suspended'}>{staffMember.isActive ? t('common.active') : t('common.suspended')}</StatusTag>
                     <span className={`rounded-full px-2.5 py-1 font-body text-label-sm ${staffMember.mustSetPin ? 'bg-warning-container text-on-warning-container' : 'bg-success-container text-success-dark'}`}>
-                      {staffMember.mustSetPin ? 'PIN not assigned' : 'PIN assigned'}
+                      {t(staffMember.mustSetPin ? 'staff.owner.pin.unassigned' as TranslationKey : 'staff.owner.pin.assigned' as TranslationKey)}
                     </span>
                   </span>
-                  <span className="mt-1 block truncate font-body text-body-sm text-outline">{staffMember.username ?? 'No username'}</span>
+                  <span className="mt-1 block truncate font-body text-body-sm text-outline">{staffMember.username ?? t('staff.owner.username.none' as TranslationKey)}</span>
                   <span className={`mt-1 block font-body text-body-sm ${currentShift ? 'text-success-dark' : 'text-outline'}`}>
                     {currentShift
-                      ? `On shift since ${new Date(currentShift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}`
-                      : 'Off'}
+                      ? t('staff.owner.shift.since' as TranslationKey, { time: new Date(currentShift.openedAt).toLocaleTimeString(getLanguage(), { hour: '2-digit', minute: '2-digit', hour12: false }) })
+                      : t('staff.owner.shift.off' as TranslationKey)}
                   </span>
                   <span className="mt-0.5 block font-body text-label-sm text-outline">
-                    {lastShift ? `Last shift ${new Date(lastShift.openedAt).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}` : 'No shifts yet'}
+                    {lastShift ? t('staff.owner.shift.last' as TranslationKey, { date: new Date(lastShift.openedAt).toLocaleDateString(getLanguage(), { day: 'numeric', month: 'short', year: 'numeric' }) }) : t('staff.owner.shift.none' as TranslationKey)}
                   </span>
                 </span>
               </button>
               <div className="relative shrink-0">
                 <button
                   type="button"
-                  aria-label={`More actions for ${staffMember.name}`}
+                  aria-label={t('staff.owner.actions.more' as TranslationKey, { name: staffMember.name })}
                   aria-haspopup="menu"
                   aria-expanded={openMenuId === staffMember.id}
                   onClick={() => setOpenMenuId(openMenuId === staffMember.id ? null : staffMember.id)}
@@ -616,12 +617,12 @@ function OwnerStaffContent() {
                 </button>
                 {openMenuId === staffMember.id && (
                   <div role="menu" className="absolute right-0 top-12 z-20 min-w-52 rounded-xl bg-surface-container-lowest p-1 shadow-dialog">
-                    <StaffMenuAction icon="key" label="Credentials" onClick={() => { setOpenMenuId(null); showCredentials(staffMember); }} />
-                    <StaffMenuAction icon="edit" label="Edit" onClick={() => { setOpenMenuId(null); openEdit(staffMember); }} />
-                    <StaffMenuAction icon="lock_reset" label="Reset password" onClick={() => { setOpenMenuId(null); setError(''); setResetTarget(staffMember); }} />
+                    <StaffMenuAction icon="key" label={t('staff.owner.action.credentials' as TranslationKey)} onClick={() => { setOpenMenuId(null); showCredentials(staffMember); }} />
+                    <StaffMenuAction icon="edit" label={t('staff.owner.action.edit' as TranslationKey)} onClick={() => { setOpenMenuId(null); openEdit(staffMember); }} />
+                    <StaffMenuAction icon="lock_reset" label={t('staff.owner.action.resetPassword' as TranslationKey)} onClick={() => { setOpenMenuId(null); setError(''); setResetTarget(staffMember); }} />
                     <StaffMenuAction
                       icon={staffMember.isActive ? 'person_off' : 'person'}
-                      label={staffMember.isActive ? 'Suspend' : 'Activate'}
+                      label={t(staffMember.isActive ? 'staff.owner.action.suspend' as TranslationKey : 'staff.owner.action.activate' as TranslationKey)}
                       onClick={() => { setOpenMenuId(null); void toggleStaff(staffMember); }}
                     />
                   </div>
@@ -633,8 +634,8 @@ function OwnerStaffContent() {
         {!loading && !error && visibleStaff.length === 0 && (
           <div className="rounded-xl bg-surface-container-lowest px-5 py-8 text-center shadow-card">
             <MaterialIcon name="person_search" className="text-3xl text-outline" />
-            <p className="mt-2 font-body text-label-lg text-on-surface">No staff found</p>
-            <p className="mt-1 font-body text-body-sm text-outline">Try a different search or filter.</p>
+            <p className="mt-2 font-body text-label-lg text-on-surface">{t('staff.owner.empty.title' as TranslationKey)}</p>
+            <p className="mt-1 font-body text-body-sm text-outline">{t('staff.owner.empty.body' as TranslationKey)}</p>
           </div>
         )}
       </CardGrid>
@@ -643,49 +644,50 @@ function OwnerStaffContent() {
 
       <BottomSheet open={sheet === 'new-staff'} onClose={() => setSheet(null)} title={t('staff.addStaff')}>
         <form onSubmit={createStaff} className="flex flex-col gap-4">
-          <label className="font-body text-label-md">Full name
+          <label className="font-body text-label-md">{t('staff.owner.form.fullName' as TranslationKey)}
             <input required autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" />
           </label>
-          <label className="font-body text-label-md">Phone (optional)
+          <label className="font-body text-label-md">{t('staff.owner.form.phoneOptional' as TranslationKey)}
             <input type="tel" autoComplete="tel" value={phone} onChange={(event) => setPhone(event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" />
           </label>
-          <label className="font-body text-label-md">Position
+          <label className="font-body text-label-md">{t('staff.owner.form.position' as TranslationKey)}
             <select required value={positionId} onChange={(event) => setPositionId(event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary">
-              <option value="">Select a position</option>
+              <option value="">{t('staff.owner.form.selectPosition' as TranslationKey)}</option>
               {positions.map((position) => <option key={position.id} value={position.id}>{position.name}</option>)}
             </select>
           </label>
-          <label className="font-body text-label-md">Notes (optional)
+          <label className="font-body text-label-md">{t('staff.owner.form.notesOptional' as TranslationKey)}
             <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} className="mt-1 w-full rounded-lg bg-surface-container-low px-3 py-3 outline-none focus:ring-2 focus:ring-primary" />
           </label>
 
           <section className="flex flex-col gap-3 rounded-xl border border-outline-variant p-3">
-            <h3 className="font-body text-label-lg text-on-surface">Credentials</h3>
-            <label className="min-w-0 font-body text-label-md">Username preview
-              <input readOnly value={usernamePreview} placeholder="Enter a name to preview" className="mt-1 h-12 w-full min-w-0 rounded-lg bg-surface-container-low px-3 font-mono text-body-sm" />
+            <h3 className="font-body text-label-lg text-on-surface">{t('staff.owner.credentials.title' as TranslationKey)}</h3>
+            <label className="min-w-0 font-body text-label-md">{t('staff.owner.credentials.usernamePreview' as TranslationKey)}
+              <input readOnly value={usernamePreview} placeholder={t('staff.owner.credentials.enterName' as TranslationKey)} className="mt-1 h-12 w-full min-w-0 rounded-lg bg-surface-container-low px-3 font-mono text-body-sm" />
             </label>
-            <p className="font-body text-body-sm text-on-surface-variant">Duplicate first names are numbered automatically. A temporary password is generated after creation; the staff member must set a new password at their next sign-in. The owner assigns their PIN separately.</p>
+            <p className="font-body text-body-sm text-on-surface-variant">{t('staff.owner.credentials.creationHelp' as TranslationKey)}</p>
           </section>
 
           <details className="rounded-xl border border-outline-variant p-3">
-            <summary className="flex min-h-12 cursor-pointer items-center font-body text-label-lg text-on-surface">Extra permissions for this person</summary>
-            <p className="mb-3 font-body text-body-sm text-outline">Permissions inherit from the selected position unless explicitly granted or blocked.</p>
+            <summary className="flex min-h-12 cursor-pointer items-center font-body text-label-lg text-on-surface">{t('staff.owner.permissions.extra' as TranslationKey)}</summary>
+            <p className="mb-3 font-body text-body-sm text-outline">{t('staff.owner.permissions.inheritHelp' as TranslationKey)}</p>
             <div className="flex flex-col gap-4">
               {[...new Set(permissions.map((permission) => permission.group))].map((group) => (
                 <section key={group} className="flex flex-col gap-2">
                   <h4 className="font-body text-label-md text-on-surface">{group}</h4>
                   {permissions.filter((permission) => permission.group === group).map((permission) => {
                     const state = permissionOverrideState(permission.id);
+                    const stateLabel = t(state === 'Granted' ? 'staff.owner.permissions.granted' as TranslationKey : state === 'Blocked' ? 'staff.owner.permissions.blocked' as TranslationKey : 'staff.owner.permissions.inherited' as TranslationKey);
                     const enabled = state === 'Granted' || (state === 'Inherited' && inheritedPermissions.includes(permission.id));
                     return (
                       <div key={permission.id} className="flex min-h-12 items-center justify-between gap-3 rounded-lg bg-surface-container-low px-3">
                         <div className="min-w-0">
                           <p className="font-body text-body-sm text-on-surface">{permission.label}</p>
-                          <p className="font-body text-label-sm text-outline">{state}</p>
+                          <p className="font-body text-label-sm text-outline">{stateLabel}</p>
                         </div>
                         <ToggleSwitch
                           checked={enabled}
-                          label={`${permission.label}: ${state}`}
+                          label={`${permission.label}: ${stateLabel}`}
                           onChange={() => cyclePermissionOverride(permission.id)}
                         />
                       </div>
@@ -701,7 +703,7 @@ function OwnerStaffContent() {
         </form>
       </BottomSheet>
 
-      <BottomSheet open={sheet === 'edit-staff'} onClose={() => { setSheet(null); setEditing(null); }} title="Edit staff">
+      <BottomSheet open={sheet === 'edit-staff'} onClose={() => { setSheet(null); setEditing(null); }} title={t('staff.owner.form.editStaff' as TranslationKey)}>
         <form onSubmit={editStaff} className="flex flex-col gap-3">
           <label className="font-body text-label-md">{t('common.name')}<input required value={name} onChange={(event) => setName(event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" /></label>
           <label className="font-body text-label-md">{t('staff.position')}<select required value={positionId} onChange={(event) => setPositionId(event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3">{positions.map((position) => <option key={position.id} value={position.id}>{position.name}</option>)}</select></label>
@@ -729,14 +731,14 @@ function OwnerStaffContent() {
         </form>
       </BottomSheet>
 
-      <BottomSheet open={sheet === 'edit-position'} onClose={() => { setSheet(null); setEditingPosition(null); }} title="Edit position">
+      <BottomSheet open={sheet === 'edit-position'} onClose={() => { setSheet(null); setEditingPosition(null); }} title={t('staff.owner.form.editPosition' as TranslationKey)}>
         {editingPosition && (
           <form onSubmit={savePosition} className="flex flex-col gap-4">
-            <label className="font-body text-label-md">Position name
+            <label className="font-body text-label-md">{t('staff.owner.form.positionName' as TranslationKey)}
               <input required value={name} onChange={(event) => setName(event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary" />
             </label>
             <p className="rounded-lg bg-surface-container-low p-3 font-body text-body-sm text-on-surface-variant">
-              {staff.filter((staffMember) => staffMember.positionId === editingPosition.id).length} staff use this position.
+              {t(staff.filter((staffMember) => staffMember.positionId === editingPosition.id).length === 1 ? 'staff.owner.position.staffCountUsed.one' as TranslationKey : 'staff.owner.position.staffCountUsed.many' as TranslationKey, { count: staff.filter((staffMember) => staffMember.positionId === editingPosition.id).length })}
             </p>
             <PermissionGroupSwitches permissions={permissions} selectedPermissions={selectedPermissions} onToggle={togglePositionPermission} onSelectAll={(group) => selectPermissionGroup(group, true)} onClearAll={(group) => selectPermissionGroup(group, false)} />
             <StaffDrinkRulesEditor
@@ -752,73 +754,73 @@ function OwnerStaffContent() {
             {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
             <Button type="submit">{t('common.save')}</Button>
             <div className="grid grid-cols-2 gap-2">
-              <Button type="button" variant="secondary" onClick={() => { void duplicatePosition(); }}><MaterialIcon name="content_copy" />Duplicate</Button>
-              <Button type="button" variant="danger" onClick={() => openDeletePosition(editingPosition)}><MaterialIcon name="delete" />Delete position</Button>
+              <Button type="button" variant="secondary" onClick={() => { void duplicatePosition(); }}><MaterialIcon name="content_copy" />{t('staff.owner.position.duplicate' as TranslationKey)}</Button>
+              <Button type="button" variant="danger" onClick={() => openDeletePosition(editingPosition)}><MaterialIcon name="delete" />{t('staff.owner.position.delete' as TranslationKey)}</Button>
             </div>
           </form>
         )}
       </BottomSheet>
 
-      <BottomSheet open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} title="Delete position?">
+      <BottomSheet open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} title={t('staff.owner.position.deleteTitle' as TranslationKey)}>
         {deleteTarget && (
           <div className="flex flex-col gap-3">
             {staff.filter((staffMember) => staffMember.positionId === deleteTarget.id).length > 0 ? (
               <>
                 <p className="font-body text-body-md text-on-surface-variant">
-                  Move {staff.filter((staffMember) => staffMember.positionId === deleteTarget.id).length} staff to a replacement position before deleting {deleteTarget.name}.
+                  {t('staff.owner.position.moveStaff' as TranslationKey, { count: staff.filter((staffMember) => staffMember.positionId === deleteTarget.id).length, name: deleteTarget.name })}
                 </p>
-                <label className="font-body text-label-md">Move staff to...
+                <label className="font-body text-label-md">{t('staff.owner.position.moveLabel' as TranslationKey)}
                   <select required value={replacementPositionId} onChange={(event) => setReplacementPositionId(event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-low px-3 outline-none focus:ring-2 focus:ring-primary">
-                    <option value="">Select a replacement position</option>
+                    <option value="">{t('staff.owner.position.selectReplacement' as TranslationKey)}</option>
                     {positions.filter((position) => position.id !== deleteTarget.id).map((position) => <option key={position.id} value={position.id}>{position.name}</option>)}
                   </select>
                 </label>
-                {positions.filter((position) => position.id !== deleteTarget.id).length === 0 && <p className="font-body text-body-sm text-error-dark">Create another position before deleting this one.</p>}
+                {positions.filter((position) => position.id !== deleteTarget.id).length === 0 && <p className="font-body text-body-sm text-error-dark">{t('staff.owner.position.createReplacement' as TranslationKey)}</p>}
               </>
-            ) : <p className="font-body text-body-md text-on-surface-variant">Delete {deleteTarget.name}? This position has no assigned staff.</p>}
+            ) : <p className="font-body text-body-md text-on-surface-variant">{t('staff.owner.position.deleteEmpty' as TranslationKey, { name: deleteTarget.name })}</p>}
             {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
             <div className="grid grid-cols-2 gap-2">
-              <Button type="button" variant="secondary" disabled={busy} onClick={() => setDeleteTarget(null)}>Cancel</Button>
-              <Button type="button" variant="danger" disabled={busy || (staff.some((staffMember) => staffMember.positionId === deleteTarget.id) && !replacementPositionId)} onClick={() => { void deletePosition(); }}>Delete position</Button>
+              <Button type="button" variant="secondary" disabled={busy} onClick={() => setDeleteTarget(null)}>{t('staff.owner.action.cancel' as TranslationKey)}</Button>
+              <Button type="button" variant="danger" disabled={busy || (staff.some((staffMember) => staffMember.positionId === deleteTarget.id) && !replacementPositionId)} onClick={() => { void deletePosition(); }}>{t('staff.owner.position.delete' as TranslationKey)}</Button>
             </div>
           </div>
         )}
       </BottomSheet>
 
-      <BottomSheet open={Boolean(activeCredentials)} onClose={() => setActiveCredentials(null)} title={activeCredentials?.title}>
+      <BottomSheet open={Boolean(activeCredentials)} onClose={() => setActiveCredentials(null)} title={activeCredentials ? t(activeCredentials.title as TranslationKey) : undefined}>
         {activeCredentials && (
           <div className="flex flex-col gap-4">
-            <p className="font-body text-body-md text-on-surface">Credentials for {activeCredentials.staffName}</p>
-            <label className="font-body text-label-md">Username
+            <p className="font-body text-body-md text-on-surface">{t('staff.owner.credentials.for' as TranslationKey, { name: activeCredentials.staffName })}</p>
+            <label className="font-body text-label-md">{t('staff.owner.credentials.username' as TranslationKey)}
               <div className="mt-1 grid grid-cols-[minmax(0,1fr)_auto] gap-2">
                 <input readOnly value={activeCredentials.username} className="h-12 min-w-0 rounded-lg bg-surface-container-low px-3 font-mono text-body-sm" />
-                <Button type="button" variant="secondary" className="px-3" onClick={() => { void copyValue('Username', activeCredentials.username); }}>Copy</Button>
+                <Button type="button" variant="secondary" className="px-3" onClick={() => { void copyValue(t('staff.owner.credentials.username' as TranslationKey), activeCredentials.username); }}>{t('staff.owner.credentials.copy' as TranslationKey)}</Button>
               </div>
             </label>
-            <label className="font-body text-label-md">Temporary password
+            <label className="font-body text-label-md">{t('staff.owner.credentials.temporaryPassword' as TranslationKey)}
               <div className="mt-1 grid grid-cols-[minmax(0,1fr)_auto] gap-2">
                 <input readOnly value={activeCredentials.password} className="h-12 min-w-0 rounded-lg bg-surface-container-low px-3 font-mono tracking-widest" />
-                <Button type="button" variant="secondary" className="px-3" onClick={() => { void copyValue('Temporary password', activeCredentials.password); }}>Copy</Button>
+                <Button type="button" variant="secondary" className="px-3" onClick={() => { void copyValue(t('staff.owner.credentials.temporaryPassword' as TranslationKey), activeCredentials.password); }}>{t('staff.owner.credentials.copy' as TranslationKey)}</Button>
               </div>
             </label>
-            <p className="rounded-lg bg-primary-fixed/40 p-3 font-body text-body-sm text-on-surface">They must set a new password at their next sign-in. Staff PINs are generated and managed by the owner separately.</p>
+            <p className="rounded-lg bg-primary-fixed/40 p-3 font-body text-body-sm text-on-surface">{t('staff.owner.credentials.passwordHelp' as TranslationKey)}</p>
             {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
             <div className="grid grid-cols-2 gap-2">
-              <Button type="button" variant="secondary" onClick={() => { void copyAllCredentials(); }}>Copy all</Button>
-              <Button type="button" onClick={() => { void shareCredentials(); }}><MaterialIcon name="share" />Share</Button>
+              <Button type="button" variant="secondary" onClick={() => { void copyAllCredentials(); }}>{t('staff.owner.credentials.copyAll' as TranslationKey)}</Button>
+              <Button type="button" onClick={() => { void shareCredentials(); }}><MaterialIcon name="share" />{t('staff.owner.credentials.share' as TranslationKey)}</Button>
             </div>
             {notice && <p role="status" className="font-body text-body-sm text-success-dark">{notice}</p>}
           </div>
         )}
       </BottomSheet>
 
-      <BottomSheet open={Boolean(resetTarget)} onClose={() => setResetTarget(null)} title="Reset password?">
+      <BottomSheet open={Boolean(resetTarget)} onClose={() => setResetTarget(null)} title={t('staff.owner.password.resetTitle' as TranslationKey)}>
         <div className="flex flex-col gap-3">
-          <p className="font-body text-body-md text-on-surface-variant">Reset the temporary password for {resetTarget?.name}? This also clears their current PIN. They must change the password at next sign-in; you can generate a new PIN separately.</p>
+          <p className="font-body text-body-md text-on-surface-variant">{t('staff.owner.password.resetDescription' as TranslationKey, { name: resetTarget?.name ?? '' })}</p>
           {error && <p role="alert" className="font-body text-body-sm text-error-dark">{error}</p>}
           <div className="grid grid-cols-2 gap-2">
-            <Button type="button" variant="secondary" disabled={busy} onClick={() => setResetTarget(null)}>Cancel</Button>
-            <Button type="button" disabled={busy} onClick={() => { void resetPassword(); }}>Reset password</Button>
+            <Button type="button" variant="secondary" disabled={busy} onClick={() => setResetTarget(null)}>{t('staff.owner.action.cancel' as TranslationKey)}</Button>
+            <Button type="button" disabled={busy} onClick={() => { void resetPassword(); }}>{t('staff.owner.password.reset' as TranslationKey)}</Button>
           </div>
         </div>
       </BottomSheet>
@@ -851,6 +853,8 @@ function StaffMenuAction({ icon, label, onClick }: { icon: string; label: string
 
 function PositionCard({ position, permissions, staffCount, onClick }: { position: PositionRecord; permissions: PermissionDefinition[]; staffCount: number; onClick: () => void }) {
   const enabled = permissions.filter((permission) => position.permissionIds.includes(permission.id));
+  const permissionLabel = t(enabled.length === 1 ? 'staff.owner.position.permission' as TranslationKey : 'staff.owner.position.permissions' as TranslationKey);
+  const staffLabel = t(staffCount === 1 ? 'staff.owner.position.staffCount.one' as TranslationKey : 'staff.owner.position.staffCount.many' as TranslationKey, { count: staffCount });
   return (
     <button type="button" onClick={onClick} className="rounded-xl bg-surface-container-lowest p-4 text-left shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
       <span className="flex items-center justify-between gap-2">
@@ -858,7 +862,7 @@ function PositionCard({ position, permissions, staffCount, onClick }: { position
         <MaterialIcon name="edit" className="text-lg text-outline" />
       </span>
       <span className="mt-1 block font-body text-body-sm text-outline">
-        {staffCount} staff · {enabled.length} {enabled.length === 1 ? 'permission' : 'permissions'}
+        {t('staff.owner.position.permissionCount' as TranslationKey, { staffLabel, count: enabled.length, permissionLabel })}
       </span>
     </button>
   );
@@ -885,18 +889,19 @@ function PermissionGroupSwitches({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="font-body text-label-md text-on-surface">{group}</h3>
             <div className="flex gap-2">
-              <button type="button" onClick={() => onSelectAll(group)} className="min-h-12 rounded-lg px-3 font-body text-label-sm text-primary hover:bg-surface-container-low">Select all</button>
-              <button type="button" onClick={() => onClearAll(group)} className="min-h-12 rounded-lg px-3 font-body text-label-sm text-primary hover:bg-surface-container-low">Clear all</button>
+              <button type="button" onClick={() => onSelectAll(group)} className="min-h-12 rounded-lg px-3 font-body text-label-sm text-primary hover:bg-surface-container-low">{t('staff.owner.action.selectAll' as TranslationKey)}</button>
+              <button type="button" onClick={() => onClearAll(group)} className="min-h-12 rounded-lg px-3 font-body text-label-sm text-primary hover:bg-surface-container-low">{t('staff.owner.action.clearAll' as TranslationKey)}</button>
             </div>
           </div>
           {permissions.filter((permission) => permission.group === group).map((permission) => {
             const enabled = selectedPermissions.includes(permission.id);
+            const switchState = t(enabled ? 'staff.owner.permissions.on' as TranslationKey : 'staff.owner.permissions.off' as TranslationKey);
             return (
               <div key={permission.id} className="flex min-h-12 items-center justify-between gap-3 rounded-lg bg-surface-container-low px-3">
                 <span className="font-body text-body-sm text-on-surface">{permission.label}</span>
                 <ToggleSwitch
                   checked={enabled}
-                  label={`${permission.label}: ${enabled ? 'On' : 'Off'}`}
+                  label={`${permission.label}: ${switchState}`}
                   onChange={() => onToggle(permission.id)}
                 />
               </div>
@@ -941,26 +946,26 @@ function StaffDrinkRulesEditor({
   return (
     <section className="flex flex-col gap-3 rounded-xl bg-surface-container-low p-3">
       <div>
-        <h3 className="font-body text-label-lg text-on-surface">Staff drinks (Prompt 5.8)</h3>
-        <p className="mt-1 font-body text-body-sm text-on-surface-variant">Select categories or items staff may take for themselves. The limit applies to the combined quantity per shift.</p>
+        <h3 className="font-body text-label-lg text-on-surface">{t('staff.owner.drinks.title' as TranslationKey)}</h3>
+        <p className="mt-1 font-body text-body-sm text-on-surface-variant">{t('staff.owner.drinks.description' as TranslationKey)}</p>
       </div>
-      <label className="font-body text-label-md">Maximum quantity per shift
+      <label className="font-body text-label-md">{t('staff.owner.drinks.maxPerShift' as TranslationKey)}
         <input type="number" min="0" step="1" required value={maxQuantity} onChange={(event) => onMaxQuantityChange(event.target.value)} className="mt-1 h-12 w-full rounded-lg bg-surface-container-lowest px-3 outline-none focus:ring-2 focus:ring-primary" />
       </label>
       <fieldset className="flex flex-col gap-2">
         <legend className="mb-1 flex w-full items-center justify-between gap-2 font-body text-label-md">
-          <span>Allowed categories</span>
-          <span className="text-label-sm text-outline">{selectedCategoryIds.length} selected</span>
+          <span>{t('staff.owner.drinks.categories' as TranslationKey)}</span>
+          <span className="text-label-sm text-outline">{t('staff.owner.drinks.selected' as TranslationKey, { count: selectedCategoryIds.length })}</span>
         </legend>
         <label className="relative block">
-          <span className="sr-only">Search categories</span>
+          <span className="sr-only">{t('staff.owner.drinks.searchCategories' as TranslationKey)}</span>
           <MaterialIcon name="search" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xl text-outline" />
           <input
             type="search"
             value={categorySearch}
             onChange={(event) => setCategorySearch(event.target.value)}
-            placeholder="Search categories"
-            aria-label="Search allowed categories"
+            placeholder={t('staff.owner.drinks.searchCategories' as TranslationKey)}
+            aria-label={t('staff.owner.drinks.searchAllowedCategories' as TranslationKey)}
             className="h-11 w-full rounded-lg bg-surface-container-lowest pl-10 pr-3 font-body text-body-sm outline-none focus:ring-2 focus:ring-primary"
           />
         </label>
@@ -971,23 +976,23 @@ function StaffDrinkRulesEditor({
               {category.name}
             </label>
           ))}
-          {visibleCategories.length === 0 && <p className="px-1 py-2 font-body text-body-sm text-outline">{categories.length === 0 ? 'No categories available.' : categoryQuery ? 'No matching categories.' : 'Search to find categories.'}</p>}
+          {visibleCategories.length === 0 && <p className="px-1 py-2 font-body text-body-sm text-outline">{t(categories.length === 0 ? 'staff.owner.drinks.noCategories' as TranslationKey : categoryQuery ? 'staff.owner.drinks.noMatchingCategories' as TranslationKey : 'staff.owner.drinks.searchToFindCategories' as TranslationKey)}</p>}
         </div>
       </fieldset>
       <fieldset className="flex flex-col gap-2">
         <legend className="mb-1 flex w-full items-center justify-between gap-2 font-body text-label-md">
-          <span>Allowed items</span>
-          <span className="text-label-sm text-outline">{selectedItemIds.length} selected</span>
+          <span>{t('staff.owner.drinks.items' as TranslationKey)}</span>
+          <span className="text-label-sm text-outline">{t('staff.owner.drinks.selected' as TranslationKey, { count: selectedItemIds.length })}</span>
         </legend>
         <label className="relative block">
-          <span className="sr-only">Search items</span>
+          <span className="sr-only">{t('staff.owner.drinks.searchItems' as TranslationKey)}</span>
           <MaterialIcon name="search" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xl text-outline" />
           <input
             type="search"
             value={itemSearch}
             onChange={(event) => setItemSearch(event.target.value)}
-            placeholder="Search items"
-            aria-label="Search allowed items"
+            placeholder={t('staff.owner.drinks.searchItems' as TranslationKey)}
+            aria-label={t('staff.owner.drinks.searchAllowedItems' as TranslationKey)}
             className="h-11 w-full rounded-lg bg-surface-container-lowest pl-10 pr-3 font-body text-body-sm outline-none focus:ring-2 focus:ring-primary"
           />
         </label>
@@ -998,7 +1003,7 @@ function StaffDrinkRulesEditor({
               {item.name}
             </label>
           ))}
-          {visibleItems.length === 0 && <p className="px-1 py-2 font-body text-body-sm text-outline">{items.length === 0 ? 'No active catalog items.' : itemQuery ? 'No matching items.' : 'Search to find items.'}</p>}
+          {visibleItems.length === 0 && <p className="px-1 py-2 font-body text-body-sm text-outline">{t(items.length === 0 ? 'staff.owner.drinks.noItems' as TranslationKey : itemQuery ? 'staff.owner.drinks.noMatchingItems' as TranslationKey : 'staff.owner.drinks.searchToFindItems' as TranslationKey)}</p>}
         </div>
       </fieldset>
     </section>

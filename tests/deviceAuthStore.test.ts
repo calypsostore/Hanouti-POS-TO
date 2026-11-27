@@ -4,10 +4,11 @@ const mocks = vi.hoisted(() => ({
   authGetCurrentUser: vi.fn(),
   authGetCachedUserDisplay: vi.fn(() => null),
   authIsSessionLocked: vi.fn(),
+  authLockCurrentSession: vi.fn(),
   authLockDeviceStaffSession: vi.fn(),
   authLogout: vi.fn(),
   deviceLogin: vi.fn(),
-  deviceStaffLogin: vi.fn(),
+  devicePinLogin: vi.fn(),
   deviceChangePassword: vi.fn(),
   deviceLogout: vi.fn(),
   deviceGetCurrent: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock('../src/services/authService', () => ({
     getCurrentUser: mocks.authGetCurrentUser,
     getCachedUserDisplay: mocks.authGetCachedUserDisplay,
     isSessionLocked: mocks.authIsSessionLocked,
+    lockCurrentSession: mocks.authLockCurrentSession,
     lockDeviceStaffSession: mocks.authLockDeviceStaffSession,
     logout: mocks.authLogout,
   },
@@ -28,7 +30,7 @@ vi.mock('../src/services/authService', () => ({
 vi.mock('../src/services/deviceService', () => ({
   deviceService: {
     loginDevice: mocks.deviceLogin,
-    loginStaffWithPin: mocks.deviceStaffLogin,
+    loginWithPin: mocks.devicePinLogin,
     changeDevicePassword: mocks.deviceChangePassword,
     logoutDevice: mocks.deviceLogout,
     getCurrentDevice: mocks.deviceGetCurrent,
@@ -69,6 +71,13 @@ const staff = {
   isActive: true,
 } satisfies UserSummary;
 
+const owner = {
+  ...staff,
+  id: 'owner-1',
+  role: 'owner',
+  name: 'Mo',
+} satisfies UserSummary;
+
 describe('shared device authentication state', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -83,19 +92,20 @@ describe('shared device authentication state', () => {
       initializationError: null,
     });
     mocks.deviceLogin.mockResolvedValue(device);
-    mocks.deviceStaffLogin.mockResolvedValue(undefined);
+    mocks.devicePinLogin.mockResolvedValue(undefined);
     mocks.deviceChangePassword.mockResolvedValue(undefined);
     mocks.deviceLogout.mockResolvedValue(undefined);
     mocks.authGetCurrentUser.mockResolvedValue(staff);
     mocks.getEffectivePermissions.mockResolvedValue(['take_orders']);
     mocks.authLockDeviceStaffSession.mockResolvedValue(undefined);
+    mocks.authLockCurrentSession.mockResolvedValue(undefined);
     mocks.authLogout.mockResolvedValue(undefined);
     mocks.signOut.mockResolvedValue({ error: null });
   });
 
   it('keeps the employee role, store identity, and permissions after device PIN sign-in', async () => {
     await useAuthStore.getState().loginDevice(device.username, 'temporary-password');
-    const signedInStaff = await useAuthStore.getState().loginStaffWithDevicePin('4826');
+    const signedInStaff = await useAuthStore.getState().loginWithDevicePin('4826');
 
     expect(signedInStaff).toMatchObject({ id: staff.id, role: 'staff', storeId: device.storeId });
     expect(useAuthStore.getState()).toMatchObject({
@@ -106,12 +116,28 @@ describe('shared device authentication state', () => {
     });
   });
 
-  it('rejects a staff session from a different store instead of switching terminal identity', async () => {
+  it('allows the store owner to sign in with their personal PIN on the shared device', async () => {
+    await useAuthStore.getState().loginDevice(device.username, 'temporary-password');
+    mocks.authGetCurrentUser.mockResolvedValue(owner);
+
+    const signedInOwner = await useAuthStore.getState().loginWithDevicePin('4826');
+
+    expect(signedInOwner).toMatchObject({ id: owner.id, role: 'owner', storeId: device.storeId });
+    expect(useAuthStore.getState()).toMatchObject({
+      user: { id: owner.id, role: 'owner', storeId: device.storeId },
+      device: { id: device.id, storeId: device.storeId },
+      locked: false,
+      permissions: [],
+      permissionsReady: true,
+    });
+  });
+
+  it('rejects an account from a different store instead of switching terminal identity', async () => {
     await useAuthStore.getState().loginDevice(device.username, 'temporary-password');
     mocks.authGetCurrentUser.mockResolvedValue({ ...staff, storeId: 'another-store' });
 
-    await expect(useAuthStore.getState().loginStaffWithDevicePin('4826'))
-      .rejects.toThrow('The staff account could not be matched to this store device.');
+    await expect(useAuthStore.getState().loginWithDevicePin('4826'))
+      .rejects.toThrow('The account could not be matched to this store device.');
     expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' });
     expect(useAuthStore.getState().user).toBeNull();
     expect(useAuthStore.getState().device?.id).toBe(device.id);
@@ -132,8 +158,41 @@ describe('shared device authentication state', () => {
     expect(mocks.clearOrder).toHaveBeenCalledOnce();
   });
 
-  it('ends both device and employee state on explicit device logout', async () => {
+  it('lets the store owner lock their shared-device session without signing out', async () => {
+    useAuthStore.setState({ user: owner, device, locked: false });
+
+    await useAuthStore.getState().lock();
+
+    expect(mocks.authLockCurrentSession).toHaveBeenCalledOnce();
+    expect(useAuthStore.getState()).toMatchObject({ user: owner, device, locked: true });
+    expect(mocks.authLogout).not.toHaveBeenCalled();
+    expect(mocks.deviceLogout).not.toHaveBeenCalled();
+  });
+
+  it('prevents a staff PIN session from signing out the shared device', async () => {
     useAuthStore.setState({ user: staff, device, locked: false });
+
+    await expect(useAuthStore.getState().logout())
+      .rejects.toThrow('Lock the account session before signing out of a shared device.');
+    await expect(useAuthStore.getState().logoutDevice())
+      .rejects.toThrow('Lock the account session before signing out of a shared device.');
+
+    expect(mocks.authLogout).not.toHaveBeenCalled();
+    expect(mocks.deviceLogout).not.toHaveBeenCalled();
+    expect(useAuthStore.getState()).toMatchObject({ user: staff, device, locked: false });
+  });
+
+  it('prevents the store owner from signing out of the shared device', async () => {
+    useAuthStore.setState({ user: owner, device, locked: false });
+
+    await expect(useAuthStore.getState().logout())
+      .rejects.toThrow('Lock the account session before signing out of a shared device.');
+    expect(mocks.authLogout).not.toHaveBeenCalled();
+    expect(mocks.deviceLogout).not.toHaveBeenCalled();
+  });
+
+  it('allows device sign-out from its PIN screen', async () => {
+    useAuthStore.setState({ user: null, device, locked: true });
 
     await useAuthStore.getState().logoutDevice();
 

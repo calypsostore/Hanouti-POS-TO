@@ -11,7 +11,10 @@ const permissionIds = new Set([
   'take_orders', 'view_order_history', 'view_all_orders', 'request_void', 'add_order_note',
   'comp_items', '86_items', 'edit_stock_counts', 'customers_view', 'customers_create',
   'customers_edit', 'use_tabs', 'settle_tabs', 'tab_override_limit', 'open_close_shift',
-  'cash_in_out', 'view_schedule', 'view_own_hours',
+  'cash_in_out', 'print_x_report', 'view_schedule', 'view_own_hours',
+  'manage_store_operations', 'view_dashboard', 'manage_catalog', 'manage_schedule',
+  'resolve_voids', 'manage_shifts', 'view_reports', 'manage_fiscal', 'view_fiscal_reports',
+  'manage_inventory', 'manage_waste', 'manage_expenses', 'manage_suppliers', 'view_activity_log',
 ]);
 
 interface CallerProfile {

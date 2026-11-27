@@ -6,6 +6,7 @@ import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
 import { CardGrid, PageHeader } from '../components/layout';
 import { t } from '../i18n/translations';
+import { getLanguage } from '../i18n';
 import { activityService, type ActivityFilters } from '../services/activityService';
 import { useAuthStore } from '../stores/authStore';
 import { userService } from '../services/userService';
@@ -112,7 +113,7 @@ export function OwnerActivityLogScreen() {
         </div>
       </section>
       <CardGrid className="mobile-card-list mobile-gap-2">
-        {loading ? <ListSkeleton label="Loading activity" /> : entries.map((entry) => (
+        {loading ? <ListSkeleton label={t('activity.loading')} /> : entries.map((entry) => (
           <ActivityEntry key={entry.id} entry={entry} onSelect={() => setSelectedEntry(entry)} />
         ))}
         {!loading && !error && entries.length === 0 && <p className="rounded-xl bg-surface-container-lowest p-6 text-center font-body text-body-md text-outline">{t('common.noData')}</p>}
@@ -122,8 +123,8 @@ export function OwnerActivityLogScreen() {
           <div className="flex flex-col gap-4">
             <p className="font-body text-body-md text-on-surface">{selectedEntry.summary}</p>
             <dl className="grid grid-cols-2 gap-3 rounded-lg bg-surface-container-low p-3 font-body text-body-sm">
-              <div><dt className="text-outline">By</dt><dd className="text-on-surface">{selectedEntry.actorName}</dd></div>
-              <div><dt className="text-outline">When</dt><dd className="text-on-surface">{new Date(selectedEntry.createdAt).toLocaleString()}</dd></div>
+              <div><dt className="text-outline">{t('activity.by')}</dt><dd className="text-on-surface">{selectedEntry.actorName}</dd></div>
+              <div><dt className="text-outline">{t('activity.when')}</dt><dd className="text-on-surface">{new Date(selectedEntry.createdAt).toLocaleString(getLanguage())}</dd></div>
             </dl>
           </div>
         )}
@@ -141,7 +142,7 @@ function ActivityEntry({ entry, onSelect }: { entry: ActivityRecord; onSelect: (
       <span className="min-w-0 flex-1">
         <span className="block break-words font-body text-label-md text-on-surface">{entry.summary}</span>
         <span className="mt-1 block break-words font-body text-body-sm text-on-surface-variant">
-          {entry.actorName} · {new Date(entry.createdAt).toLocaleString()}
+          {entry.actorName} · {new Date(entry.createdAt).toLocaleString(getLanguage())}
         </span>
       </span>
       <MaterialIcon name="chevron_right" className="mt-1 text-outline" />

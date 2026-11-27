@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from './Button';
 import type { UpdateCheckResult } from '../services/updateService';
+import { t } from '../i18n/translations';
 import {
   shouldShowUpdateModal,
   UPDATE_REMINDER_DELAY_MS,
   type UpdateReminder,
 } from '../services/updateModalLogic';
 import { useOverlayLifecycle, useOverlayTarget } from './overlay/overlayArchitecture';
+import { localizeErrorMessage } from '../i18n';
 
 export function UpdateRequiredModal({ result }: { result: UpdateCheckResult | null }) {
   const [updating, setUpdating] = useState(false);
@@ -48,7 +50,7 @@ export function UpdateRequiredModal({ result }: { result: UpdateCheckResult | nu
       if (active) setHasUnsavedWork(updateService.hasUnsavedChanges());
     }).catch((loadError: unknown) => {
       console.error('[updates] Could not check for unsaved work.', loadError);
-      if (active) setError('Could not check whether there is unsaved work.');
+      if (active) setError(t('updates.checkUnsavedFailed'));
     });
     return () => { active = false; };
   }, [visible]);
@@ -64,7 +66,7 @@ export function UpdateRequiredModal({ result }: { result: UpdateCheckResult | nu
       await updateService.applyUpdate();
     } catch (updateError) {
       console.error('[updates] Could not apply the required update.', updateError);
-      setError(updateError instanceof Error ? updateError.message : 'Could not apply the update.');
+      setError(localizeErrorMessage(updateError, t('updates.applyFailed')));
     } finally {
       setUpdating(false);
     }
@@ -91,23 +93,23 @@ export function UpdateRequiredModal({ result }: { result: UpdateCheckResult | nu
         className="glass-modal-panel required-update-dialog-panel max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl bg-surface-container-lowest p-6 shadow-overlay"
       >
         <h1 id="required-update-title" className="font-display text-headline-lg text-on-surface">
-          Update required
+          {t('updates.requiredTitle')}
         </h1>
         <p id="required-update-message" className="mt-3 font-body text-body-md text-on-surface-variant">
-          A new version is available. Please update to continue.
+          {t('updates.availableMessage')}
         </p>
         <div className="mt-4 space-y-1 font-body text-body-sm text-on-surface">
-          <p>Current: v{result.currentVersion} (build {result.currentBuild})</p>
-          <p>New: v{result.latestVersion ?? 'unknown'} (build {result.latestBuild ?? 'unknown'})</p>
+          <p>{t('updates.currentVersion', { version: result.currentVersion, build: result.currentBuild })}</p>
+          <p>{t('updates.newVersion', { version: result.latestVersion ?? 'unknown', build: result.latestBuild ?? 'unknown' })}</p>
         </div>
         {hasUnsavedWork && (
           <p className="mt-4 rounded-lg bg-warning-container p-3 font-body text-body-sm text-on-warning-container">
-            You have unsaved work. You will be asked to confirm before the app reloads.
+            {t('updates.unsavedWork')}
           </p>
         )}
         {bundled && !result.latestApkUrl && (
           <p role="alert" className="mt-4 font-body text-body-sm text-error">
-            {result.error ?? 'The APK download link is not available yet.'}
+            {result.error ?? t('updates.apkUnavailable')}
           </p>
         )}
         {error && <p role="alert" className="mt-4 font-body text-body-sm text-error">{error}</p>}
@@ -116,7 +118,7 @@ export function UpdateRequiredModal({ result }: { result: UpdateCheckResult | nu
           disabled={updating || (bundled && !result.latestApkUrl)}
           className="mt-6 min-h-14 w-full text-label-lg"
         >
-          {updating ? 'Updating…' : bundled ? 'Download the new APK' : 'Update now'}
+          {updating ? t('updates.updating') : bundled ? t('updates.downloadNewApk') : t('updates.updateNow')}
         </Button>
         <Button
           variant="secondary"
@@ -124,7 +126,7 @@ export function UpdateRequiredModal({ result }: { result: UpdateCheckResult | nu
           disabled={updating}
           className="mt-3 min-h-12 w-full"
         >
-          Remind me after 5 minutes
+          {t('updates.remindLater')}
         </Button>
       </section>
     </div>

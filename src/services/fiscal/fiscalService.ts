@@ -34,8 +34,10 @@ async function assertStoreOwner(storeId: string, actorId: string): Promise<void>
     userService.getStore(storeId),
     userService.getUser(actorId),
   ]);
-  if (!store || !actor || !actor.isActive || actor.role !== 'owner' || actor.id !== store.ownerId || actor.storeId !== storeId) {
-    throw new Error('Only the active owner of this store can change its fiscal configuration.');
+  const isOwner = Boolean(actor && store && actor.role === 'owner' && actor.id === store.ownerId);
+  if (!store || !actor || !actor.isActive || actor.storeId !== storeId ||
+    (!isOwner && !await userService.hasPermission(actorId, 'manage_fiscal'))) {
+    throw new Error('This account does not have permission to change fiscal configuration.');
   }
 }
 
@@ -214,7 +216,7 @@ export const fiscalService = {
       storeId,
       actorId,
       action: 'fiscal.tax_rule_confirmed',
-      summary: `Owner confirmed fiscal tax rule "${rule.name}" version ${rule.version}.`,
+      summary: `Confirmed fiscal tax rule "${rule.name}" version ${rule.version}.`,
       entityType: 'fiscal_tax_rule',
       entityId: `${ruleId}:${version}`,
       meta: { after: { status: 'active', legalReference: reference } },
@@ -227,8 +229,10 @@ export const fiscalService = {
     actorId: string,
   ): Promise<FiscalTaxAssignmentRecord> {
     await assertStoreOwner(input.storeId, actorId);
-    if ((!input.itemId && !input.categoryId) || (input.itemId && input.categoryId)) {
-      throw new Error('A fiscal classification must target exactly one item or category.');
+    if ((input.itemId !== undefined && !input.itemId.trim()) ||
+      (input.categoryId !== undefined && !input.categoryId.trim()) ||
+      (input.itemId && input.categoryId)) {
+      throw new Error('A fiscal classification must target all products, one item, or one category.');
     }
     if (!isDate(input.effectiveFrom) || (input.effectiveThrough && !isDate(input.effectiveThrough)) ||
       (input.effectiveThrough && input.effectiveThrough < input.effectiveFrom)) {
@@ -291,7 +295,7 @@ export const fiscalService = {
       summary: `Recorded ${assignment.taxType} treatment "${assignment.treatment}".`,
       entityType: 'fiscal_tax_assignment',
       entityId: assignment.id,
-      meta: { after: { taxType: assignment.taxType, treatment: assignment.treatment, itemId: assignment.itemId, categoryId: assignment.categoryId } },
+      meta: { after: { taxType: assignment.taxType, treatment: assignment.treatment, itemId: assignment.itemId, categoryId: assignment.categoryId, allProducts: !assignment.itemId && !assignment.categoryId } },
     });
     return assignment;
   },

@@ -58,8 +58,9 @@ function balanceForSupplier(supplierId: string, expenses = getExpenses(), paymen
 
 async function assertOwner(storeId: string, actorId: string): Promise<void> {
   const [store, actor] = await Promise.all([userService.getStore(storeId), userService.getUser(actorId)]);
-  if (!store || !actor || actor.role !== 'owner' || actor.storeId !== store.id || store.ownerId !== actor.id) {
-    throw new Error('Only this store owner can manage suppliers and expenses.');
+  const isOwner = Boolean(store && actor && actor.role === 'owner' && store.ownerId === actor.id);
+  if (!store || !actor || actor.storeId !== store.id || (!isOwner && !await userService.hasPermission(actorId, 'manage_suppliers'))) {
+    throw new Error('This account does not have permission to manage suppliers.');
   }
 }
 

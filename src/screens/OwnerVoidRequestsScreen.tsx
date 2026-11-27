@@ -8,6 +8,7 @@ import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { ownerWorkspaceLinks } from '../app/navigation';
 import { CardGrid, PageHeader } from '../components/layout';
 import { t } from '../i18n/translations';
+import { getLanguage, localizeErrorMessage } from '../i18n';
 import { formatTnd } from '../lib/format';
 import { orderService } from '../services/orderService';
 import { useAuthStore } from '../stores/authStore';
@@ -36,7 +37,7 @@ function OwnerVoidRequestsContent() {
       const orders = (await orderService.listAll(storeId)).filter((order) => order.status === 'pending_void');
       const staff = await Promise.all(orders.map((order) => userService.getUser(order.staffId)));
       setRequests(orders);
-      setStaffNames(Object.fromEntries(orders.map((order, index) => [order.staffId, staff[index]?.name ?? 'Staff'])));
+      setStaffNames(Object.fromEntries(orders.map((order, index) => [order.staffId, staff[index]?.name ?? t('common.staff')])));
     } finally {
       setLoading(false);
     }
@@ -67,27 +68,29 @@ function OwnerVoidRequestsContent() {
       await orderService.resolveVoidRequest(order.id, ownerId, decision, voidReasons[order.id]);
       await refreshRequests();
       setActiveRequest(null);
-      setNotice(decision === 'approve' ? `Order #${order.number} voided.` : `Void request for #${order.number} rejected.`);
+      setNotice(decision === 'approve'
+        ? t('voids.approvedNotice', { number: order.number })
+        : t('voids.rejectedNotice', { number: order.number }));
     } catch (resolveError) {
-      setError(resolveError instanceof Error ? resolveError.message : 'Unable to resolve this request.');
+      setError(localizeErrorMessage(resolveError, t('voids.unableToResolve')));
     }
   }
 
   return (
     <WorkspaceLayout title={t('voids.title')} storeName={storeName} links={ownerWorkspaceLinks}>
-      <PageHeader title={t('voids.title')} subtitle="Approve or reject staff requests to void completed orders." />
+      <PageHeader title={t('voids.title')} subtitle={t('voids.subtitle')} />
       {error && <p role="alert" className="mb-3 rounded-lg bg-error-container p-3 font-body text-body-sm text-on-error-container">{error}</p>}
       {notice && <p role="status" className="mb-3 rounded-lg bg-success-container p-3 font-body text-body-sm text-on-success-container">{notice}</p>}
       <CardGrid className="mobile-card-list mobile-gap-3">
-        {loading ? <ListSkeleton label="Loading void requests" /> : requests.map((order) => {
+        {loading ? <ListSkeleton label={t('voids.loading')} /> : requests.map((order) => {
           return (
             <article key={order.id} className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest p-4 shadow-card">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  <h2 className="font-display text-headline-sm text-on-surface">Order #{order.number}</h2>
-                  <p className="mt-1 font-body text-body-sm text-outline">{t('voids.requestedBy', { name: staffNames[order.staffId] ?? 'Staff' })} • {order.voidRequestedAt ? new Date(order.voidRequestedAt).toLocaleString() : ''}</p>
+                  <h2 className="font-display text-headline-sm text-on-surface">{t('voids.orderNumber', { number: order.number })}</h2>
+                  <p className="mt-1 font-body text-body-sm text-outline">{t('voids.requestedBy', { name: staffNames[order.staffId] ?? t('common.staff') })} • {order.voidRequestedAt ? new Date(order.voidRequestedAt).toLocaleString(getLanguage()) : ''}</p>
                 </div>
-                <StatusTag status="pending">Awaiting owner</StatusTag>
+                <StatusTag status="pending">{t('voids.awaitingOwner')}</StatusTag>
               </div>
               <div className="rounded-xl bg-surface-container-low p-3">
                 {order.items.map((item, index) => (
@@ -97,11 +100,11 @@ function OwnerVoidRequestsContent() {
                   </div>
                 ))}
                 <div className="mt-2 flex justify-between border-t border-outline-variant pt-2 font-body text-label-md">
-                  <span>Total</span><span className="tabular-nums">{formatTnd(order.totalMillimes / 1000)} DT</span>
+                  <span>{t('voids.total')}</span><span className="tabular-nums">{formatTnd(order.totalMillimes / 1000)} DT</span>
                 </div>
               </div>
               <Button className="w-full" variant="secondary" onClick={() => setActiveRequest(order)}>
-                <MaterialIcon name="edit_note" />Review request
+                <MaterialIcon name="edit_note" />{t('voids.reviewRequest')}
               </Button>
             </article>
           );
@@ -111,12 +114,12 @@ function OwnerVoidRequestsContent() {
       <BottomSheet
         open={activeRequest !== null}
         onClose={() => setActiveRequest(null)}
-        title={`Review order #${activeRequest?.number ?? ''}`}
+        title={t('voids.reviewOrder', { number: activeRequest?.number ?? '' })}
       >
         {activeRequest && (
           <div className="flex flex-col gap-3">
             <label className="font-body text-label-md text-on-surface">
-              Reason required to approve void
+              {t('voids.reasonRequired')}
               <textarea
                 autoFocus
                 value={voidReasons[activeRequest.id] ?? activeRequest.voidReason ?? ''}
@@ -126,7 +129,10 @@ function OwnerVoidRequestsContent() {
             </label>
             {activeRequest.paymentMethod === 'cash' && (
               <p className="rounded-lg bg-surface-container-low p-3 font-body text-body-sm text-on-surface-variant">
-                Reject returns {formatTnd(activeRequest.totalMillimes / 1000)} DT to {staffNames[activeRequest.staffId] ?? 'the staff member'}'s expected cash.
+                {t('voids.rejectCashReturn', {
+                  amount: formatTnd(activeRequest.totalMillimes / 1000),
+                  name: staffNames[activeRequest.staffId] ?? t('voids.theStaffMember'),
+                })}
               </p>
             )}
             <div className="sheet-action-bar grid grid-cols-2 gap-2">

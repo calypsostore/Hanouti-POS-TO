@@ -9,6 +9,8 @@ type Setter<T> = Dispatch<SetStateAction<T>>;
 
 export interface ShiftDialogsProps {
   ownerMode: boolean;
+  blind: boolean;
+  blindStaffId?: string;
   store: StoreRecord | undefined;
   openShiftSheetOpen: boolean;
   closeStartingCashSheet: () => void;
@@ -58,7 +60,6 @@ export interface ShiftDialogsProps {
   parsedZCountedCash: number | undefined;
   parsedZCardMillimes: number | undefined;
   parsedZOtherMillimes: number | undefined;
-  hasZDifference: boolean;
   hasZCountInputs: boolean;
   closeShiftSheetOpen: boolean;
   ownOpenShift: ShiftRecord | undefined;

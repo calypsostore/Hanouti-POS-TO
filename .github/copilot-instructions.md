@@ -1,5 +1,36 @@
 # Copilot instructions
 
+## Platform localization and code organization
+
+For every platform change, keep all app-owned user-facing content available in
+English, French, and Arabic. Follow the
+[`platform-localization` skill](skills/platform-localization/SKILL.md) whenever
+adding or changing UI, notifications, reports, exports, or printable content.
+Do not call localization complete until the affected surfaces have been audited
+and locale parity has been validated.
+
+- Put translations in the appropriate section catalog under
+  `src/i18n/locales/{en,fr,ar}/`; keep the locale aggregators in sync.
+- Keep all customer tickets, kitchen tickets, statements, X/Z reports, and other
+  printed ticket/report wording in the dedicated ticket catalogs. Do not mix
+  ticket wording into general UI catalogs.
+- Translate app-owned labels, actions, dialogs, validation and error messages,
+  empty/loading states, tooltips, accessibility text, notifications, chart
+  labels, and CSV/PDF output. Avoid hardcoded UI strings and English-only
+  fallbacks.
+- Keep keys and interpolation placeholders aligned in all three languages.
+  Preserve Arabic RTL behavior and use the active language for date, time, and
+  money display.
+- Do not translate customer/store-entered content, proper names, or standard
+  technical/currency identifiers. If stored generated content cannot change
+  language when the UI language changes, document that limitation rather than
+  claiming it is fully localized.
+- Keep catalogs sectioned and code changes focused; reuse existing i18n helpers
+  instead of duplicating translation or formatting logic.
+- Validate the relevant locale and ticket parity tests, typecheck, lint, and
+  production build. Scan the changed UI for remaining hardcoded text and
+  locale-implicit formatting.
+
 ## Android APK download link
 
 When the user requests an Android APK release, use two separate pushes:

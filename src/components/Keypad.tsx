@@ -21,7 +21,7 @@ export function Keypad({ onPress, onClear, onBackspace, disabled = false, decima
       ))}
       <button type="button" disabled={disabled} onClick={onClear} className="h-14 rounded-xl bg-surface-container-high font-body text-label-md text-on-surface-variant disabled:opacity-40">{t('keypad.clear')}</button>
       <button type="button" disabled={disabled} onClick={() => onPress('0')} className="h-14 rounded-xl bg-surface-container font-display text-headline-md text-on-surface disabled:opacity-40">0</button>
-      {decimal && <button type="button" disabled={disabled} onClick={() => onPress('.')} aria-label="Decimal point" className="h-14 rounded-xl bg-surface-container font-display text-headline-md text-on-surface disabled:opacity-40">.</button>}
+      {decimal && <button type="button" disabled={disabled} onClick={() => onPress('.')} aria-label={t('keypad.decimalPoint')} className="h-14 rounded-xl bg-surface-container font-display text-headline-md text-on-surface disabled:opacity-40">.</button>}
       <button type="button" disabled={disabled} aria-label={t('keypad.deleteDigit')} onClick={onBackspace} className="flex h-14 items-center justify-center rounded-xl bg-surface-container-high text-on-surface-variant disabled:opacity-40">
         <MaterialIcon name="backspace" />
       </button>

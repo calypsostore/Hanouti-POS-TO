@@ -14,20 +14,34 @@ import { readData, writeData } from './storage';
 import { customerService } from './customerService';
 import type { CustomerCreditStatus, CustomerDueInfo } from './customerService';
 import { userService } from './userService';
+import { getSubscriptionDaysRemaining } from '../lib/subscriptionExpiry';
 import { getSupabaseClient } from '../data/supabaseClient';
 import { isSupabaseDriver } from '../data/driver';
 import { permissionService } from './permissionService';
+import { compareNotificationsNewestFirst, type NotificationCursor } from '../lib/notificationOrder';
+import { getLanguage, t } from '../i18n';
 
 export interface CustomerCreditAlert {
   customerId: string;
   customerName: string;
+  kind: 'overdue' | 'limit' | 'nearLimit';
   severity: 'warning' | 'error';
-  message: string;
 }
 
 export const OWNER_NOTIFICATIONS_CHANGED_EVENT = 'owner-notifications-changed';
+export const OWNER_DASHBOARD_NOTIFICATION_TYPES: readonly NotificationType[] = [
+  'customer_overdue',
+  'stock_depleted',
+  'item_86',
+  'low_stock',
+  'cash_out_alert',
+  'cash_difference',
+  'void_requested',
+  'subscription_expiring',
+];
 const USER_NOTIFICATION_PREFERENCES_KEY = 'notification-user-preferences';
 const overdueChecks = new Map<string, Promise<number>>();
+const subscriptionChecks = new Map<string, Promise<void>>();
 
 export function keepUnresolvedItem86Notifications(
   notifications: NotificationRecord[],
@@ -38,6 +52,18 @@ export function keepUnresolvedItem86Notifications(
     if (notification.type !== 'item_86' || !notification.catalogItemId) return true;
     return outOfStockById.get(notification.catalogItemId) !== false;
   });
+}
+
+export function selectOwnerDashboardNotifications(
+  notifications: NotificationRecord[],
+  catalogItems: Pick<CatalogItemRecord, 'id' | 'outOfStock'>[],
+): NotificationRecord[] {
+  return keepUnresolvedItem86Notifications(
+    [...notifications].sort(compareNotificationsNewestFirst),
+    catalogItems,
+  )
+    .slice(0, 5)
+    .filter((notification) => !notification.readAt);
 }
 
 function notifyChanged(): void {
@@ -88,6 +114,22 @@ export function shouldRegisterPushNotifications(
   storeId?: string,
 ): boolean {
   return enabled && isNative && usesSupabase && Boolean(storeId);
+}
+
+export function notificationRecipientFilter(
+  user: Pick<UserRecord, 'id' | 'role'>,
+  cursor?: NotificationCursor,
+  direction: 'after' | 'before' = 'before',
+): string {
+  if (!cursor) return `user_id.eq.${user.id},and(user_id.is.null,target_role.eq.${user.role})`;
+
+  const operator = direction === 'after' ? 'gt' : 'lt';
+  return [
+    `and(user_id.eq.${user.id},created_at.${operator}.${cursor.createdAt})`,
+    `and(user_id.eq.${user.id},created_at.eq.${cursor.createdAt},id.${operator}.${cursor.id})`,
+    `and(user_id.is.null,target_role.eq.${user.role},created_at.${operator}.${cursor.createdAt})`,
+    `and(user_id.is.null,target_role.eq.${user.role},created_at.eq.${cursor.createdAt},id.${operator}.${cursor.id})`,
+  ].join(',');
 }
 
 export function mapNotificationRow(row: Record<string, unknown>): NotificationRecord {
@@ -143,7 +185,6 @@ async function createForUser(
     const row = data as Record<string, unknown>;
     const notification = mapNotificationRow(row);
     notifyChanged();
-    await showLocalNotificationForActiveUser(notification);
     return notification;
   }
   const store = await userService.getStore(input.storeId ?? user.storeId ?? '');
@@ -196,10 +237,12 @@ async function notifyOwnerAnd86Staff(
   await Promise.all(recipients.map((recipient) => createForUser(recipient, {
     storeId,
     type,
-    title: type === 'stock_depleted' ? 'Stock depleted' : 'Item marked 86',
+    title: type === 'stock_depleted'
+      ? t('notificationsContent.stockDepletedTitle')
+      : t('notificationsContent.item86Title'),
     body: type === 'stock_depleted'
-      ? `${itemName} has reached 0 in tracked stock.`
-      : `${itemName} was marked 86.`,
+      ? t('notificationsContent.stockDepletedBody', { name: itemName })
+      : t('notificationsContent.item86Body', { name: itemName }),
     entityType: 'catalog_item',
     entityId: catalogItemId,
     catalogItemId,
@@ -255,30 +298,61 @@ export const notificationService = {
 
   async listFor(
     user: Pick<UserRecord, 'id' | 'role' | 'storeId'>,
-    before?: string,
+    before?: NotificationCursor,
   ): Promise<NotificationRecord[]> {
     if (isSupabaseDriver()) {
       if (!user.storeId) return [];
-      let query = getSupabaseClient()
+      const query = getSupabaseClient()
         .from('notifications')
         .select('*')
         .eq('store_id', user.storeId)
-        .or(`user_id.eq.${user.id},and(user_id.is.null,target_role.eq.${user.role})`)
+        .or(notificationRecipientFilter(user, before, 'before'))
         .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
         .limit(50);
-      if (before) query = query.lt('created_at', before);
       const { data, error } = await query;
       if (error) throw new Error(`Could not load notifications: ${error.message}`, { cause: error });
-      return (data ?? []).map((row) => mapNotificationRow(row as unknown as Record<string, unknown>));
+      return (data ?? [])
+        .map((row) => mapNotificationRow(row as unknown as Record<string, unknown>))
+        .sort(compareNotificationsNewestFirst);
     }
     const notifications = getNotifications()
       .filter((notification) =>
         (!notification.storeId || notification.storeId === user.storeId) &&
         (notification.userId === user.id || notification.targetRole === user.role),
       )
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+      .sort(compareNotificationsNewestFirst);
     return notifications
-      .filter((notification) => !before || notification.createdAt < before)
+      .filter((notification) => !before || compareNotificationsNewestFirst(notification, before) > 0)
+      .slice(0, 50);
+  },
+
+  async listImportantForDashboard(
+    user: Pick<UserRecord, 'id' | 'role' | 'storeId'>,
+  ): Promise<NotificationRecord[]> {
+    if (isSupabaseDriver()) {
+      if (!user.storeId) return [];
+      const { data, error } = await getSupabaseClient()
+        .from('notifications')
+        .select('*')
+        .eq('store_id', user.storeId)
+        .in('type', [...OWNER_DASHBOARD_NOTIFICATION_TYPES])
+        .or(notificationRecipientFilter(user))
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(50);
+      if (error) throw new Error(`Could not load owner dashboard notifications: ${error.message}`, { cause: error });
+      return (data ?? [])
+        .map((row) => mapNotificationRow(row as unknown as Record<string, unknown>))
+        .sort(compareNotificationsNewestFirst);
+    }
+    return getNotifications()
+      .filter((notification) =>
+        (!notification.storeId || notification.storeId === user.storeId) &&
+        (notification.userId === user.id || notification.targetRole === user.role) &&
+        OWNER_DASHBOARD_NOTIFICATION_TYPES.includes(notification.type),
+      )
+      .sort(compareNotificationsNewestFirst)
       .slice(0, 50);
   },
 
@@ -368,8 +442,11 @@ export const notificationService = {
           storeId,
           userId: ownerId,
           type: 'customer_overdue' as const,
-          title: 'Customer tab overdue',
-          body: `${customer.name} is overdue on their customer tab. The oldest unpaid balance is ${formatTnd(balanceMillimes / 1000)} DT.`,
+          title: t('notificationsContent.customerOverdueTitle'),
+          body: t('notificationsContent.customerOverdueBody', {
+            name: customer.name,
+            amount: formatTnd(balanceMillimes / 1000),
+          }),
           entityType: 'customer',
           entityId: customer.id,
           customerId: customer.id,
@@ -400,38 +477,50 @@ export const notificationService = {
   },
 
   async checkSubscriptionExpiring(storeId: string): Promise<void> {
-    const store = await userService.getStore(storeId);
-    if (!store?.subscription?.paidUntil) return;
-    const expiry = new Date(`${store.subscription.paidUntil}T00:00:00`);
-    if (Number.isNaN(expiry.getTime())) throw new Error('The store subscription expiry date is invalid.');
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const daysRemaining = Math.round((expiry.getTime() - today.getTime()) / 86_400_000);
-    if (daysRemaining !== 7) return;
-    const owner = await userService.getUser(store.ownerId);
-    if (!owner || owner.role !== 'owner') throw new Error('The store owner could not be found for subscription notifications.');
-    const alreadyNotified = (isSupabaseDriver() ? await this.listFor(owner) : getNotifications()).some((notification) =>
-      notification.userId === owner.id &&
-      notification.type === 'subscription_expiring' &&
-      notification.entityId === store.subscription?.paidUntil,
-    );
-    if (alreadyNotified) return;
-    await createForUser(owner, {
-      storeId,
-      type: 'subscription_expiring',
-      title: 'Subscription expiring soon',
-      body: `Your store subscription expires on ${store.subscription.paidUntil}.`,
-      entityType: 'store',
-      entityId: store.subscription.paidUntil,
-    });
+    const currentCheck = subscriptionChecks.get(storeId);
+    if (currentCheck) return currentCheck;
+    const check = (async () => {
+      const store = await userService.getStore(storeId);
+      if (!store?.subscription?.paidUntil) return;
+      const daysRemaining = getSubscriptionDaysRemaining(store.subscription.paidUntil);
+      if (daysRemaining === null) throw new Error('The store subscription expiry date is invalid.');
+      if (daysRemaining !== 7) return;
+      const owner = await userService.getUser(store.ownerId);
+      if (!owner || owner.role !== 'owner') throw new Error('The store owner could not be found for subscription notifications.');
+      const alreadyNotified = (isSupabaseDriver() ? await this.listFor(owner) : getNotifications()).some((notification) =>
+        notification.userId === owner.id &&
+        notification.type === 'subscription_expiring' &&
+        notification.entityId === store.subscription?.paidUntil,
+      );
+      if (alreadyNotified) return;
+      await createForUser(owner, {
+        storeId,
+        type: 'subscription_expiring',
+        title: t('notificationsContent.subscriptionExpiringTitle'),
+        body: t('notificationsContent.subscriptionExpiringBody', {
+          date: new Date(`${store.subscription.paidUntil}T00:00:00`).toLocaleDateString(getLanguage()),
+        }),
+        entityType: 'store',
+        entityId: store.subscription.paidUntil,
+      });
+    })();
+    subscriptionChecks.set(storeId, check);
+    try {
+      await check;
+    } finally {
+      if (subscriptionChecks.get(storeId) === check) subscriptionChecks.delete(storeId);
+    }
   },
 
   async notifyVoidRequested(order: OrderRecord): Promise<void> {
     const staff = await userService.getUser(order.staffId);
     await notifyOwner(order.storeId, {
       type: 'void_requested',
-      title: 'Void request awaiting review',
-      body: `${staff?.name ?? 'A staff member'} requested to void order #${order.number}.`,
+      title: t('notificationsContent.voidRequestedTitle'),
+      body: t('notificationsContent.voidRequestedBody', {
+        name: staff?.name ?? t('notificationsContent.staffMember'),
+        number: order.number,
+      }),
       entityType: 'order',
       entityId: order.id,
     });
@@ -443,10 +532,10 @@ export const notificationService = {
     await createForUser(staff, {
       storeId: order.storeId,
       type: approved ? 'void_approved' : 'void_rejected',
-      title: approved ? 'Void request approved' : 'Void request rejected',
+      title: t(approved ? 'notificationsContent.voidApprovedTitle' : 'notificationsContent.voidRejectedTitle'),
       body: approved
-        ? `Your request to void order #${order.number} was approved.`
-        : `Your request to void order #${order.number} was rejected.`,
+        ? t('notificationsContent.voidApprovedBody', { number: order.number })
+        : t('notificationsContent.voidRejectedBody', { number: order.number }),
       entityType: 'order',
       entityId: order.id,
     });
@@ -460,8 +549,8 @@ export const notificationService = {
       createForUser(member, {
         storeId,
         type: 'schedule_published',
-        title: 'Schedule published',
-        body: `Your work schedule for ${weekLabel} is published.`,
+        title: t('notificationsContent.schedulePublishedTitle'),
+        body: t('notificationsContent.schedulePublishedBody', { week: weekLabel }),
         entityType: 'schedule',
         entityId: weekLabel,
       }),
@@ -479,8 +568,8 @@ export const notificationService = {
   async notifyLowStock(storeId: string, catalogItemId: string, itemName: string, stockCount: number, threshold: number): Promise<void> {
     await notifyOwner(storeId, {
       type: 'low_stock',
-      title: 'Low stock',
-      body: `${itemName} has ${stockCount} units remaining (low-stock threshold: ${threshold}).`,
+      title: t('notificationsContent.lowStockTitle'),
+      body: t('notificationsContent.lowStockBody', { name: itemName, count: stockCount, threshold }),
       entityType: 'catalog_item',
       entityId: catalogItemId,
       catalogItemId,
@@ -490,8 +579,8 @@ export const notificationService = {
   async notifyShiftOpened(shiftId: string, storeId: string, staffName: string): Promise<void> {
     await notifyOwner(storeId, {
       type: 'shift_opened',
-      title: 'Shift opened',
-      body: `${staffName} opened a shift.`,
+      title: t('notificationsContent.shiftOpenedTitle'),
+      body: t('notificationsContent.shiftOpenedBody', { name: staffName }),
       entityType: 'shift',
       entityId: shiftId,
       shiftId,
@@ -501,8 +590,8 @@ export const notificationService = {
   async notifyShiftClosed(shiftId: string, storeId: string, staffName: string, differenceMillimes: number): Promise<void> {
     await notifyOwner(storeId, {
       type: 'shift_closed',
-      title: 'Shift closed',
-      body: `${staffName} closed their shift.`,
+      title: t('notificationsContent.shiftClosedTitle'),
+      body: t('notificationsContent.shiftClosedBody', { name: staffName }),
       entityType: 'shift',
       entityId: shiftId,
       shiftId,
@@ -510,8 +599,11 @@ export const notificationService = {
     if (differenceMillimes !== 0) {
       await notifyOwner(storeId, {
         type: 'cash_difference',
-        title: 'Cash difference at close',
-        body: `${staffName}'s shift closed with a cash difference of ${formatTnd(differenceMillimes / 1000)} DT.`,
+        title: t('notificationsContent.cashDifferenceTitle'),
+        body: t('notificationsContent.cashDifferenceBody', {
+          name: staffName,
+          amount: formatTnd(differenceMillimes / 1000),
+        }),
         entityType: 'shift',
         entityId: shiftId,
         shiftId,
@@ -526,8 +618,15 @@ export const notificationService = {
     if (movement.kind !== 'out' || movement.amountMillimes <= thresholdMillimes) return;
     await notifyOwner(store.id, {
       type: 'cash_out_alert',
-      title: 'Large cash withdrawal',
-      body: `${staffName} recorded a cash out of ${formatTnd(movement.amountMillimes / 1000)} DT for ${movement.reason}${movement.note ? `: ${movement.note}` : '.'}`,
+      title: t('notificationsContent.cashOutTitle'),
+      body: t('notificationsContent.cashOutBody', {
+        name: staffName,
+        amount: formatTnd(movement.amountMillimes / 1000),
+        reason: movement.reason,
+        note: movement.note
+          ? t('notificationsContent.noteSuffix', { note: movement.note })
+          : '.',
+      }),
       entityType: 'cash_movement',
       entityId: movement.id,
       shiftId: movement.shiftId,
@@ -548,8 +647,8 @@ export const notificationService = {
     if (reached80) {
       await notifyOwner(storeId, {
         type: 'customer_credit_warning',
-        title: 'Customer nearing credit limit',
-        body: `${customerName} has used at least 80% of their credit limit.`,
+        title: t('notificationsContent.customerCreditWarningTitle'),
+        body: t('notificationsContent.customerCreditWarningBody', { name: customerName }),
         entityType: 'customer',
         entityId: customerId,
         customerId,
@@ -558,8 +657,8 @@ export const notificationService = {
     if (reached100) {
       await notifyOwner(storeId, {
         type: 'customer_credit_limit',
-        title: 'Customer credit limit reached',
-        body: `${customerName} has reached their credit limit.`,
+        title: t('notificationsContent.customerCreditLimitTitle'),
+        body: t('notificationsContent.customerCreditLimitBody', { name: customerName }),
         entityType: 'customer',
         entityId: customerId,
         customerId,
@@ -570,8 +669,10 @@ export const notificationService = {
   async notifyZReportClosed(storeId: string, reportId: string, zNumber?: number): Promise<void> {
     await notifyOwner(storeId, {
       type: 'z_report_closed',
-      title: 'Z report closed',
-      body: zNumber === undefined ? 'The Z report was closed.' : `Z report #${zNumber} was closed.`,
+      title: t('notificationsContent.zReportClosedTitle'),
+      body: zNumber === undefined
+        ? t('notificationsContent.zReportClosedWithoutNumber')
+        : t('notificationsContent.zReportClosedBody', { number: zNumber }),
       entityType: 'report',
       entityId: reportId,
     });
@@ -585,16 +686,16 @@ export const notificationService = {
         notification.type === 'app_update' && notification.userId === user.id && notification.entityId === buildId,
       ) ? undefined : user;
     }));
-    const body = `Version ${version} (build ${buildId}) is ready to install.`;
+    const body = t('notificationsContent.appUpdateBody', { version, build: buildId });
     await Promise.all(recipients.filter((user): user is NonNullable<typeof user> => Boolean(user)).map((user) => createForUser(user, {
       type: 'app_update',
-      title: 'Update available',
+      title: t('notificationsContent.appUpdateTitle'),
       body,
       entityType: 'app',
       entityId: buildId,
     })));
     try {
-      await permissionService.showLocalNotification('Update available', body);
+      await permissionService.showLocalNotification(t('notificationsContent.appUpdateTitle'), body);
     } catch (error) {
       console.error('[notifications] Could not show the app update notification.', error);
     }
@@ -623,13 +724,28 @@ export const notificationService = {
       const due = dueInfos[customer.id];
       if (!credit || !due) throw new Error(`Customer credit alert data is missing for "${customer.id}".`);
       if (due.overdue) {
-        return { customerId: customer.id, customerName: customer.name, severity: 'error', message: 'Customer tab payment is overdue.' };
+        return {
+          customerId: customer.id,
+          customerName: customer.name,
+          kind: 'overdue',
+          severity: 'error',
+        };
       }
       if (credit.limit !== undefined && (credit.percentUsed ?? 0) >= 100) {
-        return { customerId: customer.id, customerName: customer.name, severity: 'error', message: 'Customer has reached their credit limit.' };
+        return {
+          customerId: customer.id,
+          customerName: customer.name,
+          kind: 'limit',
+          severity: 'error',
+        };
       }
       if (credit.state === 'near') {
-        return { customerId: customer.id, customerName: customer.name, severity: 'warning', message: 'Customer is near their credit limit.' };
+        return {
+          customerId: customer.id,
+          customerName: customer.name,
+          kind: 'nearLimit',
+          severity: 'warning',
+        };
       }
       return undefined;
     });

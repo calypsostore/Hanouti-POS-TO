@@ -4,7 +4,7 @@ import { isSupabaseDriver } from '../../data/driver';
 import { activityService } from '../activityService';
 import { getPermissionOverrides, getProfile } from '../../data/repositories/profileRepository';
 import { getUsers, getPositions, savePositions, saveUsers, createId, logUserMutation, notifyPermissionsChanged, positionFromRow, withoutPassword } from './userHelpers';
-import { PERMISSIONS, normalizePermissionOverrides, validatePositionCompRules } from './userValidation';
+import { PERMISSIONS, resolveEffectivePermissionIds, normalizePermissionOverrides, validatePositionCompRules } from './userValidation';
 import type { UserServiceContext } from './types';
 
 export const userPermissionMethods = {
@@ -34,24 +34,22 @@ export const userPermissionMethods = {
         getPermissionOverrides(user.id),
       ]);
       if (positionError) throw new Error(`Could not load staff position: ${positionError.message}`, { cause: positionError });
-      const permissions = new Set([
-        ...((position?.permission_ids as string[] | undefined) ?? []),
-        ...(overrides?.granted ?? []),
-      ]);
-      for (const permissionId of overrides?.revoked ?? []) permissions.delete(permissionId);
-      return [...permissions];
+      return resolveEffectivePermissionIds(
+        (position?.permission_ids as string[] | undefined) ?? [],
+        overrides?.granted,
+        overrides?.revoked,
+      );
     }
     const user = getUsers().find((candidate) => candidate.id === userId && candidate.role === 'staff');
     if (!user) return [];
     const position = user.storeId && user.positionId
       ? getPositions().find((candidate) => candidate.id === user.positionId && candidate.storeId === user.storeId)
       : undefined;
-    const permissions = new Set([
-      ...(position?.permissionIds ?? []),
-      ...(user.permissionOverrides?.granted ?? []),
-    ]);
-    for (const permissionId of user.permissionOverrides?.revoked ?? []) permissions.delete(permissionId);
-    return [...permissions];
+    return resolveEffectivePermissionIds(
+      position?.permissionIds ?? [],
+      user.permissionOverrides?.granted,
+      user.permissionOverrides?.revoked,
+    );
   },
 
   async hasPermission(this: UserServiceContext, userId: string, permissionId: string): Promise<boolean> {

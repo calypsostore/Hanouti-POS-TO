@@ -1,0 +1,783 @@
+name: Deploy Hanouti POS frontend to VPS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hanouti-pos-vps-frontend
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: hanouti-pos-vps
+    timeout-minutes: 20
+    steps:
+      - name: Require the deployment branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/feature/supabase-vps-deployment" ]]; then
+            echo "::error::Dispatch this workflow from feature/supabase-vps-deployment."
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and package production frontend
+        shell: bash
+        env:
+          VERCEL_GIT_COMMIT_SHA: ${{ github.sha }}
+          VITE_DATA_DRIVER: supabase
+          VITE_SUPABASE_URL: https://hanouti-pos.tn
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VPS_SUPABASE_ANON_KEY }}
+          VITE_APP_URL: https://hanouti-pos.tn
+          VITE_ANDROID_PUSH_ENABLED: 'false'
+        run: |
+          set -euo pipefail
+          test -n "$VITE_SUPABASE_ANON_KEY" || {
+            echo "::error::Set VPS_SUPABASE_ANON_KEY in the hanouti-pos-vps environment."
+            exit 1
+          }
+
+          npm run build
+          test -s dist/index.html || {
+            echo "::error::The Vite build did not produce dist/index.html."
+            exit 1
+          }
+          test -s dist/version.json || {
+            echo "::error::The Vite build did not produce dist/version.json."
+            exit 1
+          }
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          expected_build_id="${GITHUB_SHA:0:7}"
+          node - "$expected_build_id" <<'NODE'
+          const fs = require('node:fs');
+          const expectedBuildId = process.argv[2];
+          let manifest;
+          try {
+            manifest = JSON.parse(fs.readFileSync('dist/version.json', 'utf8'));
+          } catch (error) {
+            console.error('dist/version.json is missing or invalid JSON.');
+            process.exit(1);
+          }
+          if (
+            typeof manifest !== 'object'
+            || manifest === null
+            || typeof manifest.buildId !== 'string'
+            || !/^[0-9A-Za-z_-]+$/.test(manifest.buildId)
+          ) {
+            console.error('dist/version.json has no valid buildId.');
+            process.exit(1);
+          }
+          if (manifest.buildId !== expectedBuildId) {
+            console.error(`dist/version.json buildId mismatch: got ${manifest.buildId}, expected ${expectedBuildId}.`);
+            process.exit(1);
+          }
+          console.log(`VALIDATED_BUILD_ID=${manifest.buildId}`);
+          NODE
+          if find dist -type l -print -quit | grep -q .; then
+            echo "::error::The frontend build contains a symlink."
+            exit 1
+          fi
+
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          archive_name="hanouti-pos-frontend-${GITHUB_SHA}.tar.gz"
+          archive="$RUNNER_TEMP/$archive_name"
+          checksum="$archive.sha256"
+          tar --create --gzip --file="$archive" --directory=dist .
+          digest="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+          [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+          printf '%s  %s\n' "$digest" "$archive_name" > "$checksum"
+          test -s "$archive" && test -s "$checksum"
+          printf 'FRONTEND_ARCHIVE=%s\n' "$archive" >> "$GITHUB_ENV"
+          printf 'FRONTEND_CHECKSUM=%s\n' "$checksum" >> "$GITHUB_ENV"
+          printf 'FRONTEND_ARCHIVE_NAME=%s\n' "$archive_name" >> "$GITHUB_ENV"
+          printf 'FRONTEND_SHA256=%s\n' "$digest" >> "$GITHUB_ENV"
+
+      - name: Stage and atomically activate frontend release
+        shell: bash
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_SSH_KEY" || {
+            echo "::error::VPS_SSH_KEY is not configured."
+            exit 1
+          }
+          test -n "$VPS_KNOWN_HOSTS" || {
+            echo "::error::VPS_KNOWN_HOSTS is not configured."
+            exit 1
+          }
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$FRONTEND_ARCHIVE_NAME" =~ ^hanouti-pos-frontend-[0-9a-f]{40}\.tar\.gz$ ]]
+          [[ "$FRONTEND_SHA256" =~ ^[0-9a-f]{64}$ ]]
+
+          ssh_dir="$(mktemp -d "$RUNNER_TEMP/hanouti-pos-ssh.XXXXXX")"
+          key_file="$ssh_dir/id_vps"
+          known_hosts_file="$ssh_dir/known_hosts"
+          trap 'rm -f -- "$key_file" "$known_hosts_file"; rmdir -- "$ssh_dir" 2>/dev/null || true' EXIT
+          printf '%s\n' "$VPS_SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$known_hosts_file"
+          chmod 600 "$key_file" "$known_hosts_file"
+
+          remote="hanouti-deploy@84.247.176.105"
+          ssh_options=(
+            -i "$key_file"
+            -o IdentitiesOnly=yes
+            -o BatchMode=yes
+            -o ConnectTimeout=15
+            -o UserKnownHostsFile="$known_hosts_file"
+            -o StrictHostKeyChecking=yes
+          )
+
+          python_lock_wrapper_b64="$(
+            base64 -w0 <<'PY_LOCK_WRAPPER'
+          import fcntl
+          import os
+          import signal
+          import stat
+          import subprocess
+          import sys
+
+          class WrapperInterrupted(BaseException):
+              pass
+
+          def handle_interruption(signum, frame):
+              raise WrapperInterrupted("interrupted by signal {}".format(signum))
+
+          lock_path = "/srv/www/hanouti-pos/.deployment.lock"
+          deploy_root = "/srv/www/hanouti-pos"
+          fd = None
+          child = None
+          try:
+              root_stat = os.stat(deploy_root, follow_symlinks=False)
+              if not stat.S_ISDIR(root_stat.st_mode):
+                  raise RuntimeError("deployment root is not a real directory")
+              if os.path.realpath(deploy_root) != deploy_root:
+                  raise RuntimeError("deployment root canonical path mismatch")
+              if root_stat.st_uid != os.geteuid():
+                  raise RuntimeError("deployment root is not owned by the effective deployment user")
+              if stat.S_IMODE(root_stat.st_mode) & 0o022:
+                  raise RuntimeError("deployment root is group/other-writable")
+
+              os.umask(0o077)
+              fd = os.open(
+                  lock_path,
+                  os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+                  0o600,
+              )
+              lock_stat = os.fstat(fd)
+              if not stat.S_ISREG(lock_stat.st_mode):
+                  raise RuntimeError("deployment lock is not a regular file")
+              if lock_stat.st_uid != os.geteuid():
+                  raise RuntimeError("deployment lock has the wrong owner")
+              if stat.S_IMODE(lock_stat.st_mode) != 0o600:
+                  raise RuntimeError("deployment lock must have mode 0600")
+              if lock_stat.st_nlink != 1:
+                  raise RuntimeError("deployment lock must have exactly one link")
+              fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+              signal.signal(signal.SIGTERM, handle_interruption)
+              signal.signal(signal.SIGHUP, handle_interruption)
+              signal.signal(signal.SIGINT, handle_interruption)
+
+              bash_script = sys.stdin.buffer.read()
+              child = subprocess.Popen(
+                  ["/bin/bash", "-s", "--"] + sys.argv[1:],
+                  stdin=subprocess.PIPE,
+              )
+              try:
+                  child.stdin.write(bash_script)
+                  child.stdin.close()
+                  return_code = child.wait()
+              except (BrokenPipeError, KeyboardInterrupt, OSError):
+                  if child.poll() is None:
+                      child.terminate()
+                      try:
+                          return_code = child.wait(timeout=5)
+                      except subprocess.TimeoutExpired:
+                          child.kill()
+                          return_code = child.wait()
+                  else:
+                      return_code = child.returncode
+                  print("Deployment wrapper interrupted or failed to deliver the Bash script.", file=sys.stderr)
+                  if fd is not None:
+                      os.close(fd)
+                      fd = None
+                  raise SystemExit(1)
+              finally:
+                  if child.poll() is None:
+                      child.terminate()
+                      try:
+                          child.wait(timeout=5)
+                      except subprocess.TimeoutExpired:
+                          child.kill()
+                          child.wait()
+              os.close(fd)
+              fd = None
+              raise SystemExit(return_code)
+          except SystemExit as error:
+              if child is not None and child.poll() is None:
+                  child.terminate()
+                  try:
+                      child.wait(timeout=5)
+                  except subprocess.TimeoutExpired:
+                      child.kill()
+                      child.wait()
+              if fd is not None:
+                  os.close(fd)
+                  fd = None
+              raise error
+          except BaseException as error:
+              if child is not None and child.poll() is None:
+                  child.terminate()
+                  try:
+                      child.wait(timeout=5)
+                  except subprocess.TimeoutExpired:
+                      child.kill()
+                      child.wait()
+              if fd is not None:
+                  os.close(fd)
+                  fd = None
+              print("Deployment lock validation failed: {}".format(error), file=sys.stderr)
+              raise SystemExit(1)
+          PY_LOCK_WRAPPER
+          )"
+
+          remote_home_output="$(
+            ssh "${ssh_options[@]}" "$remote" 'bash -s' <<'REMOTE_PREFLIGHT'
+          set -euo pipefail
+          user_name="$(id -un)"
+          if [[ "$user_name" != "hanouti-deploy" ]]; then
+            echo "SSH session is not running as hanouti-deploy." >&2
+            exit 1
+          fi
+          home_dir="$(getent passwd "$user_name" | cut -d: -f 6)"
+          if [[ -z "$home_dir" ]]; then
+            echo "Could not determine the deployment user's home directory." >&2
+            exit 1
+          fi
+          home_dir="$(realpath -e -- "$home_dir")"
+          if [[ ! -d "$home_dir" || ! -O "$home_dir" || ! -w "$home_dir" || ! -x "$home_dir" ]]; then
+            echo "The deployment user's actual home directory is not writable by that user." >&2
+            exit 1
+          fi
+
+          deploy_root="/srv/www/hanouti-pos"
+          if [[ -L "$deploy_root" ]] || [[ ! -d "$deploy_root" ]]; then
+            echo "The POS frontend deployment directory must be pre-created and must not be a symlink." >&2
+            exit 1
+          fi
+          if [[ "$(realpath -e -- "$deploy_root")" != "$deploy_root" ]] ||
+             [[ ! -O "$deploy_root" || ! -r "$deploy_root" || ! -w "$deploy_root" || ! -x "$deploy_root" ]]; then
+            echo "The POS frontend deployment directory must be owned and writable by hanouti-deploy." >&2
+            exit 1
+          fi
+
+          releases_dir="$deploy_root/releases"
+          if [[ -L "$releases_dir" ]] || { [[ -e "$releases_dir" ]] && [[ ! -d "$releases_dir" ]]; }; then
+            echo "The POS frontend releases path is not a safe directory." >&2
+            exit 1
+          fi
+          if [[ -d "$releases_dir" ]] &&
+             [[ ! -O "$releases_dir" || ! -r "$releases_dir" || ! -w "$releases_dir" || ! -x "$releases_dir" ]]; then
+            echo "The POS frontend releases directory is not accessible to hanouti-deploy." >&2
+            exit 1
+          fi
+          if [[ -L "$deploy_root/current" ]]; then
+            current_target="$(realpath -e -- "$deploy_root/current")"
+            case "$current_target" in
+              "$releases_dir"/*) ;;
+              *) echo "The current frontend symlink points outside the POS releases directory." >&2; exit 1 ;;
+            esac
+          elif [[ -e "$deploy_root/current" ]]; then
+            echo "The current frontend path exists but is not a symlink." >&2
+            exit 1
+          fi
+
+          printf 'REMOTE_HOME=%s\n' "$home_dir"
+          REMOTE_PREFLIGHT
+          )"
+          if [[ "$remote_home_output" != REMOTE_HOME=* || "$remote_home_output" == *$'\n'* ]]; then
+            echo "::error::VPS preflight returned an unexpected result."
+            exit 1
+          fi
+          remote_home="${remote_home_output#REMOTE_HOME=}"
+          [[ "$remote_home" =~ ^/[A-Za-z0-9._/-]+$ ]]
+
+          stage_dir="$remote_home/staging/hanouti-pos-frontend/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ssh "${ssh_options[@]}" "$remote" "bash -s -- '$stage_dir'" <<'REMOTE_STAGE'
+          set -euo pipefail
+          test "$(id -un)" = "hanouti-deploy"
+          home_dir="$(getent passwd "$(id -un)" | cut -d: -f 6)"
+          home_dir="$(realpath -e -- "$home_dir")"
+          stage_parent="$home_dir/staging/hanouti-pos-frontend"
+          stage_dir="$1"
+          case "$stage_dir" in
+            "$stage_parent"/*) ;;
+            *) echo "Staging path is outside the deployment user's home." >&2; exit 1 ;;
+          esac
+          if [[ -L "$home_dir/staging" || -L "$stage_parent" ]]; then
+            echo "The frontend staging path contains a symlink." >&2
+            exit 1
+          fi
+          umask 077
+          mkdir -p -- "$stage_parent"
+          test "$(realpath -e -- "$stage_parent")" = "$stage_parent"
+          test -O "$stage_parent" && test -w "$stage_parent" && test -x "$stage_parent"
+          if [[ -e "$stage_dir" || -L "$stage_dir" ]]; then
+            echo "The frontend staging directory already exists." >&2
+            exit 1
+          fi
+          mkdir -- "$stage_dir"
+          chmod 700 -- "$stage_dir"
+          test "$(realpath -e -- "$stage_dir")" = "$stage_dir"
+          test -O "$stage_dir" && test -w "$stage_dir" && test -x "$stage_dir"
+          REMOTE_STAGE
+
+          scp "${ssh_options[@]}" \
+            "$FRONTEND_ARCHIVE" "$FRONTEND_CHECKSUM" \
+            "$remote:$stage_dir/"
+          ssh "${ssh_options[@]}" "$remote" \
+            "cd -- '$stage_dir' && sha256sum --check -- '$FRONTEND_ARCHIVE_NAME.sha256'"
+
+          release_id="${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          deploy_status=0
+          if deploy_output="$(ssh "${ssh_options[@]}" "$remote" \
+            "python3 -c 'import base64,sys;exec(base64.b64decode(\"$python_lock_wrapper_b64\").decode())' '$stage_dir' '$FRONTEND_ARCHIVE_NAME' '$release_id' '$FRONTEND_SHA256'" <<'REMOTE_DEPLOY'
+          set -euo pipefail
+          test "$(id -un)" = "hanouti-deploy"
+          stage_dir="$1"
+          archive_name="$2"
+          release_id="$3"
+          expected_sha256="$4"
+          [[ "$archive_name" =~ ^hanouti-pos-frontend-[0-9a-f]{40}\.tar\.gz$ ]]
+          [[ "$release_id" =~ ^[0-9a-f]{40}-[0-9]+-[0-9]+$ ]]
+          [[ "$expected_sha256" =~ ^[0-9a-f]{64}$ ]]
+
+          home_dir="$(getent passwd "$(id -un)" | cut -d: -f 6)"
+          home_dir="$(realpath -e -- "$home_dir")"
+          case "$stage_dir" in
+            "$home_dir"/staging/hanouti-pos-frontend/*) ;;
+            *) echo "Staging path is outside the deployment user's home." >&2; exit 1 ;;
+          esac
+          test "$(realpath -e -- "$stage_dir")" = "$stage_dir"
+          archive_path="$stage_dir/$archive_name"
+          checksum_path="$archive_path.sha256"
+          test -s "$archive_path" && test -s "$checksum_path"
+          (cd -- "$stage_dir" && sha256sum --check -- "$archive_name.sha256")
+          actual_sha256="$(sha256sum -- "$archive_path" | cut -d ' ' -f 1)"
+          if [[ "$actual_sha256" != "$expected_sha256" ]]; then
+            echo "Frontend archive does not match the build checksum." >&2
+            exit 1
+          fi
+
+          deploy_root="/srv/www/hanouti-pos"
+          releases_dir="$deploy_root/releases"
+          current_link="$deploy_root/current"
+          if [[ -L "$deploy_root" || ! -d "$deploy_root" ]] ||
+             [[ "$(realpath -e -- "$deploy_root")" != "$deploy_root" ]] ||
+             [[ ! -O "$deploy_root" || ! -r "$deploy_root" || ! -w "$deploy_root" || ! -x "$deploy_root" ]]; then
+            echo "The POS frontend deployment directory is not safe or writable." >&2
+            exit 1
+          fi
+          deploy_mode="$(stat -c '%a' -- "$deploy_root")"
+          deploy_mode_num=$((8#$deploy_mode))
+          if [[ "$(stat -c '%U' -- "$deploy_root")" != "hanouti-deploy" ]] ||
+             (( (deploy_mode_num & 022) != 0 )); then
+            echo "The POS frontend deployment directory owner or write permissions are unsafe." >&2
+            exit 1
+          fi
+          if [[ -L "$releases_dir" ]]; then
+            echo "The POS frontend releases path must not be a symlink." >&2
+            exit 1
+          fi
+          if [[ ! -e "$releases_dir" ]]; then
+            mkdir -- "$releases_dir"
+          fi
+          if [[ ! -d "$releases_dir" || ! -O "$releases_dir" || ! -r "$releases_dir" || ! -w "$releases_dir" || ! -x "$releases_dir" ]] ||
+             [[ "$(realpath -e -- "$releases_dir")" != "$releases_dir" ]]; then
+            echo "The POS frontend releases directory is not safe or writable." >&2
+            exit 1
+          fi
+
+          previous_release=""
+          if [[ -L "$current_link" ]]; then
+            previous_release="$(realpath -e -- "$current_link")"
+            case "$previous_release" in
+              "$releases_dir"/*) ;;
+              *) echo "The current frontend symlink points outside the POS releases directory." >&2; exit 1 ;;
+            esac
+            test -d "$previous_release"
+          elif [[ -e "$current_link" ]]; then
+            echo "The current frontend path exists but is not a symlink." >&2
+            exit 1
+          fi
+
+          release_dir="$releases_dir/$release_id"
+          release_tmp="$releases_dir/.${release_id}.tmp"
+          if [[ -e "$release_dir" || -L "$release_dir" || -e "$release_tmp" || -L "$release_tmp" ]]; then
+            echo "The requested frontend release path already exists." >&2
+            exit 1
+          fi
+
+          python3 - "$archive_path" <<'PY'
+          import sys
+          import tarfile
+          from pathlib import PurePosixPath
+
+          archive_path = sys.argv[1]
+          try:
+              with tarfile.open(archive_path, "r:gz") as archive:
+                  members = archive.getmembers()
+                  if not members or len(members) > 20000:
+                      raise ValueError
+                  seen = set()
+                  files = set()
+                  total_size = 0
+                  for member in members:
+                      path = PurePosixPath(member.name)
+                      if path.is_absolute() or ".." in path.parts or "\\" in member.name:
+                          raise ValueError
+                      if not (member.isdir() or member.isfile()):
+                          raise ValueError
+                      normalized = path.as_posix()
+                      if normalized in seen:
+                          raise ValueError
+                      seen.add(normalized)
+                      if member.isfile():
+                          if member.size < 0:
+                              raise ValueError
+                          total_size += member.size
+                          if total_size > 536870912:
+                              raise ValueError
+                          files.add(normalized)
+                  if "index.html" not in files or "version.json" not in files:
+                      raise ValueError
+          except (OSError, tarfile.TarError, ValueError):
+              print("Frontend archive failed path, type, size, or required-file validation.", file=sys.stderr)
+              raise SystemExit(1)
+          PY
+
+          umask 022
+          mkdir -- "$release_tmp"
+          tar --extract --gzip --file="$archive_path" --directory="$release_tmp" \
+            --no-same-owner --no-same-permissions
+          find "$release_tmp" -type d -exec chmod 755 {} +
+          find "$release_tmp" -type f -exec chmod 644 {} +
+          test -s "$release_tmp/index.html" && test -s "$release_tmp/version.json"
+          mv -- "$release_tmp" "$release_dir"
+
+          state_dir="$deploy_root/.deployment-state"
+          if [[ -L "$state_dir" ]] || { [[ -e "$state_dir" ]] && [[ ! -d "$state_dir" ]]; }; then
+            echo "Deployment state path is not a safe directory." >&2
+            exit 1
+          fi
+          if [[ ! -e "$state_dir" ]]; then
+            umask 077
+            mkdir -- "$state_dir"
+            chmod 700 -- "$state_dir"
+          fi
+          if [[ ! -d "$state_dir" || ! -O "$state_dir" || ! -w "$state_dir" || ! -x "$state_dir" ]] ||
+             [[ "$(stat -c '%U' -- "$state_dir")" != "hanouti-deploy" ]] ||
+             [[ "$(stat -c '%a' -- "$state_dir")" != "700" ]] ||
+             [[ "$(realpath -e -- "$state_dir")" != "$state_dir" ]]; then
+            echo "Deployment state directory is not safe or writable." >&2
+            exit 1
+          fi
+          state_file="$state_dir/$release_id.state"
+          state_tmp="$state_dir/.${release_id}.tmp"
+          if [[ -e "$state_file" || -L "$state_file" || -e "$state_tmp" || -L "$state_tmp" ]]; then
+            echo "Deployment state for the requested release already exists." >&2
+            exit 1
+          fi
+          if [[ -n "$previous_release" ]]; then
+            printf 'previous=%s\n' "$previous_release" > "$state_tmp"
+          else
+            printf 'previous=none\n' > "$state_tmp"
+          fi
+          chmod 600 -- "$state_tmp"
+          mv -- "$state_tmp" "$state_file"
+          test -f "$state_file" && test ! -L "$state_file"
+          [[ "$(stat -c '%U' -- "$state_file")" == "hanouti-deploy" ]]
+          [[ "$(stat -c '%a' -- "$state_file")" == "600" ]]
+
+          previous_link="$deploy_root/previous"
+          if [[ -n "$previous_release" ]]; then
+            if [[ -e "$previous_link" && ! -L "$previous_link" ]]; then
+              echo "The previous frontend pointer exists but is not a symlink." >&2
+              exit 1
+            fi
+            previous_tmp="$deploy_root/.previous-${release_id}"
+            if [[ -e "$previous_tmp" || -L "$previous_tmp" ]]; then
+              echo "The temporary previous-release pointer already exists." >&2
+              exit 1
+            fi
+            ln -s -- "$previous_release" "$previous_tmp"
+            mv -Tf -- "$previous_tmp" "$previous_link"
+          fi
+          if [[ -n "$previous_release" ]]; then
+            printf 'PREVIOUS_RELEASE=%s\n' "$(basename "$previous_release")"
+          else
+            printf 'PREVIOUS_RELEASE=none\n'
+          fi
+
+          current_tmp="$deploy_root/.current-${release_id}"
+          if [[ -e "$current_tmp" || -L "$current_tmp" ]]; then
+            echo "The temporary current-release pointer already exists." >&2
+            exit 1
+          fi
+          printf 'ACTIVATION_STARTED=%s\n' "$release_dir"
+          ln -s -- "$release_dir" "$current_tmp"
+          mv -Tf -- "$current_tmp" "$current_link"
+          test "$(realpath -e -- "$current_link")" = "$release_dir"
+          test -s "$current_link/index.html"
+          printf 'ACTIVATED_RELEASE=%s\n' "$release_dir"
+
+          rm -f -- "$archive_path" "$checksum_path"
+          if ! rmdir -- "$stage_dir"; then
+            echo "Deployment succeeded; staging directory retained for inspection." >&2
+          fi
+          printf 'DEPLOYED_RELEASE=%s\n' "$release_id"
+          REMOTE_DEPLOY
+          )"; then
+            deploy_status=0
+          else
+            deploy_status=$?
+          fi
+          printf '%s\n' "$deploy_output"
+
+          activation_started=0
+          activated_release=0
+          deployment_failed=0
+          if grep -q "^ACTIVATION_STARTED=/srv/www/hanouti-pos/releases/${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}$" <<<"$deploy_output"; then
+            activation_started=1
+          fi
+          if grep -q "^ACTIVATED_RELEASE=/srv/www/hanouti-pos/releases/${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}$" <<<"$deploy_output"; then
+            activated_release=1
+          fi
+          if [[ "$deploy_status" -ne 0 || "$activated_release" -eq 0 ]]; then
+            deployment_failed=1
+            if [[ "$activation_started" -eq 1 ]]; then
+              echo "::error::Remote deployment failed after activation started; attempting automatic rollback."
+            else
+              echo "::error::Remote deployment status is incomplete or activation could not be confirmed; attempting guarded server-side recovery."
+            fi
+          fi
+
+          health_nonce="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date +%s%N)"
+          version_health_file="$(mktemp "$RUNNER_TEMP/hanouti-pos-version.XXXXXX")"
+          root_health_file="$(mktemp "$RUNNER_TEMP/hanouti-pos-root.XXXXXX")"
+          trap 'rm -f -- "$key_file" "$known_hosts_file" "$version_health_file" "$root_health_file"; rmdir -- "$ssh_dir" 2>/dev/null || true' EXIT
+
+          health_failed="$deployment_failed"
+          if [[ "$health_failed" -eq 0 ]]; then
+            version_status="$(
+              curl --silent --show-error \
+                --proto '=https' --tlsv1.2 \
+                --connect-timeout 5 --max-time 15 \
+                --retry 6 --retry-delay 2 \
+                --header 'Accept: application/json' \
+                --header 'Cache-Control: no-cache, no-store, must-revalidate' \
+                --header 'Pragma: no-cache' \
+                --output "$version_health_file" \
+                --write-out '%{http_code}' \
+                "https://hanouti-pos.tn/version.json?t=${health_nonce}"
+            2>/dev/null)" || health_failed=1
+
+            if [[ "$health_failed" -eq 0 ]] &&
+               [[ "$version_status" != "200" || ! -s "$version_health_file" ]]; then
+              echo "::error::Post-deployment /version.json health check returned HTTP $version_status or an empty response."
+              health_failed=1
+            elif [[ "$health_failed" -eq 0 ]] && ! node - "$version_health_file" "${GITHUB_SHA:0:7}" <<'NODE'
+          const fs = require('node:fs');
+          const manifestPath = process.argv[2];
+          const expectedBuildId = process.argv[3];
+          let manifest;
+          try {
+            manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+          } catch {
+            console.error('Post-deployment /version.json returned invalid JSON.');
+            process.exit(1);
+          }
+          if (
+            typeof manifest !== 'object'
+            || manifest === null
+            || typeof manifest.buildId !== 'string'
+          ) {
+            console.error('Post-deployment /version.json has no valid buildId.');
+            process.exit(1);
+          }
+          if (manifest.buildId !== expectedBuildId) {
+            console.error(`Post-deployment buildId mismatch: got ${manifest.buildId}, expected ${expectedBuildId}.`);
+            process.exit(1);
+          }
+          console.log(`HEALTH_CHECK_BUILD_ID=${manifest.buildId}`);
+          NODE
+            then
+              health_failed=1
+            fi
+          fi
+
+          if [[ "$health_failed" -eq 0 ]]; then
+            root_status="$(
+              curl --silent --show-error \
+                --proto '=https' --tlsv1.2 \
+                --connect-timeout 5 --max-time 15 \
+                --retry 6 --retry-delay 2 \
+                --header 'Accept: text/html' \
+                --header 'Cache-Control: no-cache, no-store, must-revalidate' \
+                --header 'Pragma: no-cache' \
+                --output "$root_health_file" \
+                --write-out '%{http_code}' \
+                "https://hanouti-pos.tn/?t=${health_nonce}"
+            2>/dev/null)" || health_failed=1
+            if [[ "$health_failed" -eq 0 ]] &&
+               [[ "$root_status" != "200" || ! -s "$root_health_file" ]]; then
+              echo "::error::Post-deployment / health check returned HTTP $root_status or empty HTML."
+              health_failed=1
+            elif [[ "$health_failed" -eq 0 ]] &&
+                 ! grep -Eqi '<!doctype html|<html([[:space:]>])' "$root_health_file"; then
+              echo "::error::Post-deployment / health check returned non-HTML content."
+              health_failed=1
+            fi
+          fi
+
+          if [[ "$health_failed" -eq 1 ]]; then
+            echo "::error::Post-deployment health check failed for ${GITHUB_SHA:0:7}; attempting automatic rollback."
+            if ssh "${ssh_options[@]}" "$remote" \
+              "python3 -c 'import base64,sys;exec(base64.b64decode(\"$python_lock_wrapper_b64\").decode())' '$release_id'" <<'REMOTE_ROLLBACK'
+          set -euo pipefail
+          test "$(id -un)" = "hanouti-deploy"
+          failed_release_id="$1"
+          [[ "$failed_release_id" =~ ^[0-9a-f]{40}-[0-9]+-[0-9]+$ ]]
+
+          deploy_root="/srv/www/hanouti-pos"
+          releases_dir="$deploy_root/releases"
+          current_link="$deploy_root/current"
+          failed_release="$releases_dir/$failed_release_id"
+          state_dir="$deploy_root/.deployment-state"
+          state_file="$state_dir/$failed_release_id.state"
+
+          if [[ -L "$deploy_root" || ! -d "$deploy_root" ]] ||
+             [[ "$(realpath -e -- "$deploy_root")" != "$deploy_root" ]] ||
+             [[ "$(stat -c '%U' -- "$deploy_root")" != "hanouti-deploy" ]]; then
+            echo "Rollback refused: the POS frontend deployment directory is unsafe." >&2
+            exit 1
+          fi
+          deploy_mode="$(stat -c '%a' -- "$deploy_root")"
+          deploy_mode_num=$((8#$deploy_mode))
+          if (( (deploy_mode_num & 022) != 0 )); then
+            echo "Rollback refused: the POS frontend deployment directory is group/other-writable." >&2
+            exit 1
+          fi
+
+          if [[ ! -L "$current_link" ]]; then
+            echo "Rollback refused: current is missing or is not a symlink." >&2
+            exit 1
+          fi
+          current_target="$(realpath -e -- "$current_link")"
+          if [[ "$current_target" != "$failed_release" ]]; then
+            echo "Rollback refused: current no longer points to the failed release." >&2
+            exit 1
+          fi
+
+          if [[ -L "$state_dir" || ! -d "$state_dir" ||
+                "$(realpath -e -- "$state_dir")" != "$state_dir" ||
+                ! -O "$state_dir" || ! -w "$state_dir" || ! -x "$state_dir" ||
+                "$(stat -c '%U' -- "$state_dir")" != "hanouti-deploy" ||
+                "$(stat -c '%a' -- "$state_dir")" != "700" ||
+                -L "$state_file" || ! -f "$state_file" ||
+                ! -r "$state_file" || ! -O "$state_file" ||
+                "$(stat -c '%U' -- "$state_file")" != "hanouti-deploy" ||
+                "$(stat -c '%a' -- "$state_file")" != "600" ]]; then
+            echo "Rollback refused: deployment state is missing or unsafe." >&2
+            exit 1
+          fi
+          state_value="$(cat -- "$state_file")"
+          if [[ "$state_value" == "previous=none" ]]; then
+            if [[ ! -L "$current_link" ]]; then
+              echo "Rollback refused: current changed before first-deployment removal." >&2
+              exit 1
+            fi
+            current_target="$(realpath -e -- "$current_link")"
+            if [[ "$current_target" != "$failed_release" ]]; then
+              echo "Rollback refused: current changed before first-deployment removal." >&2
+              exit 1
+            fi
+            rm -f -- "$current_link"
+            if [[ -e "$current_link" || -L "$current_link" ]]; then
+              echo "Rollback failed: current is still present after removal." >&2
+              exit 1
+            fi
+            printf 'ROLLBACK_RESULT=removed_current_first_deployment\n'
+            exit 0
+          fi
+          if [[ "$state_value" =~ ^previous=(.+)$ ]]; then
+            previous_target="${BASH_REMATCH[1]}"
+          else
+            echo "Rollback refused: deployment state format is invalid." >&2
+            exit 1
+          fi
+
+          previous_target="$(realpath -e -- "$previous_target")"
+          case "$previous_target" in
+            "$releases_dir"/*) ;;
+            *) echo "Rollback refused: previous release is outside $releases_dir." >&2; exit 1 ;;
+          esac
+          if [[ "$previous_target" == "$failed_release" || ! -d "$previous_target" ]] ||
+             [[ ! -s "$previous_target/index.html" ]]; then
+            echo "Rollback refused: previous release is invalid or unsafe." >&2
+            exit 1
+          fi
+
+          rollback_tmp="$deploy_root/.rollback-current-${failed_release_id}"
+          if [[ -e "$rollback_tmp" || -L "$rollback_tmp" ]]; then
+            echo "Rollback refused: temporary rollback pointer already exists." >&2
+            exit 1
+          fi
+          if [[ ! -L "$current_link" ]]; then
+            echo "Rollback refused: current changed before previous-release restoration." >&2
+            exit 1
+          fi
+          current_target="$(realpath -e -- "$current_link")"
+          if [[ "$current_target" != "$failed_release" ]]; then
+            echo "Rollback refused: current changed before previous-release restoration." >&2
+            exit 1
+          fi
+          ln -s -- "$previous_target" "$rollback_tmp"
+          mv -Tf -- "$rollback_tmp" "$current_link"
+          if [[ "$(realpath -e -- "$current_link")" != "$previous_target" ]]; then
+            echo "Rollback failed: current does not point to the previous release." >&2
+            exit 1
+          fi
+          printf 'ROLLBACK_RESULT=restored_previous\n'
+          REMOTE_ROLLBACK
+            then
+              echo "::error::Automatic rollback succeeded, but the post-deployment health check failed."
+            else
+              echo "::error::Automatic rollback also failed; the failed release was preserved."
+            fi
+            exit 1
+          fi
+
+          echo "Post-deployment HTTPS health checks passed."

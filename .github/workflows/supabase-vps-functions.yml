@@ -1,0 +1,140 @@
+name: Stage Supabase Edge Functions to VPS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-vps-functions-staging
+  cancel-in-progress: false
+
+jobs:
+  stage-functions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require the feature branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/feature/supabase-vps-deployment" ]]; then
+            echo "::error::Dispatch this workflow from feature/supabase-vps-deployment."
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Build and validate the function package
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/supabase-edge-functions-${GITHUB_SHA}.tar.gz"
+          checksum="$archive.sha256"
+          python3 .github/scripts/package-supabase-vps-functions.py --output "$archive"
+          digest="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+          [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+          printf '%s  %s\n' "$digest" "$(basename "$archive")" > "$checksum"
+          test -s "$archive"
+          test -s "$checksum"
+          echo "FUNCTIONS_ARCHIVE=$archive" >> "$GITHUB_ENV"
+          echo "FUNCTIONS_CHECKSUM=$checksum" >> "$GITHUB_ENV"
+
+      - name: Verify staging access and stage package
+        shell: bash
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_SSH_KEY" || { echo "::error::VPS_SSH_KEY is not configured."; exit 1; }
+          test -n "$VPS_KNOWN_HOSTS" || { echo "::error::VPS_KNOWN_HOSTS is not configured."; exit 1; }
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]]
+          ssh_dir="$(mktemp -d "$RUNNER_TEMP/hanouti-ssh.XXXXXX")"
+          key_file="$ssh_dir/id_vps"
+          known_hosts_file="$ssh_dir/known_hosts"
+          trap 'rm -f -- "$key_file" "$known_hosts_file"; rmdir -- "$ssh_dir" 2>/dev/null || true' EXIT
+          printf '%s\n' "$VPS_SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$known_hosts_file"
+          chmod 600 "$key_file" "$known_hosts_file"
+
+          remote="hanouti-deploy@84.247.176.105"
+          ssh_options=(
+            -i "$key_file"
+            -o IdentitiesOnly=yes
+            -o BatchMode=yes
+            -o ConnectTimeout=15
+            -o UserKnownHostsFile="$known_hosts_file"
+            -o StrictHostKeyChecking=yes
+          )
+
+          remote_home_output="$(
+            ssh "${ssh_options[@]}" "$remote" \
+              'bash -s' <<'REMOTE_PREFLIGHT'
+          set -euo pipefail
+          user_name="$(id -un)"
+          test "$user_name" = "hanouti-deploy" || {
+            echo "SSH did not run as the restricted deployment user."
+            exit 1
+          }
+          home_dir="$(getent passwd "$user_name" | cut -d: -f 6)"
+          test -n "$home_dir" || {
+            echo "Could not determine the deployment user's home directory."
+            exit 1
+          }
+          home_dir="$(realpath -e -- "$home_dir")"
+          test -d "$home_dir" && test -O "$home_dir" && test -w "$home_dir" && test -x "$home_dir" || {
+            echo "The deployment user's actual home directory is not writable by that user."
+            exit 1
+          }
+          printf 'REMOTE_HOME=%s\n' "$home_dir"
+          REMOTE_PREFLIGHT
+          )"
+
+          if [[ "$remote_home_output" != REMOTE_HOME=* || "$remote_home_output" == *$'\n'* ]]; then
+            echo "::error::VPS home preflight returned an unexpected result."
+            exit 1
+          fi
+          remote_home="${remote_home_output#REMOTE_HOME=}"
+          [[ "$remote_home" =~ ^/[A-Za-z0-9._/-]+$ ]]
+          stage_dir="$remote_home/staging/supabase-edge-functions/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          staged_path="$(
+            ssh "${ssh_options[@]}" "$remote" "bash -s -- '$stage_dir'" <<'REMOTE_STAGE'
+          set -euo pipefail
+          test "$(id -un)" = "hanouti-deploy"
+          home_dir="$(getent passwd "$(id -un)" | cut -d: -f 6)"
+          home_dir="$(realpath -e -- "$home_dir")"
+          stage_dir="$1"
+          case "$stage_dir" in
+            "$home_dir"/staging/supabase-edge-functions/*) ;;
+            *) echo "Staging path is outside the deployment user's home."; exit 1 ;;
+          esac
+          umask 077
+          mkdir -p -- "$stage_dir"
+          chmod 700 -- "$stage_dir"
+          stage_dir="$(realpath -e -- "$stage_dir")"
+          test "$stage_dir" = "$1" && test -d "$stage_dir" && test -O "$stage_dir" && test -w "$stage_dir" && test -x "$stage_dir" || {
+            echo "Staging directory is not owned by and writable to the deployment user."
+            exit 1
+          }
+          printf 'STAGING_DIR=%s\n' "$stage_dir"
+          REMOTE_STAGE
+          )"
+          if [[ "$staged_path" != "STAGING_DIR=$stage_dir" ]]; then
+            echo "::error::VPS staging directory verification failed."
+            exit 1
+          fi
+
+          scp "${ssh_options[@]}" \
+            "$FUNCTIONS_ARCHIVE" "$FUNCTIONS_CHECKSUM" \
+            "$remote:$stage_dir/"
+          ssh "${ssh_options[@]}" "$remote" \
+            "cd -- '$stage_dir' && sha256sum --check -- '$(basename "$FUNCTIONS_CHECKSUM")'"
+
+          echo "::notice::Validated package staged at $stage_dir. No deployment, Docker command, sudo, or container restart was invoked."

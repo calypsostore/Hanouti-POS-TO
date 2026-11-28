@@ -1,0 +1,106 @@
+name: Manually roll back Hanouti POS frontend
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_current_release:
+        description: Current release ID to guard against a stale rollback request
+        required: true
+        type: string
+      target_release:
+        description: Existing frontend release ID to restore
+        required: true
+        type: string
+      confirmation:
+        description: Type ROLLBACK to authorize the pointer switch
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hanouti-pos-vps-frontend
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment: hanouti-pos-vps
+    timeout-minutes: 10
+    steps:
+      - name: Require the deployment branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/feature/supabase-vps-deployment" ]]; then
+            echo "::error::Dispatch this workflow from feature/supabase-vps-deployment."
+            exit 1
+          fi
+
+      - name: Check out rollback procedure
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Restore the selected prior release
+        shell: bash
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          EXPECTED_CURRENT_RELEASE: ${{ inputs.expected_current_release }}
+          TARGET_RELEASE: ${{ inputs.target_release }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_SSH_KEY" || {
+            echo "::error::VPS_SSH_KEY is not configured."
+            exit 1
+          }
+          test -n "$VPS_KNOWN_HOSTS" || {
+            echo "::error::VPS_KNOWN_HOSTS is not configured."
+            exit 1
+          }
+          [[ "$EXPECTED_CURRENT_RELEASE" =~ ^[0-9a-f]{40}-[0-9]+-[0-9]+$ ]]
+          [[ "$TARGET_RELEASE" =~ ^[0-9a-f]{40}-[0-9]+-[0-9]+$ ]]
+          [[ "$CONFIRMATION" == "ROLLBACK" ]]
+
+          ssh_dir="$(mktemp -d "$RUNNER_TEMP/hanouti-rollback-ssh.XXXXXX")"
+          key_file="$ssh_dir/id_vps"
+          known_hosts_file="$ssh_dir/known_hosts"
+          trap 'rm -f -- "$key_file" "$known_hosts_file"; rmdir -- "$ssh_dir" 2>/dev/null || true' EXIT
+          printf '%s\n' "$VPS_SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$known_hosts_file"
+          chmod 600 "$key_file" "$known_hosts_file"
+          ssh_options=(
+            -i "$key_file"
+            -o IdentitiesOnly=yes
+            -o BatchMode=yes
+            -o ConnectTimeout=15
+            -o UserKnownHostsFile="$known_hosts_file"
+            -o StrictHostKeyChecking=yes
+          )
+          ssh "${ssh_options[@]}" hanouti-deploy@84.247.176.105 \
+            "bash -s -- '$EXPECTED_CURRENT_RELEASE' '$TARGET_RELEASE' '$CONFIRMATION'" \
+            < .github/scripts/rollback-vps-frontend.sh
+
+          health_file="$RUNNER_TEMP/hanouti-frontend-rollback-version.json"
+          trap 'rm -f -- "$key_file" "$known_hosts_file" "$health_file"; rmdir -- "$ssh_dir" 2>/dev/null || true' EXIT
+          status="$(
+            curl --silent --show-error \
+              --proto '=https' --tlsv1.2 \
+              --connect-timeout 5 --max-time 15 \
+              --header 'Cache-Control: no-cache, no-store, must-revalidate' \
+              --output "$health_file" \
+              --write-out '%{http_code}' \
+              "https://hanouti-pos.tn/version.json?rollback=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          )"
+          [[ "$status" == "200" && -s "$health_file" ]]
+          node - "$health_file" "${TARGET_RELEASE:0:7}" <<'NODE'
+          const fs = require('node:fs');
+          const manifest = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (manifest.buildId !== process.argv[3]) {
+            console.error('Restored frontend build ID does not match the requested release.');
+            process.exit(1);
+          }
+          NODE

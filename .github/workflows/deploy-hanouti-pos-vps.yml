@@ -20,8 +20,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_REF" != "refs/heads/feature/supabase-vps-deployment" ]]; then
-            echo "::error::Dispatch this workflow from feature/supabase-vps-deployment."
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Dispatch this workflow from main."
             exit 1
           fi
 

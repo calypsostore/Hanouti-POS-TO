@@ -411,12 +411,22 @@ jobs:
             echo "The POS frontend releases path must not be a symlink." >&2
             exit 1
           fi
+          if [[ -e "$releases_dir" && ! -d "$releases_dir" ]]; then
+            echo "The POS frontend releases path is not a directory." >&2
+            exit 1
+          fi
           if [[ ! -e "$releases_dir" ]]; then
             mkdir -- "$releases_dir"
           fi
-          if [[ ! -d "$releases_dir" || ! -O "$releases_dir" || ! -r "$releases_dir" || ! -w "$releases_dir" || ! -x "$releases_dir" ]] ||
-             [[ "$(realpath -e -- "$releases_dir")" != "$releases_dir" ]]; then
+          if [[ ! -d "$releases_dir" || ! -O "$releases_dir" ||
+                "$(realpath -e -- "$releases_dir")" != "$releases_dir" ||
+                "$(stat -c '%U' -- "$releases_dir")" != "hanouti-deploy" ]]; then
             echo "The POS frontend releases directory is not safe or writable." >&2
+            exit 1
+          fi
+          chmod 0755 -- "$releases_dir"
+          if [[ "$(stat -c '%a' -- "$releases_dir")" != "755" ]]; then
+            echo "The POS frontend releases directory could not be normalized to mode 0755." >&2
             exit 1
           fi
 
@@ -479,13 +489,102 @@ jobs:
           PY
 
           umask 022
-          mkdir -- "$release_tmp"
+          mkdir -m 0755 -- "$release_tmp"
           tar --extract --gzip --file="$archive_path" --directory="$release_tmp" \
             --no-same-owner --no-same-permissions
           find "$release_tmp" -type d -exec chmod 755 {} +
           find "$release_tmp" -type f -exec chmod 644 {} +
+          if find "$release_tmp" ! -type d ! -type f -print -quit | grep -q .; then
+            echo "The extracted frontend release contains an unsupported filesystem entry." >&2
+            exit 1
+          fi
           test -s "$release_tmp/index.html" && test -s "$release_tmp/version.json"
           mv -- "$release_tmp" "$release_dir"
+          if [[ "$(stat -c '%a' -- "$release_dir")" != "755" ]]; then
+            echo "The frontend release directory is not mode 0755." >&2
+            exit 1
+          fi
+
+          python3 - "$deploy_root" "$release_dir" <<'PY_NGINX_ACCESS'
+          import os
+          import stat
+          import sys
+
+          def permission_bits_for(info, user_id, group_ids):
+              mode = stat.S_IMODE(info.st_mode)
+              if info.st_uid == user_id:
+                  return (mode >> 6) & 7
+              if info.st_gid in group_ids:
+                  return (mode >> 3) & 7
+              return mode & 7
+
+          def require_access(path, info, user_id, group_ids, required):
+              if permission_bits_for(info, user_id, group_ids) & required != required:
+                  raise RuntimeError("www-data lacks required access to {}".format(path))
+
+          def require_directory_chain(path, user_id, group_ids):
+              if not os.path.isabs(path) or os.path.realpath(path) != path:
+                  raise RuntimeError("release path is not canonical")
+              current = os.path.sep
+              for component in path.strip(os.path.sep).split(os.path.sep):
+                  if not component:
+                      continue
+                  current = os.path.join(current, component)
+                  info = os.lstat(current)
+                  if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+                      raise RuntimeError("release path contains a non-directory or symlink")
+                  require_access(current, info, user_id, group_ids, 1)
+
+          def require_release_tree(release_dir, user_id, group_ids):
+              release_info = os.lstat(release_dir)
+              if not stat.S_ISDIR(release_info.st_mode) or stat.S_IMODE(release_info.st_mode) != 0o755:
+                  raise RuntimeError("release directory must be a real mode-0755 directory")
+              require_access(release_dir, release_info, user_id, group_ids, 1)
+
+              required_files = {"index.html", "version.json"}
+              found_files = set()
+              for root, directories, files in os.walk(release_dir, topdown=True, followlinks=False):
+                  for name in directories:
+                      path = os.path.join(root, name)
+                      info = os.lstat(path)
+                      if not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o755:
+                          raise RuntimeError("release contains an unsafe directory")
+                      require_access(path, info, user_id, group_ids, 1)
+                  for name in files:
+                      path = os.path.join(root, name)
+                      info = os.lstat(path)
+                      if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o644:
+                          raise RuntimeError("release contains an unsafe static file")
+                      require_access(path, info, user_id, group_ids, 4)
+                      if root == release_dir and name in required_files and info.st_size > 0:
+                          found_files.add(name)
+              if found_files != required_files:
+                  raise RuntimeError("release is missing a readable required static file")
+
+          def main():
+              import pwd
+
+              deploy_root, release_dir = sys.argv[1:]
+              releases_dir = os.path.join(deploy_root, "releases")
+              if not os.path.isabs(deploy_root) or os.path.realpath(deploy_root) != deploy_root:
+                  raise RuntimeError("deployment root is not canonical")
+              if not release_dir.startswith(releases_dir + os.path.sep):
+                  raise RuntimeError("release path is outside the POS frontend releases directory")
+
+              nginx_user = pwd.getpwnam("www-data")
+              group_ids = set(os.getgrouplist(nginx_user.pw_name, nginx_user.pw_gid))
+              group_ids.add(nginx_user.pw_gid)
+              require_directory_chain(release_dir, nginx_user.pw_uid, group_ids)
+              require_release_tree(release_dir, nginx_user.pw_uid, group_ids)
+              print("Nginx access pre-activation check passed.")
+
+          if __name__ == "__main__":
+              try:
+                  main()
+              except (OSError, KeyError, RuntimeError) as error:
+                  print("Nginx access pre-activation check failed: {}".format(error), file=sys.stderr)
+                  raise SystemExit(1)
+          PY_NGINX_ACCESS
 
           state_dir="$deploy_root/.deployment-state"
           if [[ -L "$state_dir" ]] || { [[ -e "$state_dir" ]] && [[ ! -d "$state_dir" ]]; }; then

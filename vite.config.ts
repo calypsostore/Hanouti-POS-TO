@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { loadEnv } from 'vite';
 
 const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version: string };
+const ANDROID_PRODUCTION_URL = 'https://hanouti-pos.tn';
 
 function versionManifestPlugin(buildId: string): Plugin {
   return {
@@ -24,6 +25,7 @@ function versionManifestPlugin(buildId: string): Plugin {
 export default defineConfig(({ command, mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const isVercelPreview = process.env.VERCEL === '1' && process.env.VERCEL_ENV === 'preview';
+  const isAndroidRelease = env.VITE_ANDROID_RELEASE === 'true';
   const dataDriver = env.VITE_DATA_DRIVER || (mode === 'development' || isVercelPreview ? 'local' : '');
   const isLocalPreviewBuild = isVercelPreview && dataDriver === 'local';
   if (command === 'build' && dataDriver !== 'supabase' && !isLocalPreviewBuild) {
@@ -31,6 +33,11 @@ export default defineConfig(({ command, mode }) => {
   }
   if (command === 'build' && dataDriver === 'supabase' && (!env.VITE_SUPABASE_URL || !env.VITE_SUPABASE_ANON_KEY)) {
     throw new Error('Supabase builds require VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
+  }
+  if (command === 'build' && isAndroidRelease) {
+    if (env.VITE_SUPABASE_URL !== ANDROID_PRODUCTION_URL || env.VITE_APP_URL !== ANDROID_PRODUCTION_URL) {
+      throw new Error(`Android release builds must use ${ANDROID_PRODUCTION_URL} for the website and Supabase API.`);
+    }
   }
   const buildId = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? Date.now().toString(36);
 

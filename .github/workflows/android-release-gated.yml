@@ -91,15 +91,13 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VPS_SUPABASE_ANON_KEY: ${{ secrets.VPS_SUPABASE_ANON_KEY }}
         run: |
           test -n "$ANDROID_KEYSTORE_BASE64" || { echo "::error::Missing secret ANDROID_KEYSTORE_BASE64."; exit 1; }
           test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo "::error::Missing secret ANDROID_KEYSTORE_PASSWORD."; exit 1; }
           test -n "$ANDROID_KEY_ALIAS" || { echo "::error::Missing secret ANDROID_KEY_ALIAS."; exit 1; }
           test -n "$ANDROID_KEY_PASSWORD" || { echo "::error::Missing secret ANDROID_KEY_PASSWORD."; exit 1; }
-          test -n "$VITE_SUPABASE_URL" || { echo "::error::Missing secret VITE_SUPABASE_URL."; exit 1; }
-          test -n "$VITE_SUPABASE_ANON_KEY" || { echo "::error::Missing secret VITE_SUPABASE_ANON_KEY."; exit 1; }
+          test -n "$VPS_SUPABASE_ANON_KEY" || { echo "::error::Missing secret VPS_SUPABASE_ANON_KEY."; exit 1; }
           umask 077
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/hanouti-release.jks"
           test -s "$RUNNER_TEMP/hanouti-release.jks" || { echo "::error::Decoded keystore is empty."; exit 1; }
@@ -107,9 +105,11 @@ jobs:
       - name: Build web assets
         env:
           VITE_DATA_DRIVER: supabase
+          VITE_ANDROID_RELEASE: 'true'
           VITE_ANDROID_PUSH_ENABLED: 'false'
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_SUPABASE_URL: https://hanouti-pos.tn
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VPS_SUPABASE_ANON_KEY }}
+          VITE_APP_URL: https://hanouti-pos.tn
         run: npm run build
 
       - name: Sync Capacitor Android
@@ -247,15 +247,13 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VPS_SUPABASE_ANON_KEY: ${{ secrets.VPS_SUPABASE_ANON_KEY }}
         run: |
           test -n "$ANDROID_KEYSTORE_BASE64" || { echo "::error::Missing secret ANDROID_KEYSTORE_BASE64."; exit 1; }
           test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo "::error::Missing secret ANDROID_KEYSTORE_PASSWORD."; exit 1; }
           test -n "$ANDROID_KEY_ALIAS" || { echo "::error::Missing secret ANDROID_KEY_ALIAS."; exit 1; }
           test -n "$ANDROID_KEY_PASSWORD" || { echo "::error::Missing secret ANDROID_KEY_PASSWORD."; exit 1; }
-          test -n "$VITE_SUPABASE_URL" || { echo "::error::Missing secret VITE_SUPABASE_URL."; exit 1; }
-          test -n "$VITE_SUPABASE_ANON_KEY" || { echo "::error::Missing secret VITE_SUPABASE_ANON_KEY."; exit 1; }
+          test -n "$VPS_SUPABASE_ANON_KEY" || { echo "::error::Missing secret VPS_SUPABASE_ANON_KEY."; exit 1; }
           umask 077
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/hanouti-release.jks"
           test -s "$RUNNER_TEMP/hanouti-release.jks" || { echo "::error::Decoded keystore is empty."; exit 1; }
@@ -263,9 +261,11 @@ jobs:
       - name: Build web assets
         env:
           VITE_DATA_DRIVER: supabase
+          VITE_ANDROID_RELEASE: 'true'
           VITE_ANDROID_PUSH_ENABLED: 'false'
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_SUPABASE_URL: https://hanouti-pos.tn
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VPS_SUPABASE_ANON_KEY }}
+          VITE_APP_URL: https://hanouti-pos.tn
         run: npm run build
 
       - name: Sync Capacitor Android

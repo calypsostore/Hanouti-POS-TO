@@ -181,7 +181,7 @@ export const enCommon = {
   'permissions.settingsDescription': 'Manage notification access for this device.',
   'permissions.askAgain': 'Ask again',
   'permissions.notificationSettings': 'Notification settings',
-  'permissions.browserSettingsInstructions': 'Open your browser site settings for hanoutipos.vercel.app and enable Notifications.',
+  'permissions.browserSettingsInstructions': 'Open your browser site settings for hanouti-pos.tn and enable Notifications.',
   'feedback.kept': 'Kept',
   'feedback.keepAndViewError': 'Keep and view error details: {message}',
   'feedback.tapToKeep': 'Tap to keep this message and view the full error',

@@ -268,10 +268,12 @@ describe('updateService.checkForUpdates', () => {
     });
     vi.mocked(fetch).mockResolvedValue(new Response(
       JSON.stringify({
-        versionCode: 10004,
-        versionName: '1.0.4',
-        apkUrl: 'https://github.com/calypsostore/Hanouti-POS-TO/releases/download/v1.0.4/7anouti-POS-v1.0.4.apk',
-        notes: 'Mandatory updates and notification permissions.',
+        tag_name: 'v1.0.4',
+        body: 'Mandatory updates and notification permissions.',
+        assets: [{
+          name: '7anouti-POS-v1.0.4.apk',
+          browser_download_url: 'https://github.com/calypsostore/Hanouti-POS-TO/releases/download/v1.0.4/7anouti-POS-v1.0.4.apk',
+        }],
       }),
       { status: 200 },
     ));
@@ -288,9 +290,34 @@ describe('updateService.checkForUpdates', () => {
       updateAvailable: true,
     });
     expect(fetch).toHaveBeenCalledWith(
-      expect.stringMatching(/^https:\/\/hanouti-pos\.tn\/api\/update-manifest\?t=/),
+      'https://api.github.com/repos/calypsostore/Hanouti-POS-TO/releases/latest',
       expect.objectContaining({ cache: 'no-store' }),
     );
+  });
+
+  it('rejects a GitHub release that does not contain the expected APK asset', async () => {
+    vi.stubGlobal('window', {
+      location: { origin: 'https://localhost', reload: vi.fn() },
+      setTimeout: (...args: Parameters<typeof setTimeout>) => globalThis.setTimeout(...args),
+      clearTimeout: (...args: Parameters<typeof clearTimeout>) => globalThis.clearTimeout(...args),
+      setInterval: (...args: Parameters<typeof setInterval>) => globalThis.setInterval(...args),
+      clearInterval: (...args: Parameters<typeof clearInterval>) => globalThis.clearInterval(...args),
+    });
+    vi.spyOn(Capacitor, 'isNativePlatform').mockReturnValue(true);
+    vi.mocked(App.getInfo).mockResolvedValue({
+      name: '7anouti-POS',
+      id: 'com.calypsostore.hanouti',
+      version: '1.0.3',
+      build: '10003',
+    });
+    vi.mocked(fetch).mockResolvedValue(new Response(
+      JSON.stringify({ tag_name: 'v1.0.4', assets: [] }),
+      { status: 200 },
+    ));
+
+    const result = await updateService.checkForUpdates();
+
+    expect(result.error).toBe('Server returned an APK release without its expected download asset');
   });
 
   it('returns a readable network error', async () => {

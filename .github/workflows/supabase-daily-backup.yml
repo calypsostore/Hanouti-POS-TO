@@ -25,11 +25,9 @@ jobs:
           set -euo pipefail
           test -n "$SUPABASE_DB_POOLER_URL" || { echo "::error::Set SUPABASE_DB_POOLER_URL to this project's Supabase session-pooler connection string."; exit 1; }
           echo "::add-mask::$SUPABASE_DB_POOLER_URL"
-          case "$SUPABASE_DB_POOLER_URL" in
-            postgresql://*@*.pooler.supabase.com:5432/*|postgres://*@*.pooler.supabase.com:5432/*) ;;
-            *) echo "::error::SUPABASE_DB_POOLER_URL must use the session pooler on port 5432."; exit 1 ;;
-          esac
           test -n "$BACKUP_ENCRYPTION_KEY" || { echo "::error::Set the BACKUP_ENCRYPTION_KEY Actions secret."; exit 1; }
+          echo "::add-mask::$BACKUP_ENCRYPTION_KEY"
+          node .github/scripts/validate-supabase-pooler-url.mjs
 
       - name: Install PostgreSQL client
         run: |
@@ -50,12 +48,12 @@ jobs:
           printf '%s' "$BACKUP_ENCRYPTION_KEY" > "$passphrase_file"
           chmod 600 "$passphrase_file"
           pg_dump --format=custom --no-owner --no-acl --file="$dump" "$SUPABASE_DB_POOLER_URL"
-          test -s "$dump" || { echo "::error::Database dump is empty."; exit 1; }
+          test -f "$dump" && test -s "$dump" || { echo "::error::Database dump is missing or empty."; exit 1; }
           gpg --batch --yes --pinentry-mode loopback \
             --passphrase-file "$passphrase_file" \
             --symmetric --cipher-algo AES256 \
             --output "$encrypted" "$dump"
-          test -s "$encrypted" || { echo "::error::Encrypted backup is empty."; exit 1; }
+          test -f "$encrypted" && test -s "$encrypted" || { echo "::error::Encrypted backup is missing or empty."; exit 1; }
 
       - name: Store encrypted backup
         uses: actions/upload-artifact@v4
@@ -64,12 +62,3 @@ jobs:
           path: ${{ runner.temp }}/hanouti-${{ github.run_id }}.dump.gpg
           if-no-files-found: error
           retention-days: 30
-
-      - name: Remove expired login rate-limit records
-        if: success()
-        shell: bash
-        env:
-          SUPABASE_DB_POOLER_URL: ${{ secrets.SUPABASE_DB_POOLER_URL }}
-        run: |
-          set -euo pipefail
-          psql "$SUPABASE_DB_POOLER_URL" --set ON_ERROR_STOP=on --command "delete from public.login_rate_limits where window_started_at < now() - interval '1 day'"

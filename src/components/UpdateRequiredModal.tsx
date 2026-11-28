@@ -109,7 +109,7 @@ export function UpdateRequiredModal({ result }: { result: UpdateCheckResult | nu
         )}
         {bundled && !result.latestApkUrl && (
           <p role="alert" className="mt-4 font-body text-body-sm text-error">
-            {result.error ?? t('updates.apkUnavailable')}
+            {t('updates.apkUnavailable')}
           </p>
         )}
         {error && <p role="alert" className="mt-4 font-body text-body-sm text-error">{error}</p>}

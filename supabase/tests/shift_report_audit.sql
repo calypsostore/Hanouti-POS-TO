@@ -1171,6 +1171,18 @@ begin
     or public.get_shift_record(v_minus_shift)->>'expected_cash_millimes' is not null then
     raise exception 'Staff with view-own-hours permission could not read shift summaries.';
   end if;
+  update public.positions
+  set permission_ids = array['view_own_hours', 'open_close_shift']
+  where id = flow.position_id;
+  if public.get_shift_expected_cash_visible(v_minus_shift) is null then
+    raise exception 'Staff with open-close permission could not read expected cash for their own shift.';
+  end if;
+  begin
+    perform public.get_shift_expected_cash_visible(v_owner_shift);
+    raise exception 'Staff with open-close permission could read another user''s expected shift cash.';
+  exception when insufficient_privilege then
+    null;
+  end;
 end
 $$;
 

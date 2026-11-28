@@ -17,7 +17,7 @@ const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const MIN_AUTOMATIC_CHECK_INTERVAL_MS = 30_000;
 const CHECK_REQUEST_TIMEOUT_MS = 10_000;
 const SERVICE_WORKER_ACTIVATION_TIMEOUT_MS = 3_000;
-const RELEASE_MANIFEST_URL = `${PRODUCTION_URL}/api/update-manifest`;
+const RELEASE_MANIFEST_URL = `https://api.github.com/repos/${UPDATE_GITHUB_REPOSITORY}/releases/latest`;
 
 export type UpdateMode = 'hosted' | 'bundled' | 'web';
 
@@ -248,7 +248,30 @@ async function fetchVersionManifest(url: string): Promise<{ version: string; bui
 }
 
 async function fetchReleaseManifest() {
-  const manifest = await fetchJson(`${RELEASE_MANIFEST_URL}?t=${Date.now()}`, 'APK update manifest');
+  const release: unknown = await fetchJson(RELEASE_MANIFEST_URL, 'APK release metadata');
+  if (typeof release !== 'object' || release === null || !('tag_name' in release) ||
+    typeof release.tag_name !== 'string' || !('assets' in release) || !Array.isArray(release.assets)) {
+    throw new Error('Server returned invalid APK release metadata');
+  }
+
+  const versionMatch = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(release.tag_name);
+  if (!versionMatch) throw new Error('Server returned an invalid APK release version');
+  const versionName = `${versionMatch[1]}.${versionMatch[2]}.${versionMatch[3]}`;
+  const versionCode = Number(versionMatch[1]) * 10_000 + Number(versionMatch[2]) * 100 + Number(versionMatch[3]);
+  const apkName = `7anouti-POS-v${versionName}.apk`;
+  const apkAsset = release.assets.find((asset: unknown) =>
+    typeof asset === 'object' && asset !== null && 'name' in asset && asset.name === apkName);
+  if (typeof apkAsset !== 'object' || apkAsset === null || !('browser_download_url' in apkAsset) ||
+    typeof apkAsset.browser_download_url !== 'string') {
+    throw new Error('Server returned an APK release without its expected download asset');
+  }
+
+  const manifest = {
+    versionCode,
+    versionName,
+    apkUrl: apkAsset.browser_download_url,
+    notes: 'body' in release && typeof release.body === 'string' ? release.body : '',
+  };
   const parsed = parseAppUpdateManifest(manifest, UPDATE_GITHUB_REPOSITORY);
   if (!parsed) throw new Error('Server returned an invalid APK update manifest');
   return parsed;

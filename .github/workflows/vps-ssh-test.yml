@@ -28,4 +28,17 @@ jobs:
             -o UserKnownHostsFile=~/.ssh/known_hosts \
             -o StrictHostKeyChecking=yes \
             hanouti-deploy@84.247.176.105 \
-            "sudo -n /usr/local/sbin/hanouti-vps-deploy"
+            'bash -s' <<'REMOTE'
+          set -euo pipefail
+          user_name="$(id -un)"
+          if [[ "$user_name" != "hanouti-deploy" ]]; then
+            echo "SSH session is not running as hanouti-deploy."
+            exit 1
+          fi
+          home_dir="$(getent passwd "$user_name" | cut -d: -f 6)"
+          if [[ -z "$home_dir" ]]; then
+            echo "Could not determine the SSH user's home directory."
+            exit 1
+          fi
+          printf 'Remote user: %s\nRemote home: %s\n' "$user_name" "$home_dir"
+          REMOTE

@@ -179,7 +179,9 @@ Secrets and variables > Actions**, add:
 - `SUPABASE_DB_POOLER_URL`: this project's **Session pooler** connection string
   from Supabase **Connect** settings (port `5432`). GitHub-hosted runners cannot
   reliably reach Supabase's IPv6-only direct database endpoint. Do not use the
-  transaction pooler (port `6543`).
+  transaction pooler (port `6543`). The shared validator pins the expected
+  project host, username, port, and `/postgres` database. It allows only the
+  optional `sslmode=require` query parameter and rejects target overrides.
 - `BACKUP_ENCRYPTION_KEY`: a long, randomly generated passphrase. Store it
   separately from downloaded backups and restrict repository artifact access.
 
@@ -189,7 +191,8 @@ also enable Supabase scheduled backups/PITR in the project dashboard where the
 plan supports it.
 
 The `.github/workflows/supabase-migrations.yml` workflow uses the same
-`SUPABASE_DB_POOLER_URL` secret for production migrations.
+`SUPABASE_DB_POOLER_URL` secret and target validation for production
+migrations.
 
 To restore a workflow artifact, download it from the Actions run, then decrypt
 and restore it into a **separate recovery project** first. Use a PostgreSQL
@@ -226,6 +229,49 @@ The root `vercel.json` preserves the SPA rewrite and asset cache rules. The
 `/api/update-manifest` endpoint is provided by `api/update-manifest.js`. Pushes
 to the connected production branch trigger a web deployment. Set `VITE_APP_URL`
 to the production URL only if it differs from `https://hanoutipos.vercel.app`.
+
+## Deploy the frontend to the VPS
+
+The manual `Deploy Hanouti POS frontend to VPS` workflow is restricted to
+`feature/supabase-vps-deployment`. It builds the root-based Vite `dist` output
+for `https://hanouti-pos.tn`, stages a checksum-verified archive, and publishes
+it under `/srv/www/hanouti-pos/releases`. The `current` symlink is switched
+atomically; `previous` points to the release that was active before the latest
+switch. Releases are retained for operator rollback. This workflow does not
+change Vercel, DNS, TLS, Nginx, Supabase, or other VPS projects.
+
+For an explicit rollback, dispatch `Manually roll back Hanouti POS frontend`
+from the same branch with the exact current and target release IDs and
+confirmation `ROLLBACK`. The workflow takes the shared deployment lock,
+refuses stale or out-of-tree pointers, atomically switches `current`, then
+checks that `/version.json` reports the target build ID. It does not delete
+release files or change DNS, Nginx, TLS, or backend services.
+
+The workflow publishes static assets only. APK update checks in the current
+frontend read public latest-release metadata from GitHub directly; web builds
+use their deployed `version.json`. The Vercel-only
+[`api/update-manifest.js`](./api/update-manifest.js) remains available for
+rollback but is not used by the current VPS frontend.
+
+Create the `hanouti-pos-vps` GitHub Actions environment and configure
+`VPS_SSH_KEY`, `VPS_KNOWN_HOSTS`, and `VPS_SUPABASE_ANON_KEY` there. The SSH
+key must use the `hanouti-deploy` account, which should have no sudo or Docker
+access. `VPS_KNOWN_HOSTS` must contain the pinned VPS host key.
+`VPS_SUPABASE_ANON_KEY` must be the public anon key for the intended backend;
+Vite embeds it in browser assets, so never put a service-role key there. The
+workflow sets `VITE_SUPABASE_URL` and `VITE_APP_URL` to
+`https://hanouti-pos.tn`.
+
+Before dispatching, provision `/srv/www/hanouti-pos` as a real directory
+owned and writable by `hanouti-deploy`, with read/traverse access for the
+Nginx worker. The workflow creates its `releases` directory and release
+symlinks without sudo. Configure Nginx separately to serve
+`/srv/www/hanouti-pos/current`, fall back to `index.html` for React Router SPA
+paths, and proxy `/auth/v1`, `/rest/v1`, `/realtime/v1`, `/storage/v1`, and
+`/functions/v1` to the intended Supabase backend before applying the SPA
+fallback. Preserve the existing no-cache behavior for the app shell, service
+worker, and `version.json`, and immutable caching for `/assets/`. DNS and TLS
+for `hanouti-pos.tn` must also be ready separately.
 
 ## Android / Capacitor
 

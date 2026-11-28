@@ -1,0 +1,68 @@
+name: Manually roll back Supabase Edge Functions
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type ROLLBACK to restore the prior verified function release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-vps-functions
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment: hanouti-pos-vps
+    timeout-minutes: 10
+    steps:
+      - name: Require the deployment branch and explicit confirmation
+        shell: bash
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/feature/supabase-vps-deployment" ]] || {
+            echo "::error::Dispatch this workflow from feature/supabase-vps-deployment."
+            exit 1
+          }
+          [[ "$CONFIRMATION" == "ROLLBACK" ]] || {
+            echo "::error::Type ROLLBACK to confirm this operation."
+            exit 1
+          }
+
+      - name: Verify the VPS host and restore the prior release
+        shell: bash
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_SSH_KEY" && test -n "$VPS_KNOWN_HOSTS"
+          ssh_dir="$(mktemp -d "$RUNNER_TEMP/hanouti-functions-rollback.XXXXXX")"
+          trap 'rm -rf -- "$ssh_dir"' EXIT
+          printf '%s\n' "$VPS_SSH_KEY" > "$ssh_dir/id_vps"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          chmod 600 "$ssh_dir/id_vps" "$ssh_dir/known_hosts"
+          ssh_options=(
+            -i "$ssh_dir/id_vps"
+            -o IdentitiesOnly=yes
+            -o BatchMode=yes
+            -o ConnectTimeout=15
+            -o UserKnownHostsFile="$ssh_dir/known_hosts"
+            -o StrictHostKeyChecking=yes
+          )
+          result="$(
+            ssh "${ssh_options[@]}" hanouti-deploy@84.247.176.105 \
+              "printf '%s\\n' '{\"action\":\"functions-rollback\"}' | sudo -n /usr/local/sbin/hanouti-pos-admin-v3"
+          )"
+          [[ "$result" =~ ^functions-rollback=completed\ release_id=[a-f0-9]{40}-[0-9]+-[0-9]+$ ]] || {
+            echo "::error::VPS did not confirm a verified Edge Function rollback."
+            exit 1
+          }
+          printf '%s\n' "$result"

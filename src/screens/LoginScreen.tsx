@@ -12,7 +12,7 @@ import { localizeErrorMessage } from '../i18n';
 
 type LoginRole = 'staff' | 'admin';
 
-const LATEST_APK_URL = 'https://github.com/calypsostore/Hanouti-POS-TO/releases/download/v1.0.14/7anouti-POS-v1.0.14.apk';
+const LATEST_APK_URL = 'https://github.com/calypsostore/Hanouti-POS-TO/releases/download/v1.0.15/7anouti-POS-v1.0.15.apk';
 
 interface LoginLogoMotion {
   x: number;

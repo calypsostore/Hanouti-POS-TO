@@ -1,13 +1,13 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
-const PRODUCTION_URL = 'https://hanoutipos.vercel.app';
+const PRODUCTION_URL = 'https://hanouti-pos.tn';
 
 const config: CapacitorConfig = {
   appId: 'com.hanouti.pos',
   appName: '7anouti-POS',
   webDir: 'dist',
   server: {
-    ...(process.env.CAP_BUNDLED === '1' ? {} : { url: process.env.CAP_SERVER_URL ?? PRODUCTION_URL }),
+    ...(process.env.CAP_BUNDLED === '1' ? {} : { url: PRODUCTION_URL }),
     cleartext: false,
     androidScheme: 'https',
   },

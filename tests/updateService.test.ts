@@ -20,7 +20,7 @@ describe('updateService.checkForUpdates', () => {
     vi.stubGlobal('__APP_VERSION__', '1.0.4');
     vi.stubGlobal('__BUILD_ID__', 'current-build');
     vi.stubGlobal('window', {
-      location: { origin: 'https://hanoutipos.vercel.app', reload: vi.fn(), replace: vi.fn() },
+      location: { origin: 'https://hanouti-pos.tn', reload: vi.fn(), replace: vi.fn() },
       setTimeout: (...args: Parameters<typeof setTimeout>) => globalThis.setTimeout(...args),
       clearTimeout: (...args: Parameters<typeof clearTimeout>) => globalThis.clearTimeout(...args),
       setInterval: (...args: Parameters<typeof setInterval>) => globalThis.setInterval(...args),
@@ -54,7 +54,7 @@ describe('updateService.checkForUpdates', () => {
       updateAvailable: false,
     });
     expect(fetch).toHaveBeenCalledWith(
-      expect.stringMatching(/^https:\/\/hanoutipos\.vercel\.app\/version\.json\?t=/),
+      expect.stringMatching(/^https:\/\/hanouti-pos\.tn\/version\.json\?t=/),
       expect.objectContaining({ cache: 'no-store' }),
     );
   });
@@ -201,7 +201,7 @@ describe('updateService.checkForUpdates', () => {
     expect(waiting.postMessage).toHaveBeenCalledWith({ type: 'SKIP_WAITING' });
     expect(workerRegistration.unregister).toHaveBeenCalledOnce();
     expect(localStorage.getItem('7anouti-pos:updating-to')).toBe('deployed-build');
-    expect(window.location.replace).toHaveBeenCalledWith('https://hanoutipos.vercel.app/?v=deployed-build');
+    expect(window.location.replace).toHaveBeenCalledWith('https://hanouti-pos.tn/?v=deployed-build');
   });
 
   it('does not reload or unregister workers if the waiting worker fails to activate', async () => {
@@ -248,7 +248,7 @@ describe('updateService.checkForUpdates', () => {
     await updateService.forceRefresh();
 
     expect(localStorage.getItem('7anouti-pos:updating-to')).toBe('current-build');
-    expect(window.location.replace).toHaveBeenCalledWith('https://hanoutipos.vercel.app/?v=current-build');
+    expect(window.location.replace).toHaveBeenCalledWith('https://hanouti-pos.tn/?v=current-build');
   });
 
   it('reports an APK requirement when the release manifest has a newer APK version code', async () => {
@@ -288,7 +288,7 @@ describe('updateService.checkForUpdates', () => {
       updateAvailable: true,
     });
     expect(fetch).toHaveBeenCalledWith(
-      expect.stringMatching(/^https:\/\/hanoutipos\.vercel\.app\/api\/update-manifest\?t=/),
+      expect.stringMatching(/^https:\/\/hanouti-pos\.tn\/api\/update-manifest\?t=/),
       expect.objectContaining({ cache: 'no-store' }),
     );
   });

@@ -29,7 +29,11 @@ apply repository rulesets or environment reviewers:
    prevent self-review, and restrict allowed deployments to the protected
    `main` branch. Store Android signing credentials as environment secrets,
    not broad repository secrets.
-5. Under **Actions > General > Workflow permissions**, set the repository
+5. Make the VPS Supabase anon key available to both Android build jobs as
+   `VPS_SUPABASE_ANON_KEY` (including the `production-release` environment if
+   environment-scoped secrets are used). Android builds pin the website and
+   Supabase API origins to `https://hanouti-pos.tn` and fail if either differs.
+6. Under **Actions > General > Workflow permissions**, set the repository
    default to read-only. Keep release write access limited to the
    `android-release` job's `contents: write` permission.
 

@@ -181,7 +181,7 @@ export const arCommon = {
   'permissions.settingsDescription': 'إدارة الوصول إلى الإشعارات على هذا الجهاز.',
   'permissions.askAgain': 'إعادة الطلب',
   'permissions.notificationSettings': 'إعدادات الإشعارات',
-  'permissions.browserSettingsInstructions': 'افتح إعدادات الموقع hanoutipos.vercel.app في المتصفح واسمح بالإشعارات.',
+  'permissions.browserSettingsInstructions': 'افتح إعدادات الموقع hanouti-pos.tn في المتصفح واسمح بالإشعارات.',
   'feedback.kept': 'تم الاحتفاظ',
   'feedback.keepAndViewError': 'الاحتفاظ وعرض تفاصيل الخطأ: {message}',
   'feedback.tapToKeep': 'اضغط للاحتفاظ بهذه الرسالة وعرض الخطأ كاملاً',

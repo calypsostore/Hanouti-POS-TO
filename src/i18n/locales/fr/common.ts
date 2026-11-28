@@ -181,7 +181,7 @@ export const frCommon = {
   'permissions.settingsDescription': 'Gérer l’accès aux notifications sur cet appareil.',
   'permissions.askAgain': 'Redemander',
   'permissions.notificationSettings': 'Paramètres des notifications',
-  'permissions.browserSettingsInstructions': 'Ouvrez les paramètres du site hanoutipos.vercel.app dans votre navigateur et autorisez les notifications.',
+  'permissions.browserSettingsInstructions': 'Ouvrez les paramètres du site hanouti-pos.tn dans votre navigateur et autorisez les notifications.',
   'feedback.kept': 'Conservé',
   'feedback.keepAndViewError': 'Conserver et afficher les détails de l’erreur : {message}',
   'feedback.tapToKeep': 'Touchez pour conserver ce message et afficher l’erreur complète',
